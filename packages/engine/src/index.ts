@@ -11,6 +11,7 @@ export {
   NODE_CATEGORIES,
   NODE_CATEGORY_LABELS,
   NODE_DEFINITIONS,
+  coerceCanvasNodeData,
   createGraphNodeData,
   getNodeDefinition
 } from "./graph/nodeCatalog.js";

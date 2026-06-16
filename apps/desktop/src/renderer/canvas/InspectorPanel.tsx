@@ -1,7 +1,10 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import { Play, Trash2 } from "lucide-react";
-import type { CanvasNodeData } from "@ether/engine/graph/nodeCatalog";
+import {
+  coerceCanvasNodeData,
+  type CanvasNodeData
+} from "@ether/engine/graph/nodeCatalog";
 import { getOptionalNodeContract } from "@ether/engine/graph/contracts";
 import {
   assembleGenerationInputs,
@@ -64,7 +67,7 @@ export function InspectorPanel({
   };
 
   if (selectedNode) {
-    const nodeData = selectedNode.data as Partial<CanvasNodeData>;
+    const nodeData = coerceCanvasNodeData(selectedNode.data);
     const contract = getOptionalNodeContract(nodeData.definitionId);
     const promptAssembly =
       nodeData.kind === "Prompt" ? assemblePromptForNode(graph, selectedNode.id) : null;

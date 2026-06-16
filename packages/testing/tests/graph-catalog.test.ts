@@ -4,6 +4,7 @@ import {
   NODE_CONTRACTS,
   NODE_DEFINITIONS,
   canConnectNodeKinds,
+  coerceCanvasNodeData,
   createGraphNodeData,
   getOptionalNodeContract,
   findEdgeInsertionTarget
@@ -72,6 +73,19 @@ describe("graph node catalog", () => {
     expect(getOptionalNodeContract("missing-definition")).toBeNull();
     expect(getOptionalNodeContract(undefined)).toBeNull();
     expect(getOptionalNodeContract("prompt-general")).toMatchObject({ definitionId: "prompt-general" });
+  });
+
+  it("coerces missing persisted node data into a safe legacy fallback", () => {
+    expect(coerceCanvasNodeData(undefined)).toMatchObject({
+      definitionId: "",
+      kind: "Note",
+      subtype: "Legacy node",
+      title: "Legacy node",
+      label: "Legacy node",
+      instruction: "",
+      notes: "",
+      status: "idle"
+    });
   });
 });
 

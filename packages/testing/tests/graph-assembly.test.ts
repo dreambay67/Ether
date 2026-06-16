@@ -196,6 +196,44 @@ describe("prompt assembly", () => {
     ]);
   });
 
+  it("treats an entire Negative Prompt branch as negativePrompt over a default prompt edge", () => {
+    const canvas = graph(
+      [
+        node("subject", {
+          definitionId: "prompt-subject",
+          kind: "Prompt",
+          subtype: "Subject",
+          instruction: "clean marble counter"
+        }),
+        node("negative", {
+          definitionId: "prompt-negative",
+          kind: "Prompt",
+          subtype: "Negative",
+          title: "Negative Prompt",
+          instruction: "no clutter, no reflections"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [
+        { id: "edge-subject-negative", source: "subject", target: "negative", label: "prompt" },
+        { id: "edge-negative-generation", source: "negative", target: "generation", label: "prompt" }
+      ]
+    );
+
+    const assembly = assembleGenerationInputs(canvas, "generation");
+
+    expect(assembly.prompt).toBe("");
+    expect(assembly.negativePrompt).toBe("clean marble counter\n\nno clutter, no reflections");
+    expect(assembly.sections.map((section) => [section.nodeId, section.kind])).toEqual([
+      ["subject", "negativePrompt"],
+      ["negative", "negativePrompt"]
+    ]);
+  });
+
   it("assembles Assistant, Note, and Reference textual context into downstream prompts", () => {
     const canvas = graph(
       [

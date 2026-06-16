@@ -110,6 +110,10 @@ function canContributeTextSection(node: GraphNode) {
   );
 }
 
+function isNegativePromptNode(node: GraphNode) {
+  return node.data?.kind === "Prompt" && node.data.subtype === "Negative";
+}
+
 function textSectionForNode(
   node: GraphNode,
   incomingEdge?: GraphEdge,
@@ -129,7 +133,7 @@ function textSectionForNode(
     nodeId: node.id,
     kind:
       branchKind ??
-      (node.data?.kind === "Prompt" && (node.data.subtype === "Negative" || isNegativeEdge(incomingEdge))
+      (isNegativePromptNode(node) || (node.data?.kind === "Prompt" && isNegativeEdge(incomingEdge))
         ? "negativePrompt"
         : "prompt"),
     section: sectionName(node),
@@ -159,10 +163,11 @@ function collectPromptSections(
 
   const node = findNode(graph, nodeId);
   const sections: PromptSectionArtifact[] = [];
+  const nodeBranchKind = branchKind ?? (isNegativePromptNode(node) ? "negativePrompt" : undefined);
 
   for (const edge of incomingEdges(graph, nodeId)) {
     const source = findNode(graph, edge.source);
-    const nextBranchKind = branchKind ?? (isNegativeEdge(edge) ? "negativePrompt" : undefined);
+    const nextBranchKind = nodeBranchKind ?? (isNegativeEdge(edge) ? "negativePrompt" : undefined);
 
     for (const section of collectPromptSections(graph, source.id, new Set(seen), edge, nextBranchKind)) {
       appendUniqueSection(sections, section);
@@ -174,7 +179,7 @@ function collectPromptSections(
     }
   }
 
-  const selfBranchKind = branchKind ?? (isNegativeEdge(selfIncomingEdge) ? "negativePrompt" : undefined);
+  const selfBranchKind = nodeBranchKind ?? (isNegativeEdge(selfIncomingEdge) ? "negativePrompt" : undefined);
   const selfSection = textSectionForNode(node, selfIncomingEdge, selfBranchKind);
   if (selfSection) {
     appendUniqueSection(sections, selfSection);

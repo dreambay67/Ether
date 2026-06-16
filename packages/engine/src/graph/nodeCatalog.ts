@@ -41,6 +41,17 @@ export type EtherNodeCategory = {
   definitions: EtherNodeDefinition[];
 };
 
+const legacyNodeData: CanvasNodeData = {
+  definitionId: "",
+  kind: "Note",
+  subtype: "Legacy node",
+  title: "Legacy node",
+  label: "Legacy node",
+  notes: "",
+  instruction: "",
+  status: "idle"
+};
+
 const categoryAccents: Record<EtherNodeKind, string> = {
   Prompt: "#1470DB",
   Reference: "#37E6EA",
@@ -129,5 +140,41 @@ export function createGraphNodeData(definitionId: string): CanvasNodeData {
     notes: "",
     instruction: `${definition.subtype} ${definition.category.toLowerCase()} placeholder`,
     status: "idle"
+  };
+}
+
+function isCanvasNodeStatus(value: unknown): value is CanvasNodeData["status"] {
+  return (
+    value === "idle" ||
+    value === "queued" ||
+    value === "running" ||
+    value === "complete" ||
+    value === "error"
+  );
+}
+
+function isEtherNodeKind(value: unknown): value is EtherNodeKind {
+  return NODE_CATEGORY_LABELS.includes(value as EtherNodeKind);
+}
+
+export function coerceCanvasNodeData(value: unknown): CanvasNodeData {
+  if (!value || typeof value !== "object") {
+    return { ...legacyNodeData };
+  }
+
+  const data = value as Partial<CanvasNodeData>;
+  const title = typeof data.title === "string" && data.title.trim() ? data.title : legacyNodeData.title;
+  const label = typeof data.label === "string" && data.label.trim() ? data.label : title;
+
+  return {
+    ...data,
+    definitionId: typeof data.definitionId === "string" ? data.definitionId : legacyNodeData.definitionId,
+    kind: isEtherNodeKind(data.kind) ? data.kind : legacyNodeData.kind,
+    subtype: typeof data.subtype === "string" && data.subtype.trim() ? data.subtype : legacyNodeData.subtype,
+    title,
+    label,
+    notes: typeof data.notes === "string" ? data.notes : legacyNodeData.notes,
+    instruction: typeof data.instruction === "string" ? data.instruction : legacyNodeData.instruction,
+    status: isCanvasNodeStatus(data.status) ? data.status : legacyNodeData.status
   };
 }

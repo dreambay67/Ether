@@ -32,7 +32,11 @@ import {
 } from "@ether/engine/graph/nodeCatalog";
 import { canConnectNodeKinds } from "@ether/engine/graph/connectionRules";
 import { findEdgeInsertionTarget } from "@ether/engine/graph/canvasGeometry";
-import { createGraphNodeData, getNodeDefinition } from "@ether/engine/graph/nodeCatalog";
+import {
+  coerceCanvasNodeData,
+  createGraphNodeData,
+  getNodeDefinition
+} from "@ether/engine/graph/nodeCatalog";
 import { freezePromptNode } from "@ether/engine/graph/promptAssembly";
 import type { EtherGraph } from "@ether/engine";
 import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
@@ -77,7 +81,7 @@ function normalizeNodes(nodes: EtherGraph["nodes"]): Node<CanvasNodeData>[] {
     return {
       ...candidate,
       type: "etherNode",
-      data: candidate.data
+      data: coerceCanvasNodeData(candidate.data)
     };
   });
 }
