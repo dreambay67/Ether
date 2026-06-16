@@ -37,7 +37,13 @@ import type { EtherGraph } from "@ether/engine";
 import { EtherNode } from "./EtherNode";
 import { InspectorPanel } from "./InspectorPanel";
 import { NodeLibrary } from "./NodeLibrary";
-import { createCanvasHistory, pushCanvasHistory, redoCanvasHistory, undoCanvasHistory } from "./canvasHistory";
+import {
+  createCanvasHistory,
+  pushCanvasHistory,
+  redoCanvasHistory,
+  shouldPushNodeChangesToHistory,
+  undoCanvasHistory
+} from "./canvasHistory";
 
 type EtherCanvasProps = {
   graph: EtherGraph | null;
@@ -171,7 +177,7 @@ function InnerEtherCanvas(
   const onNodesChange = useCallback((changes: NodeChange<Node<CanvasNodeData>>[]) => {
     setHistory((current) => {
       const nextNodes = applyNodeChanges(changes, current.present.nodes);
-      const editsGraph = changes.some((change) => change.type !== "select" && change.type !== "dimensions");
+      const editsGraph = shouldPushNodeChangesToHistory(changes);
       const next = { nodes: nextNodes, edges: current.present.edges };
 
       return editsGraph ? pushCanvasHistory(current, next) : { ...current, present: next };

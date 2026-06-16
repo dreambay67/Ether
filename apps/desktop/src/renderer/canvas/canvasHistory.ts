@@ -11,6 +11,27 @@ export type CanvasHistory = {
   future: CanvasSnapshot[];
 };
 
+type CanvasNodeChangeLike = {
+  type: string;
+  resizing?: boolean;
+};
+
+export function shouldPushNodeChangesToHistory(changes: CanvasNodeChangeLike[]) {
+  return changes.some((change) => {
+    if (change.type === "select") {
+      return false;
+    }
+
+    if (change.type === "dimensions") {
+      // React Flow marks active NodeResizer drags with resizing=true and the release with resizing=false.
+      // Dimension changes without that flag are treated as measurement noise so initial layout does not pollute undo.
+      return change.resizing === false;
+    }
+
+    return true;
+  });
+}
+
 export function createCanvasHistory(snapshot: CanvasSnapshot): CanvasHistory {
   return {
     past: [],
