@@ -160,6 +160,7 @@ export function insertSnapshot(
 }
 
 type SnapshotCleanupBoundary = {
+  lexicalSnapshotsDirectory: string;
   realSnapshotsDirectory: string;
 };
 
@@ -169,6 +170,7 @@ function getSnapshotCleanupBoundary(
 ): SnapshotCleanupBoundary | null {
   try {
     const realProjectRoot = realpathSync.native(path.dirname(databasePath));
+    const lexicalSnapshotsDirectory = path.resolve(snapshotsDirectory);
     const realSnapshotsDirectory = realpathSync.native(snapshotsDirectory);
 
     if (
@@ -178,7 +180,7 @@ function getSnapshotCleanupBoundary(
       return null;
     }
 
-    return { realSnapshotsDirectory };
+    return { lexicalSnapshotsDirectory, realSnapshotsDirectory };
   } catch {
     return null;
   }
@@ -189,8 +191,11 @@ function canDeleteStaleSnapshot(
   newSnapshotPath: string,
   boundary: SnapshotCleanupBoundary
 ) {
+  const resolvedCandidatePath = path.resolve(candidatePath);
+  const resolvedNewSnapshotPath = path.resolve(newSnapshotPath);
+
   if (
-    isSameResolvedPath(candidatePath, path.resolve(newSnapshotPath)) ||
+    isSameRealPath(resolvedCandidatePath, resolvedNewSnapshotPath) ||
     !existsSync(candidatePath)
   ) {
     return false;
@@ -204,6 +209,7 @@ function canDeleteStaleSnapshot(
 
     return (
       !isSameRealPath(realCandidatePath, realNewSnapshotPath) &&
+      isPathInsideDirectory(resolvedCandidatePath, boundary.lexicalSnapshotsDirectory) &&
       isPathInsideDirectory(realCandidatePath, boundary.realSnapshotsDirectory)
     );
   } catch {
@@ -217,12 +223,6 @@ function isPathInsideDirectory(filePath: string, directoryPath: string) {
   const relativePath = path.relative(normalizedDirectoryPath, normalizedFilePath);
 
   return Boolean(relativePath) && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
-}
-
-function isSameResolvedPath(leftPath: string, resolvedRightPath: string) {
-  const resolvedLeftPath = path.resolve(leftPath);
-
-  return isSameRealPath(resolvedLeftPath, resolvedRightPath);
 }
 
 function isSameRealPath(leftPath: string, rightPath: string) {

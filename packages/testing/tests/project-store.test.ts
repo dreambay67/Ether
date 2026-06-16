@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -301,6 +301,44 @@ describe("project store", () => {
 
     await expect(readFile(staleSnapshotPath, "utf8")).resolves.toBe("do not delete through link");
     expect(restored.graph.nodes).toEqual([{ id: "replacement", position: { x: 9, y: 10 } }]);
+  });
+
+  it("does not delete an outside stale snapshot symlink pointing into snapshots", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Snapshot Cleanup Symlink Row" });
+    const staleSnapshotTargetPath = path.join(project.path, "snapshots", "stale-target.json");
+    const outsideSnapshotLinkPath = path.join(parentDirectory, "outside-stale-snapshot.json");
+
+    await writeFile(staleSnapshotTargetPath, "do not delete outside link");
+
+    try {
+      await symlink(staleSnapshotTargetPath, outsideSnapshotLinkPath, "file");
+    } catch {
+      return;
+    }
+
+    insertSnapshot(path.join(project.path, "ether.db"), {
+      id: "stale-outside-symlink-snapshot",
+      slot: "A",
+      label: "Stale outside symlink A",
+      path: outsideSnapshotLinkPath,
+      createdAt: new Date().toISOString()
+    });
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "replacement", position: { x: 11, y: 12 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+
+    const snapshot = await createSnapshot(project.path, "A", "Replacement A");
+    const restored = await restoreSnapshot(project.path, snapshot.id);
+
+    await expect(lstat(outsideSnapshotLinkPath)).resolves.toSatisfy((stats) => stats.isSymbolicLink());
+    await expect(readFile(staleSnapshotTargetPath, "utf8")).resolves.toBe("do not delete outside link");
+    expect(restored.graph.nodes).toEqual([{ id: "replacement", position: { x: 11, y: 12 } }]);
   });
 
   it("keeps only the latest same-slot snapshot during rapid saves", async () => {
