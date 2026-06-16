@@ -1,3 +1,4 @@
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import { Trash2 } from "lucide-react";
 import type { CanvasNodeData } from "@ether/engine";
@@ -5,18 +6,53 @@ import type { CanvasNodeData } from "@ether/engine";
 type InspectorPanelProps = {
   selectedNode: Node<CanvasNodeData> | null;
   selectedEdge: Edge | null;
-  onUpdateNode(id: string, updates: Partial<CanvasNodeData>): void;
-  onUpdateEdge(id: string, label: string): void;
+  onPreviewNode(id: string, updates: Partial<CanvasNodeData>): void;
+  onPreviewEdge(id: string, label: string): void;
+  onCommitTextEdit(): void;
   onDeleteSelection(): void;
 };
 
 export function InspectorPanel({
   selectedNode,
   selectedEdge,
-  onUpdateNode,
-  onUpdateEdge,
+  onPreviewNode,
+  onPreviewEdge,
+  onCommitTextEdit,
   onDeleteSelection
 }: InspectorPanelProps) {
+  const [nodeDraft, setNodeDraft] = useState<Partial<CanvasNodeData>>({});
+  const [edgeLabelDraft, setEdgeLabelDraft] = useState("");
+
+  useEffect(() => {
+    setNodeDraft(selectedNode?.data ?? {});
+  }, [selectedNode]);
+
+  useEffect(() => {
+    setEdgeLabelDraft(String(selectedEdge?.label ?? selectedEdge?.data?.label ?? ""));
+  }, [selectedEdge]);
+
+  const commitNodeDraft = () => {
+    if (!selectedNode) {
+      return;
+    }
+
+    onCommitTextEdit();
+  };
+
+  const commitEdgeDraft = () => {
+    if (!selectedEdge) {
+      return;
+    }
+
+    onCommitTextEdit();
+  };
+
+  const commitInputOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+    }
+  };
+
   if (selectedNode) {
     return (
       <div className="inspector-form">
@@ -27,31 +63,53 @@ export function InspectorPanel({
         <label>
           Title
           <input
-            value={selectedNode.data.title}
-            onChange={(event) => onUpdateNode(selectedNode.id, { title: event.target.value })}
+            value={nodeDraft.title ?? ""}
+            onChange={(event) => {
+              const title = event.target.value;
+              setNodeDraft((draft) => ({ ...draft, title }));
+              onPreviewNode(selectedNode.id, { title });
+            }}
+            onBlur={commitNodeDraft}
+            onKeyDown={commitInputOnEnter}
             data-testid="inspector-node-title"
           />
         </label>
         <label>
           Label
           <input
-            value={selectedNode.data.label}
-            onChange={(event) => onUpdateNode(selectedNode.id, { label: event.target.value })}
+            value={nodeDraft.label ?? ""}
+            onChange={(event) => {
+              const label = event.target.value;
+              setNodeDraft((draft) => ({ ...draft, label }));
+              onPreviewNode(selectedNode.id, { label });
+            }}
+            onBlur={commitNodeDraft}
+            onKeyDown={commitInputOnEnter}
             data-testid="inspector-node-label"
           />
         </label>
         <label>
           Instruction
           <textarea
-            value={selectedNode.data.instruction}
-            onChange={(event) => onUpdateNode(selectedNode.id, { instruction: event.target.value })}
+            value={nodeDraft.instruction ?? ""}
+            onChange={(event) => {
+              const instruction = event.target.value;
+              setNodeDraft((draft) => ({ ...draft, instruction }));
+              onPreviewNode(selectedNode.id, { instruction });
+            }}
+            onBlur={commitNodeDraft}
           />
         </label>
         <label>
           Notes
           <textarea
-            value={selectedNode.data.notes}
-            onChange={(event) => onUpdateNode(selectedNode.id, { notes: event.target.value })}
+            value={nodeDraft.notes ?? ""}
+            onChange={(event) => {
+              const notes = event.target.value;
+              setNodeDraft((draft) => ({ ...draft, notes }));
+              onPreviewNode(selectedNode.id, { notes });
+            }}
+            onBlur={commitNodeDraft}
           />
         </label>
         <button type="button" className="danger-button" onClick={onDeleteSelection}>
@@ -72,8 +130,14 @@ export function InspectorPanel({
         <label>
           Label
           <input
-            value={String(selectedEdge.label ?? selectedEdge.data?.label ?? "")}
-            onChange={(event) => onUpdateEdge(selectedEdge.id, event.target.value)}
+            value={edgeLabelDraft}
+            onChange={(event) => {
+              const label = event.target.value;
+              setEdgeLabelDraft(label);
+              onPreviewEdge(selectedEdge.id, label);
+            }}
+            onBlur={commitEdgeDraft}
+            onKeyDown={commitInputOnEnter}
             data-testid="inspector-edge-label"
           />
         </label>

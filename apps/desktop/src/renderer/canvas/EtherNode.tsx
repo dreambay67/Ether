@@ -1,14 +1,16 @@
-import { memo } from "react";
-import { Handle, NodeResizer, Position, type NodeProps, useReactFlow } from "@xyflow/react";
+import { createContext, memo, useContext } from "react";
+import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Trash2 } from "lucide-react";
 import type { CanvasNodeData } from "@ether/engine";
+
+export const EtherNodeDeleteContext = createContext<(id: string) => void>(() => undefined);
 
 export const EtherNode = memo(function EtherNode({
   id,
   data,
   selected
 }: NodeProps & { data: CanvasNodeData }) {
-  const flow = useReactFlow();
+  const deleteNode = useContext(EtherNodeDeleteContext);
 
   return (
     <article className={`ether-node ether-node-${data.kind.toLowerCase()}`} data-testid="ether-node">
@@ -34,7 +36,7 @@ export const EtherNode = memo(function EtherNode({
         <button
           type="button"
           aria-label={`Delete ${data.title}`}
-          onClick={() => void flow.deleteElements({ nodes: [{ id }] })}
+          onClick={() => deleteNode(id)}
         >
           <Trash2 size={14} aria-hidden="true" />
         </button>

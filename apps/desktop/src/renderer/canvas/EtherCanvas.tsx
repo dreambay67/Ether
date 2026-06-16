@@ -34,14 +34,16 @@ import { canConnectNodeKinds } from "@ether/engine/graph/connectionRules";
 import { findEdgeInsertionTarget } from "@ether/engine/graph/canvasGeometry";
 import { createGraphNodeData, getNodeDefinition } from "@ether/engine/graph/nodeCatalog";
 import type { EtherGraph } from "@ether/engine";
-import { EtherNode } from "./EtherNode";
+import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
 import { InspectorPanel } from "./InspectorPanel";
 import { NodeLibrary } from "./NodeLibrary";
 import {
   type CanvasSnapshot,
   createCanvasHistory,
+  deleteCanvasElements,
   pushCanvasHistory,
   pushCanvasHistoryFromBaseline,
+  pushCanvasHistoryIfChanged,
   redoCanvasHistory,
   shouldPushNodeChangesToHistory,
   updateCanvasHistoryPresent,
@@ -105,6 +107,8 @@ function InnerEtherCanvas(
   const flowRef = useRef<ReactFlowInstance<Node<CanvasNodeData>, Edge> | null>(null);
   const nodeCounterRef = useRef(0);
   const resizeBaselineRef = useRef<CanvasSnapshot | null>(null);
+  const dragBaselineRef = useRef<CanvasSnapshot | null>(null);
+  const textEditBaselineRef = useRef<CanvasSnapshot | null>(null);
   const [viewport, setViewport] = useState<Viewport>(graph?.viewport ?? defaultViewport);
   const [history, setHistory] = useState(() =>
     createCanvasHistory({
@@ -126,7 +130,10 @@ function InnerEtherCanvas(
     }
 
     resizeBaselineRef.current = null;
+    dragBaselineRef.current = null;
+    textEditBaselineRef.current = null;
     setViewport(graph.viewport);
+    flowRef.current?.setViewport(graph.viewport);
     setHistory(
       createCanvasHistory({
         nodes: normalizeNodes(graph.nodes),
@@ -188,8 +195,16 @@ function InnerEtherCanvas(
       const hasCompletedResize = changes.some(
         (change) => change.type === "dimensions" && change.resizing === false
       );
+      const hasDragPosition = changes.some(
+        (change) => change.type === "position" && typeof change.dragging === "boolean"
+      );
       const editsGraph = shouldPushNodeChangesToHistory(changes);
       const next = { nodes: nextNodes, edges: current.present.edges };
+
+      if (hasDragPosition) {
+        dragBaselineRef.current ??= current.present;
+        return updateCanvasHistoryPresent(current, next);
+      }
 
       if (hasActiveResize) {
         resizeBaselineRef.current ??= current.present;
@@ -331,44 +346,73 @@ function InnerEtherCanvas(
     onStatus("Add a valid source and target node before connecting.");
   }, [commitSnapshot, edges, nodes, onStatus]);
 
-  const updateNode = useCallback(
+  const previewNode = useCallback(
     (id: string, updates: Partial<CanvasNodeData>) => {
-      const nextNodes = nodes.map((node) =>
-        node.id === id ? { ...node, data: { ...node.data, ...updates } } : node
-      );
-
-      commitSnapshot(nextNodes, edges, "Updated node");
+      setHistory((current) => {
+        textEditBaselineRef.current ??= current.present;
+        return updateCanvasHistoryPresent(current, {
+          nodes: current.present.nodes.map((node) =>
+            node.id === id ? { ...node, data: { ...node.data, ...updates } } : node
+          ),
+          edges: current.present.edges
+        });
+      });
     },
-    [commitSnapshot, edges, nodes]
+    []
   );
 
-  const updateEdge = useCallback(
+  const previewEdge = useCallback(
     (id: string, label: string) => {
-      const nextEdges = edges.map((edge) =>
-        edge.id === id ? { ...edge, label, data: { ...edge.data, label } } : edge
-      );
-
-      commitSnapshot(nodes, nextEdges, "Updated edge label");
+      setHistory((current) => {
+        textEditBaselineRef.current ??= current.present;
+        return updateCanvasHistoryPresent(current, {
+          nodes: current.present.nodes,
+          edges: current.present.edges.map((edge) =>
+            edge.id === id ? { ...edge, label, data: { ...edge.data, label } } : edge
+          )
+        });
+      });
     },
-    [commitSnapshot, edges, nodes]
+    []
+  );
+
+  const commitTextEdit = useCallback(() => {
+    const baseline = textEditBaselineRef.current;
+
+    if (!baseline) {
+      return;
+    }
+
+    textEditBaselineRef.current = null;
+    setHistory((current) => pushCanvasHistoryFromBaseline(current, baseline, current.present));
+    onTrace("Updated inspector text");
+  }, [onTrace]);
+
+  const deleteElements = useCallback(
+    (selection?: { nodeIds?: string[]; edgeIds?: string[] }) => {
+      const next = deleteCanvasElements({ nodes, edges }, selection);
+
+      if (!next) {
+        return;
+      }
+
+      setHistory((current) => pushCanvasHistoryIfChanged(current, next));
+      onTrace("Deleted selection");
+      onStatus("Selection deleted");
+    },
+    [edges, nodes, onStatus, onTrace]
   );
 
   const deleteSelection = useCallback(() => {
-    const selectedNodeIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
-    const selectedEdgeIds = new Set(edges.filter((edge) => edge.selected).map((edge) => edge.id));
-    const nextNodes = nodes.filter((node) => !selectedNodeIds.has(node.id));
-    const nextEdges = edges.filter(
-      (edge) =>
-        !selectedEdgeIds.has(edge.id) &&
-        !selectedNodeIds.has(edge.source) &&
-        !selectedNodeIds.has(edge.target)
-    );
+    deleteElements();
+  }, [deleteElements]);
 
-    if (nextNodes.length !== nodes.length || nextEdges.length !== edges.length) {
-      commitSnapshot(nextNodes, nextEdges, "Deleted selection");
-      onStatus("Selection deleted");
-    }
-  }, [commitSnapshot, edges, nodes, onStatus]);
+  const deleteNodeById = useCallback(
+    (id: string) => {
+      deleteElements({ nodeIds: [id] });
+    },
+    [deleteElements]
+  );
 
   const undo = useCallback(() => {
     setHistory((current) => undoCanvasHistory(current));
@@ -398,11 +442,16 @@ function InnerEtherCanvas(
         event.preventDefault();
         redo();
       }
+
+      if (key === "delete" || key === "backspace") {
+        event.preventDefault();
+        deleteSelection();
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [redo, undo]);
+  }, [deleteSelection, redo, undo]);
 
   const onDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
@@ -425,6 +474,19 @@ function InnerEtherCanvas(
   const onNodeDragStop = useCallback(
     (_event: React.MouseEvent, draggedNode: Node<CanvasNodeData>) => {
       const latestNodes = nodes.map((node) => (node.id === draggedNode.id ? draggedNode : node));
+      const commitDragOnly = () => {
+        const baseline = dragBaselineRef.current;
+        dragBaselineRef.current = null;
+
+        if (baseline) {
+          setHistory((current) =>
+            pushCanvasHistoryFromBaseline(current, baseline, {
+              nodes: latestNodes,
+              edges: current.present.edges
+            })
+          );
+        }
+      };
       const targetEdge = findEdgeInsertionTarget({
         draggedNodeId: draggedNode.id,
         nodes: latestNodes,
@@ -432,6 +494,7 @@ function InnerEtherCanvas(
       });
 
       if (!targetEdge) {
+        commitDragOnly();
         return;
       }
 
@@ -440,6 +503,7 @@ function InnerEtherCanvas(
       const targetNode = latestNodes.find((node) => node.id === targetEdge.target);
 
       if (!sourceNode || !dragged || !targetNode) {
+        commitDragOnly();
         return;
       }
 
@@ -453,6 +517,7 @@ function InnerEtherCanvas(
       });
 
       if (!firstRule.allowed || !secondRule.allowed) {
+        commitDragOnly();
         onStatus("Dropped node is near an edge, but that insertion would create an invalid route.");
         return;
       }
@@ -479,11 +544,22 @@ function InnerEtherCanvas(
           ])
         );
 
-      commitSnapshot(latestNodes, nextEdges, "Inserted node onto edge");
+      const baseline = dragBaselineRef.current;
+      dragBaselineRef.current = null;
+      setHistory((current) =>
+        baseline
+          ? pushCanvasHistoryFromBaseline(current, baseline, { nodes: latestNodes, edges: nextEdges })
+          : pushCanvasHistory(current, { nodes: latestNodes, edges: nextEdges })
+      );
+      onTrace("Inserted node onto edge");
       onStatus("Node inserted between connected nodes");
     },
-    [commitSnapshot, edges, nodes, onStatus]
+    [edges, nodes, onStatus, onTrace]
   );
+
+  const onNodeDragStart = useCallback(() => {
+    dragBaselineRef.current = { nodes, edges };
+  }, [edges, nodes]);
 
   const actionDefinitions = useMemo(
     () => [
@@ -542,11 +618,13 @@ function InnerEtherCanvas(
         <InspectorPanel
           selectedNode={selectedNode}
           selectedEdge={selectedEdge}
-          onUpdateNode={updateNode}
-          onUpdateEdge={updateEdge}
+          onPreviewNode={previewNode}
+          onPreviewEdge={previewEdge}
+          onCommitTextEdit={commitTextEdit}
           onDeleteSelection={deleteSelection}
         />
       </aside>
+      <EtherNodeDeleteContext.Provider value={deleteNodeById}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -560,6 +638,7 @@ function InnerEtherCanvas(
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onSelectionChange={replaceSelection}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onDrop={onDrop}
         onDragOver={(event) => {
@@ -575,8 +654,7 @@ function InnerEtherCanvas(
           setContextMenu({ x: event.clientX, y: event.clientY, position });
         }}
         onPaneClick={() => setContextMenu(null)}
-        deleteKeyCode={["Backspace", "Delete"]}
-        fitView
+        deleteKeyCode={null}
       >
         <Background color="rgba(153, 168, 186, 0.16)" gap={36} />
         <Controls position="bottom-right" />
@@ -589,6 +667,7 @@ function InnerEtherCanvas(
           />
         ) : null}
       </ReactFlow>
+      </EtherNodeDeleteContext.Provider>
       {contextMenu ? (
         <div
           className="canvas-context-menu"

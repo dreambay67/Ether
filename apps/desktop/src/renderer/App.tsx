@@ -252,7 +252,6 @@ export function App() {
 
     try {
       const graph = await window.ether.project.saveGraph(currentProject.id, canvasRef.current!.serialize());
-      setActiveGraph(graph);
       setCurrentProject((project) =>
         project ? { ...project, updatedAt: graph.updatedAt } : project
       );
