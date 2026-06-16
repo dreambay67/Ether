@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
-import { FolderPlus, Play, Trash2 } from "lucide-react";
+import { FolderInput, FolderPlus, ImagePlus, Play, Trash2 } from "lucide-react";
 import {
   coerceCanvasNodeData,
   type CanvasNodeData
@@ -21,6 +21,8 @@ type InspectorPanelProps = {
   onCommitTextEdit(): void;
   onRunNode(id: string): void;
   onEnsureStoreFolder(id: string): void;
+  onSaveFakeGeneratedAsset(id: string): void;
+  onMoveLatestGeneratedAssetToCollection(id: string): void;
   onDeleteSelection(): void;
   hasOpenProject: boolean;
 };
@@ -34,6 +36,8 @@ export function InspectorPanel({
   onCommitTextEdit,
   onRunNode,
   onEnsureStoreFolder,
+  onSaveFakeGeneratedAsset,
+  onMoveLatestGeneratedAssetToCollection,
   onDeleteSelection,
   hasOpenProject
 }: InspectorPanelProps) {
@@ -174,6 +178,23 @@ export function InspectorPanel({
             {nodeData.assetPath ? <pre>{nodeData.assetPath}</pre> : null}
           </section>
         ) : null}
+        {nodeData.kind === "Generation" ? (
+          <section className="inspector-preview" data-testid="inspector-generated-output">
+            <div>
+              <span>Generated Output</span>
+              <button
+                type="button"
+                className="run-node-button"
+                onClick={() => onSaveFakeGeneratedAsset(selectedNode.id)}
+                disabled={!hasOpenProject}
+              >
+                <ImagePlus size={14} aria-hidden="true" />
+                Save fake output
+              </button>
+            </div>
+            {nodeData.assetPath ? <pre>{nodeData.assetPath}</pre> : <p>Open a project to save fake output.</p>}
+          </section>
+        ) : null}
         {canMirrorStoreFolder ? (
           <section className="inspector-preview" data-testid="inspector-store-folder">
             <div>
@@ -189,6 +210,25 @@ export function InspectorPanel({
               </button>
             </div>
             {nodeData.storePath ? <pre>{nodeData.storePath}</pre> : <p>Open a project to create the folder.</p>}
+            {nodeData.subtype === "Collection" ? (
+              <>
+                <button
+                  type="button"
+                  className="run-node-button"
+                  onClick={() => onMoveLatestGeneratedAssetToCollection(selectedNode.id)}
+                  disabled={!hasOpenProject}
+                >
+                  <FolderInput size={14} aria-hidden="true" />
+                  Move latest generated
+                </button>
+                {nodeData.lastMovedAssetPath ? (
+                  <>
+                    <span>Last moved</span>
+                    <pre>{nodeData.lastMovedAssetPath}</pre>
+                  </>
+                ) : null}
+              </>
+            ) : null}
           </section>
         ) : null}
         {promptAssembly || generationAssembly ? (

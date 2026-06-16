@@ -1,5 +1,6 @@
 import type {
   AssetKind,
+  AssetMoveRecord,
   AssetRecord,
   CreateProjectOptions,
   EtherGraph,
@@ -15,6 +16,9 @@ declare global {
   interface Window {
     ether: {
       shell: "desktop";
+      file: {
+        getDroppedFilePath(file: File): string | null;
+      };
       project: {
         create(options: CreateProjectOptions): Promise<ProjectSession>;
         open(projectPath: string): Promise<ProjectSession>;
@@ -42,6 +46,11 @@ declare global {
           projectId: string,
           options: { generationNodeId: string; fileName: string; content?: string; mimeType?: string }
         ): Promise<AssetRecord>;
+        moveToCollection(
+          projectId: string,
+          options: { assetId: string; collectionId?: string; collectionName?: string; reason?: string }
+        ): Promise<AssetRecord>;
+        listMoves(projectId: string, query?: { assetId?: string }): Promise<AssetMoveRecord[]>;
       };
     };
   }

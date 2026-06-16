@@ -40,6 +40,9 @@ export type CanvasNodeData = {
   storeAssetId?: string;
   storePath?: string;
   storeMetadata?: Record<string, unknown>;
+  lastMovedAssetId?: string;
+  lastMovedAssetPath?: string;
+  lastMovedAt?: string;
 };
 
 export type EtherNodeCategory = {

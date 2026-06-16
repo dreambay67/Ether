@@ -81,6 +81,18 @@ test("generation node previews prompt inputs from a connected prompt", async ({ 
   );
 });
 
+test("shows disabled manual asset validation controls until a project is open", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-generation-image").click();
+  await expect(page.getByRole("button", { name: "Save fake output" })).toBeDisabled();
+
+  await page.locator("summary").filter({ hasText: "Store" }).click();
+  await page.getByTestId("library-node-store-collection").click();
+  await expect(page.getByRole("button", { name: "Mirror" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move latest generated" })).toBeDisabled();
+});
+
 test("creates an edge and edits the visible edge label", async ({ page }) => {
   await page.goto("/");
 

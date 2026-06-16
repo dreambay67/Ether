@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { createDroppedFilePathReader } from "./filePathBridge";
 
 const projectChannels = {
   create: "ether:project:create",
@@ -14,11 +15,18 @@ const assetChannels = {
   ensureCollection: "ether:asset:ensureCollection",
   ensureDirectory: "ether:asset:ensureDirectory",
   list: "ether:asset:list",
-  saveFakeGenerated: "ether:asset:saveFakeGenerated"
+  saveFakeGenerated: "ether:asset:saveFakeGenerated",
+  moveToCollection: "ether:asset:moveToCollection",
+  listMoves: "ether:asset:listMoves"
 } as const;
+
+const getDroppedFilePath = createDroppedFilePathReader(webUtils);
 
 contextBridge.exposeInMainWorld("ether", {
   shell: "desktop",
+  file: {
+    getDroppedFilePath
+  },
   project: {
     create: (options: { parentDirectory: string; name: string }) =>
       ipcRenderer.invoke(projectChannels.create, options),
@@ -42,6 +50,12 @@ contextBridge.exposeInMainWorld("ether", {
     saveFakeGenerated: (
       projectId: string,
       options: { generationNodeId: string; fileName: string; content?: string; mimeType?: string }
-    ) => ipcRenderer.invoke(assetChannels.saveFakeGenerated, projectId, options)
+    ) => ipcRenderer.invoke(assetChannels.saveFakeGenerated, projectId, options),
+    moveToCollection: (
+      projectId: string,
+      options: { assetId: string; collectionId?: string; collectionName?: string; reason?: string }
+    ) => ipcRenderer.invoke(assetChannels.moveToCollection, projectId, options),
+    listMoves: (projectId: string, query?: { assetId?: string }) =>
+      ipcRenderer.invoke(assetChannels.listMoves, projectId, query)
   }
 });

@@ -114,10 +114,6 @@ function isSupportedImageFile(file: File) {
   return file.type.startsWith("image/") || imageFileExtensionPattern.test(file.name);
 }
 
-function getDroppedFilePath(file: File) {
-  return (file as File & { path?: string }).path;
-}
-
 function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
   const baseData = createGraphNodeData("reference-image");
   const originalName =
@@ -616,6 +612,145 @@ function InnerEtherCanvas(
     [commitSnapshot, edges, nodes, onStatus, projectId]
   );
 
+  const saveFakeGeneratedAssetForNode = useCallback(
+    async (id: string) => {
+      const target = nodes.find((node) => node.id === id);
+
+      if (!target || target.data.kind !== "Generation") {
+        onStatus("Select a Generation node first.");
+        return;
+      }
+
+      if (!projectId) {
+        const message = "Open a project to save fake generated output";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      try {
+        const asset = await window.ether.asset.saveFakeGenerated(projectId, {
+          generationNodeId: target.id,
+          fileName: `fake-output-${target.id}-${Date.now()}.png`,
+          content: `fake generated output for ${target.data.title}\n`,
+          mimeType: "image/png"
+        });
+        const nextNodes = nodes.map((node) =>
+          node.id === target.id
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  status: "complete" as const,
+                  assetId: asset.id,
+                  assetKind: asset.kind,
+                  assetPath: asset.path,
+                  assetMetadata: asset.metadata
+                }
+              }
+            : { ...node, selected: false }
+        );
+        const message = "Saved fake generated output";
+
+        commitSnapshot(nextNodes, edges, message);
+        onStatus(message);
+      } catch (error) {
+        onStatus(error instanceof Error ? error.message : "Fake generated output save failed");
+      }
+    },
+    [commitSnapshot, edges, nodes, onStatus, projectId]
+  );
+
+  const moveLatestGeneratedAssetToCollection = useCallback(
+    async (collectionNodeId: string) => {
+      const collectionNode = nodes.find((node) => node.id === collectionNodeId);
+
+      if (
+        !collectionNode ||
+        collectionNode.data.kind !== "Store" ||
+        collectionNode.data.subtype !== "Collection"
+      ) {
+        onStatus("Select a Collection node first.");
+        return;
+      }
+
+      if (!projectId) {
+        const message = "Open a project to move generated assets";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      const sourceNode = [...nodes]
+        .reverse()
+        .find((node) => node.data.kind === "Generation" && node.data.assetKind === "generated" && node.data.assetId);
+
+      if (!sourceNode?.data.assetId) {
+        onStatus("Save fake generated output before moving it to a Collection.");
+        return;
+      }
+
+      try {
+        const collectionName = collectionNode.data.label.trim() || collectionNode.data.title;
+        const collectionAsset =
+          collectionNode.data.storeAssetId && collectionNode.data.storePath
+            ? {
+                id: collectionNode.data.storeAssetId,
+                path: collectionNode.data.storePath,
+                metadata: collectionNode.data.storeMetadata ?? {}
+              }
+            : await window.ether.asset.ensureCollection(projectId, {
+                name: collectionName,
+                nodeId: collectionNode.id
+              });
+        const movedAsset = await window.ether.asset.moveToCollection(projectId, {
+          assetId: sourceNode.data.assetId,
+          collectionId: collectionAsset.id,
+          reason: "manual-inspector-validation"
+        });
+        const nextNodes = nodes.map((node) => {
+          if (node.id === sourceNode.id) {
+            return {
+              ...node,
+              selected: false,
+              data: {
+                ...node.data,
+                assetPath: movedAsset.path,
+                assetMetadata: movedAsset.metadata
+              }
+            };
+          }
+
+          if (node.id === collectionNode.id) {
+            return {
+              ...node,
+              selected: true,
+              data: {
+                ...node.data,
+                status: "complete" as const,
+                storeAssetId: collectionAsset.id,
+                storePath: collectionAsset.path,
+                storeMetadata: collectionAsset.metadata,
+                lastMovedAssetId: movedAsset.id,
+                lastMovedAssetPath: movedAsset.path,
+                lastMovedAt: movedAsset.updatedAt
+              }
+            };
+          }
+
+          return { ...node, selected: false };
+        });
+        const message = "Moved latest generated output to Collection";
+
+        commitSnapshot(nextNodes, edges, message);
+        onStatus(message);
+      } catch (error) {
+        onStatus(error instanceof Error ? error.message : "Generated asset move failed");
+      }
+    },
+    [commitSnapshot, edges, nodes, onStatus, projectId]
+  );
+
   const deleteNodeById = useCallback(
     (id: string) => {
       deleteElements({ nodeIds: [id] });
@@ -688,12 +823,12 @@ function InnerEtherCanvas(
           return;
         }
 
-        const filePaths = imageFiles.map(getDroppedFilePath).filter((filePath): filePath is string =>
-          Boolean(filePath)
-        );
+        const filePaths = imageFiles
+          .map((file) => window.ether.file.getDroppedFilePath(file))
+          .filter((filePath): filePath is string => Boolean(filePath));
 
         if (filePaths.length !== imageFiles.length) {
-          onStatus("Dropped images need local file paths before they can be linked.");
+          onStatus("Dropped images need Electron file paths before they can be linked.");
           return;
         }
 
@@ -889,6 +1024,8 @@ function InnerEtherCanvas(
           onCommitTextEdit={commitTextEdit}
           onRunNode={runNode}
           onEnsureStoreFolder={ensureStoreFolderForNode}
+          onSaveFakeGeneratedAsset={saveFakeGeneratedAssetForNode}
+          onMoveLatestGeneratedAssetToCollection={moveLatestGeneratedAssetToCollection}
           onDeleteSelection={deleteSelection}
           hasOpenProject={Boolean(projectId)}
         />

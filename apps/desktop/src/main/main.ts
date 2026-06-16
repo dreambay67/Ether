@@ -9,8 +9,10 @@ import {
   type AssetKind,
   type ProjectOpenResult,
   linkExternalReference,
+  listAssetMoves,
   listAssets,
   loadGraph,
+  moveAssetToCollection,
   openProject,
   runHealthCheck,
   saveGeneratedAsset,
@@ -32,7 +34,9 @@ const assetChannels = {
   ensureCollection: "ether:asset:ensureCollection",
   ensureDirectory: "ether:asset:ensureDirectory",
   list: "ether:asset:list",
-  saveFakeGenerated: "ether:asset:saveFakeGenerated"
+  saveFakeGenerated: "ether:asset:saveFakeGenerated",
+  moveToCollection: "ether:asset:moveToCollection",
+  listMoves: "ether:asset:listMoves"
 } as const;
 
 type ProjectSession = ProjectOpenResult & {
@@ -222,6 +226,28 @@ function registerAssetIpc() {
       fileName: assertString(generatedOptions.fileName, "fileName"),
       content: optionalString(generatedOptions.content, "content") ?? "",
       mimeType: optionalString(generatedOptions.mimeType, "mimeType")
+    });
+  });
+
+  ipcMain.handle(assetChannels.moveToCollection, (_event, projectId: unknown, options: unknown) => {
+    const moveOptions = assertOptions(options, "move asset options");
+
+    return moveAssetToCollection(getRegisteredProjectPath(projectId), {
+      assetId: assertString(moveOptions.assetId, "assetId"),
+      collectionId: optionalString(moveOptions.collectionId, "collectionId"),
+      collectionName: optionalString(moveOptions.collectionName, "collectionName"),
+      reason: optionalString(moveOptions.reason, "reason")
+    });
+  });
+
+  ipcMain.handle(assetChannels.listMoves, (_event, projectId: unknown, query?: unknown) => {
+    const moveQuery =
+      query && typeof query === "object" && !Array.isArray(query)
+        ? (query as { assetId?: unknown })
+        : {};
+
+    return listAssetMoves(getRegisteredProjectPath(projectId), {
+      assetId: optionalString(moveQuery.assetId, "assetId")
     });
   });
 }
