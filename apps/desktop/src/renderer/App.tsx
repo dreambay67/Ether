@@ -1,6 +1,7 @@
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type FormEvent,
   useCallback,
   useEffect,
   useRef,
@@ -181,6 +182,92 @@ function FloatingPanel({
 }
 
 export function App() {
+  const [parentDirectory, setParentDirectory] = useState("");
+  const [projectName, setProjectName] = useState("Untitled Ether Project");
+  const [projectPath, setProjectPath] = useState("");
+  const [currentProject, setCurrentProject] = useState<{
+    name: string;
+    path: string;
+    updatedAt: string;
+  } | null>(null);
+  const [projectMessage, setProjectMessage] = useState("No project open");
+
+  const setProjectFromResult = (result: Awaited<ReturnType<typeof window.ether.project.open>>) => {
+    setCurrentProject({
+      name: result.metadata.displayName,
+      path: result.path,
+      updatedAt: result.metadata.updatedAt
+    });
+    setProjectPath(result.path);
+  };
+
+  const createLocalProject = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setProjectMessage("Creating project...");
+
+    try {
+      const project = await window.ether.project.create({ parentDirectory, name: projectName });
+      setProjectFromResult(project);
+      setProjectMessage("Project created");
+    } catch (error) {
+      setProjectMessage(error instanceof Error ? error.message : "Project creation failed");
+    }
+  };
+
+  const openLocalProject = async () => {
+    setProjectMessage("Opening project...");
+
+    try {
+      const project = await window.ether.project.open(projectPath);
+      setProjectFromResult(project);
+      setProjectMessage("Project opened");
+    } catch (error) {
+      setProjectMessage(error instanceof Error ? error.message : "Project open failed");
+    }
+  };
+
+  const saveCurrentGraph = async () => {
+    if (!currentProject) {
+      setProjectMessage("Open a project before saving graph state");
+      return;
+    }
+
+    try {
+      const graph = await window.ether.project.saveGraph(currentProject.path, {
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        selectedSnapshotId: null,
+        updatedAt: new Date().toISOString()
+      });
+
+      setCurrentProject((project) =>
+        project ? { ...project, updatedAt: graph.updatedAt } : project
+      );
+      setProjectMessage("Graph saved");
+    } catch (error) {
+      setProjectMessage(error instanceof Error ? error.message : "Graph save failed");
+    }
+  };
+
+  const checkProjectHealth = async () => {
+    if (!currentProject) {
+      setProjectMessage("Open a project before running health check");
+      return;
+    }
+
+    try {
+      const health = await window.ether.project.health(currentProject.path);
+      setProjectMessage(
+        health.issues.length === 0
+          ? "Health check clear"
+          : `${health.issues.length} health issue${health.issues.length === 1 ? "" : "s"} found`
+      );
+    } catch (error) {
+      setProjectMessage(error instanceof Error ? error.message : "Health check failed");
+    }
+  };
+
   return (
     <main className="ether-shell" aria-label="Ether desktop shell">
       <header className="brand-strip">
@@ -196,6 +283,52 @@ export function App() {
           Providers offline
         </div>
       </header>
+
+      <section className="project-strip" aria-label="Project controls">
+        <form className="project-form" onSubmit={createLocalProject}>
+          <label>
+            Parent directory
+            <input
+              value={parentDirectory}
+              onChange={(event) => setParentDirectory(event.target.value)}
+              placeholder="C:\\Users\\you\\Documents"
+            />
+          </label>
+          <label>
+            Project name
+            <input
+              value={projectName}
+              onChange={(event) => setProjectName(event.target.value)}
+              placeholder="Campaign Exploration"
+            />
+          </label>
+          <button type="submit">Create</button>
+        </form>
+        <div className="project-open">
+          <label>
+            Project path
+            <input
+              value={projectPath}
+              onChange={(event) => setProjectPath(event.target.value)}
+              placeholder="C:\\Projects\\Campaign.ether"
+            />
+          </label>
+          <button type="button" onClick={openLocalProject}>
+            Open
+          </button>
+          <button type="button" onClick={saveCurrentGraph}>
+            Save Graph
+          </button>
+          <button type="button" onClick={checkProjectHealth}>
+            Health
+          </button>
+        </div>
+        <div className="project-status" aria-live="polite">
+          <strong>{currentProject?.name ?? "No project"}</strong>
+          <span>{currentProject?.path ?? "Create or open a local project bundle"}</span>
+          <em>{projectMessage}</em>
+        </div>
+      </section>
 
       <section className="workspace" aria-label={`${brandTokens.lockup} workspace`}>
         <section className="canvas-stage" aria-label="Canvas">

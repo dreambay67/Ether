@@ -143,6 +143,7 @@ ProjectName.ether/
   directories/
   runs/
     run-log.jsonl
+  snapshots/
   templates/
   exports/
 ```
@@ -874,4 +875,3 @@ Ether V1 is complete only when:
 - Codex can create/edit workflows and execute on explicit command,
 - the app can be closed/reopened without losing graph, assets, metadata, or lineage,
 - visual implementation follows the Ether and DreamBay handbooks.
-

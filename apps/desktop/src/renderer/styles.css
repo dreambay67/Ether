@@ -44,6 +44,7 @@ button {
 }
 
 .brand-strip,
+.project-strip,
 .workspace {
   position: relative;
   z-index: 1;
@@ -111,6 +112,96 @@ button {
   background: rgba(7, 11, 18, 0.72);
   color: var(--ether-text-muted);
   font-size: 13px;
+}
+
+.project-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(220px, 0.8fr);
+  gap: 10px;
+  align-items: stretch;
+  padding: 10px;
+  border: 1px solid rgba(153, 168, 186, 0.18);
+  border-radius: var(--ether-panel-radius);
+  background: rgba(7, 11, 18, 0.76);
+}
+
+.project-form,
+.project-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-open {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.project-strip label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ether-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.project-strip input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(153, 168, 186, 0.24);
+  border-radius: var(--ether-control-radius);
+  padding: 0 10px;
+  background: rgba(9, 15, 25, 0.88);
+  color: var(--ether-text-primary);
+  text-transform: none;
+}
+
+.project-strip button {
+  align-self: end;
+  height: 34px;
+  border: 1px solid rgba(55, 230, 234, 0.28);
+  border-radius: var(--ether-control-radius);
+  padding: 0 12px;
+  background: rgba(20, 112, 219, 0.2);
+  color: var(--ether-text-primary);
+  cursor: pointer;
+}
+
+.project-strip button:hover,
+.project-strip button:focus-visible,
+.project-strip input:focus-visible {
+  border-color: rgba(126, 244, 215, 0.72);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(55, 230, 234, 0.16);
+}
+
+.project-status {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ether-text-muted);
+  font-size: 12px;
+}
+
+.project-status strong,
+.project-status span,
+.project-status em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-status strong {
+  color: var(--ether-text-primary);
+  font-size: 14px;
+  font-style: normal;
+}
+
+.project-status em {
+  color: var(--ether-aqua-signal);
+  font-style: normal;
 }
 
 .status-dot {
@@ -375,6 +466,7 @@ button {
   }
 
   .brand-strip,
+  .project-strip,
   .workspace {
     min-width: 0;
   }
@@ -385,6 +477,12 @@ button {
 
   .brand-strip {
     flex-direction: column;
+  }
+
+  .project-strip,
+  .project-form,
+  .project-open {
+    grid-template-columns: 1fr;
   }
 
   .workspace,

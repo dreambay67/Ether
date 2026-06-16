@@ -8,6 +8,7 @@
     "test:smoke": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
-    "@ether/brand": "workspace:*"
+    "@ether/brand": "workspace:*",
+    "@ether/engine": "workspace:*"
   }
 }
