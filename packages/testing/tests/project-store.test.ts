@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,6 +34,9 @@ describe("project store", () => {
 
     expect(project.path).toBe(path.join(parentDirectory, "My Test Project.ether"));
     expect(project.metadata.displayName).toBe("My Test Project!");
+    expect(project.metadata.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
     expect(project.metadata.autosave).toEqual({ enabled: true, intervalMs: 60000 });
     expect(project.metadata.brandLockup).toBe("ETHER by DreamBay");
     expect(project.metadata.activeSnapshotId).toBeNull();
@@ -72,6 +75,27 @@ describe("project store", () => {
     expect(loaded.edges).toEqual(graph.edges);
     expect(loaded.viewport).toEqual(graph.viewport);
     expect(new Date(loaded.updatedAt).toString()).not.toBe("Invalid Date");
+
+    const rootEntries = await readdir(project.path);
+    expect(rootEntries.filter((entry) => entry.includes(".tmp-"))).toEqual([]);
+  });
+
+  it("rejects invalid graph updatedAt values when loading existing graph JSON", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Invalid Graph Date" });
+
+    await writeFile(
+      path.join(project.path, "graph.json"),
+      JSON.stringify({
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        selectedSnapshotId: null,
+        updatedAt: "not-a-date"
+      })
+    );
+
+    await expect(loadGraph(project.path)).rejects.toThrow();
   });
 
   it("creates and restores an A slot snapshot", async () => {
@@ -100,6 +124,39 @@ describe("project store", () => {
     expect(restored.graph.nodes).toEqual([{ id: "original", position: { x: 1, y: 2 } }]);
     expect(restored.metadata.activeSnapshotId).toBe(snapshot.id);
     expect(restored.graph.selectedSnapshotId).toBe(snapshot.id);
+  });
+
+  it("replaces the previous snapshot when the same slot is saved again", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Snapshot Replacement" });
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "first", position: { x: 1, y: 2 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+    const firstSnapshot = await createSnapshot(project.path, "A", "First A");
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "second", position: { x: 3, y: 4 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+    const secondSnapshot = await createSnapshot(project.path, "A", "Second A");
+
+    const restored = await restoreSnapshot(project.path, secondSnapshot.id);
+    const snapshotFiles = await readdir(path.join(project.path, "snapshots"));
+
+    expect(secondSnapshot.id).not.toBe(firstSnapshot.id);
+    expect(restored.graph.nodes).toEqual([{ id: "second", position: { x: 3, y: 4 } }]);
+    expect(snapshotFiles).toEqual([path.basename(secondSnapshot.path)]);
+    await expect(restoreSnapshot(project.path, firstSnapshot.id)).rejects.toThrow(
+      `Snapshot "${firstSnapshot.id}" was not found.`
+    );
   });
 
   it("reports missing linked references and persists health issues", async () => {
@@ -135,6 +192,27 @@ describe("project store", () => {
       })
     ]);
     expect(reopened.database.healthIssueCount).toBe(1);
+  });
+
+  it("clears persisted health issues after linked references are fixed", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Health Clear" });
+    const referencePath = path.join(parentDirectory, "fixed-reference.png");
+
+    await writeFile(
+      path.join(project.path, "assets", "references", "linked-index.json"),
+      JSON.stringify({
+        references: [{ id: "ref-1", path: referencePath, linkedAt: new Date().toISOString() }]
+      })
+    );
+
+    await runHealthCheck(project.path);
+    await writeFile(referencePath, "placeholder");
+    const health = await runHealthCheck(project.path);
+    const reopened = await openProject(project.path);
+
+    expect(health.issues).toEqual([]);
+    expect(reopened.database.healthIssueCount).toBe(0);
   });
 
   it("opens an existing project with an initialized database and required tables", async () => {

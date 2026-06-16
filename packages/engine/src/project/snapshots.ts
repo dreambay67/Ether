@@ -1,8 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getSnapshot, insertSnapshot } from "./database.js";
 import { projectPaths } from "./paths.js";
-import { loadGraph, readProjectMetadata, saveGraph, writeProjectMetadata } from "./projectStore.js";
+import { loadGraph, readProjectMetadata, saveGraph, writeJson, writeProjectMetadata } from "./projectStore.js";
 import { EtherGraphSchema, SNAPSHOT_SLOTS, type RestoreSnapshotResult, type SnapshotRecord, type SnapshotSlot } from "./schema.js";
 
 export async function createSnapshot(
@@ -27,7 +27,7 @@ export async function createSnapshot(
     createdAt
   };
 
-  await writeFile(snapshotPath, `${JSON.stringify({ snapshot, graph }, null, 2)}\n`);
+  await writeJson(snapshotPath, { snapshot, graph });
   insertSnapshot(paths.database, snapshot);
 
   return snapshot;

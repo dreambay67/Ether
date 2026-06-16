@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { rmSync } from "node:fs";
 import type { HealthIssue, ProjectDatabaseStatus, SnapshotRecord, SnapshotSlot } from "./schema.js";
 
 export const REQUIRED_DATABASE_TABLES = [
@@ -108,10 +109,24 @@ export function insertSnapshot(
   const db = new Database(databasePath);
 
   try {
-    db.prepare(
-      `INSERT INTO snapshots (id, slot, label, file_path, created_at)
-       VALUES (@id, @slot, @label, @path, @createdAt)`
-    ).run(snapshot);
+    const replaceSlot = db.transaction(() => {
+      const existingRows = db
+        .prepare("SELECT file_path as path FROM snapshots WHERE slot = ?")
+        .all(snapshot.slot) as Array<{ path: string }>;
+
+      db.prepare("DELETE FROM snapshots WHERE slot = ?").run(snapshot.slot);
+
+      for (const row of existingRows) {
+        rmSync(row.path, { force: true });
+      }
+
+      db.prepare(
+        `INSERT INTO snapshots (id, slot, label, file_path, created_at)
+         VALUES (@id, @slot, @label, @path, @createdAt)`
+      ).run(snapshot);
+    });
+
+    replaceSlot();
   } finally {
     db.close();
   }

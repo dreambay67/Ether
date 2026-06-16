@@ -5,7 +5,7 @@ export const SNAPSHOT_SLOTS = ["A", "B", "C", "D"] as const;
 export type SnapshotSlot = (typeof SNAPSHOT_SLOTS)[number];
 
 export const ProjectMetadataSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
   displayName: z.string().min(1),
   appVersion: z.string().min(1),
   createdAt: z.string().datetime(),
@@ -30,7 +30,7 @@ export const EtherGraphSchema = z.object({
     })
     .catch({ x: 0, y: 0, zoom: 1 }),
   selectedSnapshotId: z.string().nullable(),
-  updatedAt: z.string()
+  updatedAt: z.string().datetime()
 });
 
 export const LinkedReferenceSchema = z.object({

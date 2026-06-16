@@ -186,6 +186,7 @@ export function App() {
   const [projectName, setProjectName] = useState("Untitled Ether Project");
   const [projectPath, setProjectPath] = useState("");
   const [currentProject, setCurrentProject] = useState<{
+    id: string;
     name: string;
     path: string;
     updatedAt: string;
@@ -194,6 +195,7 @@ export function App() {
 
   const setProjectFromResult = (result: Awaited<ReturnType<typeof window.ether.project.open>>) => {
     setCurrentProject({
+      id: result.projectId,
       name: result.metadata.displayName,
       path: result.path,
       updatedAt: result.metadata.updatedAt
@@ -233,7 +235,7 @@ export function App() {
     }
 
     try {
-      const graph = await window.ether.project.saveGraph(currentProject.path, {
+      const graph = await window.ether.project.saveGraph(currentProject.id, {
         nodes: [],
         edges: [],
         viewport: { x: 0, y: 0, zoom: 1 },
@@ -257,7 +259,7 @@ export function App() {
     }
 
     try {
-      const health = await window.ether.project.health(currentProject.path);
+      const health = await window.ether.project.health(currentProject.id);
       setProjectMessage(
         health.issues.length === 0
           ? "Health check clear"

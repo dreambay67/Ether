@@ -14,9 +14,9 @@ contextBridge.exposeInMainWorld("ether", {
     create: (options: { parentDirectory: string; name: string }) =>
       ipcRenderer.invoke(projectChannels.create, options),
     open: (projectPath: string) => ipcRenderer.invoke(projectChannels.open, projectPath),
-    saveGraph: (projectPath: string, graph: unknown) =>
-      ipcRenderer.invoke(projectChannels.saveGraph, projectPath, graph),
-    loadGraph: (projectPath: string) => ipcRenderer.invoke(projectChannels.loadGraph, projectPath),
-    health: (projectPath: string) => ipcRenderer.invoke(projectChannels.health, projectPath)
+    saveGraph: (projectId: string, graph: unknown) =>
+      ipcRenderer.invoke(projectChannels.saveGraph, projectId, graph),
+    loadGraph: (projectId: string) => ipcRenderer.invoke(projectChannels.loadGraph, projectId),
+    health: (projectId: string) => ipcRenderer.invoke(projectChannels.health, projectId)
   }
 });

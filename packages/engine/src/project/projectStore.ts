@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { initializeDatabase } from "./database.js";
@@ -154,7 +154,18 @@ export async function readJson(filePath: string): Promise<unknown> {
 }
 
 export async function writeJson(filePath: string, value: unknown) {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+  const tempPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`
+  );
+
+  try {
+    await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`);
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    throw error;
+  }
 }
 
 async function exists(filePath: string) {
