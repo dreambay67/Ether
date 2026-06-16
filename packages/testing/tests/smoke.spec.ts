@@ -3,8 +3,13 @@ import { expect, test } from "@playwright/test";
 test("renders the branded Ether shell", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "ETHER" })).toBeVisible();
+  await expect(page.getByText("ETHER")).toBeVisible();
   await expect(page.getByText("by DreamBay")).toBeVisible();
+  await expect(page.getByText("Node Library")).toBeVisible();
+  await expect(page.getByText("Canvas", { exact: true })).toBeVisible();
+  await expect(page.getByText("Inspector")).toBeVisible();
+  await expect(page.getByText("Run Trace")).toBeVisible();
+  await expect(page.getByText("Providers offline")).toBeVisible();
   await expect(page.getByTestId("panel-node-library")).toBeVisible();
   await expect(page.getByTestId("panel-inspector")).toBeVisible();
   await expect(page.getByTestId("panel-run-trace")).toBeVisible();
