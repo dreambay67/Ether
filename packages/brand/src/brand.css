@@ -1,0 +1,13 @@
+:root {
+  --ether-electric-blue: #1470DB;
+  --ether-command-surface: #070B12;
+  --ether-panel-surface: rgba(10, 18, 30, 0.82);
+  --ether-neutral-depth: #101825;
+  --ether-cyan-signal: #37E6EA;
+  --ether-aqua-signal: #7EF4D7;
+  --ether-violet-accent: #8A5CFF;
+  --ether-text-primary: #F4F8FF;
+  --ether-text-muted: #99A8BA;
+  --ether-panel-radius: 8px;
+  --ether-control-radius: 6px;
+}

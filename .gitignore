@@ -6,6 +6,9 @@ coverage/
 .turbo/
 .vite/
 .worktrees/
+dist-electron/
+test-results/
+playwright-report/
 *.log
 *.tmp
 *.local

@@ -1,0 +1,13 @@
+{
+  "name": "@ether/testing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:smoke": "playwright test --config playwright.config.ts"
+  },
+  "dependencies": {
+    "@ether/brand": "workspace:*"
+  }
+}

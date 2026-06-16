@@ -1,0 +1,29 @@
+{
+  "name": "ether",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "pnpm run test:unit && pnpm run test:smoke",
+    "test:unit": "pnpm --filter @ether/testing test:unit",
+    "test:smoke": "pnpm --filter @ether/testing test:smoke",
+    "desktop:dev": "pnpm --filter @ether/desktop dev",
+    "desktop:build": "pnpm --filter @ether/desktop build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.53.1",
+    "@vitejs/plugin-react": "^4.5.2",
+    "@types/node": "^22.15.32",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "concurrently": "^9.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^36.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4",
+    "wait-on": "^8.0.3"
+  }
+}

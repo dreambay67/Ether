@@ -1,0 +1,327 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  color: var(--ether-text-primary);
+  background: var(--ether-command-surface);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.ether-shell {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 18px;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  padding: 22px;
+  background:
+    radial-gradient(circle at 68% 18%, rgba(55, 230, 234, 0.12), transparent 28%),
+    linear-gradient(150deg, rgba(20, 112, 219, 0.2), transparent 32%),
+    var(--ether-command-surface);
+}
+
+.brand-strip,
+.workspace,
+.run-trace {
+  position: relative;
+  z-index: 1;
+}
+
+.brand-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.brand-mark,
+.provider-status,
+.trace-brand {
+  display: flex;
+  align-items: center;
+}
+
+.brand-mark {
+  gap: 14px;
+}
+
+.ether-logo {
+  width: 50px;
+  height: 50px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 22px rgba(55, 230, 234, 0.22));
+}
+
+.brand-mark h1,
+.brand-mark p,
+.floating-panel h2,
+.canvas-label h2,
+.canvas-label p,
+.run-trace p {
+  margin: 0;
+}
+
+.brand-mark h1 {
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.brand-mark p,
+.panel-kicker,
+.canvas-label p,
+.trace-brand,
+.run-trace p {
+  color: var(--ether-text-muted);
+}
+
+.brand-mark p {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.provider-status {
+  gap: 10px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid rgba(153, 168, 186, 0.22);
+  border-radius: var(--ether-control-radius);
+  background: rgba(7, 11, 18, 0.72);
+  color: var(--ether-text-muted);
+  font-size: 13px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ether-violet-accent);
+  box-shadow: 0 0 18px rgba(138, 92, 255, 0.6);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr) minmax(220px, 280px);
+  gap: 18px;
+  min-height: 0;
+}
+
+.floating-panel {
+  border: 1px solid rgba(153, 168, 186, 0.22);
+  border-radius: var(--ether-panel-radius);
+  background: var(--ether-panel-surface);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+}
+
+.node-library,
+.inspector {
+  align-self: start;
+  min-height: 360px;
+  padding: 14px;
+}
+
+.panel-handle {
+  width: 36px;
+  height: 4px;
+  margin-bottom: 22px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--ether-electric-blue), var(--ether-aqua-signal));
+}
+
+.panel-kicker {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.floating-panel h2,
+.canvas-label h2 {
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.panel-placeholder {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid rgba(55, 230, 234, 0.18);
+  border-radius: var(--ether-control-radius);
+  color: var(--ether-text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.canvas-stage {
+  position: relative;
+  min-height: 520px;
+  overflow: hidden;
+  border: 1px solid rgba(126, 244, 215, 0.2);
+  border-radius: var(--ether-panel-radius);
+  background:
+    linear-gradient(rgba(153, 168, 186, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(153, 168, 186, 0.07) 1px, transparent 1px),
+    rgba(9, 15, 25, 0.64);
+  background-size: 36px 36px;
+}
+
+.air-field {
+  position: absolute;
+  inset: 0;
+}
+
+.air-field::before {
+  position: absolute;
+  inset: 10%;
+  content: "";
+  border-radius: 40% 60% 55% 45%;
+  background:
+    radial-gradient(circle at 28% 46%, rgba(126, 244, 215, 0.12), transparent 24%),
+    radial-gradient(circle at 58% 52%, rgba(20, 112, 219, 0.16), transparent 26%);
+  filter: blur(14px);
+}
+
+.pressure-ring {
+  position: absolute;
+  border: 1px solid rgba(55, 230, 234, 0.28);
+  border-radius: 999px;
+}
+
+.ring-one {
+  top: 22%;
+  left: 22%;
+  width: 280px;
+  height: 280px;
+}
+
+.ring-two {
+  right: 16%;
+  bottom: 18%;
+  width: 360px;
+  height: 360px;
+  border-color: rgba(138, 92, 255, 0.26);
+}
+
+.mask-flow {
+  position: absolute;
+  top: 18%;
+  right: 28%;
+  width: 34%;
+  height: 58%;
+  border-radius: 999px;
+  background: linear-gradient(170deg, transparent, rgba(20, 112, 219, 0.18), transparent);
+  transform: rotate(18deg);
+}
+
+.signal {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(244, 248, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(244, 248, 255, 0.08);
+  box-shadow: 0 0 24px rgba(55, 230, 234, 0.36);
+}
+
+.signal-selection {
+  top: 38%;
+  left: 34%;
+}
+
+.signal-generation {
+  top: 55%;
+  left: 62%;
+  width: 22px;
+  height: 22px;
+  border-color: rgba(126, 244, 215, 0.78);
+}
+
+.signal-refinement {
+  top: 30%;
+  right: 24%;
+  border-color: rgba(138, 92, 255, 0.74);
+}
+
+.canvas-label {
+  position: absolute;
+  left: 28px;
+  bottom: 28px;
+  padding: 16px;
+  border: 1px solid rgba(153, 168, 186, 0.2);
+  border-radius: var(--ether-panel-radius);
+  background: rgba(7, 11, 18, 0.68);
+}
+
+.run-trace {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 80px;
+  padding: 12px 14px;
+}
+
+.trace-brand {
+  gap: 8px;
+  padding-right: 14px;
+  border-right: 1px solid rgba(153, 168, 186, 0.18);
+  font-size: 12px;
+}
+
+.dreambay-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.run-trace p {
+  font-size: 13px;
+}
+
+@media (max-width: 980px) {
+  .ether-shell {
+    overflow: auto;
+  }
+
+  .brand-strip,
+  .workspace,
+  .run-trace {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-strip,
+  .run-trace {
+    align-items: flex-start;
+  }
+
+  .brand-strip {
+    flex-direction: column;
+  }
+
+  .node-library,
+  .inspector {
+    min-height: 180px;
+  }
+
+  .canvas-stage {
+    min-height: 420px;
+  }
+}
