@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { getSnapshot, insertSnapshot } from "./database.js";
@@ -17,7 +18,7 @@ export async function createSnapshot(
   const paths = projectPaths(projectPath);
   const graph = await loadGraph(projectPath);
   const createdAt = new Date().toISOString();
-  const id = `${slot}-${createdAt.replace(/[:.]/g, "-")}`;
+  const id = `${slot}-${createdAt.replace(/[:.]/g, "-")}-${randomUUID()}`;
   const snapshotPath = path.join(paths.snapshots, `${id}.json`);
   const snapshot: SnapshotRecord = {
     id,

@@ -25,6 +25,7 @@ type ProjectSession = ProjectOpenResult & {
 };
 
 const projectRegistry = new Map<string, string>();
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function assertString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -58,6 +59,11 @@ async function registerProject(project: ProjectOpenResult): Promise<ProjectSessi
 
 function getRegisteredProjectPath(projectIdValue: unknown): string {
   const projectId = assertString(projectIdValue, "projectId");
+
+  if (!uuidPattern.test(projectId)) {
+    throw new Error("projectId must be a valid UUID.");
+  }
+
   const projectPath = projectRegistry.get(projectId);
 
   if (!projectPath) {
@@ -75,6 +81,7 @@ function registerProjectIpc() {
 
     const candidate = options as { parentDirectory?: unknown; name?: unknown };
 
+    // TODO: Replace freeform parentDirectory with native directory grants/dialogs.
     const project = await createProject({
       parentDirectory: assertString(candidate.parentDirectory, "parentDirectory"),
       name: assertString(candidate.name, "name")

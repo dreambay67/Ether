@@ -1,7 +1,7 @@
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createProject,
   createSnapshot,
@@ -11,8 +11,10 @@ import {
   runHealthCheck,
   saveGraph,
   REQUIRED_DATABASE_TABLES,
-  type EtherGraph
+  type EtherGraph,
+  type SnapshotRecord
 } from "@ether/engine";
+import { insertSnapshot } from "../../engine/src/project/database";
 
 const tempRoots: string[] = [];
 
@@ -23,6 +25,7 @@ async function createTempRoot() {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -157,6 +160,77 @@ describe("project store", () => {
     await expect(restoreSnapshot(project.path, firstSnapshot.id)).rejects.toThrow(
       `Snapshot "${firstSnapshot.id}" was not found.`
     );
+  });
+
+  it("keeps the previous same-slot snapshot file when replacement insert fails", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Snapshot Failure" });
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "original-a", position: { x: 1, y: 2 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+    const originalA = await createSnapshot(project.path, "A", "Original A");
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "slot-b", position: { x: 3, y: 4 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+    const slotB = await createSnapshot(project.path, "B", "Slot B");
+
+    const replacementPath = path.join(project.path, "snapshots", "failed-replacement.json");
+    await writeFile(replacementPath, JSON.stringify({ replacement: true }));
+
+    expect(() =>
+      insertSnapshot(path.join(project.path, "ether.db"), {
+        id: slotB.id,
+        slot: "A",
+        label: "Conflicting replacement",
+        path: replacementPath,
+        createdAt: new Date().toISOString()
+      })
+    ).toThrow();
+
+    await expect(readFile(originalA.path, "utf8")).resolves.toContain("original-a");
+
+    const restored = await restoreSnapshot(project.path, originalA.id);
+    expect(restored.graph.nodes).toEqual([{ id: "original-a", position: { x: 1, y: 2 } }]);
+  });
+
+  it("keeps only the latest same-slot snapshot during rapid saves", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Rapid Snapshots" });
+    const snapshots: SnapshotRecord[] = [];
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-16T20:00:00.000Z"));
+
+    for (let index = 0; index < 5; index += 1) {
+      await saveGraph(project.path, {
+        nodes: [{ id: `version-${index}`, position: { x: index, y: index } }],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        selectedSnapshotId: null,
+        updatedAt: new Date().toISOString()
+      });
+      snapshots.push(await createSnapshot(project.path, "A", `Version ${index}`));
+    }
+
+    const latestSnapshot = snapshots.at(-1);
+    const snapshotFiles = await readdir(path.join(project.path, "snapshots"));
+
+    expect(new Set(snapshots.map((snapshot) => snapshot.id)).size).toBe(snapshots.length);
+    expect(latestSnapshot).toBeDefined();
+    expect(snapshotFiles).toEqual([path.basename(latestSnapshot?.path ?? "")]);
+
+    const restored = await restoreSnapshot(project.path, latestSnapshot?.id ?? "");
+    expect(restored.graph.nodes).toEqual([{ id: "version-4", position: { x: 4, y: 4 } }]);
   });
 
   it("reports missing linked references and persists health issues", async () => {

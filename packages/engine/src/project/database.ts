@@ -62,6 +62,20 @@ export function initializeDatabase(databasePath: string): ProjectDatabaseStatus 
         path TEXT,
         detected_at TEXT NOT NULL
       );
+
+      DELETE FROM snapshots
+      WHERE rowid NOT IN (
+        SELECT rowid
+        FROM (
+          SELECT rowid, slot, created_at, ROW_NUMBER() OVER (
+            PARTITION BY slot ORDER BY created_at DESC, rowid DESC
+          ) as slot_rank
+          FROM snapshots
+        )
+        WHERE slot_rank = 1
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS snapshots_slot_unique_idx ON snapshots (slot);
     `);
 
     return getDatabaseStatus(databasePath, db);
@@ -109,24 +123,28 @@ export function insertSnapshot(
   const db = new Database(databasePath);
 
   try {
+    const oldRows = db
+      .prepare("SELECT file_path as path FROM snapshots WHERE slot = ?")
+      .all(snapshot.slot) as Array<{ path: string }>;
     const replaceSlot = db.transaction(() => {
-      const existingRows = db
-        .prepare("SELECT file_path as path FROM snapshots WHERE slot = ?")
-        .all(snapshot.slot) as Array<{ path: string }>;
-
-      db.prepare("DELETE FROM snapshots WHERE slot = ?").run(snapshot.slot);
-
-      for (const row of existingRows) {
-        rmSync(row.path, { force: true });
-      }
-
       db.prepare(
         `INSERT INTO snapshots (id, slot, label, file_path, created_at)
-         VALUES (@id, @slot, @label, @path, @createdAt)`
+         VALUES (@id, @slot, @label, @path, @createdAt)
+         ON CONFLICT(slot) DO UPDATE SET
+           id = excluded.id,
+           label = excluded.label,
+           file_path = excluded.file_path,
+           created_at = excluded.created_at`
       ).run(snapshot);
     });
 
     replaceSlot();
+
+    for (const row of oldRows) {
+      if (row.path !== snapshot.path) {
+        rmSync(row.path, { force: true });
+      }
+    }
   } finally {
     db.close();
   }
