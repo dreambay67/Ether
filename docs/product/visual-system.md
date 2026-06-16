@@ -19,9 +19,9 @@ The repo-local brand assets are copied from:
 - Air fields, sparse clear bubbles, pressure rings, and mask flow represent operational state.
 - Bubbles must communicate selection, generation, refinement, confidence, or pass intensity.
 - The canvas should feel airy while keeping precise command-surface structure.
-- Panels should be floating, movable, collapsible, and operational in later phases.
+- Panels are floating, movable, collapsible, and operational in the Phase 0 shell.
 - Avoid one-note purple or blue gradients. Use neutral depth, cyan/aqua signal, violet accent, and dark command surfaces for contrast.
 
 ## Phase 0 Shell
 
-The initial shell uses a dark command surface, a restrained Electric Blue highlight, sparse operational signal bubbles, and pressure rings in the canvas placeholder. Provider status remains offline and no provider calls are implemented in Phase 0.
+The initial shell uses a dark command surface, a restrained Electric Blue highlight, sparse operational signal bubbles, and pressure rings in the canvas placeholder. Node Library, Inspector, and Run Trace panels can be collapsed, restored, and dragged within the renderer surface. Provider status remains offline and no provider calls are implemented in Phase 0.
