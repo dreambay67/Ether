@@ -9,6 +9,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./graph/artifacts": {
+      "types": "./dist/graph/artifacts.d.ts",
+      "default": "./dist/graph/artifacts.js"
+    },
+    "./graph/canvasGeometry": {
+      "types": "./dist/graph/canvasGeometry.d.ts",
+      "default": "./dist/graph/canvasGeometry.js"
+    },
+    "./graph/connectionRules": {
+      "types": "./dist/graph/connectionRules.d.ts",
+      "default": "./dist/graph/connectionRules.js"
+    },
+    "./graph/contracts": {
+      "types": "./dist/graph/contracts.d.ts",
+      "default": "./dist/graph/contracts.js"
+    },
+    "./graph/nodeCatalog": {
+      "types": "./dist/graph/nodeCatalog.d.ts",
+      "default": "./dist/graph/nodeCatalog.js"
+    },
+    "./graph/promptAssembly": {
+      "types": "./dist/graph/promptAssembly.d.ts",
+      "default": "./dist/graph/promptAssembly.js"
     }
   },
   "scripts": {

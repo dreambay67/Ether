@@ -1,23 +1,33 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
-import { Trash2 } from "lucide-react";
-import type { CanvasNodeData } from "@ether/engine";
+import { Play, Trash2 } from "lucide-react";
+import type { CanvasNodeData } from "@ether/engine/graph/nodeCatalog";
+import { getNodeContract } from "@ether/engine/graph/contracts";
+import {
+  assembleGenerationInputs,
+  assemblePromptForNode
+} from "@ether/engine/graph/promptAssembly";
+import type { EtherGraph } from "@ether/engine";
 
 type InspectorPanelProps = {
   selectedNode: Node<CanvasNodeData> | null;
   selectedEdge: Edge | null;
+  graph: EtherGraph;
   onPreviewNode(id: string, updates: Partial<CanvasNodeData>): void;
   onPreviewEdge(id: string, label: string): void;
   onCommitTextEdit(): void;
+  onRunNode(id: string): void;
   onDeleteSelection(): void;
 };
 
 export function InspectorPanel({
   selectedNode,
   selectedEdge,
+  graph,
   onPreviewNode,
   onPreviewEdge,
   onCommitTextEdit,
+  onRunNode,
   onDeleteSelection
 }: InspectorPanelProps) {
   const [nodeDraft, setNodeDraft] = useState<Partial<CanvasNodeData>>({});
@@ -54,6 +64,15 @@ export function InspectorPanel({
   };
 
   if (selectedNode) {
+    const contract = getNodeContract(selectedNode.data.definitionId);
+    const promptAssembly =
+      selectedNode.data.kind === "Prompt" ? assemblePromptForNode(graph, selectedNode.id) : null;
+    const generationAssembly =
+      selectedNode.data.kind === "Generation" ? assembleGenerationInputs(graph, selectedNode.id) : null;
+    const previewPrompt = promptAssembly?.prompt ?? generationAssembly?.prompt ?? "";
+    const previewNegativePrompt =
+      promptAssembly?.negativePrompt ?? generationAssembly?.negativePrompt ?? "";
+
     return (
       <div className="inspector-form">
         <div className="inspector-meta">
@@ -112,6 +131,60 @@ export function InspectorPanel({
             onBlur={commitNodeDraft}
           />
         </label>
+        <section className="inspector-contract" data-testid="inspector-contract">
+          <div>
+            <span>Contract</span>
+            <strong>{contract.runLabel}</strong>
+          </div>
+          <p>{contract.description}</p>
+          <dl>
+            <div>
+              <dt>Inputs</dt>
+              <dd>{contract.acceptedInputs.length > 0 ? contract.acceptedInputs.join(", ") : "none"}</dd>
+            </div>
+            <div>
+              <dt>Outputs</dt>
+              <dd>{contract.producedOutputs.join(", ")}</dd>
+            </div>
+          </dl>
+        </section>
+        {promptAssembly || generationAssembly ? (
+          <section className="inspector-preview" data-testid="inspector-assembly-preview">
+            <div>
+              <span>{generationAssembly ? "Prepared Generation Inputs" : "Assembled Prompt"}</span>
+              {promptAssembly ? (
+                <button
+                  type="button"
+                  className="run-node-button"
+                  onClick={() => onRunNode(selectedNode.id)}
+                  data-testid="inspector-run-node"
+                >
+                  <Play size={14} aria-hidden="true" />
+                  Assemble
+                </button>
+              ) : null}
+            </div>
+            <pre>{previewPrompt || "No prompt text assembled yet."}</pre>
+            {previewNegativePrompt ? (
+              <>
+                <span>Negative</span>
+                <pre>{previewNegativePrompt}</pre>
+              </>
+            ) : null}
+            {generationAssembly && generationAssembly.references.length > 0 ? (
+              <ul>
+                {generationAssembly.references.map((reference) => (
+                  <li key={`${reference.nodeId}-${reference.role}`}>
+                    {reference.role}: {reference.title}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {selectedNode.data.assembledPrompt ? (
+              <p>Frozen {selectedNode.data.lastRunAt ?? "recently"}</p>
+            ) : null}
+          </section>
+        ) : null}
         <button type="button" className="danger-button" onClick={onDeleteSelection}>
           <Trash2 size={15} aria-hidden="true" />
           Delete selection

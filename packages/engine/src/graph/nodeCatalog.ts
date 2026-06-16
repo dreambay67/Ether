@@ -28,6 +28,11 @@ export type CanvasNodeData = {
   notes: string;
   instruction: string;
   status: "idle" | "queued" | "running" | "complete" | "error";
+  artifactKind?: "assembledPrompt";
+  assembledPrompt?: string;
+  assembledNegativePrompt?: string;
+  assembledPromptArtifact?: unknown;
+  lastRunAt?: string;
 };
 
 export type EtherNodeCategory = {

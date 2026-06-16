@@ -33,6 +33,7 @@ import {
 import { canConnectNodeKinds } from "@ether/engine/graph/connectionRules";
 import { findEdgeInsertionTarget } from "@ether/engine/graph/canvasGeometry";
 import { createGraphNodeData, getNodeDefinition } from "@ether/engine/graph/nodeCatalog";
+import { freezePromptNode } from "@ether/engine/graph/promptAssembly";
 import type { EtherGraph } from "@ether/engine";
 import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
 import { InspectorPanel } from "./InspectorPanel";
@@ -118,11 +119,22 @@ function InnerEtherCanvas(
   );
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [showMiniMap, setShowMiniMap] = useState(true);
+  const [localRunStatus, setLocalRunStatus] = useState<string | null>(null);
 
   const nodes = history.present.nodes as Node<CanvasNodeData>[];
   const edges = history.present.edges;
   const selectedNode = nodes.find((node) => node.selected) ?? null;
   const selectedEdge = edges.find((edge) => edge.selected) ?? null;
+  const assemblyGraph = useMemo<EtherGraph>(
+    () => ({
+      nodes,
+      edges,
+      viewport,
+      selectedSnapshotId: graph?.selectedSnapshotId ?? null,
+      updatedAt: graph?.updatedAt ?? new Date().toISOString()
+    }),
+    [edges, graph?.selectedSnapshotId, graph?.updatedAt, nodes, viewport]
+  );
 
   useEffect(() => {
     if (!graph) {
@@ -407,6 +419,30 @@ function InnerEtherCanvas(
     deleteElements();
   }, [deleteElements]);
 
+  const runNode = useCallback(
+    (id: string) => {
+      const target = nodes.find((node) => node.id === id);
+
+      if (!target || target.data.kind !== "Prompt") {
+        onStatus("Only prompt nodes can be assembled locally in this phase.");
+        return;
+      }
+
+      const nextGraph = freezePromptNode(assemblyGraph, id);
+      const nextNodes = normalizeNodes(nextGraph.nodes).map((node) => ({
+        ...node,
+        selected: node.id === id
+      }));
+      const nextEdges = normalizeEdges(nextGraph.edges);
+      const message = `Assembled ${target.data.title}`;
+
+      commitSnapshot(nextNodes, nextEdges, message);
+      setLocalRunStatus(message);
+      onStatus(message);
+    },
+    [assemblyGraph, commitSnapshot, nodes, onStatus]
+  );
+
   const deleteNodeById = useCallback(
     (id: string) => {
       deleteElements({ nodeIds: [id] });
@@ -618,9 +654,11 @@ function InnerEtherCanvas(
         <InspectorPanel
           selectedNode={selectedNode}
           selectedEdge={selectedEdge}
+          graph={assemblyGraph}
           onPreviewNode={previewNode}
           onPreviewEdge={previewEdge}
           onCommitTextEdit={commitTextEdit}
+          onRunNode={runNode}
           onDeleteSelection={deleteSelection}
         />
       </aside>
@@ -688,7 +726,12 @@ function InnerEtherCanvas(
         </div>
       ) : null}
       <div className="canvas-status" aria-live="polite" data-testid="canvas-status">
-        {selectedNode ? `Selected ${selectedNode.data.title}` : selectedEdge ? `Selected ${selectedEdge.label}` : "Canvas ready"}
+        {localRunStatus ??
+          (selectedNode
+            ? `Selected ${selectedNode.data.title}`
+            : selectedEdge
+              ? `Selected ${selectedEdge.label}`
+              : "Canvas ready")}
       </div>
     </div>
   );

@@ -639,6 +639,78 @@ button {
   text-transform: uppercase;
 }
 
+.inspector-contract,
+.inspector-preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid rgba(55, 230, 234, 0.18);
+  border-radius: var(--ether-control-radius);
+  padding: 10px;
+  background: rgba(9, 15, 25, 0.62);
+}
+
+.inspector-contract div,
+.inspector-preview div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inspector-contract span,
+.inspector-preview span {
+  color: var(--ether-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.inspector-contract strong {
+  color: var(--ether-text-primary);
+  font-size: 12px;
+}
+
+.inspector-contract p,
+.inspector-preview p,
+.inspector-preview li,
+.inspector-contract dd,
+.inspector-contract dt {
+  margin: 0;
+  color: var(--ether-text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-transform: none;
+}
+
+.inspector-contract dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.inspector-contract dt {
+  color: var(--ether-aqua-signal);
+}
+
+.inspector-preview pre {
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ether-text-primary);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  text-transform: none;
+}
+
+.inspector-preview ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
+
 .inspector-form input,
 .inspector-form textarea {
   width: 100%;
@@ -660,6 +732,21 @@ button {
   justify-self: start;
   padding: 0 10px;
   border-color: rgba(255, 116, 116, 0.34);
+}
+
+.run-node-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  border: 1px solid rgba(126, 244, 215, 0.38);
+  border-radius: var(--ether-control-radius);
+  padding: 0 9px;
+  background: rgba(20, 112, 219, 0.24);
+  color: var(--ether-text-primary);
+  cursor: pointer;
+  font-size: 12px;
 }
 
 .canvas-status {

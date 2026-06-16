@@ -17,6 +17,14 @@ export default defineConfig({
       "@ether/engine/graph/canvasGeometry": path.resolve(
         __dirname,
         "../../packages/engine/src/graph/canvasGeometry.ts"
+      ),
+      "@ether/engine/graph/contracts": path.resolve(
+        __dirname,
+        "../../packages/engine/src/graph/contracts.ts"
+      ),
+      "@ether/engine/graph/promptAssembly": path.resolve(
+        __dirname,
+        "../../packages/engine/src/graph/promptAssembly.ts"
       )
     }
   },

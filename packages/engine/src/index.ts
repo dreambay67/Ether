@@ -16,6 +16,14 @@ export {
 } from "./graph/nodeCatalog.js";
 export { canConnectNodeKinds } from "./graph/connectionRules.js";
 export { distanceFromPointToSegment, findEdgeInsertionTarget } from "./graph/canvasGeometry.js";
+export { getNodeContract, NODE_CONTRACTS } from "./graph/contracts.js";
+export {
+  assembleGenerationInputs,
+  assemblePromptForNode,
+  freezePromptNode,
+  getUpstreamNodes,
+  resolveReferenceRole
+} from "./graph/promptAssembly.js";
 export type {
   CanvasNodeData,
   EtherNodeCategory,
@@ -24,6 +32,14 @@ export type {
 } from "./graph/nodeCatalog.js";
 export type { ConnectionRuleResult } from "./graph/connectionRules.js";
 export type { GeometryEdge, GeometryNode, GraphPoint } from "./graph/canvasGeometry.js";
+export type { ContractArtifactKind, NodeContract } from "./graph/contracts.js";
+export type {
+  EdgeRoleArtifact,
+  GenerationInputAssembly,
+  PromptAssembly,
+  PromptSectionArtifact,
+  ReferenceArtifact
+} from "./graph/artifacts.js";
 export type {
   CreateProjectOptions,
   EtherGraph,

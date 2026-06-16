@@ -33,6 +33,47 @@ test("inspector edits selected node title and label", async ({ page }) => {
   await expect(page.getByTestId("ether-node").getByText("Launch prompt")).toBeVisible();
 });
 
+test("selected prompt node shows contract summary and assembled preview", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-prompt-general").click();
+
+  await expect(page.getByTestId("inspector-contract")).toContainText("Assemble Prompt");
+  await expect(page.getByTestId("inspector-contract")).toContainText("Outputs");
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText(
+    "General prompt placeholder"
+  );
+});
+
+test("assembling a prompt node freezes a local prompt artifact", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-prompt-general").click();
+  await page.getByLabel("Instruction").fill("hero bottle on reflective glass");
+  await page.getByTestId("inspector-run-node").click();
+
+  await expect(page.getByTestId("canvas-status")).toContainText("Assembled General Prompt");
+  await expect(page.getByTestId("panel-run-trace")).toContainText("Assembled General Prompt");
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText("Frozen");
+});
+
+test("generation node previews prompt inputs from a connected prompt", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-prompt-general").click();
+  await page.getByLabel("Instruction").fill("cinematic skincare campaign");
+  await page.getByTestId("library-node-generation-image").click();
+  await page.getByRole("button", { name: "Connect first valid pair" }).click();
+  await page.getByTestId("ether-node").getByRole("heading", { name: "Image" }).click();
+
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText(
+    "Prepared Generation Inputs"
+  );
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText(
+    "cinematic skincare campaign"
+  );
+});
+
 test("creates an edge and edits the visible edge label", async ({ page }) => {
   await page.goto("/");
 
