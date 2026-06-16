@@ -1,4 +1,11 @@
-import { type PointerEvent as ReactPointerEvent, type ReactNode, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import { brandTokens } from "@ether/brand";
 import etherLogo from "../../../../packages/brand/src/assets/Ether_logo.png";
 import dreamBayLogo from "../../../../packages/brand/src/assets/DB_logo.png";
@@ -13,7 +20,7 @@ type FloatingPanelProps = {
   title: string;
   kicker: string;
   className: string;
-  initialPosition: PanelPosition;
+  initialPlacement: PanelPosition;
   children: ReactNode;
 };
 
@@ -28,18 +35,86 @@ function FloatingPanel({
   title,
   kicker,
   className,
-  initialPosition,
+  initialPlacement,
   children
 }: FloatingPanelProps) {
-  const [position, setPosition] = useState(initialPosition);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isCollapsed, setIsCollapsed] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
+  const cleanupDragRef = useRef<(() => void) | null>(null);
+
+  const clampPosition = useCallback((nextPosition: PanelPosition) => {
+    const panel = panelRef.current;
+    const surface = panel?.parentElement;
+
+    if (!panel || !surface) {
+      return nextPosition;
+    }
+
+    const maxX = Math.max(0, surface.clientWidth - panel.offsetWidth);
+    const maxY = Math.max(0, surface.clientHeight - panel.offsetHeight);
+
+    return {
+      x: Math.min(Math.max(0, nextPosition.x), maxX),
+      y: Math.min(Math.max(0, nextPosition.y), maxY)
+    };
+  }, []);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    const surface = panel?.parentElement;
+
+    if (!panel || !surface) {
+      return;
+    }
+
+    const placePanel = () => {
+      setPosition(
+        clampPosition({
+          x: surface.clientWidth * initialPlacement.x - panel.offsetWidth * initialPlacement.x,
+          y: surface.clientHeight * initialPlacement.y - panel.offsetHeight * initialPlacement.y
+        })
+      );
+    };
+
+    placePanel();
+  }, [clampPosition, initialPlacement.x, initialPlacement.y]);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    const surface = panel?.parentElement;
+
+    if (!panel || !surface) {
+      return;
+    }
+
+    const reclamp = () => {
+      setPosition((current) => clampPosition(current));
+    };
+
+    const resizeObserver = new ResizeObserver(reclamp);
+    resizeObserver.observe(surface);
+    resizeObserver.observe(panel);
+    window.addEventListener("resize", reclamp);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", reclamp);
+    };
+  }, [clampPosition]);
+
+  useEffect(() => {
+    return () => {
+      cleanupDragRef.current?.();
+    };
+  }, []);
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !panelRef.current?.parentElement) {
       return;
     }
 
+    cleanupDragRef.current?.();
     event.currentTarget.setPointerCapture(event.pointerId);
 
     const panel = panelRef.current;
@@ -52,22 +127,21 @@ function FloatingPanel({
     const movePanel = (moveEvent: PointerEvent) => {
       const nextX = moveEvent.clientX - surfaceBounds.left - offsetX;
       const nextY = moveEvent.clientY - surfaceBounds.top - offsetY;
-      const maxX = Math.max(0, surfaceBounds.width - panel.offsetWidth);
-      const maxY = Math.max(0, surfaceBounds.height - panel.offsetHeight);
 
-      setPosition({
-        x: Math.min(Math.max(0, nextX), maxX),
-        y: Math.min(Math.max(0, nextY), maxY)
-      });
+      setPosition(clampPosition({ x: nextX, y: nextY }));
     };
 
     const stopDrag = () => {
       window.removeEventListener("pointermove", movePanel);
       window.removeEventListener("pointerup", stopDrag);
+      window.removeEventListener("pointercancel", stopDrag);
+      cleanupDragRef.current = null;
     };
 
+    cleanupDragRef.current = stopDrag;
     window.addEventListener("pointermove", movePanel);
     window.addEventListener("pointerup", stopDrag);
+    window.addEventListener("pointercancel", stopDrag);
   };
 
   return (
@@ -144,7 +218,7 @@ export function App() {
           title="Node Library"
           kicker="Input"
           className="node-library"
-          initialPosition={{ x: 0, y: 0 }}
+          initialPlacement={{ x: 0, y: 0 }}
         >
           <div className="panel-placeholder">Prompt, reference, generate, evaluate</div>
         </FloatingPanel>
@@ -154,7 +228,7 @@ export function App() {
           title="Inspector"
           kicker="State"
           className="inspector"
-          initialPosition={{ x: 878, y: 0 }}
+          initialPlacement={{ x: 1, y: 0 }}
         >
           <div className="panel-placeholder">Selection, confidence, lineage</div>
         </FloatingPanel>
@@ -164,7 +238,7 @@ export function App() {
           title="Run Trace"
           kicker="Trace"
           className="run-trace"
-          initialPosition={{ x: 284, y: 574 }}
+          initialPlacement={{ x: 0.5, y: 1 }}
         >
           <div className="trace-content">
             <div className="trace-brand">

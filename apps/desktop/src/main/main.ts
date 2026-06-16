@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
+import { isLocalDevelopmentRendererUrl } from "./rendererUrl";
 
 const createMainWindow = () => {
   const mainWindow = new BrowserWindow({
@@ -17,8 +18,9 @@ const createMainWindow = () => {
   });
 
   const rendererUrl = process.env.ETHER_RENDERER_URL;
+  const canLoadDevelopmentUrl = isLocalDevelopmentRendererUrl(rendererUrl, !app.isPackaged);
 
-  if (rendererUrl) {
+  if (rendererUrl && canLoadDevelopmentUrl) {
     void mainWindow.loadURL(rendererUrl);
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"));

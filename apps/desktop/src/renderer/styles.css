@@ -136,6 +136,8 @@ button {
 
 .shell-panel {
   position: absolute;
+  top: 0;
+  left: 0;
   z-index: 4;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
