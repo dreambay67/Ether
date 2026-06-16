@@ -142,7 +142,12 @@ export function insertSnapshot(
 
     for (const row of oldRows) {
       if (row.path !== snapshot.path) {
-        rmSync(row.path, { force: true });
+        try {
+          // Post-commit cleanup is best-effort; orphaned files are handled by future health/cleanup logic.
+          rmSync(row.path, { force: true });
+        } catch {
+          // Tolerate stale snapshot files when the database already points at the new snapshot.
+        }
       }
     }
   } finally {

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -201,6 +201,37 @@ describe("project store", () => {
 
     const restored = await restoreSnapshot(project.path, originalA.id);
     expect(restored.graph.nodes).toEqual([{ id: "original-a", position: { x: 1, y: 2 } }]);
+  });
+
+  it("creates a replacement snapshot when stale same-slot file cleanup fails", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Snapshot Cleanup Failure" });
+    const staleSnapshotPath = path.join(project.path, "snapshots", "stale-directory.json");
+
+    await mkdir(staleSnapshotPath);
+    insertSnapshot(path.join(project.path, "ether.db"), {
+      id: "stale-snapshot",
+      slot: "A",
+      label: "Stale A",
+      path: staleSnapshotPath,
+      createdAt: new Date().toISOString()
+    });
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "replacement", position: { x: 5, y: 6 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+
+    const snapshot = await createSnapshot(project.path, "A", "Replacement A");
+    const restored = await restoreSnapshot(project.path, snapshot.id);
+
+    expect(restored.graph.nodes).toEqual([{ id: "replacement", position: { x: 5, y: 6 } }]);
+    await expect(restoreSnapshot(project.path, "stale-snapshot")).rejects.toThrow(
+      'Snapshot "stale-snapshot" was not found.'
+    );
   });
 
   it("keeps only the latest same-slot snapshot during rapid saves", async () => {
