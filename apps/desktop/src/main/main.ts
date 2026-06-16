@@ -12,6 +12,7 @@ const createMainWindow = () => {
     backgroundColor: "#070B12",
     webPreferences: {
       preload: path.join(__dirname, "../preload/preload.js"),
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }
