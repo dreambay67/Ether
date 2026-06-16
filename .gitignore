@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+out/
+coverage/
+.turbo/
+.vite/
+.worktrees/
+*.log
+*.tmp
+*.local
+*.ether/
