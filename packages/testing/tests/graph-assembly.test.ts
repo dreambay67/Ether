@@ -158,6 +158,100 @@ describe("prompt assembly", () => {
     ]);
   });
 
+  it("treats an entire prompt branch as negativePrompt when the generation edge is negative", () => {
+    const canvas = graph(
+      [
+        node("subject", {
+          definitionId: "prompt-subject",
+          kind: "Prompt",
+          subtype: "Subject",
+          instruction: "clean product silhouette"
+        }),
+        node("avoid", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          title: "Avoid",
+          instruction: "blurred reflections"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [
+        { id: "edge-subject-avoid", source: "subject", target: "avoid", label: "prompt" },
+        { id: "edge-avoid-generation", source: "avoid", target: "generation", label: "negative" }
+      ]
+    );
+
+    const assembly = assembleGenerationInputs(canvas, "generation");
+
+    expect(assembly.prompt).toBe("");
+    expect(assembly.negativePrompt).toBe("clean product silhouette\n\nblurred reflections");
+    expect(assembly.sections.map((section) => [section.nodeId, section.kind])).toEqual([
+      ["subject", "negativePrompt"],
+      ["avoid", "negativePrompt"]
+    ]);
+  });
+
+  it("assembles Assistant, Note, and Reference textual context into downstream prompts", () => {
+    const canvas = graph(
+      [
+        node("assistant", {
+          definitionId: "assistant-brainstormer",
+          kind: "Assistant",
+          subtype: "Brainstormer",
+          title: "Assistant Idea",
+          instruction: "make the campaign feel precise"
+        }),
+        node("note", {
+          definitionId: "note-cloud",
+          kind: "Note",
+          subtype: "Cloud",
+          title: "Client Note",
+          notes: "avoid a seasonal theme"
+        }),
+        node("reference", {
+          definitionId: "reference-moodboard",
+          kind: "Reference",
+          subtype: "Moodboard",
+          title: "Moodboard",
+          instruction: "quiet editorial restraint"
+        }),
+        node("prompt", {
+          definitionId: "prompt-style",
+          kind: "Prompt",
+          subtype: "Style",
+          instruction: "polished studio minimalism"
+        })
+      ],
+      [
+        { id: "edge-assistant-prompt", source: "assistant", target: "prompt", label: "context" },
+        { id: "edge-note-prompt", source: "note", target: "prompt", label: "context" },
+        { id: "edge-reference-prompt", source: "reference", target: "prompt", label: "style" }
+      ]
+    );
+
+    const assembly = assemblePromptForNode(canvas, "prompt");
+
+    expect(assembly.prompt).toBe(
+      [
+        "make the campaign feel precise",
+        "avoid a seasonal theme",
+        "quiet editorial restraint",
+        "polished studio minimalism"
+      ].join("\n\n")
+    );
+    expect(assembly.sections.map((section) => [section.nodeId, section.section])).toEqual([
+      ["assistant", "Assistant Idea"],
+      ["note", "Client Note"],
+      ["reference", "Moodboard"],
+      ["prompt", "Style Prompt"]
+    ]);
+  });
+
   it("uses an edited prompt label as the assembled section name", () => {
     const canvas = graph(
       [

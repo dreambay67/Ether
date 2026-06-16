@@ -97,12 +97,25 @@ function sectionTitle(node: GraphNode) {
   return cleanText(node.data?.title) || cleanText(node.data?.label) || sectionName(node);
 }
 
-function isNegativePrompt(node: GraphNode, incomingEdge?: GraphEdge) {
-  return node.data?.kind === "Prompt" && (node.data.subtype === "Negative" || normalizeRoleKey(edgeLabel(incomingEdge ?? ({} as GraphEdge))) === "negative");
+function isNegativeEdge(edge?: GraphEdge) {
+  return edge ? normalizeRoleKey(edgeLabel(edge)) === "negative" : false;
 }
 
-function promptSectionForNode(node: GraphNode, incomingEdge?: GraphEdge): PromptSectionArtifact | null {
-  if (node.data?.kind !== "Prompt") {
+function canContributeTextSection(node: GraphNode) {
+  return (
+    node.data?.kind === "Prompt" ||
+    node.data?.kind === "Assistant" ||
+    node.data?.kind === "Note" ||
+    node.data?.kind === "Reference"
+  );
+}
+
+function textSectionForNode(
+  node: GraphNode,
+  incomingEdge?: GraphEdge,
+  branchKind?: PromptSectionArtifact["kind"]
+): PromptSectionArtifact | null {
+  if (!canContributeTextSection(node)) {
     return null;
   }
 
@@ -114,7 +127,11 @@ function promptSectionForNode(node: GraphNode, incomingEdge?: GraphEdge): Prompt
 
   return {
     nodeId: node.id,
-    kind: isNegativePrompt(node, incomingEdge) ? "negativePrompt" : "prompt",
+    kind:
+      branchKind ??
+      (node.data?.kind === "Prompt" && (node.data.subtype === "Negative" || isNegativeEdge(incomingEdge))
+        ? "negativePrompt"
+        : "prompt"),
     section: sectionName(node),
     title: sectionTitle(node),
     text
@@ -131,7 +148,8 @@ function collectPromptSections(
   graph: EtherGraph,
   nodeId: string,
   seen = new Set<string>(),
-  selfIncomingEdge?: GraphEdge
+  selfIncomingEdge?: GraphEdge,
+  branchKind?: PromptSectionArtifact["kind"]
 ): PromptSectionArtifact[] {
   if (seen.has(nodeId)) {
     return [];
@@ -144,18 +162,20 @@ function collectPromptSections(
 
   for (const edge of incomingEdges(graph, nodeId)) {
     const source = findNode(graph, edge.source);
+    const nextBranchKind = branchKind ?? (isNegativeEdge(edge) ? "negativePrompt" : undefined);
 
-    for (const section of collectPromptSections(graph, source.id, new Set(seen))) {
+    for (const section of collectPromptSections(graph, source.id, new Set(seen), edge, nextBranchKind)) {
       appendUniqueSection(sections, section);
     }
 
-    const sourceSection = promptSectionForNode(source, edge);
+    const sourceSection = textSectionForNode(source, edge, nextBranchKind);
     if (sourceSection) {
       appendUniqueSection(sections, sourceSection);
     }
   }
 
-  const selfSection = promptSectionForNode(node, selfIncomingEdge);
+  const selfBranchKind = branchKind ?? (isNegativeEdge(selfIncomingEdge) ? "negativePrompt" : undefined);
+  const selfSection = textSectionForNode(node, selfIncomingEdge, selfBranchKind);
   if (selfSection) {
     appendUniqueSection(sections, selfSection);
   }
@@ -234,7 +254,8 @@ export function getUpstreamNodes(graph: EtherGraph, nodeId: string) {
 }
 
 export function assemblePromptForNode(graph: EtherGraph, nodeId: string, incomingEdge?: GraphEdge): PromptAssembly {
-  const sections = collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge);
+  const branchKind = isNegativeEdge(incomingEdge) ? "negativePrompt" : undefined;
+  const sections = collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge, branchKind);
 
   return {
     nodeId,

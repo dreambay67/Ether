@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   NODE_CATEGORIES,
+  NODE_CONTRACTS,
   NODE_DEFINITIONS,
   canConnectNodeKinds,
   createGraphNodeData,
+  getOptionalNodeContract,
   findEdgeInsertionTarget
 } from "@ether/engine";
 
@@ -55,6 +57,22 @@ describe("graph node catalog", () => {
     });
     expect(data.instruction).toContain("General");
   });
+
+  it("marks only prompt contracts runnable for current local Task 3 execution", () => {
+    const runnableContracts = NODE_CONTRACTS.filter((contract) => contract.runnable);
+
+    expect(runnableContracts.map((contract) => contract.definitionId).sort()).toEqual(
+      NODE_DEFINITIONS.filter((definition) => definition.category === "Prompt")
+        .map((definition) => definition.id)
+        .sort()
+    );
+  });
+
+  it("offers a safe optional contract lookup for malformed persisted nodes", () => {
+    expect(getOptionalNodeContract("missing-definition")).toBeNull();
+    expect(getOptionalNodeContract(undefined)).toBeNull();
+    expect(getOptionalNodeContract("prompt-general")).toMatchObject({ definitionId: "prompt-general" });
+  });
 });
 
 describe("connection rules", () => {
@@ -67,6 +85,7 @@ describe("connection rules", () => {
     ["Evaluate", "Filter"],
     ["Filter", "Collection"],
     ["Prompt", "Prompt"],
+    ["Reference", "Prompt"],
     ["Store", "Store"],
     ["Assistant", "Prompt"],
     ["Note", "Prompt"]

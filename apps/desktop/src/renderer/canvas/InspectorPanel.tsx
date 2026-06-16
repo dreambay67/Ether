@@ -2,7 +2,7 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import { Play, Trash2 } from "lucide-react";
 import type { CanvasNodeData } from "@ether/engine/graph/nodeCatalog";
-import { getNodeContract } from "@ether/engine/graph/contracts";
+import { getOptionalNodeContract } from "@ether/engine/graph/contracts";
 import {
   assembleGenerationInputs,
   assemblePromptForNode
@@ -64,11 +64,12 @@ export function InspectorPanel({
   };
 
   if (selectedNode) {
-    const contract = getNodeContract(selectedNode.data.definitionId);
+    const nodeData = selectedNode.data as Partial<CanvasNodeData>;
+    const contract = getOptionalNodeContract(nodeData.definitionId);
     const promptAssembly =
-      selectedNode.data.kind === "Prompt" ? assemblePromptForNode(graph, selectedNode.id) : null;
+      nodeData.kind === "Prompt" ? assemblePromptForNode(graph, selectedNode.id) : null;
     const generationAssembly =
-      selectedNode.data.kind === "Generation" ? assembleGenerationInputs(graph, selectedNode.id) : null;
+      nodeData.kind === "Generation" ? assembleGenerationInputs(graph, selectedNode.id) : null;
     const previewPrompt = promptAssembly?.prompt ?? generationAssembly?.prompt ?? "";
     const previewNegativePrompt =
       promptAssembly?.negativePrompt ?? generationAssembly?.negativePrompt ?? "";
@@ -76,8 +77,8 @@ export function InspectorPanel({
     return (
       <div className="inspector-form">
         <div className="inspector-meta">
-          <span>{selectedNode.data.kind}</span>
-          <span>{selectedNode.data.subtype}</span>
+          <span>{nodeData.kind ?? "Unknown"}</span>
+          <span>{nodeData.subtype ?? "Legacy node"}</span>
         </div>
         <label>
           Title
@@ -134,19 +135,24 @@ export function InspectorPanel({
         <section className="inspector-contract" data-testid="inspector-contract">
           <div>
             <span>Contract</span>
-            <strong>{contract.runLabel}</strong>
+            <strong>{contract?.runLabel ?? "Unavailable"}</strong>
           </div>
-          <p>{contract.description}</p>
-          <dl>
-            <div>
-              <dt>Inputs</dt>
-              <dd>{contract.acceptedInputs.length > 0 ? contract.acceptedInputs.join(", ") : "none"}</dd>
-            </div>
-            <div>
-              <dt>Outputs</dt>
-              <dd>{contract.producedOutputs.join(", ")}</dd>
-            </div>
-          </dl>
+          <p>
+            {contract?.description ??
+              "This saved node does not match a known Ether node definition. You can edit its text or delete it."}
+          </p>
+          {contract ? (
+            <dl>
+              <div>
+                <dt>Inputs</dt>
+                <dd>{contract.acceptedInputs.length > 0 ? contract.acceptedInputs.join(", ") : "none"}</dd>
+              </div>
+              <div>
+                <dt>Outputs</dt>
+                <dd>{contract.producedOutputs.join(", ")}</dd>
+              </div>
+            </dl>
+          ) : null}
         </section>
         {promptAssembly || generationAssembly ? (
           <section className="inspector-preview" data-testid="inspector-assembly-preview">
@@ -180,8 +186,8 @@ export function InspectorPanel({
                 ))}
               </ul>
             ) : null}
-            {selectedNode.data.assembledPrompt ? (
-              <p>Frozen {selectedNode.data.lastRunAt ?? "recently"}</p>
+            {nodeData.assembledPrompt ? (
+              <p>Frozen {nodeData.lastRunAt ?? "recently"}</p>
             ) : null}
           </section>
         ) : null}

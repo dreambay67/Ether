@@ -16,7 +16,7 @@ export {
 } from "./graph/nodeCatalog.js";
 export { canConnectNodeKinds } from "./graph/connectionRules.js";
 export { distanceFromPointToSegment, findEdgeInsertionTarget } from "./graph/canvasGeometry.js";
-export { getNodeContract, NODE_CONTRACTS } from "./graph/contracts.js";
+export { getNodeContract, getOptionalNodeContract, NODE_CONTRACTS } from "./graph/contracts.js";
 export {
   assembleGenerationInputs,
   assemblePromptForNode,

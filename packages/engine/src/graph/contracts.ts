@@ -44,7 +44,7 @@ function referenceContract(definition: EtherNodeDefinition): NodeContract {
     definitionId: definition.id,
     acceptedInputs: ["image", "metadata", "note"],
     producedOutputs: ["reference", "metadata"],
-    runnable: true,
+    runnable: false,
     runLabel: "Resolve Reference",
     description: `${definition.title} prepares a role-labeled reference artifact for downstream nodes.`
   };
@@ -55,7 +55,7 @@ function editContract(definition: EtherNodeDefinition): NodeContract {
     definitionId: definition.id,
     acceptedInputs: ["image", "prompt", "negativePrompt", "reference", "mask", "note"],
     producedOutputs: ["editedImage", "metadata"],
-    runnable: true,
+    runnable: false,
     runLabel: "Prepare Edit",
     description: `${definition.title} prepares edit inputs without executing a provider.`
   };
@@ -84,7 +84,7 @@ function storeContract(definition: EtherNodeDefinition): NodeContract {
       "filterRule"
     ],
     producedOutputs: producedOutputs[definition.subtype] ?? ["metadata"],
-    runnable: definition.subtype !== "Directory",
+    runnable: false,
     runLabel:
       definition.subtype === "Compare" || definition.subtype === "Evaluate"
         ? "Review"
@@ -100,7 +100,7 @@ function assistantContract(definition: EtherNodeDefinition): NodeContract {
     definitionId: definition.id,
     acceptedInputs: ["prompt", "negativePrompt", "reference", "metadata", "note", "text"],
     producedOutputs: ["text", "prompt", "metadata"],
-    runnable: true,
+    runnable: false,
     runLabel: "Prepare Assistant Text",
     description: `${definition.title} prepares editable assistant text for later workflow stages.`
   };
@@ -111,7 +111,7 @@ function generationContract(definition: EtherNodeDefinition): NodeContract {
     definitionId: definition.id,
     acceptedInputs: ["prompt", "negativePrompt", "reference", "metadata"],
     producedOutputs: ["image", "metadata", "prompt"],
-    runnable: true,
+    runnable: false,
     runLabel: "Prepare Generation",
     description: `${definition.title} assembles generation inputs without executing an image provider.`
   };
@@ -159,4 +159,12 @@ export function getNodeContract(definitionId: string) {
   }
 
   return contract;
+}
+
+export function getOptionalNodeContract(definitionId: unknown) {
+  if (typeof definitionId !== "string") {
+    return null;
+  }
+
+  return NODE_CONTRACTS.find((candidate) => candidate.definitionId === definitionId) ?? null;
 }
