@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -261,6 +261,46 @@ describe("project store", () => {
 
     await expect(readFile(outsideSnapshotPath, "utf8")).resolves.toBe("do not delete");
     expect(restored.graph.nodes).toEqual([{ id: "replacement", position: { x: 7, y: 8 } }]);
+  });
+
+  it("does not delete stale same-slot snapshot files through a linked snapshots directory", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Snapshot Cleanup Link Boundary" });
+    const snapshotsDirectory = path.join(project.path, "snapshots");
+    const outsideSnapshotsDirectory = path.join(parentDirectory, "outside-snapshots");
+    const staleSnapshotPath = path.join(snapshotsDirectory, "victim.json");
+
+    await rm(snapshotsDirectory, { recursive: true, force: true });
+    await mkdir(outsideSnapshotsDirectory);
+
+    try {
+      await symlink(outsideSnapshotsDirectory, snapshotsDirectory, "junction");
+    } catch {
+      return;
+    }
+
+    await writeFile(staleSnapshotPath, "do not delete through link");
+    insertSnapshot(path.join(project.path, "ether.db"), {
+      id: "stale-linked-snapshot",
+      slot: "A",
+      label: "Stale linked A",
+      path: staleSnapshotPath,
+      createdAt: new Date().toISOString()
+    });
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "replacement", position: { x: 9, y: 10 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+
+    const snapshot = await createSnapshot(project.path, "A", "Replacement A");
+    const restored = await restoreSnapshot(project.path, snapshot.id);
+
+    await expect(readFile(staleSnapshotPath, "utf8")).resolves.toBe("do not delete through link");
+    expect(restored.graph.nodes).toEqual([{ id: "replacement", position: { x: 9, y: 10 } }]);
   });
 
   it("keeps only the latest same-slot snapshot during rapid saves", async () => {

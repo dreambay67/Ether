@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { HealthIssue, ProjectDatabaseStatus, SnapshotRecord, SnapshotSlot } from "./schema.js";
 
@@ -142,13 +142,10 @@ export function insertSnapshot(
 
     replaceSlot();
 
-    const resolvedSnapshotPath = path.resolve(snapshot.path);
+    const cleanupBoundary = getSnapshotCleanupBoundary(databasePath, snapshotsDirectory);
 
     for (const row of oldRows) {
-      if (
-        !isSameResolvedPath(row.path, resolvedSnapshotPath) &&
-        isPathInsideDirectory(row.path, snapshotsDirectory)
-      ) {
+      if (cleanupBoundary && canDeleteStaleSnapshot(row.path, snapshot.path, cleanupBoundary)) {
         try {
           // Post-commit cleanup is best-effort; orphaned files are handled by future health/cleanup logic.
           rmSync(row.path, { force: true });
@@ -162,8 +159,62 @@ export function insertSnapshot(
   }
 }
 
+type SnapshotCleanupBoundary = {
+  realSnapshotsDirectory: string;
+};
+
+function getSnapshotCleanupBoundary(
+  databasePath: string,
+  snapshotsDirectory: string
+): SnapshotCleanupBoundary | null {
+  try {
+    const realProjectRoot = realpathSync.native(path.dirname(databasePath));
+    const realSnapshotsDirectory = realpathSync.native(snapshotsDirectory);
+
+    if (
+      !statSync(realSnapshotsDirectory).isDirectory() ||
+      !isPathInsideDirectory(realSnapshotsDirectory, realProjectRoot)
+    ) {
+      return null;
+    }
+
+    return { realSnapshotsDirectory };
+  } catch {
+    return null;
+  }
+}
+
+function canDeleteStaleSnapshot(
+  candidatePath: string,
+  newSnapshotPath: string,
+  boundary: SnapshotCleanupBoundary
+) {
+  if (
+    isSameResolvedPath(candidatePath, path.resolve(newSnapshotPath)) ||
+    !existsSync(candidatePath)
+  ) {
+    return false;
+  }
+
+  try {
+    const realCandidatePath = realpathSync.native(candidatePath);
+    const realNewSnapshotPath = existsSync(newSnapshotPath)
+      ? realpathSync.native(newSnapshotPath)
+      : path.resolve(newSnapshotPath);
+
+    return (
+      !isSameRealPath(realCandidatePath, realNewSnapshotPath) &&
+      isPathInsideDirectory(realCandidatePath, boundary.realSnapshotsDirectory)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isPathInsideDirectory(filePath: string, directoryPath: string) {
-  const relativePath = path.relative(path.resolve(directoryPath), path.resolve(filePath));
+  const normalizedFilePath = normalizePathForComparison(filePath);
+  const normalizedDirectoryPath = normalizePathForComparison(directoryPath);
+  const relativePath = path.relative(normalizedDirectoryPath, normalizedFilePath);
 
   return Boolean(relativePath) && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
 }
@@ -171,11 +222,22 @@ function isPathInsideDirectory(filePath: string, directoryPath: string) {
 function isSameResolvedPath(leftPath: string, resolvedRightPath: string) {
   const resolvedLeftPath = path.resolve(leftPath);
 
+  return isSameRealPath(resolvedLeftPath, resolvedRightPath);
+}
+
+function isSameRealPath(leftPath: string, rightPath: string) {
+  const normalizedLeftPath = normalizePathForComparison(leftPath);
+  const normalizedRightPath = normalizePathForComparison(rightPath);
+
+  return normalizedLeftPath === normalizedRightPath;
+}
+
+function normalizePathForComparison(filePath: string) {
   if (process.platform === "win32") {
-    return resolvedLeftPath.toLowerCase() === resolvedRightPath.toLowerCase();
+    return filePath.toLowerCase();
   }
 
-  return resolvedLeftPath === resolvedRightPath;
+  return filePath;
 }
 
 export function getSnapshot(databasePath: string, snapshotId: string): SnapshotRecord {
