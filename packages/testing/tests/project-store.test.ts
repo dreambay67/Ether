@@ -234,6 +234,35 @@ describe("project store", () => {
     );
   });
 
+  it("does not delete stale same-slot snapshot paths outside the snapshots directory", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Snapshot Cleanup Boundary" });
+    const outsideSnapshotPath = path.join(parentDirectory, "outside-snapshot.json");
+
+    await writeFile(outsideSnapshotPath, "do not delete");
+    insertSnapshot(path.join(project.path, "ether.db"), {
+      id: "stale-outside-snapshot",
+      slot: "A",
+      label: "Stale outside A",
+      path: outsideSnapshotPath,
+      createdAt: new Date().toISOString()
+    });
+
+    await saveGraph(project.path, {
+      nodes: [{ id: "replacement", position: { x: 7, y: 8 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    });
+
+    const snapshot = await createSnapshot(project.path, "A", "Replacement A");
+    const restored = await restoreSnapshot(project.path, snapshot.id);
+
+    await expect(readFile(outsideSnapshotPath, "utf8")).resolves.toBe("do not delete");
+    expect(restored.graph.nodes).toEqual([{ id: "replacement", position: { x: 7, y: 8 } }]);
+  });
+
   it("keeps only the latest same-slot snapshot during rapid saves", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Rapid Snapshots" });

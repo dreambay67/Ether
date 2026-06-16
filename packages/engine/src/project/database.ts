@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import { rmSync } from "node:fs";
+import path from "node:path";
 import type { HealthIssue, ProjectDatabaseStatus, SnapshotRecord, SnapshotSlot } from "./schema.js";
 
 export const REQUIRED_DATABASE_TABLES = [
@@ -118,7 +119,8 @@ export function insertSnapshot(
     label: string | null;
     path: string;
     createdAt: string;
-  }
+  },
+  snapshotsDirectory = path.join(path.dirname(databasePath), "snapshots")
 ) {
   const db = new Database(databasePath);
 
@@ -140,8 +142,13 @@ export function insertSnapshot(
 
     replaceSlot();
 
+    const resolvedSnapshotPath = path.resolve(snapshot.path);
+
     for (const row of oldRows) {
-      if (row.path !== snapshot.path) {
+      if (
+        !isSameResolvedPath(row.path, resolvedSnapshotPath) &&
+        isPathInsideDirectory(row.path, snapshotsDirectory)
+      ) {
         try {
           // Post-commit cleanup is best-effort; orphaned files are handled by future health/cleanup logic.
           rmSync(row.path, { force: true });
@@ -153,6 +160,22 @@ export function insertSnapshot(
   } finally {
     db.close();
   }
+}
+
+function isPathInsideDirectory(filePath: string, directoryPath: string) {
+  const relativePath = path.relative(path.resolve(directoryPath), path.resolve(filePath));
+
+  return Boolean(relativePath) && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+}
+
+function isSameResolvedPath(leftPath: string, resolvedRightPath: string) {
+  const resolvedLeftPath = path.resolve(leftPath);
+
+  if (process.platform === "win32") {
+    return resolvedLeftPath.toLowerCase() === resolvedRightPath.toLowerCase();
+  }
+
+  return resolvedLeftPath === resolvedRightPath;
 }
 
 export function getSnapshot(databasePath: string, snapshotId: string): SnapshotRecord {

@@ -29,7 +29,7 @@ export async function createSnapshot(
   };
 
   await writeJson(snapshotPath, { snapshot, graph });
-  insertSnapshot(paths.database, snapshot);
+  insertSnapshot(paths.database, snapshot, paths.snapshots);
 
   return snapshot;
 }
