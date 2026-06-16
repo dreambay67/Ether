@@ -90,7 +90,7 @@ function nodeText(node: GraphNode) {
 }
 
 function sectionName(node: GraphNode) {
-  return cleanText(node.data?.subtype) || cleanText(node.data?.label) || cleanText(node.data?.title) || "General";
+  return cleanText(node.data?.label) || cleanText(node.data?.subtype) || cleanText(node.data?.title) || "General";
 }
 
 function sectionTitle(node: GraphNode) {
@@ -127,7 +127,12 @@ function appendUniqueSection(sections: PromptSectionArtifact[], section: PromptS
   }
 }
 
-function collectPromptSections(graph: EtherGraph, nodeId: string, seen = new Set<string>()): PromptSectionArtifact[] {
+function collectPromptSections(
+  graph: EtherGraph,
+  nodeId: string,
+  seen = new Set<string>(),
+  selfIncomingEdge?: GraphEdge
+): PromptSectionArtifact[] {
   if (seen.has(nodeId)) {
     return [];
   }
@@ -150,7 +155,7 @@ function collectPromptSections(graph: EtherGraph, nodeId: string, seen = new Set
     }
   }
 
-  const selfSection = promptSectionForNode(node);
+  const selfSection = promptSectionForNode(node, selfIncomingEdge);
   if (selfSection) {
     appendUniqueSection(sections, selfSection);
   }
@@ -228,8 +233,8 @@ export function getUpstreamNodes(graph: EtherGraph, nodeId: string) {
   return incomingEdges(graph, nodeId).map((edge) => findNode(graph, edge.source));
 }
 
-export function assemblePromptForNode(graph: EtherGraph, nodeId: string): PromptAssembly {
-  const sections = collectPromptSections(graph, nodeId);
+export function assemblePromptForNode(graph: EtherGraph, nodeId: string, incomingEdge?: GraphEdge): PromptAssembly {
+  const sections = collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge);
 
   return {
     nodeId,
@@ -250,7 +255,7 @@ export function assembleGenerationInputs(graph: EtherGraph, generationNodeId: st
       continue;
     }
 
-    const assembly = assemblePromptForNode(graph, source.id);
+    const assembly = assemblePromptForNode(graph, source.id, edge);
     for (const section of assembly.sections) {
       appendUniqueSection(sections, section);
     }

@@ -130,6 +130,59 @@ describe("prompt assembly", () => {
     expect(assembly.sections.map((section) => section.kind)).toEqual(["prompt", "negativePrompt"]);
   });
 
+  it("treats a general prompt as negativePrompt when its generation edge is labeled negative", () => {
+    const canvas = graph(
+      [
+        node("avoid", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          title: "Avoid",
+          instruction: "grain, blur, extra fingers"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [{ id: "edge-avoid-generation", source: "avoid", target: "generation", label: "negative" }]
+    );
+
+    const assembly = assembleGenerationInputs(canvas, "generation");
+
+    expect(assembly.prompt).toBe("");
+    expect(assembly.negativePrompt).toBe("grain, blur, extra fingers");
+    expect(assembly.sections).toEqual([
+      expect.objectContaining({ nodeId: "avoid", kind: "negativePrompt" })
+    ]);
+  });
+
+  it("uses an edited prompt label as the assembled section name", () => {
+    const canvas = graph(
+      [
+        node("subject", {
+          definitionId: "prompt-subject",
+          kind: "Prompt",
+          subtype: "Subject",
+          title: "Subject Prompt",
+          label: "Hero Product",
+          instruction: "chrome espresso machine"
+        })
+      ],
+      []
+    );
+
+    const assembly = assemblePromptForNode(canvas, "subject");
+
+    expect(assembly.sections[0]).toMatchObject({
+      nodeId: "subject",
+      title: "Subject Prompt",
+      section: "Hero Product",
+      text: "chrome espresso machine"
+    });
+  });
+
   it("uses editable edge labels when resolving reference roles", () => {
     const canvas = graph(
       [

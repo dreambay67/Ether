@@ -13,7 +13,7 @@ type ConnectionRuleContext = {
 };
 
 const validTargets: Record<EtherNodeKind, EtherNodeKind[]> = {
-  Prompt: ["Generation", "Assistant"],
+  Prompt: ["Prompt", "Generation", "Assistant"],
   Reference: ["Generation", "Edit", "Store"],
   Edit: ["Generation", "Store"],
   Store: ["Store"],
@@ -23,6 +23,7 @@ const validTargets: Record<EtherNodeKind, EtherNodeKind[]> = {
 };
 
 const defaultLabels: Record<string, string> = {
+  "Prompt:Prompt": "prompt",
   "Prompt:Generation": "prompt",
   "Prompt:Assistant": "context",
   "Reference:Generation": "reference",

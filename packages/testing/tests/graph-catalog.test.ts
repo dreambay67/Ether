@@ -66,6 +66,7 @@ describe("connection rules", () => {
     ["Generation", "Compare"],
     ["Evaluate", "Filter"],
     ["Filter", "Collection"],
+    ["Prompt", "Prompt"],
     ["Store", "Store"],
     ["Assistant", "Prompt"],
     ["Note", "Prompt"]
@@ -74,7 +75,6 @@ describe("connection rules", () => {
   });
 
   it.each([
-    ["Prompt", "Prompt"],
     ["Generation", "Prompt"],
     ["Edit", "Reference"],
     ["Store", "Generation"]
