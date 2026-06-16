@@ -48,6 +48,28 @@ export function pushCanvasHistory(history: CanvasHistory, snapshot: CanvasSnapsh
   };
 }
 
+export function pushCanvasHistoryFromBaseline(
+  history: CanvasHistory,
+  baseline: CanvasSnapshot,
+  snapshot: CanvasSnapshot
+): CanvasHistory {
+  return {
+    past: [...history.past, baseline].slice(-80),
+    present: snapshot,
+    future: []
+  };
+}
+
+export function updateCanvasHistoryPresent(
+  history: CanvasHistory,
+  snapshot: CanvasSnapshot
+): CanvasHistory {
+  return {
+    ...history,
+    present: snapshot
+  };
+}
+
 export function undoCanvasHistory(history: CanvasHistory): CanvasHistory {
   const previous = history.past.at(-1);
 

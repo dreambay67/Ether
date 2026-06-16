@@ -38,10 +38,13 @@ import { EtherNode } from "./EtherNode";
 import { InspectorPanel } from "./InspectorPanel";
 import { NodeLibrary } from "./NodeLibrary";
 import {
+  type CanvasSnapshot,
   createCanvasHistory,
   pushCanvasHistory,
+  pushCanvasHistoryFromBaseline,
   redoCanvasHistory,
   shouldPushNodeChangesToHistory,
+  updateCanvasHistoryPresent,
   undoCanvasHistory
 } from "./canvasHistory";
 
@@ -101,6 +104,7 @@ function InnerEtherCanvas(
   const wrapperRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<ReactFlowInstance<Node<CanvasNodeData>, Edge> | null>(null);
   const nodeCounterRef = useRef(0);
+  const resizeBaselineRef = useRef<CanvasSnapshot | null>(null);
   const [viewport, setViewport] = useState<Viewport>(graph?.viewport ?? defaultViewport);
   const [history, setHistory] = useState(() =>
     createCanvasHistory({
@@ -121,6 +125,7 @@ function InnerEtherCanvas(
       return;
     }
 
+    resizeBaselineRef.current = null;
     setViewport(graph.viewport);
     setHistory(
       createCanvasHistory({
@@ -177,10 +182,27 @@ function InnerEtherCanvas(
   const onNodesChange = useCallback((changes: NodeChange<Node<CanvasNodeData>>[]) => {
     setHistory((current) => {
       const nextNodes = applyNodeChanges(changes, current.present.nodes);
+      const hasActiveResize = changes.some(
+        (change) => change.type === "dimensions" && change.resizing === true
+      );
+      const hasCompletedResize = changes.some(
+        (change) => change.type === "dimensions" && change.resizing === false
+      );
       const editsGraph = shouldPushNodeChangesToHistory(changes);
       const next = { nodes: nextNodes, edges: current.present.edges };
 
-      return editsGraph ? pushCanvasHistory(current, next) : { ...current, present: next };
+      if (hasActiveResize) {
+        resizeBaselineRef.current ??= current.present;
+        return updateCanvasHistoryPresent(current, next);
+      }
+
+      if (hasCompletedResize && resizeBaselineRef.current) {
+        const baseline = resizeBaselineRef.current;
+        resizeBaselineRef.current = null;
+        return pushCanvasHistoryFromBaseline(current, baseline, next);
+      }
+
+      return editsGraph ? pushCanvasHistory(current, next) : updateCanvasHistoryPresent(current, next);
     });
   }, []);
 
