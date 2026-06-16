@@ -83,6 +83,72 @@ describe("project store", () => {
     expect(rootEntries.filter((entry) => entry.includes(".tmp-"))).toEqual([]);
   });
 
+  it("round-trips representative React Flow canvas graph state", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Canvas Roundtrip" });
+    const graph: EtherGraph = {
+      nodes: [
+        {
+          id: "ether-node-1",
+          type: "etherNode",
+          position: { x: 120, y: 180 },
+          width: 240,
+          height: 148,
+          selected: true,
+          data: {
+            definitionId: "prompt-general",
+            kind: "Prompt",
+            subtype: "General",
+            title: "Hero prompt",
+            label: "Hero prompt",
+            notes: "Keep it cinematic",
+            instruction: "blue hour portrait",
+            status: "idle"
+          }
+        },
+        {
+          id: "ether-node-2",
+          type: "etherNode",
+          position: { x: 480, y: 180 },
+          width: 240,
+          height: 148,
+          data: {
+            definitionId: "generation-image",
+            kind: "Generation",
+            subtype: "Image",
+            title: "Image Generation",
+            label: "Image Generation",
+            notes: "",
+            instruction: "Placeholder only",
+            status: "idle"
+          }
+        }
+      ],
+      edges: [
+        {
+          id: "edge-1",
+          source: "ether-node-1",
+          target: "ether-node-2",
+          label: "prompt",
+          data: { label: "prompt" }
+        }
+      ],
+      viewport: { x: -25, y: 40, zoom: 0.85 },
+      selectedSnapshotId: null,
+      updatedAt: new Date().toISOString()
+    };
+
+    await saveGraph(project.path, graph);
+    const loaded = await loadGraph(project.path);
+    const reopened = await openProject(project.path);
+
+    expect(loaded.nodes).toEqual(graph.nodes);
+    expect(loaded.edges).toEqual(graph.edges);
+    expect(loaded.viewport).toEqual(graph.viewport);
+    expect(reopened.graph.nodes).toEqual(graph.nodes);
+    expect(reopened.graph.edges).toEqual(graph.edges);
+  });
+
   it("rejects invalid graph updatedAt values when loading existing graph JSON", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Invalid Graph Date" });

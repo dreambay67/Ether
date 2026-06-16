@@ -1,3 +1,4 @@
+import "@xyflow/react/dist/style.css";
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -8,8 +9,10 @@ import {
   useState
 } from "react";
 import { brandTokens } from "@ether/brand";
+import type { EtherGraph } from "@ether/engine";
 import etherLogo from "../../../../packages/brand/src/assets/Ether_logo.png";
-import dreamBayLogo from "../../../../packages/brand/src/assets/DB_logo.png";
+import { EtherCanvasWithProvider, type EtherCanvasHandle } from "./canvas/EtherCanvas";
+import { RunTracePanel } from "./canvas/RunTracePanel";
 
 type PanelPosition = {
   x: number;
@@ -24,12 +27,6 @@ type FloatingPanelProps = {
   initialPlacement: PanelPosition;
   children: ReactNode;
 };
-
-const operationalSignals = [
-  { label: "selection", className: "signal signal-selection" },
-  { label: "generation", className: "signal signal-generation" },
-  { label: "refinement", className: "signal signal-refinement" }
-];
 
 function FloatingPanel({
   id,
@@ -69,16 +66,12 @@ function FloatingPanel({
       return;
     }
 
-    const placePanel = () => {
-      setPosition(
-        clampPosition({
-          x: surface.clientWidth * initialPlacement.x - panel.offsetWidth * initialPlacement.x,
-          y: surface.clientHeight * initialPlacement.y - panel.offsetHeight * initialPlacement.y
-        })
-      );
-    };
-
-    placePanel();
+    setPosition(
+      clampPosition({
+        x: surface.clientWidth * initialPlacement.x - panel.offsetWidth * initialPlacement.x,
+        y: surface.clientHeight * initialPlacement.y - panel.offsetHeight * initialPlacement.y
+      })
+    );
   }, [clampPosition, initialPlacement.x, initialPlacement.y]);
 
   useEffect(() => {
@@ -89,10 +82,7 @@ function FloatingPanel({
       return;
     }
 
-    const reclamp = () => {
-      setPosition((current) => clampPosition(current));
-    };
-
+    const reclamp = () => setPosition((current) => clampPosition(current));
     const resizeObserver = new ResizeObserver(reclamp);
     resizeObserver.observe(surface);
     resizeObserver.observe(panel);
@@ -105,9 +95,7 @@ function FloatingPanel({
   }, [clampPosition]);
 
   useEffect(() => {
-    return () => {
-      cleanupDragRef.current?.();
-    };
+    return () => cleanupDragRef.current?.();
   }, []);
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -126,10 +114,12 @@ function FloatingPanel({
     const offsetY = event.clientY - panelBounds.top;
 
     const movePanel = (moveEvent: PointerEvent) => {
-      const nextX = moveEvent.clientX - surfaceBounds.left - offsetX;
-      const nextY = moveEvent.clientY - surfaceBounds.top - offsetY;
-
-      setPosition(clampPosition({ x: nextX, y: nextY }));
+      setPosition(
+        clampPosition({
+          x: moveEvent.clientX - surfaceBounds.left - offsetX,
+          y: moveEvent.clientY - surfaceBounds.top - offsetY
+        })
+      );
     };
 
     const stopDrag = () => {
@@ -182,9 +172,12 @@ function FloatingPanel({
 }
 
 export function App() {
+  const canvasRef = useRef<EtherCanvasHandle>(null);
   const [parentDirectory, setParentDirectory] = useState("");
   const [projectName, setProjectName] = useState("Untitled Ether Project");
   const [projectPath, setProjectPath] = useState("");
+  const [activeGraph, setActiveGraph] = useState<EtherGraph | null>(null);
+  const [traceEntries, setTraceEntries] = useState<string[]>([]);
   const [currentProject, setCurrentProject] = useState<{
     id: string;
     name: string;
@@ -192,6 +185,10 @@ export function App() {
     updatedAt: string;
   } | null>(null);
   const [projectMessage, setProjectMessage] = useState("No project open");
+
+  const appendTrace = useCallback((message: string) => {
+    setTraceEntries((entries) => [message, ...entries].slice(0, 12));
+  }, []);
 
   const setProjectFromResult = (result: Awaited<ReturnType<typeof window.ether.project.open>>) => {
     setCurrentProject({
@@ -201,6 +198,7 @@ export function App() {
       updatedAt: result.metadata.updatedAt
     });
     setProjectPath(result.path);
+    setActiveGraph(result.graph);
   };
 
   const createLocalProject = async (event: FormEvent<HTMLFormElement>) => {
@@ -211,6 +209,7 @@ export function App() {
       const project = await window.ether.project.create({ parentDirectory, name: projectName });
       setProjectFromResult(project);
       setProjectMessage("Project created");
+      appendTrace("Project created");
     } catch (error) {
       setProjectMessage(error instanceof Error ? error.message : "Project creation failed");
     }
@@ -223,8 +222,25 @@ export function App() {
       const project = await window.ether.project.open(projectPath);
       setProjectFromResult(project);
       setProjectMessage("Project opened");
+      appendTrace("Graph hydrated from project");
     } catch (error) {
       setProjectMessage(error instanceof Error ? error.message : "Project open failed");
+    }
+  };
+
+  const loadCurrentGraph = async () => {
+    if (!currentProject) {
+      setProjectMessage("Open a project before loading graph state");
+      return;
+    }
+
+    try {
+      const graph = await window.ether.project.loadGraph(currentProject.id);
+      setActiveGraph(graph);
+      setProjectMessage("Graph loaded");
+      appendTrace("Graph loaded");
+    } catch (error) {
+      setProjectMessage(error instanceof Error ? error.message : "Graph load failed");
     }
   };
 
@@ -235,18 +251,13 @@ export function App() {
     }
 
     try {
-      const graph = await window.ether.project.saveGraph(currentProject.id, {
-        nodes: [],
-        edges: [],
-        viewport: { x: 0, y: 0, zoom: 1 },
-        selectedSnapshotId: null,
-        updatedAt: new Date().toISOString()
-      });
-
+      const graph = await window.ether.project.saveGraph(currentProject.id, canvasRef.current!.serialize());
+      setActiveGraph(graph);
       setCurrentProject((project) =>
         project ? { ...project, updatedAt: graph.updatedAt } : project
       );
       setProjectMessage("Graph saved");
+      appendTrace("Graph saved");
     } catch (error) {
       setProjectMessage(error instanceof Error ? error.message : "Graph save failed");
     }
@@ -265,6 +276,7 @@ export function App() {
           ? "Health check clear"
           : `${health.issues.length} health issue${health.issues.length === 1 ? "" : "s"} found`
       );
+      appendTrace("Health check complete");
     } catch (error) {
       setProjectMessage(error instanceof Error ? error.message : "Health check failed");
     }
@@ -318,6 +330,9 @@ export function App() {
           <button type="button" onClick={openLocalProject}>
             Open
           </button>
+          <button type="button" onClick={loadCurrentGraph}>
+            Load Graph
+          </button>
           <button type="button" onClick={saveCurrentGraph}>
             Save Graph
           </button>
@@ -334,39 +349,13 @@ export function App() {
 
       <section className="workspace" aria-label={`${brandTokens.lockup} workspace`}>
         <section className="canvas-stage" aria-label="Canvas">
-          <div className="air-field" aria-hidden="true">
-            <div className="pressure-ring ring-one" />
-            <div className="pressure-ring ring-two" />
-            <div className="mask-flow" />
-            {operationalSignals.map((signal) => (
-              <span key={signal.label} className={signal.className} aria-hidden="true" />
-            ))}
-          </div>
-          <div className="canvas-label">
-            <p>Operational canvas</p>
-            <h2>Canvas</h2>
-          </div>
+          <EtherCanvasWithProvider
+            canvasRef={canvasRef}
+            graph={activeGraph}
+            onStatus={setProjectMessage}
+            onTrace={appendTrace}
+          />
         </section>
-
-        <FloatingPanel
-          id="node-library"
-          title="Node Library"
-          kicker="Input"
-          className="node-library"
-          initialPlacement={{ x: 0, y: 0 }}
-        >
-          <div className="panel-placeholder">Prompt, reference, generate, evaluate</div>
-        </FloatingPanel>
-
-        <FloatingPanel
-          id="inspector"
-          title="Inspector"
-          kicker="State"
-          className="inspector"
-          initialPlacement={{ x: 1, y: 0 }}
-        >
-          <div className="panel-placeholder">Selection, confidence, lineage</div>
-        </FloatingPanel>
 
         <FloatingPanel
           id="run-trace"
@@ -375,13 +364,7 @@ export function App() {
           className="run-trace"
           initialPlacement={{ x: 0.5, y: 1 }}
         >
-          <div className="trace-content">
-            <div className="trace-brand">
-              <img src={dreamBayLogo} alt="DreamBay logo" className="dreambay-logo" />
-              <span>Inherited highlight</span>
-            </div>
-            <p>No executions yet. Provider integrations are intentionally offline in this shell.</p>
-          </div>
+          <RunTracePanel entries={traceEntries} queueCount={traceEntries.length} />
         </FloatingPanel>
       </section>
     </main>
