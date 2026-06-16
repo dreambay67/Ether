@@ -1,4 +1,6 @@
 import type {
+  AssetKind,
+  AssetRecord,
   CreateProjectOptions,
   EtherGraph,
   HealthCheckResult,
@@ -19,6 +21,27 @@ declare global {
         saveGraph(projectId: string, graph: EtherGraph): Promise<EtherGraph>;
         loadGraph(projectId: string): Promise<EtherGraph>;
         health(projectId: string): Promise<HealthCheckResult>;
+      };
+      asset: {
+        selectReferenceImage(projectId: string, options?: { role?: string }): Promise<AssetRecord | null>;
+        linkDroppedReference(
+          projectId: string,
+          filePath: string,
+          options?: { role?: string }
+        ): Promise<AssetRecord>;
+        ensureCollection(
+          projectId: string,
+          options: { name: string; nodeId?: string }
+        ): Promise<AssetRecord>;
+        ensureDirectory(
+          projectId: string,
+          options: { name: string; nodeId?: string }
+        ): Promise<AssetRecord>;
+        list(projectId: string, query?: { kind?: AssetKind }): Promise<AssetRecord[]>;
+        saveFakeGenerated(
+          projectId: string,
+          options: { generationNodeId: string; fileName: string; content?: string; mimeType?: string }
+        ): Promise<AssetRecord>;
       };
     };
   }

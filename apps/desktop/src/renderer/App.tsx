@@ -351,6 +351,7 @@ export function App() {
           <EtherCanvasWithProvider
             canvasRef={canvasRef}
             graph={activeGraph}
+            projectId={currentProject?.id ?? null}
             onStatus={setProjectMessage}
             onTrace={appendTrace}
           />

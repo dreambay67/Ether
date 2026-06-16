@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
-import { Play, Trash2 } from "lucide-react";
+import { FolderPlus, Play, Trash2 } from "lucide-react";
 import {
   coerceCanvasNodeData,
   type CanvasNodeData
@@ -20,7 +20,9 @@ type InspectorPanelProps = {
   onPreviewEdge(id: string, label: string): void;
   onCommitTextEdit(): void;
   onRunNode(id: string): void;
+  onEnsureStoreFolder(id: string): void;
   onDeleteSelection(): void;
+  hasOpenProject: boolean;
 };
 
 export function InspectorPanel({
@@ -31,7 +33,9 @@ export function InspectorPanel({
   onPreviewEdge,
   onCommitTextEdit,
   onRunNode,
-  onDeleteSelection
+  onEnsureStoreFolder,
+  onDeleteSelection,
+  hasOpenProject
 }: InspectorPanelProps) {
   const [nodeDraft, setNodeDraft] = useState<Partial<CanvasNodeData>>({});
   const [edgeLabelDraft, setEdgeLabelDraft] = useState("");
@@ -76,6 +80,9 @@ export function InspectorPanel({
     const previewPrompt = promptAssembly?.prompt ?? generationAssembly?.prompt ?? "";
     const previewNegativePrompt =
       promptAssembly?.negativePrompt ?? generationAssembly?.negativePrompt ?? "";
+    const canMirrorStoreFolder =
+      nodeData.kind === "Store" &&
+      (nodeData.subtype === "Collection" || nodeData.subtype === "Directory");
 
     return (
       <div className="inspector-form">
@@ -157,6 +164,33 @@ export function InspectorPanel({
             </dl>
           ) : null}
         </section>
+        {nodeData.assetId || nodeData.assetPath ? (
+          <section className="inspector-preview" data-testid="inspector-asset-metadata">
+            <div>
+              <span>Asset</span>
+              <strong>{nodeData.assetKind ?? "reference"}</strong>
+            </div>
+            {nodeData.assetId ? <p>ID: {nodeData.assetId}</p> : null}
+            {nodeData.assetPath ? <pre>{nodeData.assetPath}</pre> : null}
+          </section>
+        ) : null}
+        {canMirrorStoreFolder ? (
+          <section className="inspector-preview" data-testid="inspector-store-folder">
+            <div>
+              <span>{nodeData.subtype} Folder</span>
+              <button
+                type="button"
+                className="run-node-button"
+                onClick={() => onEnsureStoreFolder(selectedNode.id)}
+                disabled={!hasOpenProject}
+              >
+                <FolderPlus size={14} aria-hidden="true" />
+                Mirror
+              </button>
+            </div>
+            {nodeData.storePath ? <pre>{nodeData.storePath}</pre> : <p>Open a project to create the folder.</p>}
+          </section>
+        ) : null}
         {promptAssembly || generationAssembly ? (
           <section className="inspector-preview" data-testid="inspector-assembly-preview">
             <div>

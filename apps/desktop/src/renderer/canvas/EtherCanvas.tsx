@@ -25,7 +25,7 @@ import {
   type ReactFlowInstance,
   type Viewport
 } from "@xyflow/react";
-import { Eye, EyeOff, Link2, Redo2, Undo2 } from "lucide-react";
+import { Eye, EyeOff, ImagePlus, Link2, Redo2, Undo2 } from "lucide-react";
 import {
   type CanvasNodeData,
   type EtherNodeDefinition
@@ -38,7 +38,7 @@ import {
   getNodeDefinition
 } from "@ether/engine/graph/nodeCatalog";
 import { freezePromptNode } from "@ether/engine/graph/promptAssembly";
-import type { EtherGraph } from "@ether/engine";
+import type { AssetRecord, EtherGraph } from "@ether/engine";
 import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
 import { InspectorPanel } from "./InspectorPanel";
 import { NodeLibrary } from "./NodeLibrary";
@@ -57,6 +57,7 @@ import {
 
 type EtherCanvasProps = {
   graph: EtherGraph | null;
+  projectId: string | null;
   onStatus(message: string): void;
   onTrace(message: string): void;
 };
@@ -74,6 +75,7 @@ type ContextMenuState = {
 const nodeTypes = { etherNode: EtherNode };
 
 const defaultViewport: Viewport = { x: 0, y: 0, zoom: 1 };
+const imageFileExtensionPattern = /\.(avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
 
 function normalizeNodes(nodes: EtherGraph["nodes"]): Node<CanvasNodeData>[] {
   return nodes.map((node) => {
@@ -104,8 +106,45 @@ function normalizeEdges(edges: EtherGraph["edges"]): Edge[] {
   });
 }
 
+function getBasename(filePath: string) {
+  return filePath.split(/[\\/]/).filter(Boolean).at(-1) ?? filePath;
+}
+
+function isSupportedImageFile(file: File) {
+  return file.type.startsWith("image/") || imageFileExtensionPattern.test(file.name);
+}
+
+function getDroppedFilePath(file: File) {
+  return (file as File & { path?: string }).path;
+}
+
+function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
+  const baseData = createGraphNodeData("reference-image");
+  const originalName =
+    typeof asset.metadata.originalName === "string" && asset.metadata.originalName.trim()
+      ? asset.metadata.originalName
+      : getBasename(asset.path);
+  const role =
+    typeof asset.metadata.role === "string" && asset.metadata.role.trim()
+      ? asset.metadata.role
+      : "reference";
+
+  return {
+    ...baseData,
+    title: originalName,
+    label: "Linked reference",
+    instruction: `Linked ${role} image reference`,
+    notes: asset.path,
+    status: "complete",
+    assetId: asset.id,
+    assetKind: asset.kind,
+    assetPath: asset.path,
+    assetMetadata: asset.metadata
+  };
+}
+
 function InnerEtherCanvas(
-  { graph, onStatus, onTrace }: EtherCanvasProps,
+  { graph, projectId, onStatus, onTrace }: EtherCanvasProps,
   ref: React.ForwardedRef<EtherCanvasHandle>
 ) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -157,6 +196,12 @@ function InnerEtherCanvas(
       })
     );
   }, [graph]);
+
+  useEffect(() => {
+    if (projectId) {
+      setLocalRunStatus(null);
+    }
+  }, [projectId]);
 
   useImperativeHandle(
     ref,
@@ -276,6 +321,78 @@ function InnerEtherCanvas(
     },
     [createNode, nodes.length]
   );
+
+  const getCanvasCenterPosition = useCallback(() => {
+    const bounds = wrapperRef.current?.getBoundingClientRect();
+
+    if (!bounds || !flowRef.current) {
+      return { x: 320 + nodes.length * 28, y: 160 + nodes.length * 28 };
+    }
+
+    return flowRef.current.screenToFlowPosition({
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2
+    });
+  }, [nodes.length]);
+
+  const createReferenceNodes = useCallback(
+    (assets: AssetRecord[], position: { x: number; y: number }) => {
+      if (assets.length === 0) {
+        return;
+      }
+
+      const definition = getNodeDefinition("reference-image");
+      const referenceNodes: Node<CanvasNodeData>[] = assets.map((asset, index) => {
+        nodeCounterRef.current += 1;
+
+        return {
+          id: `node-${definition.id}-${Date.now()}-${nodeCounterRef.current}`,
+          type: "etherNode",
+          position: {
+            x: position.x + index * 32,
+            y: position.y + index * 32
+          },
+          width: 224,
+          height: 138,
+          selected: true,
+          data: createReferenceNodeData(asset)
+        };
+      });
+      const nextNodes = nodes.map((candidate) => ({ ...candidate, selected: false })).concat(referenceNodes);
+      const nextEdges = edges.map((edge) => ({ ...edge, selected: false }));
+      const message =
+        assets.length === 1
+          ? `Linked ${referenceNodes[0]?.data.title ?? "reference"}`
+          : `Linked ${assets.length} references as separate nodes`;
+
+      commitSnapshot(nextNodes, nextEdges, message);
+      onStatus(message);
+      setContextMenu(null);
+    },
+    [commitSnapshot, edges, nodes, onStatus]
+  );
+
+  const linkReferenceImage = useCallback(async () => {
+    if (!projectId) {
+      const message = "Open a project to link references";
+      setLocalRunStatus(message);
+      onStatus(message);
+      return;
+    }
+
+    try {
+      const asset = await window.ether.asset.selectReferenceImage(projectId);
+
+      if (!asset) {
+        onStatus("Reference selection cancelled");
+        return;
+      }
+
+      createReferenceNodes([asset], getCanvasCenterPosition());
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Reference link failed");
+    }
+  }, [createReferenceNodes, getCanvasCenterPosition, onStatus, projectId]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -447,6 +564,58 @@ function InnerEtherCanvas(
     [assemblyGraph, commitSnapshot, nodes, onStatus]
   );
 
+  const ensureStoreFolderForNode = useCallback(
+    async (id: string) => {
+      const target = nodes.find((node) => node.id === id);
+
+      if (!target || target.data.kind !== "Store") {
+        onStatus("Select a Collection or Directory node first.");
+        return;
+      }
+
+      if (target.data.subtype !== "Collection" && target.data.subtype !== "Directory") {
+        onStatus("Only Collection and Directory nodes mirror folders in this phase.");
+        return;
+      }
+
+      if (!projectId) {
+        const message = "Open a project to mirror folders";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      try {
+        const name = target.data.label.trim() || target.data.title;
+        const asset =
+          target.data.subtype === "Collection"
+            ? await window.ether.asset.ensureCollection(projectId, { name, nodeId: target.id })
+            : await window.ether.asset.ensureDirectory(projectId, { name, nodeId: target.id });
+        const nextNodes = nodes.map((node) =>
+          node.id === target.id
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  status: "complete" as const,
+                  storeAssetId: asset.id,
+                  storePath: asset.path,
+                  storeMetadata: asset.metadata
+                }
+              }
+            : { ...node, selected: false }
+        );
+        const message = `${target.data.subtype} folder ready`;
+
+        commitSnapshot(nextNodes, edges, message);
+        onStatus(message);
+      } catch (error) {
+        onStatus(error instanceof Error ? error.message : "Folder mirror failed");
+      }
+    },
+    [commitSnapshot, edges, nodes, onStatus, projectId]
+  );
+
   const deleteNodeById = useCallback(
     (id: string) => {
       deleteElements({ nodeIds: [id] });
@@ -494,12 +663,58 @@ function InnerEtherCanvas(
   }, [deleteSelection, redo, undo]);
 
   const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
+    async (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       const definitionId = event.dataTransfer.getData("application/ether-node-definition");
       const definition = definitionId ? getNodeDefinition(definitionId) : null;
 
       if (!definition || !flowRef.current) {
+        const droppedFiles = Array.from(event.dataTransfer.files);
+        const imageFiles = droppedFiles.filter(isSupportedImageFile);
+
+        if (droppedFiles.length === 0) {
+          return;
+        }
+
+        if (imageFiles.length === 0) {
+          onStatus("Drop image files to create Reference nodes.");
+          return;
+        }
+
+        if (!projectId) {
+          const message = "Open a project to link references";
+          setLocalRunStatus(message);
+          onStatus(message);
+          return;
+        }
+
+        const filePaths = imageFiles.map(getDroppedFilePath).filter((filePath): filePath is string =>
+          Boolean(filePath)
+        );
+
+        if (filePaths.length !== imageFiles.length) {
+          onStatus("Dropped images need local file paths before they can be linked.");
+          return;
+        }
+
+        try {
+          const assets = await Promise.all(
+            filePaths.map((filePath) => window.ether.asset.linkDroppedReference(projectId, filePath))
+          );
+          const position = flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) ?? {
+            x: 320,
+            y: 160
+          };
+
+          createReferenceNodes(assets, position);
+
+          if (imageFiles.length > 1 && !event.ctrlKey && !event.metaKey) {
+            onTrace("Multiple dropped images linked as separate Reference nodes");
+          }
+        } catch (error) {
+          onStatus(error instanceof Error ? error.message : "Dropped reference link failed");
+        }
+
         return;
       }
 
@@ -508,7 +723,7 @@ function InnerEtherCanvas(
         flowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
       );
     },
-    [createNode]
+    [createNode, createReferenceNodes, onStatus, onTrace, projectId]
   );
 
   const onNodeDragStop = useCallback(
@@ -639,6 +854,16 @@ function InnerEtherCanvas(
         >
           {showMiniMap ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
         </button>
+        <button
+          type="button"
+          aria-label="Link reference image"
+          data-testid="canvas-link-reference"
+          onClick={linkReferenceImage}
+          disabled={!projectId}
+          title={projectId ? "Link reference image" : "Open a project to link references"}
+        >
+          <ImagePlus size={16} aria-hidden="true" />
+        </button>
         <button type="button" aria-label="Connect first valid pair" onClick={connectFirstValidPair}>
           <Link2 size={16} aria-hidden="true" />
         </button>
@@ -663,7 +888,9 @@ function InnerEtherCanvas(
           onPreviewEdge={previewEdge}
           onCommitTextEdit={commitTextEdit}
           onRunNode={runNode}
+          onEnsureStoreFolder={ensureStoreFolderForNode}
           onDeleteSelection={deleteSelection}
+          hasOpenProject={Boolean(projectId)}
         />
       </aside>
       <EtherNodeDeleteContext.Provider value={deleteNodeById}>
@@ -735,7 +962,9 @@ function InnerEtherCanvas(
             ? `Selected ${selectedNode.data.title}`
             : selectedEdge
               ? `Selected ${selectedEdge.label}`
-              : "Canvas ready")}
+              : projectId
+                ? "Canvas ready"
+                : "Open a project to link references")}
       </div>
     </div>
   );

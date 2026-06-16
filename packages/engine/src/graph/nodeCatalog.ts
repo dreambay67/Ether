@@ -33,6 +33,13 @@ export type CanvasNodeData = {
   assembledNegativePrompt?: string;
   assembledPromptArtifact?: unknown;
   lastRunAt?: string;
+  assetId?: string;
+  assetKind?: string;
+  assetPath?: string;
+  assetMetadata?: Record<string, unknown>;
+  storeAssetId?: string;
+  storePath?: string;
+  storeMetadata?: Record<string, unknown>;
 };
 
 export type EtherNodeCategory = {

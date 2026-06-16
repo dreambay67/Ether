@@ -22,6 +22,13 @@ test("creates a node from the library and selects it", async ({ page }) => {
   await expect(page.getByTestId("canvas-status")).toContainText("Selected General Prompt");
 });
 
+test("disables reference upload until a project is open", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Link reference image" })).toBeDisabled();
+  await expect(page.getByTestId("canvas-status")).toContainText("Open a project to link references");
+});
+
 test("inspector edits selected node title and label", async ({ page }) => {
   await page.goto("/");
 

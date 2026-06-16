@@ -8,6 +8,15 @@ export { createSnapshot, restoreSnapshot } from "./project/snapshots.js";
 export { runHealthCheck } from "./project/health.js";
 export { REQUIRED_DATABASE_TABLES } from "./project/database.js";
 export {
+  ensureCollectionFolder,
+  ensureDirectoryRoot,
+  linkExternalReference,
+  listAssetMoves,
+  listAssets,
+  moveAssetToCollection,
+  saveGeneratedAsset
+} from "./project/assets.js";
+export {
   NODE_CATEGORIES,
   NODE_CATEGORY_LABELS,
   NODE_DEFINITIONS,
@@ -53,3 +62,14 @@ export type {
   SnapshotRecord,
   SnapshotSlot
 } from "./project/schema.js";
+export type {
+  AssetKind,
+  AssetMoveRecord,
+  AssetRecord,
+  EnsureFolderOptions,
+  LinkExternalReferenceOptions,
+  ListAssetMovesQuery,
+  ListAssetsQuery,
+  MoveAssetToCollectionOptions,
+  SaveGeneratedAssetOptions
+} from "./project/assets.js";

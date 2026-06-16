@@ -1,13 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   createProject,
+  ensureCollectionFolder,
+  ensureDirectoryRoot,
+  type AssetKind,
   type ProjectOpenResult,
+  linkExternalReference,
+  listAssets,
   loadGraph,
   openProject,
   runHealthCheck,
+  saveGeneratedAsset,
   saveGraph
 } from "@ether/engine";
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl";
@@ -18,6 +24,15 @@ const projectChannels = {
   saveGraph: "ether:project:saveGraph",
   loadGraph: "ether:project:loadGraph",
   health: "ether:project:health"
+} as const;
+
+const assetChannels = {
+  selectReferenceImage: "ether:asset:selectReferenceImage",
+  linkDroppedReference: "ether:asset:linkDroppedReference",
+  ensureCollection: "ether:asset:ensureCollection",
+  ensureDirectory: "ether:asset:ensureDirectory",
+  list: "ether:asset:list",
+  saveFakeGenerated: "ether:asset:saveFakeGenerated"
 } as const;
 
 type ProjectSession = ProjectOpenResult & {
@@ -33,6 +48,22 @@ function assertString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function optionalString(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return assertString(value, label);
+}
+
+function assertOptions(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
 }
 
 async function canonicalizeProjectPath(projectPath: string): Promise<string> {
@@ -114,6 +145,87 @@ function registerProjectIpc() {
   });
 }
 
+function registerAssetIpc() {
+  ipcMain.handle(assetChannels.selectReferenceImage, async (_event, projectId: unknown, options?: unknown) => {
+    const projectPath = getRegisteredProjectPath(projectId);
+    const assetOptions =
+      options && typeof options === "object" && !Array.isArray(options)
+        ? (options as Record<string, unknown>)
+        : {};
+    const result = await dialog.showOpenDialog({
+      title: "Link reference image",
+      properties: ["openFile"],
+      filters: [
+        {
+          name: "Images",
+          extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "tif", "tiff"]
+        }
+      ]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return linkExternalReference(projectPath, {
+      filePath: result.filePaths[0],
+      role: optionalString(assetOptions.role, "role")
+    });
+  });
+
+  ipcMain.handle(assetChannels.linkDroppedReference, (_event, projectId: unknown, filePath: unknown, options?: unknown) => {
+    const assetOptions =
+      options && typeof options === "object" && !Array.isArray(options)
+        ? (options as Record<string, unknown>)
+        : {};
+
+    return linkExternalReference(getRegisteredProjectPath(projectId), {
+      filePath: assertString(filePath, "filePath"),
+      role: optionalString(assetOptions.role, "role")
+    });
+  });
+
+  ipcMain.handle(assetChannels.ensureCollection, (_event, projectId: unknown, options: unknown) => {
+    const folderOptions = assertOptions(options, "collection options");
+
+    return ensureCollectionFolder(getRegisteredProjectPath(projectId), {
+      name: assertString(folderOptions.name, "name"),
+      nodeId: optionalString(folderOptions.nodeId, "nodeId")
+    });
+  });
+
+  ipcMain.handle(assetChannels.ensureDirectory, (_event, projectId: unknown, options: unknown) => {
+    const folderOptions = assertOptions(options, "directory options");
+
+    return ensureDirectoryRoot(getRegisteredProjectPath(projectId), {
+      name: assertString(folderOptions.name, "name"),
+      nodeId: optionalString(folderOptions.nodeId, "nodeId")
+    });
+  });
+
+  ipcMain.handle(assetChannels.list, (_event, projectId: unknown, query?: unknown) => {
+    const assetQuery =
+      query && typeof query === "object" && !Array.isArray(query)
+        ? (query as { kind?: unknown })
+        : {};
+
+    return listAssets(getRegisteredProjectPath(projectId), {
+      kind: optionalString(assetQuery.kind, "kind") as AssetKind | undefined
+    });
+  });
+
+  ipcMain.handle(assetChannels.saveFakeGenerated, (_event, projectId: unknown, options: unknown) => {
+    const generatedOptions = assertOptions(options, "generated asset options");
+
+    return saveGeneratedAsset(getRegisteredProjectPath(projectId), {
+      generationNodeId: assertString(generatedOptions.generationNodeId, "generationNodeId"),
+      fileName: assertString(generatedOptions.fileName, "fileName"),
+      content: optionalString(generatedOptions.content, "content") ?? "",
+      mimeType: optionalString(generatedOptions.mimeType, "mimeType")
+    });
+  });
+}
+
 const createMainWindow = () => {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -141,6 +253,7 @@ const createMainWindow = () => {
 };
 
 registerProjectIpc();
+registerAssetIpc();
 
 app.whenReady().then(() => {
   createMainWindow();
