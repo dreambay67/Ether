@@ -49,6 +49,7 @@ const windowsAppsCodexMessage =
   "WindowsApps Codex alias paths are blocked because they can return Access is denied. Configure a real user-local CODEX_CLI_PATH in C:\\Users\\<you>\\.codex\\config.toml.";
 const defaultProcessTimeoutMs = 10 * 60 * 1000;
 const defaultOutputLimitBytes = 1024 * 1024;
+const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export class CodexCliImageProvider implements GenerationProvider {
   readonly descriptor = {
@@ -329,13 +330,13 @@ async function collectOutputArtifacts(outputDir: string, jobId: string): Promise
     throw new Error(`Codex image worker must report the required PNG output at ${expectedPngPath}.`);
   }
 
-  await access(expectedPngPath, constants.R_OK);
+  const content = await readRequiredPngOutput(expectedPngPath);
 
   return [
     {
       fileName: "image.png",
       sourcePath: expectedPngPath,
-      content: await readFile(expectedPngPath),
+      content,
       mimeType: inferMimeType(expectedPngPath),
       metadata: {
         jobId,
@@ -343,6 +344,38 @@ async function collectOutputArtifacts(outputDir: string, jobId: string): Promise
       }
     }
   ];
+}
+
+async function readRequiredPngOutput(filePath: string) {
+  let content: Buffer;
+
+  try {
+    content = await readFile(filePath);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Codex image worker required PNG output was not found: ${filePath}`);
+    }
+
+    throw new Error(
+      `Codex image worker required PNG output could not be read: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  if (!hasPngSignature(content)) {
+    throw new Error(`Codex image worker output is not valid PNG bytes: ${filePath}`);
+  }
+
+  return content;
+}
+
+function hasPngSignature(content: Uint8Array) {
+  if (content.length < pngSignature.length) {
+    return false;
+  }
+
+  return pngSignature.every((byte, index) => content[index] === byte);
 }
 
 async function readCodexWorkerResult(resultPath: string) {

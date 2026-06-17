@@ -58,6 +58,11 @@ function providerInput(projectPath: string): GenerationProviderInput {
   };
 }
 
+const validPngBytes = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.from("ether-test-png")
+]);
+
 describe("generation provider registry", () => {
   it("lists provider capabilities and diagnostics without enabling OpenAI API fallback", async () => {
     const registry = createDefaultProviderRegistry({
@@ -147,7 +152,7 @@ describe("generation provider registry", () => {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
         const imagePath = path.join(outputDir, "image.png");
-        await writeFile(imagePath, "image-bytes");
+        await writeFile(imagePath, validPngBytes);
         await writeFile(
           path.join(outputDir, "result.json"),
           JSON.stringify({
@@ -193,7 +198,7 @@ describe("generation provider registry", () => {
       fileName: "image.png",
       mimeType: "image/png"
     });
-    await expect(readFile(result.artifacts[0]!.sourcePath!, "utf8")).resolves.toBe("image-bytes");
+    await expect(readFile(result.artifacts[0]!.sourcePath!)).resolves.toEqual(validPngBytes);
   });
 
   it("prefers the user Codex config binary over an env alias path", async () => {
@@ -305,6 +310,62 @@ describe("generation provider registry", () => {
     });
 
     await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/image\.png/i);
+  });
+
+  it("rejects Codex image.png outputs that are not PNG bytes", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex prompt.");
+        }
+        const imagePath = path.join(outputDir, "image.png");
+        await writeFile(imagePath, "not a png");
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-1-generation-2",
+            status: "complete",
+            image_path: imagePath,
+            error: null
+          }),
+          "utf8"
+        );
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/not valid PNG bytes/i);
+  });
+
+  it("reports a useful error when Codex result.json points at a missing image.png", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex prompt.");
+        }
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-1-generation-2",
+            status: "complete",
+            image_path: path.join(outputDir, "image.png"),
+            error: null
+          }),
+          "utf8"
+        );
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/required PNG output was not found/i);
   });
 
   it("times out provider child processes with bounded diagnostic output", async () => {
