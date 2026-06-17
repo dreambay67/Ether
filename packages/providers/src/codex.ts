@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, readFileSync } from "node:fs";
-import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sanitizeProviderEnv } from "./env.js";
 import { ProviderUnavailableError } from "./errors.js";
@@ -25,11 +25,18 @@ export type CodexCliImageProviderOptions = {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   fileExists?: (filePath: string) => Promise<boolean> | boolean;
   runner?: ProviderProcessRunner;
+  processTimeoutMs?: number;
+  processOutputLimitBytes?: number;
 };
 
 export type CodexFailureClassification = {
   category: "local-runtime-or-sandbox" | "codex-worker";
   message: string;
+};
+
+export type ProviderProcessOptions = {
+  timeoutMs?: number;
+  outputLimitBytes?: number;
 };
 
 const runtimeFailureHints = [
@@ -40,6 +47,8 @@ const runtimeFailureHints = [
 ];
 const windowsAppsCodexMessage =
   "WindowsApps Codex alias paths are blocked because they can return Access is denied. Configure a real user-local CODEX_CLI_PATH in C:\\Users\\<you>\\.codex\\config.toml.";
+const defaultProcessTimeoutMs = 10 * 60 * 1000;
+const defaultOutputLimitBytes = 1024 * 1024;
 
 export class CodexCliImageProvider implements GenerationProvider {
   readonly descriptor = {
@@ -58,12 +67,22 @@ export class CodexCliImageProvider implements GenerationProvider {
   private readonly env: NodeJS.ProcessEnv | Record<string, string | undefined>;
   private readonly fileExists: (filePath: string) => Promise<boolean> | boolean;
   private readonly runner: ProviderProcessRunner;
+  private readonly processTimeoutMs: number;
+  private readonly processOutputLimitBytes: number;
 
   constructor(options: CodexCliImageProviderOptions = {}) {
     this.env = options.env ?? process.env;
     this.codexCliPath = options.codexCliPath ?? resolveCodexCliPath(this.env);
     this.fileExists = options.fileExists ?? pathExists;
-    this.runner = options.runner ?? runProcess;
+    this.processTimeoutMs = options.processTimeoutMs ?? defaultProcessTimeoutMs;
+    this.processOutputLimitBytes = options.processOutputLimitBytes ?? defaultOutputLimitBytes;
+    this.runner =
+      options.runner ??
+      ((call) =>
+        runProviderProcess(call, {
+          timeoutMs: this.processTimeoutMs,
+          outputLimitBytes: this.processOutputLimitBytes
+        }));
   }
 
   async diagnose(context: ProviderDiagnosticContext = {}): Promise<ProviderDiagnostic> {
@@ -159,10 +178,6 @@ export class CodexCliImageProvider implements GenerationProvider {
     }
 
     const artifacts = await collectOutputArtifacts(job.outputDir, job.jobId);
-
-    if (artifacts.length === 0) {
-      throw new Error(`Codex CLI finished but did not place an image in ${job.outputDir}`);
-    }
 
     return {
       providerId: this.descriptor.id,
@@ -294,26 +309,68 @@ async function createJobPaths(input: GenerationProviderInput) {
 }
 
 async function collectOutputArtifacts(outputDir: string, jobId: string): Promise<GeneratedArtifact[]> {
-  const names = await readdir(outputDir);
-  const imageNames = names
-    .filter((name) => /\.(png|jpe?g|webp|svg)$/i.test(name))
-    .sort((left, right) => left.localeCompare(right));
+  const resultPath = path.join(outputDir, "result.json");
+  const expectedPngPath = path.join(outputDir, "image.png");
+  const result = await readCodexWorkerResult(resultPath);
 
-  return Promise.all(
-    imageNames.map(async (fileName) => {
-      const sourcePath = path.join(outputDir, fileName);
+  if (result.status === "failed") {
+    throw new Error(`Codex image worker failed: ${result.error || "unknown failure"}`);
+  }
 
-      return {
-        fileName,
-        sourcePath,
-        content: await readFile(sourcePath),
-        mimeType: inferMimeType(sourcePath),
-        metadata: {
-          jobId
-        }
-      };
-    })
-  );
+  if (result.status !== "complete") {
+    throw new Error(`Codex image worker returned unsupported status "${result.status}".`);
+  }
+
+  if (!result.image_path) {
+    throw new Error("Codex image worker result.json did not include image_path.");
+  }
+
+  if (path.resolve(result.image_path) !== path.resolve(expectedPngPath)) {
+    throw new Error(`Codex image worker must report the required PNG output at ${expectedPngPath}.`);
+  }
+
+  await access(expectedPngPath, constants.R_OK);
+
+  return [
+    {
+      fileName: "image.png",
+      sourcePath: expectedPngPath,
+      content: await readFile(expectedPngPath),
+      mimeType: inferMimeType(expectedPngPath),
+      metadata: {
+        jobId,
+        workerResult: result
+      }
+    }
+  ];
+}
+
+async function readCodexWorkerResult(resultPath: string) {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(await readFile(resultPath, "utf8")) as unknown;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Codex image worker did not write required result file: ${resultPath}`);
+    }
+
+    throw new Error(
+      `Codex image worker result file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Codex image worker result.json must be an object.");
+  }
+
+  const result = parsed as { status?: unknown; image_path?: unknown; error?: unknown };
+
+  return {
+    status: typeof result.status === "string" ? result.status : "",
+    image_path: typeof result.image_path === "string" ? result.image_path : null,
+    error: typeof result.error === "string" ? result.error : ""
+  };
 }
 
 function resolveCodexCliPath(
@@ -356,32 +413,133 @@ async function pathExists(filePath: string) {
   }
 }
 
-function runProcess(call: ProviderProcessCall): Promise<ProviderProcessResult> {
+export function runProviderProcess(
+  call: ProviderProcessCall,
+  options: ProviderProcessOptions = {}
+): Promise<ProviderProcessResult> {
+  const timeoutMs = options.timeoutMs ?? defaultProcessTimeoutMs;
+  const outputLimitBytes = options.outputLimitBytes ?? defaultOutputLimitBytes;
+
   return new Promise((resolve, reject) => {
+    const stdout = new BoundedTextCapture(outputLimitBytes);
+    const stderr = new BoundedTextCapture(outputLimitBytes);
+    let timedOut = false;
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     const child = spawn(call.command, call.args, {
       cwd: call.cwd,
       env: call.env,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
-    let stdout = "";
-    let stderr = "";
+    const finishReject = (error: Error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      reject(error);
+    };
 
     child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
+      stdout.append(chunk);
     });
     child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
+      stderr.append(chunk);
     });
-    child.on("error", reject);
+    child.on("error", finishReject);
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+
+      if (timedOut) {
+        reject(
+          new Error(
+            [
+              `Provider process timed out after ${timeoutMs} ms: ${call.command}`,
+              `stdout:\n${stdout.toString()}`,
+              `stderr:\n${stderr.toString()}`
+            ].join("\n")
+          )
+        );
+        return;
+      }
+
       resolve({
-        stdout,
-        stderr,
+        stdout: stdout.toString(),
+        stderr: stderr.toString(),
         exitCode: code ?? 1
       });
     });
+
+    timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
   });
+}
+
+class BoundedTextCapture {
+  private readonly limitBytes: number;
+  private readonly headLimitBytes: number;
+  private readonly tailLimitBytes: number;
+  private full = Buffer.alloc(0);
+  private head = Buffer.alloc(0);
+  private tail = Buffer.alloc(0);
+  private totalBytes = 0;
+  private truncated = false;
+
+  constructor(limitBytes: number) {
+    this.limitBytes = Math.max(1, Math.floor(limitBytes));
+    this.headLimitBytes = Math.max(1, Math.ceil(this.limitBytes / 2));
+    this.tailLimitBytes = Math.max(1, Math.floor(this.limitBytes / 2));
+  }
+
+  append(chunk: string | Buffer | Uint8Array) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    this.totalBytes += buffer.length;
+
+    if (!this.truncated) {
+      const next = Buffer.concat([this.full, buffer]);
+
+      if (next.length <= this.limitBytes) {
+        this.full = next;
+        return;
+      }
+
+      this.truncated = true;
+      this.head = next.subarray(0, this.headLimitBytes);
+      this.tail = next.subarray(Math.max(0, next.length - this.tailLimitBytes));
+      this.full = Buffer.alloc(0);
+      return;
+    }
+
+    const combinedTail = Buffer.concat([this.tail, buffer]);
+    this.tail = combinedTail.subarray(Math.max(0, combinedTail.length - this.tailLimitBytes));
+  }
+
+  toString() {
+    if (!this.truncated) {
+      return this.full.toString("utf8");
+    }
+
+    const omittedBytes = Math.max(0, this.totalBytes - this.head.length - this.tail.length);
+
+    return [
+      this.head.toString("utf8"),
+      `\n...[truncated ${omittedBytes} bytes]...\n`,
+      this.tail.toString("utf8")
+    ].join("");
+  }
 }
 
 function sanitizePathSegment(value: string) {

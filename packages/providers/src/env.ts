@@ -9,10 +9,14 @@ export const BLOCKED_OPENAI_ENV_KEYS = [
   "OPENAI_API_VERSION"
 ] as const;
 
+const blockedOpenAiEnvKeys = new Set(BLOCKED_OPENAI_ENV_KEYS.map((key) => key.toLowerCase()));
+
 export function hasBlockedOpenAiEnvKey(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env
 ) {
-  return BLOCKED_OPENAI_ENV_KEYS.some((key) => Boolean(env[key]));
+  return Object.entries(env).some(
+    ([key, value]) => Boolean(value) && blockedOpenAiEnvKeys.has(key.toLowerCase())
+  );
 }
 
 export function sanitizeProviderEnv(
@@ -25,7 +29,7 @@ export function sanitizeProviderEnv(
       continue;
     }
 
-    if ((BLOCKED_OPENAI_ENV_KEYS as readonly string[]).includes(key)) {
+    if (blockedOpenAiEnvKeys.has(key.toLowerCase())) {
       continue;
     }
 

@@ -8,6 +8,9 @@ import {
   classifyCodexCliFailure,
   createDefaultProviderRegistry,
   diagnoseProviderRegistry,
+  hasBlockedOpenAiEnvKey,
+  runProviderProcess,
+  sanitizeProviderEnv,
   type GenerationProviderInput,
   type ProviderProcessCall
 } from "@ether/providers";
@@ -93,6 +96,19 @@ describe("generation provider registry", () => {
     });
   });
 
+  it("detects and strips blocked OpenAI env keys case-insensitively", () => {
+    const env = {
+      openai_api_key: "sk-lowercase",
+      Azure_OpenAI_Endpoint: "https://blocked.example",
+      PATH: "C:\\Windows\\System32"
+    };
+
+    expect(hasBlockedOpenAiEnvKey(env)).toBe(true);
+    expect(sanitizeProviderEnv(env)).toEqual({
+      PATH: "C:\\Windows\\System32"
+    });
+  });
+
   it("produces deterministic fake image artifacts for offline tests", async () => {
     const projectPath = await createTempRoot();
     const provider = new FakeImageProvider();
@@ -118,7 +134,8 @@ describe("generation provider registry", () => {
     const provider = new CodexCliImageProvider({
       codexCliPath: "C:\\Tools\\codex.exe",
       env: {
-        OPENAI_API_KEY: "sk-must-not-leak",
+        openai_api_key: "sk-must-not-leak",
+        Azure_OpenAI_Endpoint: "https://blocked.example",
         PATH: "C:\\Windows\\System32"
       },
       fileExists: async () => true,
@@ -129,7 +146,19 @@ describe("generation provider registry", () => {
         if (!outputDir) {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
-        await writeFile(path.join(outputDir, "codex-result.png"), "image-bytes");
+        const imagePath = path.join(outputDir, "image.png");
+        await writeFile(imagePath, "image-bytes");
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-1-generation-2",
+            status: "complete",
+            image_path: imagePath,
+            error: null,
+            caveats: ""
+          }),
+          "utf8"
+        );
         return { stdout: "{\"ok\":true}", stderr: "", exitCode: 0 };
       }
     });
@@ -156,10 +185,12 @@ describe("generation provider registry", () => {
       ])
     );
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
+    expect(calls[0]?.env.openai_api_key).toBeUndefined();
+    expect(calls[0]?.env.Azure_OpenAI_Endpoint).toBeUndefined();
     expect(calls[0]?.args.join(" ")).not.toContain("sk-must-not-leak");
     expect(calls[0]?.args.at(-1)).toContain("Do not use OPENAI_API_KEY");
     expect(result.artifacts[0]).toMatchObject({
-      fileName: "codex-result.png",
+      fileName: "image.png",
       mimeType: "image/png"
     });
     await expect(readFile(result.artifacts[0]!.sourcePath!, "utf8")).resolves.toBe("image-bytes");
@@ -214,6 +245,108 @@ describe("generation provider registry", () => {
     });
     await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/WindowsApps.*blocked/i);
     expect(calls).toEqual([]);
+  });
+
+  it("rejects Codex worker failure results even when an image file exists", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex prompt.");
+        }
+        const imagePath = path.join(outputDir, "image.png");
+        await writeFile(imagePath, "image-bytes");
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-1-generation-2",
+            status: "failed",
+            image_path: null,
+            error: "native image generation unavailable"
+          }),
+          "utf8"
+        );
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(
+      /native image generation unavailable/i
+    );
+  });
+
+  it("requires the Codex worker result contract to point at image.png", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex prompt.");
+        }
+        const imagePath = path.join(outputDir, "image.webp");
+        await writeFile(imagePath, "image-bytes");
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-1-generation-2",
+            status: "complete",
+            image_path: imagePath,
+            error: null
+          }),
+          "utf8"
+        );
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/image\.png/i);
+  });
+
+  it("times out provider child processes with bounded diagnostic output", async () => {
+    await expect(
+      runProviderProcess(
+        {
+          command: process.execPath,
+          args: ["-e", "process.stdout.write('start-' + 'x'.repeat(10000)); setTimeout(() => {}, 1000);"],
+          cwd: process.cwd(),
+          env: {}
+        },
+        {
+          timeoutMs: 50,
+          outputLimitBytes: 64
+        }
+      )
+    ).rejects.toThrow(/timed out/i);
+  });
+
+  it("bounds provider child process stdout and stderr capture", async () => {
+    const result = await runProviderProcess(
+      {
+        command: process.execPath,
+        args: [
+          "-e",
+          "process.stdout.write('out-' + 'a'.repeat(200)); process.stderr.write('err-' + 'b'.repeat(200));"
+        ],
+        cwd: process.cwd(),
+        env: {}
+      },
+      {
+        timeoutMs: 5000,
+        outputLimitBytes: 64
+      }
+    );
+
+    expect(result.stdout.length).toBeLessThan(180);
+    expect(result.stderr.length).toBeLessThan(180);
+    expect(result.stdout).toContain("out-");
+    expect(result.stdout).toContain("[truncated");
+    expect(result.stderr).toContain("err-");
+    expect(result.stderr).toContain("[truncated");
   });
 
   it("classifies Codex local state failures separately from prompt or generation failures", () => {

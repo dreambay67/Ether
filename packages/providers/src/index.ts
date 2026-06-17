@@ -2,8 +2,10 @@ export {
   CODEX_PROVIDER_ID,
   CodexCliImageProvider,
   classifyCodexCliFailure,
+  runProviderProcess,
   type CodexCliImageProviderOptions,
-  type CodexFailureClassification
+  type CodexFailureClassification,
+  type ProviderProcessOptions
 } from "./codex.js";
 export {
   BLOCKED_OPENAI_ENV_KEYS,
