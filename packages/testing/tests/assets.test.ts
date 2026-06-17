@@ -73,6 +73,34 @@ describe("asset service", () => {
     ]);
   });
 
+  it("preserves all linked-index entries from concurrent external reference links", async () => {
+    const parentDirectory = await createTempRoot();
+    const externalDirectory = path.join(parentDirectory, "external-concurrent");
+    const project = await createProject({ parentDirectory, name: "Concurrent References" });
+    const referencePaths = Array.from({ length: 16 }, (_value, index) =>
+      path.join(externalDirectory, `reference-${index}.png`)
+    );
+
+    await mkdir(externalDirectory);
+    await Promise.all(
+      referencePaths.map((referencePath, index) => writeFile(referencePath, `reference ${index}`))
+    );
+
+    const assets = await Promise.all(
+      referencePaths.map((referencePath) => linkExternalReference(project.path, { filePath: referencePath }))
+    );
+    const linkedIndex = JSON.parse(
+      await readFile(path.join(project.path, "assets", "references", "linked-index.json"), "utf8")
+    ) as { references: Array<{ id: string; path: string }> };
+
+    expect(linkedIndex.references.map((reference) => reference.id).sort()).toEqual(
+      assets.map((asset) => asset.id).sort()
+    );
+    expect(linkedIndex.references.map((reference) => reference.path).sort()).toEqual(
+      referencePaths.sort()
+    );
+  });
+
   it("saves generated output under a dated generation-node directory and records lineage", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Generated Output" });
@@ -185,6 +213,39 @@ describe("asset service", () => {
         reason: "filter-accepted"
       })
     ]);
+  });
+
+  it("moves concurrent generated assets with the same basename into distinct collection files", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Concurrent Collection Moves" });
+    const first = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation-node-1",
+      fileName: "keeper.png",
+      content: "first keeper",
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+    const second = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation-node-2",
+      fileName: "keeper.png",
+      content: "second keeper",
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+    const collection = await ensureCollectionFolder(project.path, { name: "Concurrent Keepers" });
+
+    const moved = await Promise.all(
+      [first, second].map((asset) =>
+        moveAssetToCollection(project.path, {
+          assetId: asset.id,
+          collectionId: collection.id,
+          reason: "concurrent-move"
+        })
+      )
+    );
+    const movedContents = await Promise.all(moved.map((asset) => readFile(asset.path, "utf8")));
+
+    expect(new Set(moved.map((asset) => asset.path)).size).toBe(2);
+    expect(moved.map((asset) => path.dirname(asset.path))).toEqual([collection.path, collection.path]);
+    expect(movedContents.sort()).toEqual(["first keeper", "second keeper"]);
   });
 
   it("refuses to move external linked references by default", async () => {
@@ -309,6 +370,39 @@ describe("asset service", () => {
     ).rejects.toThrow("Collection path must stay inside the project collections directory.");
 
     await expect(readFile(generated.path, "utf8")).resolves.toBe("linked guard");
+  });
+
+  it("rejects collection moves when the project collections root resolves outside the project", async () => {
+    const parentDirectory = await createTempRoot();
+    const outsideCollectionsDirectory = path.join(parentDirectory, "outside-collections-root");
+    const project = await createProject({ parentDirectory, name: "Linked Collections Root" });
+    const collectionsDirectory = path.join(project.path, "collections");
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation-node-1",
+      fileName: "root-linked.png",
+      content: "root linked guard",
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+
+    await mkdir(outsideCollectionsDirectory);
+    await rm(collectionsDirectory, { recursive: true, force: true });
+
+    try {
+      await symlink(outsideCollectionsDirectory, collectionsDirectory, "junction");
+    } catch {
+      return;
+    }
+
+    const collection = await ensureCollectionFolder(project.path, { name: "Root Linked Collection" });
+
+    await expect(
+      moveAssetToCollection(project.path, {
+        assetId: generated.id,
+        collectionId: collection.id
+      })
+    ).rejects.toThrow("Collection path must stay inside the project collections directory.");
+
+    await expect(readFile(generated.path, "utf8")).resolves.toBe("root linked guard");
   });
 
   it("allocates generated output paths uniquely under concurrent saves", async () => {

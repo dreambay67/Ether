@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { constants, renameSync } from "node:fs";
+import { constants, renameSync, unlinkSync } from "node:fs";
 import { access, mkdir, open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { initializeDatabase } from "./database.js";
@@ -88,6 +88,8 @@ type AssetMoveRow = {
   moved_at: string;
 };
 
+const linkedIndexLocks = new Map<string, Promise<void>>();
+
 export async function linkExternalReference(
   projectPath: string,
   options: LinkExternalReferenceOptions
@@ -98,28 +100,30 @@ export async function linkExternalReference(
   const referencePath = path.resolve(options.filePath);
   await assertReadableFile(referencePath, "Reference path");
 
-  const now = toTimestamp(options.now);
-  const asset = insertAsset(paths.database, {
-    id: randomUUID(),
-    kind: "reference",
-    path: referencePath,
-    metadata: {
-      ...options.metadata,
-      role: options.role ?? "reference",
-      linkMode: options.linkMode ?? "linked",
-      originalName: path.basename(referencePath),
-      mimeType: options.mimeType ?? inferMimeType(referencePath)
-    },
-    now
-  });
+  return withLinkedIndexLock(paths.linkedIndex, async () => {
+    const now = toTimestamp(options.now);
+    const asset = insertAsset(paths.database, {
+      id: randomUUID(),
+      kind: "reference",
+      path: referencePath,
+      metadata: {
+        ...options.metadata,
+        role: options.role ?? "reference",
+        linkMode: options.linkMode ?? "linked",
+        originalName: path.basename(referencePath),
+        mimeType: options.mimeType ?? inferMimeType(referencePath)
+      },
+      now
+    });
 
-  await appendLinkedReference(paths.linkedIndex, {
-    id: asset.id,
-    path: referencePath,
-    linkedAt: now
-  });
+    await appendLinkedReference(paths.linkedIndex, {
+      id: asset.id,
+      path: referencePath,
+      linkedAt: now
+    });
 
-  return asset;
+    return asset;
+  });
 }
 
 export async function saveGeneratedAsset(
@@ -248,14 +252,16 @@ export async function moveAssetToCollection(
   await assertCollectionPathReallyInsideProject(projectPath, collection.path);
 
   const now = toTimestamp(options.now);
-  const toPath = await nextAvailablePath(path.join(collection.path, path.basename(asset.path)));
+  const toPath = await reserveAvailablePath(path.join(collection.path, path.basename(asset.path)));
   const moveId = randomUUID();
   const db = new Database(paths.database);
   let physicallyMoved = false;
+  let reservationStillExists = true;
 
   try {
     renameSync(asset.path, toPath);
     physicallyMoved = true;
+    reservationStillExists = false;
 
     const moveAsset = db.transaction(() => {
       db.prepare(
@@ -283,6 +289,12 @@ export async function moveAssetToCollection(
         renameSync(toPath, asset.path);
       } catch {
         // If recovery fails, preserve the original DB error so callers know the durable commit failed.
+      }
+    } else if (reservationStillExists) {
+      try {
+        unlinkSync(toPath);
+      } catch {
+        // Best-effort cleanup for an unused destination reservation.
       }
     }
 
@@ -504,6 +516,28 @@ async function appendLinkedReference(
   await writeJson(linkedIndexPath, { references });
 }
 
+async function withLinkedIndexLock<T>(linkedIndexPath: string, task: () => Promise<T>): Promise<T> {
+  const key = path.resolve(linkedIndexPath);
+  const previous = linkedIndexLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current, () => current);
+
+  linkedIndexLocks.set(key, queued);
+  await previous.catch(() => undefined);
+
+  try {
+    return await task();
+  } finally {
+    release();
+    if (linkedIndexLocks.get(key) === queued) {
+      linkedIndexLocks.delete(key);
+    }
+  }
+}
+
 async function assertReadableFile(filePath: string, label: string) {
   await access(filePath, constants.R_OK);
   const stats = await stat(filePath);
@@ -560,6 +594,32 @@ async function writeFileToAvailablePath(basePath: string, content: string | Uint
   throw new Error(`Could not find an available file path for ${basePath}`);
 }
 
+async function reserveAvailablePath(basePath: string) {
+  const directory = path.dirname(basePath);
+  const extension = path.extname(basePath);
+  const name = path.basename(basePath, extension);
+
+  for (let index = 1; index < 10000; index += 1) {
+    const candidate = index === 1 ? basePath : path.join(directory, `${name}-${index}${extension}`);
+    let fileHandle: Awaited<ReturnType<typeof open>> | null = null;
+
+    try {
+      fileHandle = await open(candidate, "wx");
+      return candidate;
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "EEXIST")) {
+        continue;
+      }
+
+      throw error;
+    } finally {
+      await fileHandle?.close();
+    }
+  }
+
+  throw new Error(`Could not reserve an available file path for ${basePath}`);
+}
+
 async function exists(filePath: string) {
   try {
     await access(filePath, constants.F_OK);
@@ -613,7 +673,8 @@ function assertCollectionPathLexicallyInsideProject(projectPath: string, collect
 
 async function assertCollectionPathReallyInsideProject(projectPath: string, collectionPath: string) {
   const collectionsDirectory = path.join(projectPath, "collections");
-  const [realCollectionsDirectory, realCollectionPath] = await Promise.all([
+  const [realProjectRoot, realCollectionsDirectory, realCollectionPath] = await Promise.all([
+    realpath(projectPath),
     realpath(collectionsDirectory),
     realpath(collectionPath)
   ]);
@@ -621,6 +682,7 @@ async function assertCollectionPathReallyInsideProject(projectPath: string, coll
 
   if (
     !collectionStats.isDirectory() ||
+    !isPathInsideDirectory(realCollectionsDirectory, realProjectRoot) ||
     !isPathInsideDirectory(realCollectionPath, realCollectionsDirectory)
   ) {
     throw new Error("Collection path must stay inside the project collections directory.");
