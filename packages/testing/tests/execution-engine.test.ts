@@ -189,6 +189,40 @@ describe("execution planning", () => {
     expect(executionIds(plan.items)).toEqual(["prompt:1", "generation-a:1", "generation-b:1"]);
   });
 
+  it("keeps later generation jobs behind intervening dependencies when capped", () => {
+    const canvas = graph(
+      [
+        node("generation-a", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        }),
+        node("edit", {
+          definitionId: "edit-crop",
+          kind: "Edit",
+          subtype: "Crop"
+        }),
+        node("generation-b", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [
+        edge("edge-generation-a-edit", "generation-a", "edit", "result"),
+        edge("edge-edit-generation-b", "edit", "generation-b", "prompt")
+      ]
+    );
+
+    const plan = planExecution(canvas, {
+      policy: "branch",
+      targetNodeIds: ["generation-a"],
+      runCountCap: 2
+    });
+
+    expect(executionIds(plan.items)).toEqual(["generation-a:1", "edit:1", "generation-b:1"]);
+  });
+
   it("runs queue items sequentially by default and in parallel when requested", async () => {
     const items: ExecutionQueueItem[] = [
       { nodeId: "first", iteration: 1 },
@@ -285,6 +319,65 @@ describe("execution planning", () => {
     releaseSameSecond();
     releaseOther();
     await expect(parallelRun).resolves.toEqual(["same:1", "same:2", "other:1"]);
+  });
+
+  it("runs parallel queue groups by dependency layer", async () => {
+    const starts: string[] = [];
+    let releaseFirst = () => undefined;
+    let releaseSecond = () => undefined;
+    let releaseDownstream = () => undefined;
+    const waitForFirst = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const waitForSecond = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const waitForDownstream = new Promise<void>((resolve) => {
+      releaseDownstream = resolve;
+    });
+    const options = {
+      parallel: true,
+      dependencies: new Map([["downstream", ["first", "second"]]])
+    };
+
+    const parallelRun = runExecutionQueue(
+      [
+        { nodeId: "first", iteration: 1 },
+        { nodeId: "second", iteration: 1 },
+        { nodeId: "downstream", iteration: 1 }
+      ],
+      async (item) => {
+        starts.push(item.nodeId);
+
+        if (item.nodeId === "first") {
+          await waitForFirst;
+        }
+        if (item.nodeId === "second") {
+          await waitForSecond;
+        }
+        if (item.nodeId === "downstream") {
+          await waitForDownstream;
+        }
+
+        return item.nodeId;
+      },
+      options
+    );
+
+    await Promise.resolve();
+    expect([...starts].sort()).toEqual(["first", "second"]);
+
+    releaseFirst();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([...starts].sort()).toEqual(["first", "second"]);
+
+    releaseSecond();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect([...starts].sort()).toEqual(["downstream", "first", "second"]);
+
+    releaseDownstream();
+    await expect(parallelRun).resolves.toEqual(["first", "second", "downstream"]);
   });
 });
 
@@ -546,6 +639,45 @@ describe("fake local execution", () => {
       assembledPrompt: "revised prompt"
     });
     expect(rerunGeneration?.data?.staleSince).toBeUndefined();
+  });
+
+  it("preserves linked Reference assets when marking an edited reference stale", () => {
+    const canvas = graph(
+      [
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          status: "complete",
+          assetId: "reference-asset-1",
+          assetKind: "reference",
+          assetPath: "C:\\Project\\assets\\references\\reference.png",
+          assetMetadata: {
+            source: "linked-file"
+          }
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [edge("edge-reference-generation", "reference", "generation", "reference")]
+    );
+
+    const staleGraph = markDownstreamStale(canvas, ["reference"], "2026-06-17T16:30:00.000Z");
+    const staleReference = staleGraph.nodes.find((candidate) => candidate.id === "reference");
+
+    expect(staleReference?.data).toMatchObject({
+      rerunState: "stale",
+      staleSince: "2026-06-17T16:30:00.000Z",
+      assetId: "reference-asset-1",
+      assetKind: "reference",
+      assetPath: "C:\\Project\\assets\\references\\reference.png",
+      assetMetadata: {
+        source: "linked-file"
+      }
+    });
   });
 
   it("skips unsupported selected nodes without marking them complete and records the skip", async () => {

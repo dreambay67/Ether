@@ -63,6 +63,7 @@ function markChangedNodeStale(data: Partial<CanvasNodeData> | undefined, now: st
     data?.rerunState === "stale" ||
     data?.status === "complete" ||
     hasExecutionArtifact(data);
+  const preserveLinkedAsset = data?.kind === "Reference";
   const next: Partial<CanvasNodeData> = {
     ...data,
     rerunState: shouldMarkStale ? "stale" : "ready",
@@ -72,10 +73,10 @@ function markChangedNodeStale(data: Partial<CanvasNodeData> | undefined, now: st
     assembledNegativePrompt: undefined,
     assembledPromptArtifact: undefined,
     lastRunAt: undefined,
-    assetId: undefined,
-    assetKind: undefined,
-    assetPath: undefined,
-    assetMetadata: undefined,
+    assetId: preserveLinkedAsset ? data?.assetId : undefined,
+    assetKind: preserveLinkedAsset ? data?.assetKind : undefined,
+    assetPath: preserveLinkedAsset ? data?.assetPath : undefined,
+    assetMetadata: preserveLinkedAsset ? data?.assetMetadata : undefined,
     storeAssetId: undefined,
     storePath: undefined,
     storeMetadata: undefined,

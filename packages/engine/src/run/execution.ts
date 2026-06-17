@@ -33,6 +33,8 @@ export type ExecutionQueueItem = {
   iteration: number;
 };
 
+export type ExecutionQueueDependencies = Map<string, string[]> | Record<string, string[]>;
+
 export type ExecutionPlan = {
   policy: ExecutionPolicy;
   targetNodeIds: string[];
@@ -114,25 +116,39 @@ export function planExecution(graph: EtherGraph, request: ExecutionRequest): Exe
 export async function runExecutionQueue<T>(
   items: ExecutionQueueItem[],
   runner: (item: ExecutionQueueItem) => Promise<T>,
-  options: { parallel?: boolean } = {}
+  options: { parallel?: boolean; dependencies?: ExecutionQueueDependencies } = {}
 ): Promise<T[]> {
   if (options.parallel) {
     const results = new Array<T>(items.length);
-    const groups = new Map<string, Array<{ item: ExecutionQueueItem; index: number }>>();
+    const groups = groupQueueItems(items);
+    const dependencies = normalizeQueueDependencies(options.dependencies, groups);
+    const completed = new Set<string>();
+    const pending = new Set(groups.keys());
 
-    items.forEach((item, index) => {
-      const group = groups.get(item.nodeId) ?? [];
-      group.push({ item, index });
-      groups.set(item.nodeId, group);
-    });
+    while (pending.size > 0) {
+      const readyGroupIds = [...pending].filter((nodeId) =>
+        (dependencies.get(nodeId) ?? []).every((dependencyId) => completed.has(dependencyId))
+      );
 
-    await Promise.all(
-      [...groups.values()].map(async (group) => {
-        for (const { item, index } of group) {
-          results[index] = await runner(item);
-        }
-      })
-    );
+      if (readyGroupIds.length === 0) {
+        throw new Error("Execution queue has cyclic or unsatisfied dependencies");
+      }
+
+      await Promise.all(
+        readyGroupIds.map(async (nodeId) => {
+          const group = groups.get(nodeId) ?? [];
+
+          for (const { item, index } of group) {
+            results[index] = await runner(item);
+          }
+        })
+      );
+
+      for (const nodeId of readyGroupIds) {
+        pending.delete(nodeId);
+        completed.add(nodeId);
+      }
+    }
 
     return results;
   }
@@ -146,6 +162,51 @@ export async function runExecutionQueue<T>(
   return results;
 }
 
+function groupQueueItems(items: ExecutionQueueItem[]) {
+  const groups = new Map<string, Array<{ item: ExecutionQueueItem; index: number }>>();
+
+  items.forEach((item, index) => {
+    const group = groups.get(item.nodeId) ?? [];
+    group.push({ item, index });
+    groups.set(item.nodeId, group);
+  });
+
+  return groups;
+}
+
+function normalizeQueueDependencies(
+  dependencies: ExecutionQueueDependencies | undefined,
+  groups: Map<string, Array<{ item: ExecutionQueueItem; index: number }>>
+) {
+  const groupIds = new Set(groups.keys());
+  const normalized = new Map<string, string[]>();
+
+  for (const nodeId of groupIds) {
+    normalized.set(nodeId, []);
+  }
+
+  if (!dependencies) {
+    return normalized;
+  }
+
+  const entries = dependencies instanceof Map ? dependencies.entries() : Object.entries(dependencies);
+
+  for (const [nodeId, dependencyIds] of entries) {
+    if (!groupIds.has(nodeId)) {
+      continue;
+    }
+
+    normalized.set(
+      nodeId,
+      uniqueInOrder(dependencyIds).filter(
+        (dependencyId) => dependencyId !== nodeId && groupIds.has(dependencyId)
+      )
+    );
+  }
+
+  return normalized;
+}
+
 export async function executeGraphRun(
   projectPath: string,
   graph: EtherGraph,
@@ -156,7 +217,7 @@ export async function executeGraphRun(
   const results = await runExecutionQueue(
     plan.items,
     (item) => executeQueueItem(projectPath, state, request, item),
-    { parallel: plan.parallel }
+    { parallel: plan.parallel, dependencies: queueDependenciesForPlan(graph, plan.items) }
   );
 
   return {
@@ -227,11 +288,12 @@ function createQueueItems(
   runCountCap?: number
 ): ExecutionQueueItem[] {
   const items: ExecutionQueueItem[] = [];
-  const generationNodeIds = nodeIds.filter((nodeId) => findNode(graph, nodeId).data?.kind === "Generation");
+  const generationNodeIds = nodeIds.filter(
+    (nodeId) => findNode(graph, nodeId).data?.kind === "Generation"
+  );
   const generationBudget =
     typeof runCountCap === "number" ? Math.max(0, Math.floor(runCountCap)) : undefined;
-  const generationJobs = createGenerationJobs(generationNodeIds, generationBudget);
-  let insertedGenerationJobs = false;
+  const generationCounts = createGenerationJobCounts(generationNodeIds, generationBudget);
 
   for (const nodeId of nodeIds) {
     const node = findNode(graph, nodeId);
@@ -241,43 +303,72 @@ function createQueueItems(
       continue;
     }
 
-    if (!insertedGenerationJobs) {
-      items.push(...generationJobs);
-      insertedGenerationJobs = true;
+    const repetitions = generationCounts.get(nodeId) ?? 0;
+
+    for (let iteration = 1; iteration <= repetitions; iteration += 1) {
+      items.push({ nodeId, iteration });
     }
   }
 
   return items;
 }
 
-function createGenerationJobs(
+function createGenerationJobCounts(
   generationNodeIds: string[],
   generationBudget?: number
-): ExecutionQueueItem[] {
+): Map<string, number> {
+  const counts = new Map(generationNodeIds.map((nodeId) => [nodeId, 0]));
+
   if (generationNodeIds.length === 0) {
-    return [];
+    return counts;
   }
 
   if (generationBudget === undefined) {
-    return generationNodeIds.map((nodeId) => ({ nodeId, iteration: 1 }));
+    return new Map(generationNodeIds.map((nodeId) => [nodeId, 1]));
   }
 
-  const jobs: ExecutionQueueItem[] = [];
-  const iterationsByNode = new Map<string, number>();
+  let allocated = 0;
 
-  while (jobs.length < generationBudget) {
+  while (allocated < generationBudget) {
     for (const nodeId of generationNodeIds) {
-      if (jobs.length >= generationBudget) {
+      if (allocated >= generationBudget) {
         break;
       }
 
-      const nextIteration = (iterationsByNode.get(nodeId) ?? 0) + 1;
-      iterationsByNode.set(nodeId, nextIteration);
-      jobs.push({ nodeId, iteration: nextIteration });
+      counts.set(nodeId, (counts.get(nodeId) ?? 0) + 1);
+      allocated += 1;
     }
   }
 
-  return jobs;
+  return counts;
+}
+
+function queueDependenciesForPlan(graph: EtherGraph, items: ExecutionQueueItem[]) {
+  const plannedNodeIds = uniqueInOrder(items.map((item) => item.nodeId));
+  const planned = new Set(plannedNodeIds);
+  const planIndexes = new Map(plannedNodeIds.map((nodeId, index) => [nodeId, index]));
+  const dependencies = new Map(plannedNodeIds.map((nodeId) => [nodeId, [] as string[]]));
+
+  for (const edge of edgesOf(graph)) {
+    if (!planned.has(edge.source) || !planned.has(edge.target) || edge.source === edge.target) {
+      continue;
+    }
+
+    dependencies.get(edge.target)?.push(edge.source);
+  }
+
+  for (const [nodeId, dependencyIds] of dependencies) {
+    dependencies.set(
+      nodeId,
+      uniqueInOrder(dependencyIds).sort(
+        (left, right) =>
+          (planIndexes.get(left) ?? Number.MAX_SAFE_INTEGER) -
+          (planIndexes.get(right) ?? Number.MAX_SAFE_INTEGER)
+      )
+    );
+  }
+
+  return dependencies;
 }
 
 async function executeQueueItem(
