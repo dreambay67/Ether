@@ -201,6 +201,7 @@ export async function saveMaskAsset(
 
   assertPathInsideDirectory(outputDirectory, masksDirectory, "Mask output directory");
   await mkdir(outputDirectory, { recursive: true });
+  await assertMaskPathReallyInsideProject(projectPath, masksDirectory, outputDirectory);
 
   const outputPath = await writeFileToAvailablePath(
     path.join(outputDirectory, safeFileName),
@@ -756,6 +757,27 @@ async function assertCollectionPathReallyInsideProject(projectPath: string, coll
     !isPathInsideDirectory(realCollectionPath, realCollectionsDirectory)
   ) {
     throw new Error("Collection path must stay inside the project collections directory.");
+  }
+}
+
+async function assertMaskPathReallyInsideProject(
+  projectPath: string,
+  masksDirectory: string,
+  outputDirectory: string
+) {
+  const [realProjectRoot, realMasksDirectory, realOutputDirectory] = await Promise.all([
+    realpath(projectPath),
+    realpath(masksDirectory),
+    realpath(outputDirectory)
+  ]);
+  const outputStats = await stat(realOutputDirectory);
+
+  if (
+    !outputStats.isDirectory() ||
+    !isPathInsideDirectory(realMasksDirectory, realProjectRoot) ||
+    !isPathInsideDirectory(realOutputDirectory, realMasksDirectory)
+  ) {
+    throw new Error("Mask asset path must stay inside the project masks directory.");
   }
 }
 

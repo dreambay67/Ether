@@ -11,6 +11,7 @@ import {
   planExecution,
   runExecutionQueue,
   saveGeneratedAsset,
+  saveMaskAsset,
   type CanvasNodeData,
   type EtherGraph,
   type ExecutionQueueItem
@@ -491,6 +492,137 @@ describe("fake local execution", () => {
       }
     });
     await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain("ETHER_FAKE_EDITED_IMAGE");
+  });
+
+  it("uses freshly rerun upstream image and mask assets before cached edit fields", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Fresh Edit Inputs" });
+    const staleParentAsset = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "stale-parent.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>stale parent</title></svg>",
+      mimeType: "image/svg+xml",
+      now: new Date("2026-06-17T11:00:00.000Z")
+    });
+    const staleMaskAsset = await saveMaskAsset(project.path, {
+      editNodeId: "edit",
+      sourceAssetId: staleParentAsset.id,
+      sourceAssetPath: staleParentAsset.path,
+      fileName: "stale-mask.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>stale mask</title></svg>",
+      mimeType: "image/svg+xml",
+      now: new Date("2026-06-17T11:05:00.000Z")
+    });
+    const liveMaskAsset = await saveMaskAsset(project.path, {
+      editNodeId: "mask-source",
+      sourceAssetId: "live-mask-source",
+      sourceAssetPath: path.join(project.path, "assets", "generated", "live.svg"),
+      fileName: "live-mask.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>live mask</title></svg>",
+      mimeType: "image/svg+xml",
+      metadata: { overlay: "fresh upstream mask" },
+      now: new Date("2026-06-17T11:10:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "fresh parent image prompt"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: staleParentAsset.id,
+          assetKind: staleParentAsset.kind,
+          assetPath: staleParentAsset.path,
+          assetMetadata: staleParentAsset.metadata
+        }),
+        node("mask-source", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          status: "complete",
+          assetId: liveMaskAsset.id,
+          assetKind: liveMaskAsset.kind,
+          assetPath: liveMaskAsset.path,
+          assetMetadata: liveMaskAsset.metadata
+        }),
+        node("edit", {
+          definitionId: "edit-inpaint",
+          kind: "Edit",
+          subtype: "Inpaint",
+          instruction: "repair using the fresh source",
+          sourceAssetId: staleParentAsset.id,
+          sourceAssetKind: staleParentAsset.kind,
+          sourceAssetPath: staleParentAsset.path,
+          sourceAssetMetadata: staleParentAsset.metadata,
+          maskAssetId: staleMaskAsset.id,
+          maskAssetPath: staleMaskAsset.path,
+          maskMetadata: staleMaskAsset.metadata
+        } as any)
+      ],
+      [
+        edge("edge-prompt-generation", "prompt", "generation", "prompt"),
+        edge("edge-generation-edit", "generation", "edit", "image"),
+        edge("edge-mask-edit", "mask-source", "edit", "mask")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "refresh-upstream",
+      targetNodeIds: ["edit"],
+      now: () => new Date("2026-06-17T12:00:00.000Z")
+    });
+    const generationResult = result.results.find((entry) => entry.nodeId === "generation");
+    const editResult = result.results.find((entry) => entry.nodeId === "edit");
+    const editNode = result.graph.nodes.find((candidate) => candidate.id === "edit");
+    const generatedAssets = await listAssets(project.path, { kind: "generated" });
+    const freshParentAsset = generatedAssets.find((asset) => asset.id === generationResult?.assetId);
+    const editedAsset = generatedAssets.find((asset) => asset.id === editResult?.assetId);
+
+    expect(freshParentAsset?.id).toBeDefined();
+    expect(freshParentAsset?.id).not.toBe(staleParentAsset.id);
+    expect(editResult).toMatchObject({
+      status: "complete",
+      metadata: {
+        sourceAsset: {
+          id: freshParentAsset?.id,
+          path: freshParentAsset?.path
+        },
+        mask: {
+          assetId: liveMaskAsset.id,
+          assetPath: liveMaskAsset.path
+        }
+      }
+    });
+    expect(editNode?.data).toMatchObject({
+      sourceAssetId: freshParentAsset?.id,
+      sourceAssetPath: freshParentAsset?.path,
+      maskAssetId: liveMaskAsset.id,
+      maskAssetPath: liveMaskAsset.path
+    });
+    expect(editedAsset?.metadata).toMatchObject({
+      sourceAssetId: freshParentAsset?.id,
+      sourceAssetPath: freshParentAsset?.path,
+      maskAssetId: liveMaskAsset.id,
+      maskAssetPath: liveMaskAsset.path,
+      lineage: {
+        parent: {
+          assetId: freshParentAsset?.id,
+          assetPath: freshParentAsset?.path
+        },
+        mask: {
+          assetId: liveMaskAsset.id,
+          assetPath: liveMaskAsset.path
+        }
+      }
+    });
+    await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain(freshParentAsset!.id);
+    await expect(readFile(editedAsset!.path, "utf8")).resolves.not.toContain(staleParentAsset.id);
   });
 
   it("reports a missing edit provider without writing generated edit assets", async () => {

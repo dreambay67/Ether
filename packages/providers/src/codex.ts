@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants, readFileSync } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -719,8 +719,10 @@ export function runProviderProcess(
     const child = spawn(call.command, call.args, {
       cwd: call.cwd,
       env: call.env,
+      detached: process.platform !== "win32",
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
     });
     const finishReject = (error: Error) => {
       if (settled) {
@@ -773,9 +775,36 @@ export function runProviderProcess(
 
     timeout = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      terminateProviderProcessTree(child);
     }, timeoutMs);
   });
+}
+
+function terminateProviderProcessTree(child: ChildProcess) {
+  const pid = child.pid;
+
+  if (!pid) {
+    child.kill("SIGKILL");
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+
+    killer.on("error", () => {
+      child.kill();
+    });
+    return;
+  }
+
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    child.kill("SIGKILL");
+  }
 }
 
 class BoundedTextCapture {

@@ -1026,8 +1026,8 @@ function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAss
   const sections: PromptSectionArtifact[] = [];
   const references: GenerationReferenceInput[] = [];
   const edgeRoles: EdgeRoleArtifact[] = [];
-  let sourceImage = sourceImageFromNodeData(editNode.data);
-  let mask = maskFromNodeData(editNode.data);
+  let sourceImage: ImageEditSourceInput | null = null;
+  let mask: ImageEditMaskInput = null;
 
   for (const edge of incomingEdges(graph, editNodeId)) {
     const source = findNode(graph, edge.source);
@@ -1054,6 +1054,14 @@ function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAss
       references.push(reference);
       edgeRoles.push({ edgeId: edge.id, role: reference.role });
     }
+  }
+
+  if (!sourceImage) {
+    sourceImage = sourceImageFromNodeData(editNode.data);
+  }
+
+  if (!mask) {
+    mask = maskFromNodeData(editNode.data);
   }
 
   if (!sourceImage) {

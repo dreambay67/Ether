@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,6 +26,29 @@ async function createTempRoot() {
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+async function waitForCondition(condition: () => boolean | Promise<boolean>, timeoutMs = 3000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await condition()) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  return false;
+}
+
+function isProcessRunning(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function providerInput(projectPath: string): GenerationProviderInput {
   return {
@@ -468,6 +491,55 @@ describe("generation provider registry", () => {
         }
       )
     ).rejects.toThrow(/timed out/i);
+  });
+
+  it("terminates provider process trees after timeout", async () => {
+    const projectPath = await createTempRoot();
+    const childPidPath = path.join(projectPath, "child.pid");
+    const parentScript = `
+      const { spawn } = require("node:child_process");
+      const { writeFileSync } = require("node:fs");
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000);"], {
+        detached: process.platform === "win32",
+        stdio: "ignore"
+      });
+      child.unref();
+      writeFileSync(${JSON.stringify(childPidPath)}, String(child.pid));
+      setInterval(() => {}, 1000);
+    `;
+    let childPid: number | undefined;
+
+    try {
+      await expect(
+        runProviderProcess(
+          {
+            command: process.execPath,
+            args: ["-e", parentScript],
+            cwd: projectPath,
+            env: {}
+          },
+          {
+            timeoutMs: 1000,
+            outputLimitBytes: 64
+          }
+        )
+      ).rejects.toThrow(/timed out/i);
+
+      await expect(waitForCondition(async () => access(childPidPath).then(() => true, () => false))).resolves.toBe(
+        true
+      );
+      childPid = Number(await readFile(childPidPath, "utf8"));
+      expect(Number.isInteger(childPid)).toBe(true);
+      await expect(waitForCondition(() => !isProcessRunning(childPid!))).resolves.toBe(true);
+    } finally {
+      if (childPid && isProcessRunning(childPid)) {
+        try {
+          process.kill(childPid);
+        } catch {
+          // Best-effort cleanup for the intentionally orphaned pre-fix child process.
+        }
+      }
+    }
   });
 
   it("bounds provider child process stdout and stderr capture", async () => {

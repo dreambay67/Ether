@@ -90,6 +90,54 @@ describe("asset service", () => {
     ]);
   });
 
+  it("rejects mask saves when the masks directory resolves outside the project", async () => {
+    const parentDirectory = await createTempRoot();
+    const outsideMasksDirectory = path.join(parentDirectory, "outside-masks");
+    const project = await createProject({ parentDirectory, name: "Linked Masks Root" });
+    const masksDirectory = path.join(project.path, "assets", "masks");
+    const saveMaskAsset = (
+      engine as typeof engine & {
+        saveMaskAsset: (projectPath: string, options: {
+          editNodeId: string;
+          sourceAssetId: string;
+          sourceAssetPath: string;
+          fileName: string;
+          content: string;
+          mimeType: string;
+          now: Date;
+        }) => Promise<Awaited<ReturnType<typeof saveGeneratedAsset>>>;
+      }
+    ).saveMaskAsset;
+
+    await mkdir(outsideMasksDirectory);
+    await rm(masksDirectory, { recursive: true, force: true });
+
+    try {
+      await symlink(outsideMasksDirectory, masksDirectory, "junction");
+    } catch {
+      return;
+    }
+
+    await expect(
+      saveMaskAsset(project.path, {
+        editNodeId: "edit-node-1",
+        sourceAssetId: "generated-parent-1",
+        sourceAssetPath: path.join(project.path, "assets", "generated", "parent.svg"),
+        fileName: "escaped-mask.svg",
+        content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>escaped</title></svg>",
+        mimeType: "image/svg+xml",
+        now: new Date("2026-06-17T12:30:00.000Z")
+      })
+    ).rejects.toThrow("Mask asset path must stay inside the project masks directory.");
+
+    await expect(
+      readFile(
+        path.join(outsideMasksDirectory, "2026", "06", "edit-node-1", "escaped-mask.svg"),
+        "utf8"
+      )
+    ).rejects.toThrow();
+  });
+
   it("links an external reference without copying it and records the linked index", async () => {
     const parentDirectory = await createTempRoot();
     const externalDirectory = path.join(parentDirectory, "external");
