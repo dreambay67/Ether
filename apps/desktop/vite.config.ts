@@ -25,6 +25,10 @@ export default defineConfig({
       "@ether/engine/graph/promptAssembly": path.resolve(
         __dirname,
         "../../packages/engine/src/graph/promptAssembly.ts"
+      ),
+      "@ether/engine/run/rerunState": path.resolve(
+        __dirname,
+        "../../packages/engine/src/run/rerunState.ts"
       )
     }
   },

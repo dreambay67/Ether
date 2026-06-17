@@ -33,6 +33,14 @@
     "./graph/promptAssembly": {
       "types": "./dist/graph/promptAssembly.d.ts",
       "default": "./dist/graph/promptAssembly.js"
+    },
+    "./run/execution": {
+      "types": "./dist/run/execution.d.ts",
+      "default": "./dist/run/execution.js"
+    },
+    "./run/rerunState": {
+      "types": "./dist/run/rerunState.d.ts",
+      "default": "./dist/run/rerunState.js"
     }
   },
   "scripts": {

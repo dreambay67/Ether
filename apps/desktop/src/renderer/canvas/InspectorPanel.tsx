@@ -1,6 +1,17 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Edge, Node } from "@xyflow/react";
-import { FolderInput, FolderPlus, ImagePlus, Play, Trash2 } from "lucide-react";
+import {
+  FolderInput,
+  FolderPlus,
+  GitBranch,
+  ImagePlus,
+  ListChecks,
+  Lock,
+  Play,
+  Route,
+  Trash2,
+  Unlock
+} from "lucide-react";
 import {
   coerceCanvasNodeData,
   type CanvasNodeData
@@ -10,7 +21,7 @@ import {
   assembleGenerationInputs,
   assemblePromptForNode
 } from "@ether/engine/graph/promptAssembly";
-import type { EtherGraph } from "@ether/engine";
+import type { EtherGraph, ExecutionPolicy } from "@ether/engine";
 
 type InspectorPanelProps = {
   selectedNode: Node<CanvasNodeData> | null;
@@ -20,10 +31,19 @@ type InspectorPanelProps = {
   onPreviewEdge(id: string, label: string): void;
   onCommitTextEdit(): void;
   onRunNode(id: string): void;
+  onToggleNodeLock(id: string, locked: boolean): void;
+  onExecuteRun(policy: ExecutionPolicy): void;
   onEnsureStoreFolder(id: string): void;
   onSaveFakeGeneratedAsset(id: string): void;
   onMoveLatestGeneratedAssetToCollection(id: string): void;
   onDeleteSelection(): void;
+  executionPolicy: ExecutionPolicy;
+  runCountCap: number;
+  parallelExecution: boolean;
+  selectedNodeCount: number;
+  onExecutionPolicyChange(policy: ExecutionPolicy): void;
+  onRunCountCapChange(cap: number): void;
+  onParallelExecutionChange(parallel: boolean): void;
   hasOpenProject: boolean;
 };
 
@@ -35,10 +55,19 @@ export function InspectorPanel({
   onPreviewEdge,
   onCommitTextEdit,
   onRunNode,
+  onToggleNodeLock,
+  onExecuteRun,
   onEnsureStoreFolder,
   onSaveFakeGeneratedAsset,
   onMoveLatestGeneratedAssetToCollection,
   onDeleteSelection,
+  executionPolicy,
+  runCountCap,
+  parallelExecution,
+  selectedNodeCount,
+  onExecutionPolicyChange,
+  onRunCountCapChange,
+  onParallelExecutionChange,
   hasOpenProject
 }: InspectorPanelProps) {
   const [nodeDraft, setNodeDraft] = useState<Partial<CanvasNodeData>>({});
@@ -87,6 +116,7 @@ export function InspectorPanel({
     const canMirrorStoreFolder =
       nodeData.kind === "Store" &&
       (nodeData.subtype === "Collection" || nodeData.subtype === "Directory");
+    const isLocked = nodeData.locked === true;
 
     return (
       <div className="inspector-form">
@@ -94,17 +124,31 @@ export function InspectorPanel({
           <span>{nodeData.kind ?? "Unknown"}</span>
           <span>{nodeData.subtype ?? "Legacy node"}</span>
         </div>
+        <button
+          type="button"
+          className="lock-toggle-button"
+          aria-label={isLocked ? "Unlock node" : "Lock node"}
+          onClick={() => onToggleNodeLock(selectedNode.id, !isLocked)}
+        >
+          {isLocked ? <Unlock size={14} aria-hidden="true" /> : <Lock size={14} aria-hidden="true" />}
+          {isLocked ? "Unlock" : "Lock"}
+        </button>
         <label>
           Title
           <input
             value={nodeDraft.title ?? ""}
             onChange={(event) => {
+              if (isLocked) {
+                return;
+              }
+
               const title = event.target.value;
               setNodeDraft((draft) => ({ ...draft, title }));
               onPreviewNode(selectedNode.id, { title });
             }}
             onBlur={commitNodeDraft}
             onKeyDown={commitInputOnEnter}
+            disabled={isLocked}
             data-testid="inspector-node-title"
           />
         </label>
@@ -113,12 +157,17 @@ export function InspectorPanel({
           <input
             value={nodeDraft.label ?? ""}
             onChange={(event) => {
+              if (isLocked) {
+                return;
+              }
+
               const label = event.target.value;
               setNodeDraft((draft) => ({ ...draft, label }));
               onPreviewNode(selectedNode.id, { label });
             }}
             onBlur={commitNodeDraft}
             onKeyDown={commitInputOnEnter}
+            disabled={isLocked}
             data-testid="inspector-node-label"
           />
         </label>
@@ -127,11 +176,16 @@ export function InspectorPanel({
           <textarea
             value={nodeDraft.instruction ?? ""}
             onChange={(event) => {
+              if (isLocked) {
+                return;
+              }
+
               const instruction = event.target.value;
               setNodeDraft((draft) => ({ ...draft, instruction }));
               onPreviewNode(selectedNode.id, { instruction });
             }}
             onBlur={commitNodeDraft}
+            disabled={isLocked}
           />
         </label>
         <label>
@@ -139,13 +193,104 @@ export function InspectorPanel({
           <textarea
             value={nodeDraft.notes ?? ""}
             onChange={(event) => {
+              if (isLocked) {
+                return;
+              }
+
               const notes = event.target.value;
               setNodeDraft((draft) => ({ ...draft, notes }));
               onPreviewNode(selectedNode.id, { notes });
             }}
             onBlur={commitNodeDraft}
+            disabled={isLocked}
           />
         </label>
+        <section
+          className="inspector-preview inspector-execution"
+          data-testid="inspector-execution-controls"
+        >
+          <div>
+            <span>Execution</span>
+            <strong>{isLocked ? "locked" : nodeData.rerunState ?? "ready"}</strong>
+          </div>
+          <label>
+            Policy
+            <select
+              aria-label="Run policy"
+              value={executionPolicy}
+              onChange={(event) => onExecutionPolicyChange(event.target.value as ExecutionPolicy)}
+              disabled={isLocked}
+            >
+              <option value="cached-inputs">Cached inputs</option>
+              <option value="refresh-upstream">Refresh upstream</option>
+              <option value="downstream">Downstream</option>
+              <option value="branch">Branch</option>
+              <option value="selected">Selected</option>
+            </select>
+          </label>
+          <div className="execution-options">
+            <label>
+              Cap
+              <input
+                aria-label="Run count cap"
+                type="number"
+                min={0}
+                max={100}
+                value={runCountCap}
+                onChange={(event) => onRunCountCapChange(Number(event.target.value))}
+                disabled={isLocked}
+              />
+            </label>
+            <label className="execution-toggle">
+              <input
+                aria-label="Parallel execution"
+                type="checkbox"
+                checked={parallelExecution}
+                onChange={(event) => onParallelExecutionChange(event.target.checked)}
+                disabled={isLocked}
+              />
+              Parallel
+            </label>
+          </div>
+          <div className="execution-actions">
+            <button
+              type="button"
+              className="run-node-button"
+              onClick={() => onExecuteRun(executionPolicy)}
+              disabled={isLocked || !hasOpenProject}
+            >
+              <Play size={14} aria-hidden="true" />
+              Run Node
+            </button>
+            <button
+              type="button"
+              className="run-node-button"
+              onClick={() => onExecuteRun("downstream")}
+              disabled={isLocked || !hasOpenProject}
+            >
+              <Route size={14} aria-hidden="true" />
+              Downstream
+            </button>
+            <button
+              type="button"
+              className="run-node-button"
+              onClick={() => onExecuteRun("branch")}
+              disabled={isLocked || !hasOpenProject}
+            >
+              <GitBranch size={14} aria-hidden="true" />
+              Branch
+            </button>
+            <button
+              type="button"
+              className="run-node-button"
+              onClick={() => onExecuteRun("selected")}
+              disabled={isLocked || !hasOpenProject || selectedNodeCount === 0}
+            >
+              <ListChecks size={14} aria-hidden="true" />
+              Selected
+            </button>
+          </div>
+        </section>
         <section className="inspector-contract" data-testid="inspector-contract">
           <div>
             <span>Contract</span>
@@ -186,7 +331,7 @@ export function InspectorPanel({
                 type="button"
                 className="run-node-button"
                 onClick={() => onSaveFakeGeneratedAsset(selectedNode.id)}
-                disabled={!hasOpenProject}
+                disabled={!hasOpenProject || isLocked}
               >
                 <ImagePlus size={14} aria-hidden="true" />
                 Save fake output
@@ -203,7 +348,7 @@ export function InspectorPanel({
                 type="button"
                 className="run-node-button"
                 onClick={() => onEnsureStoreFolder(selectedNode.id)}
-                disabled={!hasOpenProject}
+                disabled={!hasOpenProject || isLocked}
               >
                 <FolderPlus size={14} aria-hidden="true" />
                 Mirror
@@ -216,7 +361,7 @@ export function InspectorPanel({
                   type="button"
                   className="run-node-button"
                   onClick={() => onMoveLatestGeneratedAssetToCollection(selectedNode.id)}
-                  disabled={!hasOpenProject}
+                  disabled={!hasOpenProject || isLocked}
                 >
                   <FolderInput size={14} aria-hidden="true" />
                   Move pending generated
@@ -241,6 +386,7 @@ export function InspectorPanel({
                   className="run-node-button"
                   onClick={() => onRunNode(selectedNode.id)}
                   data-testid="inspector-run-node"
+                  disabled={isLocked}
                 >
                   <Play size={14} aria-hidden="true" />
                   Assemble
@@ -268,7 +414,7 @@ export function InspectorPanel({
             ) : null}
           </section>
         ) : null}
-        <button type="button" className="danger-button" onClick={onDeleteSelection}>
+        <button type="button" className="danger-button" onClick={onDeleteSelection} disabled={isLocked}>
           <Trash2 size={15} aria-hidden="true" />
           Delete selection
         </button>

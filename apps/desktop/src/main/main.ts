@@ -6,7 +6,11 @@ import {
   createProject,
   ensureCollectionFolder,
   ensureDirectoryRoot,
+  executeGraphRun,
   type AssetKind,
+  type EtherGraph,
+  type ExecutionPolicy,
+  type ExecutionRequest,
   type ProjectOpenResult,
   linkExternalReference,
   listAssetMoves,
@@ -40,12 +44,23 @@ const assetChannels = {
   listMoves: "ether:asset:listMoves"
 } as const;
 
+const executionChannels = {
+  run: "ether:execution:run"
+} as const;
+
 type ProjectSession = ProjectOpenResult & {
   projectId: string;
 };
 
 const projectRegistry = new Map<string, string>();
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const executionPolicies = new Set<ExecutionPolicy>([
+  "cached-inputs",
+  "refresh-upstream",
+  "downstream",
+  "branch",
+  "selected"
+]);
 
 function assertString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -69,6 +84,42 @@ function assertOptions(value: unknown, label: string): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
+}
+
+function assertStringArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} must be an array.`);
+  }
+
+  return value.map((entry, index) => assertString(entry, `${label}[${index}]`));
+}
+
+function optionalRunCountCap(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 100) {
+    throw new Error("runCountCap must be an integer from 0 to 100.");
+  }
+
+  return value;
+}
+
+function assertExecutionRequest(value: unknown): Omit<ExecutionRequest, "now"> {
+  const request = assertOptions(value, "execution request");
+  const policy = assertString(request.policy, "policy");
+
+  if (!executionPolicies.has(policy as ExecutionPolicy)) {
+    throw new Error("Unknown execution policy.");
+  }
+
+  return {
+    policy: policy as ExecutionPolicy,
+    targetNodeIds: assertStringArray(request.targetNodeIds, "targetNodeIds"),
+    runCountCap: optionalRunCountCap(request.runCountCap),
+    parallel: request.parallel === true
+  };
 }
 
 async function canonicalizeProjectPath(projectPath: string): Promise<string> {
@@ -258,6 +309,23 @@ function registerAssetIpc() {
   });
 }
 
+function registerExecutionIpc() {
+  ipcMain.handle(
+    executionChannels.run,
+    (_event, projectId: unknown, graph: unknown, request: unknown) => {
+      if (!graph || typeof graph !== "object") {
+        throw new Error("graph must be an object.");
+      }
+
+      return executeGraphRun(
+        getRegisteredProjectPath(projectId),
+        graph as EtherGraph,
+        assertExecutionRequest(request)
+      );
+    }
+  );
+}
+
 const createMainWindow = () => {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -286,6 +354,7 @@ const createMainWindow = () => {
 
 registerProjectIpc();
 registerAssetIpc();
+registerExecutionIpc();
 
 app.whenReady().then(() => {
   createMainWindow();

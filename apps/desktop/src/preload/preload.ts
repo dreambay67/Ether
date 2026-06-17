@@ -20,6 +20,10 @@ const assetChannels = {
   listMoves: "ether:asset:listMoves"
 } as const;
 
+const executionChannels = {
+  run: "ether:execution:run"
+} as const;
+
 const getDroppedFilePath = createDroppedFilePathReader(webUtils);
 
 contextBridge.exposeInMainWorld("ether", {
@@ -57,5 +61,9 @@ contextBridge.exposeInMainWorld("ether", {
     ) => ipcRenderer.invoke(assetChannels.moveToCollection, projectId, options),
     listMoves: (projectId: string, query?: { assetId?: string }) =>
       ipcRenderer.invoke(assetChannels.listMoves, projectId, query)
+  },
+  execution: {
+    run: (projectId: string, graph: unknown, request: unknown) =>
+      ipcRenderer.invoke(executionChannels.run, projectId, graph, request)
   }
 });

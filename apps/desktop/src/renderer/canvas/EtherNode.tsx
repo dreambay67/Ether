@@ -11,12 +11,16 @@ export const EtherNode = memo(function EtherNode({
   selected
 }: NodeProps & { data: CanvasNodeData }) {
   const deleteNode = useContext(EtherNodeDeleteContext);
+  const isLocked = data.locked === true;
 
   return (
-    <article className={`ether-node ether-node-${data.kind.toLowerCase()}`} data-testid="ether-node">
+    <article
+      className={`ether-node ether-node-${data.kind.toLowerCase()}${isLocked ? " is-locked" : ""}`}
+      data-testid="ether-node"
+    >
       <NodeResizer
         color="#37E6EA"
-        isVisible={selected}
+        isVisible={selected && !isLocked}
         minWidth={180}
         minHeight={118}
         handleClassName="node-resize-handle"
@@ -32,11 +36,12 @@ export const EtherNode = memo(function EtherNode({
         <p>{data.label}</p>
       </div>
       <div className="ether-node-footer">
-        <span>{data.status}</span>
+        <span>{isLocked ? "locked" : data.rerunState ?? data.status}</span>
         <button
           type="button"
           aria-label={`Delete ${data.title}`}
           onClick={() => deleteNode(id)}
+          disabled={isLocked}
         >
           <Trash2 size={14} aria-hidden="true" />
         </button>

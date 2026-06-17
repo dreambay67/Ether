@@ -395,7 +395,8 @@ button {
 
 .canvas-toolbar button,
 .canvas-context-menu button,
-.danger-button {
+.danger-button,
+.lock-toggle-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -553,6 +554,13 @@ button {
   border-color: rgba(126, 244, 215, 0.62);
 }
 
+.ether-node.is-locked {
+  border-color: rgba(244, 248, 255, 0.42);
+  background:
+    linear-gradient(135deg, rgba(244, 248, 255, 0.08), transparent 34%),
+    rgba(7, 11, 18, 0.94);
+}
+
 .ether-node-edit {
   border-color: rgba(138, 92, 255, 0.62);
 }
@@ -606,6 +614,11 @@ button {
   background: rgba(9, 15, 25, 0.86);
   color: var(--ether-text-primary);
   cursor: pointer;
+}
+
+.ether-node-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .node-resize-handle {
@@ -713,7 +726,8 @@ button {
 }
 
 .inspector-form input,
-.inspector-form textarea {
+.inspector-form textarea,
+.inspector-form select {
   width: 100%;
   min-width: 0;
   border: 1px solid rgba(153, 168, 186, 0.22);
@@ -724,9 +738,54 @@ button {
   text-transform: none;
 }
 
+.inspector-form input:disabled,
+.inspector-form textarea:disabled,
+.inspector-form select:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
 .inspector-form textarea {
   min-height: 72px;
   resize: vertical;
+}
+
+.lock-toggle-button {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: rgba(153, 168, 186, 0.26);
+  background: rgba(9, 15, 25, 0.74);
+  font-size: 12px;
+}
+
+.inspector-execution {
+  gap: 10px;
+}
+
+.execution-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.execution-toggle {
+  display: inline-flex !important;
+  grid-template-columns: none !important;
+  align-items: center;
+  min-height: 34px;
+}
+
+.execution-toggle input {
+  width: 15px;
+  height: 15px;
+}
+
+.execution-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .danger-button {
@@ -751,6 +810,12 @@ button {
 }
 
 .run-node-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.danger-button:disabled,
+.lock-toggle-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }

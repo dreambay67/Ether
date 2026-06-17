@@ -64,6 +64,25 @@ test("assembling a prompt node freezes a local prompt artifact", async ({ page }
   await expect(page.getByTestId("inspector-assembly-preview")).toContainText("Frozen");
 });
 
+test("inspector exposes execution controls and lock disables node edits", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-prompt-general").click();
+
+  await expect(page.getByTestId("inspector-execution-controls")).toBeVisible();
+  await expect(page.getByLabel("Run policy")).toHaveValue("cached-inputs");
+  await expect(page.getByLabel("Run count cap")).toHaveValue("1");
+  await expect(page.getByLabel("Parallel execution")).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Run Node" })).toBeVisible();
+  await expect(page.getByTestId("inspector-run-node")).toBeEnabled();
+
+  await page.getByRole("button", { name: "Lock node" }).click();
+
+  await expect(page.getByTestId("inspector-node-title")).toBeDisabled();
+  await expect(page.getByTestId("inspector-run-node")).toBeDisabled();
+  await expect(page.getByTestId("ether-node")).toContainText("locked");
+});
+
 test("generation node previews prompt inputs from a connected prompt", async ({ page }) => {
   await page.goto("/");
 

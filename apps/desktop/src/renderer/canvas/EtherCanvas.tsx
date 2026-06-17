@@ -38,7 +38,8 @@ import {
   getNodeDefinition
 } from "@ether/engine/graph/nodeCatalog";
 import { freezePromptNode } from "@ether/engine/graph/promptAssembly";
-import type { AssetRecord, EtherGraph } from "@ether/engine";
+import { markDownstreamStale } from "@ether/engine/run/rerunState";
+import type { AssetRecord, EtherGraph, ExecutionPolicy } from "@ether/engine";
 import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
 import { linkDroppedReferenceFilesSequentially } from "./assetDrop";
 import { InspectorPanel } from "./InspectorPanel";
@@ -162,10 +163,14 @@ function InnerEtherCanvas(
   const [showMiniMap, setShowMiniMap] = useState(true);
   const [localRunStatus, setLocalRunStatus] = useState<string | null>(null);
   const [pendingGeneratedAssetId, setPendingGeneratedAssetId] = useState<string | null>(null);
+  const [executionPolicy, setExecutionPolicy] = useState<ExecutionPolicy>("cached-inputs");
+  const [runCountCap, setRunCountCap] = useState(1);
+  const [parallelExecution, setParallelExecution] = useState(false);
 
   const nodes = history.present.nodes as Node<CanvasNodeData>[];
   const edges = history.present.edges;
   const selectedNode = nodes.find((node) => node.selected) ?? null;
+  const selectedNodeIds = nodes.filter((node) => node.selected).map((node) => node.id);
   const selectedEdge = edges.find((edge) => edge.selected) ?? null;
   const assemblyGraph = useMemo<EtherGraph>(
     () => ({
@@ -265,17 +270,30 @@ function InnerEtherCanvas(
 
   const onNodesChange = useCallback((changes: NodeChange<Node<CanvasNodeData>>[]) => {
     setHistory((current) => {
-      const nextNodes = applyNodeChanges(changes, current.present.nodes);
-      const hasActiveResize = changes.some(
+      const lockedNodeIds = new Set(
+        (current.present.nodes as Node<CanvasNodeData>[])
+          .filter((node) => node.data.locked)
+          .map((node) => node.id)
+      );
+      const editableChanges = changes.filter(
+        (change) => change.type === "select" || !("id" in change) || !lockedNodeIds.has(change.id)
+      );
+
+      if (editableChanges.length === 0) {
+        return current;
+      }
+
+      const nextNodes = applyNodeChanges(editableChanges, current.present.nodes);
+      const hasActiveResize = editableChanges.some(
         (change) => change.type === "dimensions" && change.resizing === true
       );
-      const hasCompletedResize = changes.some(
+      const hasCompletedResize = editableChanges.some(
         (change) => change.type === "dimensions" && change.resizing === false
       );
-      const hasDragPosition = changes.some(
+      const hasDragPosition = editableChanges.some(
         (change) => change.type === "position" && typeof change.dragging === "boolean"
       );
-      const editsGraph = shouldPushNodeChangesToHistory(changes);
+      const editsGraph = shouldPushNodeChangesToHistory(editableChanges);
       const next = { nodes: nextNodes, edges: current.present.edges };
 
       if (hasDragPosition) {
@@ -498,31 +516,74 @@ function InnerEtherCanvas(
   const previewNode = useCallback(
     (id: string, updates: Partial<CanvasNodeData>) => {
       setHistory((current) => {
+        const target = (current.present.nodes as Node<CanvasNodeData>[]).find((node) => node.id === id);
+        const updateKeys = Object.keys(updates);
+        const updatesOnlyLock = updateKeys.length === 1 && updateKeys[0] === "locked";
+
+        if (target?.data.locked && !updatesOnlyLock) {
+          return current;
+        }
+
         textEditBaselineRef.current ??= current.present;
+        const editedNodes = (current.present.nodes as Node<CanvasNodeData>[]).map((node) =>
+          node.id === id ? { ...node, data: { ...node.data, ...updates } } : node
+        );
+
+        if (updatesOnlyLock) {
+          return updateCanvasHistoryPresent(current, {
+            nodes: editedNodes,
+            edges: current.present.edges
+          });
+        }
+
+        const staleGraph = markDownstreamStale(
+          {
+            nodes: editedNodes,
+            edges: current.present.edges,
+            viewport,
+            selectedSnapshotId: graph?.selectedSnapshotId ?? null,
+            updatedAt: new Date().toISOString()
+          },
+          [id]
+        );
+
         return updateCanvasHistoryPresent(current, {
-          nodes: current.present.nodes.map((node) =>
-            node.id === id ? { ...node, data: { ...node.data, ...updates } } : node
-          ),
+          nodes: normalizeNodes(staleGraph.nodes),
           edges: current.present.edges
         });
       });
     },
-    []
+    [graph?.selectedSnapshotId, viewport]
   );
 
   const previewEdge = useCallback(
     (id: string, label: string) => {
       setHistory((current) => {
         textEditBaselineRef.current ??= current.present;
+        const nextEdges = current.present.edges.map((edge) =>
+          edge.id === id ? { ...edge, label, data: { ...edge.data, label } } : edge
+        );
+        const changedEdge = current.present.edges.find((edge) => edge.id === id);
+        const staleGraph = changedEdge
+          ? markDownstreamStale(
+              {
+                nodes: current.present.nodes,
+                edges: nextEdges,
+                viewport,
+                selectedSnapshotId: graph?.selectedSnapshotId ?? null,
+                updatedAt: new Date().toISOString()
+              },
+              [changedEdge.source]
+            )
+          : null;
+
         return updateCanvasHistoryPresent(current, {
-          nodes: current.present.nodes,
-          edges: current.present.edges.map((edge) =>
-            edge.id === id ? { ...edge, label, data: { ...edge.data, label } } : edge
-          )
+          nodes: staleGraph ? normalizeNodes(staleGraph.nodes) : current.present.nodes,
+          edges: nextEdges
         });
       });
     },
-    []
+    [graph?.selectedSnapshotId, viewport]
   );
 
   const commitTextEdit = useCallback(() => {
@@ -537,8 +598,41 @@ function InnerEtherCanvas(
     onTrace("Updated inspector text");
   }, [onTrace]);
 
+  const toggleNodeLock = useCallback(
+    (id: string, locked: boolean) => {
+      const target = nodes.find((node) => node.id === id);
+
+      if (!target) {
+        return;
+      }
+
+      const nextNodes = nodes.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, locked } } : node
+      );
+      const message = locked ? "Node locked" : "Node unlocked";
+
+      commitSnapshot(nextNodes, edges, message);
+      setLocalRunStatus(message);
+      onStatus(message);
+    },
+    [commitSnapshot, edges, nodes, onStatus]
+  );
+
   const deleteElements = useCallback(
     (selection?: { nodeIds?: string[]; edgeIds?: string[] }) => {
+      const requestedNodeIds =
+        selection?.nodeIds ?? nodes.filter((node) => node.selected).map((node) => node.id);
+      const hasLockedNode = nodes.some(
+        (node) => requestedNodeIds.includes(node.id) && node.data.locked
+      );
+
+      if (hasLockedNode) {
+        const message = "Unlock the node before changing it.";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
       const next = deleteCanvasElements({ nodes, edges }, selection);
 
       if (!next) {
@@ -565,9 +659,17 @@ function InnerEtherCanvas(
         return;
       }
 
+      if (target.data.locked) {
+        const message = "Node is locked";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
       const nextGraph = freezePromptNode(assemblyGraph, id);
       const nextNodes = normalizeNodes(nextGraph.nodes).map((node) => ({
         ...node,
+        data: node.id === id ? { ...node.data, rerunState: "complete" as const } : node.data,
         selected: node.id === id
       }));
       const nextEdges = normalizeEdges(nextGraph.edges);
@@ -594,6 +696,13 @@ function InnerEtherCanvas(
         return;
       }
 
+      if (target.data.locked) {
+        const message = "Node is locked";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
       if (!projectId) {
         const message = "Open a project to mirror folders";
         setLocalRunStatus(message);
@@ -614,6 +723,7 @@ function InnerEtherCanvas(
                 data: {
                   ...node.data,
                   status: "complete" as const,
+                  rerunState: "complete" as const,
                   storeAssetId: asset.id,
                   storePath: asset.path,
                   storeMetadata: asset.metadata
@@ -641,6 +751,13 @@ function InnerEtherCanvas(
         return;
       }
 
+      if (target.data.locked) {
+        const message = "Node is locked";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
       if (!projectId) {
         const message = "Open a project to save fake generated output";
         setLocalRunStatus(message);
@@ -662,6 +779,7 @@ function InnerEtherCanvas(
                 data: {
                   ...node.data,
                   status: "complete" as const,
+                  rerunState: "complete" as const,
                   assetId: asset.id,
                   assetKind: asset.kind,
                   assetPath: asset.path,
@@ -695,6 +813,13 @@ function InnerEtherCanvas(
         return;
       }
 
+      if (collectionNode.data.locked) {
+        const message = "Node is locked";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
       if (!projectId) {
         const message = "Open a project to move generated assets";
         setLocalRunStatus(message);
@@ -719,6 +844,13 @@ function InnerEtherCanvas(
       if (!sourceNode?.data.assetId) {
         const message = "No pending generated output to move.";
         setPendingGeneratedAssetId(null);
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      if (sourceNode.data.locked) {
+        const message = "Unlock the generated output before moving it.";
         setLocalRunStatus(message);
         onStatus(message);
         return;
@@ -762,6 +894,7 @@ function InnerEtherCanvas(
               data: {
                 ...node.data,
                 status: "complete" as const,
+                rerunState: "complete" as const,
                 storeAssetId: collectionAsset.id,
                 storePath: collectionAsset.path,
                 storeMetadata: collectionAsset.metadata,
@@ -784,6 +917,76 @@ function InnerEtherCanvas(
       }
     },
     [commitDurableSnapshot, edges, nodes, onStatus, pendingGeneratedAssetId, projectId]
+  );
+
+  const executeRun = useCallback(
+    async (policy: ExecutionPolicy) => {
+      const targetNodeIds =
+        policy === "selected" ? selectedNodeIds : selectedNode ? [selectedNode.id] : selectedNodeIds;
+
+      if (targetNodeIds.length === 0) {
+        onStatus("Select a node before running.");
+        return;
+      }
+
+      if (!projectId) {
+        const message = "Open a project to run the execution engine";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      const cappedRunCount = Math.max(0, Math.min(100, Math.floor(runCountCap)));
+      const queueMessage = `Queued ${policy} run for ${targetNodeIds.length} node${
+        targetNodeIds.length === 1 ? "" : "s"
+      }`;
+
+      setLocalRunStatus(queueMessage);
+      onTrace(queueMessage);
+
+      try {
+        const result = await window.ether.execution.run(projectId, assemblyGraph, {
+          policy,
+          targetNodeIds,
+          runCountCap: cappedRunCount,
+          parallel: parallelExecution
+        });
+        const completed = result.results.filter((entry) => entry.status === "complete").length;
+        const skipped = result.results.filter((entry) => entry.status === "skipped").length;
+        const failed = result.results.filter((entry) => entry.status === "error").length;
+        const lastGeneratedAsset = [...result.results]
+          .reverse()
+          .find((entry) => entry.action === "fake-generate");
+        const summary = failed > 0
+          ? `Run finished with ${failed} error${failed === 1 ? "" : "s"}`
+          : `Run complete: ${completed} complete, ${skipped} skipped`;
+
+        if (lastGeneratedAsset?.assetId) {
+          setPendingGeneratedAssetId(lastGeneratedAsset.assetId);
+        }
+
+        commitDurableSnapshot(normalizeNodes(result.graph.nodes), normalizeEdges(result.graph.edges), summary);
+        for (const entry of result.results) {
+          onTrace(`${entry.status} ${entry.nodeId} (${entry.action})`);
+        }
+        onStatus(summary);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Execution run failed";
+        setLocalRunStatus(message);
+        onStatus(message);
+      }
+    },
+    [
+      assemblyGraph,
+      commitDurableSnapshot,
+      parallelExecution,
+      projectId,
+      runCountCap,
+      selectedNode,
+      selectedNodeIds,
+      onStatus,
+      onTrace
+    ]
   );
 
   const deleteNodeById = useCallback(
@@ -1060,10 +1263,21 @@ function InnerEtherCanvas(
           onPreviewEdge={previewEdge}
           onCommitTextEdit={commitTextEdit}
           onRunNode={runNode}
+          onToggleNodeLock={toggleNodeLock}
+          onExecuteRun={executeRun}
           onEnsureStoreFolder={ensureStoreFolderForNode}
           onSaveFakeGeneratedAsset={saveFakeGeneratedAssetForNode}
           onMoveLatestGeneratedAssetToCollection={moveLatestGeneratedAssetToCollection}
           onDeleteSelection={deleteSelection}
+          executionPolicy={executionPolicy}
+          runCountCap={runCountCap}
+          parallelExecution={parallelExecution}
+          selectedNodeCount={selectedNodeIds.length}
+          onExecutionPolicyChange={setExecutionPolicy}
+          onRunCountCapChange={(cap) =>
+            setRunCountCap(Number.isFinite(cap) ? Math.max(0, Math.min(100, Math.floor(cap))) : 0)
+          }
+          onParallelExecutionChange={setParallelExecution}
           hasOpenProject={Boolean(projectId)}
         />
       </aside>

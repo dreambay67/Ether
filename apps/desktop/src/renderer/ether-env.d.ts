@@ -4,6 +4,8 @@ import type {
   AssetRecord,
   CreateProjectOptions,
   EtherGraph,
+  ExecutionRequest,
+  ExecutionRunResult,
   HealthCheckResult,
   ProjectOpenResult
 } from "@ether/engine";
@@ -51,6 +53,13 @@ declare global {
           options: { assetId: string; collectionId?: string; collectionName?: string; reason?: string }
         ): Promise<AssetRecord>;
         listMoves(projectId: string, query?: { assetId?: string }): Promise<AssetMoveRecord[]>;
+      };
+      execution: {
+        run(
+          projectId: string,
+          graph: EtherGraph,
+          request: Omit<ExecutionRequest, "now">
+        ): Promise<ExecutionRunResult>;
       };
     };
   }

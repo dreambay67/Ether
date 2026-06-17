@@ -28,6 +28,9 @@ export type CanvasNodeData = {
   notes: string;
   instruction: string;
   status: "idle" | "queued" | "running" | "complete" | "error";
+  rerunState?: "ready" | "stale" | "running" | "complete" | "error";
+  locked?: boolean;
+  staleSince?: string;
   artifactKind?: "assembledPrompt";
   assembledPrompt?: string;
   assembledNegativePrompt?: string;
@@ -163,6 +166,16 @@ function isCanvasNodeStatus(value: unknown): value is CanvasNodeData["status"] {
   );
 }
 
+function isRerunState(value: unknown): value is NonNullable<CanvasNodeData["rerunState"]> {
+  return (
+    value === "ready" ||
+    value === "stale" ||
+    value === "running" ||
+    value === "complete" ||
+    value === "error"
+  );
+}
+
 function isEtherNodeKind(value: unknown): value is EtherNodeKind {
   return NODE_CATEGORY_LABELS.includes(value as EtherNodeKind);
 }
@@ -175,8 +188,7 @@ export function coerceCanvasNodeData(value: unknown): CanvasNodeData {
   const data = value as Partial<CanvasNodeData>;
   const title = typeof data.title === "string" && data.title.trim() ? data.title : legacyNodeData.title;
   const label = typeof data.label === "string" && data.label.trim() ? data.label : title;
-
-  return {
+  const coerced: CanvasNodeData = {
     ...data,
     definitionId: typeof data.definitionId === "string" ? data.definitionId : legacyNodeData.definitionId,
     kind: isEtherNodeKind(data.kind) ? data.kind : legacyNodeData.kind,
@@ -187,4 +199,24 @@ export function coerceCanvasNodeData(value: unknown): CanvasNodeData {
     instruction: typeof data.instruction === "string" ? data.instruction : legacyNodeData.instruction,
     status: isCanvasNodeStatus(data.status) ? data.status : legacyNodeData.status
   };
+
+  if (isRerunState(data.rerunState)) {
+    coerced.rerunState = data.rerunState;
+  } else {
+    delete coerced.rerunState;
+  }
+
+  if (typeof data.locked === "boolean") {
+    coerced.locked = data.locked;
+  } else {
+    delete coerced.locked;
+  }
+
+  if (typeof data.staleSince === "string") {
+    coerced.staleSince = data.staleSince;
+  } else {
+    delete coerced.staleSince;
+  }
+
+  return coerced;
 }

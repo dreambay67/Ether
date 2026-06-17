@@ -34,6 +34,13 @@ export {
   getUpstreamNodes,
   resolveReferenceRole
 } from "./graph/promptAssembly.js";
+export {
+  executeGraphRun,
+  listRunRecords,
+  planExecution,
+  runExecutionQueue
+} from "./run/execution.js";
+export { markDownstreamStale } from "./run/rerunState.js";
 export type {
   CanvasNodeData,
   EtherNodeCategory,
@@ -50,6 +57,17 @@ export type {
   PromptSectionArtifact,
   ReferenceArtifact
 } from "./graph/artifacts.js";
+export type {
+  ExecutionNodeResult,
+  ExecutionPlan,
+  ExecutionPolicy,
+  ExecutionQueueItem,
+  ExecutionRequest,
+  ExecutionResultStatus,
+  ExecutionRunResult,
+  RunRecord
+} from "./run/execution.js";
+export type { RerunState } from "./run/rerunState.js";
 export type {
   CreateProjectOptions,
   EtherGraph,
