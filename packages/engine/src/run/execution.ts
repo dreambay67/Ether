@@ -52,6 +52,7 @@ export type ExecutionNodeResult = {
   reason?: string;
   assetId?: string;
   assetPath?: string;
+  metadata?: Record<string, unknown>;
   startedAt: string;
   finishedAt: string;
 };
@@ -116,7 +117,24 @@ export async function runExecutionQueue<T>(
   options: { parallel?: boolean } = {}
 ): Promise<T[]> {
   if (options.parallel) {
-    return Promise.all(items.map((item) => runner(item)));
+    const results = new Array<T>(items.length);
+    const groups = new Map<string, Array<{ item: ExecutionQueueItem; index: number }>>();
+
+    items.forEach((item, index) => {
+      const group = groups.get(item.nodeId) ?? [];
+      group.push({ item, index });
+      groups.set(item.nodeId, group);
+    });
+
+    await Promise.all(
+      [...groups.values()].map(async (group) => {
+        for (const { item, index } of group) {
+          results[index] = await runner(item);
+        }
+      })
+    );
+
+    return results;
   }
 
   const results: T[] = [];
@@ -209,9 +227,11 @@ function createQueueItems(
   runCountCap?: number
 ): ExecutionQueueItem[] {
   const items: ExecutionQueueItem[] = [];
+  const generationNodeIds = nodeIds.filter((nodeId) => findNode(graph, nodeId).data?.kind === "Generation");
   const generationBudget =
     typeof runCountCap === "number" ? Math.max(0, Math.floor(runCountCap)) : undefined;
-  let remainingGenerations = generationBudget;
+  const generationJobs = createGenerationJobs(generationNodeIds, generationBudget);
+  let insertedGenerationJobs = false;
 
   for (const nodeId of nodeIds) {
     const node = findNode(graph, nodeId);
@@ -221,18 +241,43 @@ function createQueueItems(
       continue;
     }
 
-    const repetitions = remainingGenerations === undefined ? 1 : remainingGenerations;
-
-    for (let iteration = 1; iteration <= repetitions; iteration += 1) {
-      items.push({ nodeId, iteration });
-    }
-
-    if (remainingGenerations !== undefined) {
-      remainingGenerations = 0;
+    if (!insertedGenerationJobs) {
+      items.push(...generationJobs);
+      insertedGenerationJobs = true;
     }
   }
 
   return items;
+}
+
+function createGenerationJobs(
+  generationNodeIds: string[],
+  generationBudget?: number
+): ExecutionQueueItem[] {
+  if (generationNodeIds.length === 0) {
+    return [];
+  }
+
+  if (generationBudget === undefined) {
+    return generationNodeIds.map((nodeId) => ({ nodeId, iteration: 1 }));
+  }
+
+  const jobs: ExecutionQueueItem[] = [];
+  const iterationsByNode = new Map<string, number>();
+
+  while (jobs.length < generationBudget) {
+    for (const nodeId of generationNodeIds) {
+      if (jobs.length >= generationBudget) {
+        break;
+      }
+
+      const nextIteration = (iterationsByNode.get(nodeId) ?? 0) + 1;
+      iterationsByNode.set(nodeId, nextIteration);
+      jobs.push({ nodeId, iteration: nextIteration });
+    }
+  }
+
+  return jobs;
 }
 
 async function executeQueueItem(
@@ -246,7 +291,7 @@ async function executeQueueItem(
   const node = findNode(state.graph, item.nodeId);
 
   if (node.data?.locked) {
-    return {
+    const result: ExecutionNodeResult = {
       nodeId: item.nodeId,
       iteration: item.iteration,
       status: "skipped",
@@ -255,6 +300,14 @@ async function executeQueueItem(
       startedAt,
       finishedAt: startedAt
     };
+    recordExecutionResult(projectPath, request, result);
+    return result;
+  }
+
+  if (!canExecuteLocally(node)) {
+    const result = skipUnsupportedNode(state, item, startedAt, unsupportedNodeLabel(node));
+    recordExecutionResult(projectPath, request, result);
+    return result;
   }
 
   try {
@@ -276,10 +329,11 @@ async function executeQueueItem(
         result = await executeStoreNode(projectPath, state, item, startedDate);
         break;
       default:
-        result = skipUnsupportedNode(state, item, startedAt, node.data?.kind ?? "Unknown");
+        result = skipUnsupportedNode(state, item, startedAt, unsupportedNodeLabel(node));
         break;
     }
 
+    recordExecutionResult(projectPath, request, result);
     return result;
   } catch (error) {
     const finishedAt = (request.now?.() ?? new Date()).toISOString();
@@ -289,7 +343,7 @@ async function executeQueueItem(
       lastRunAt: finishedAt
     });
 
-    return {
+    const result: ExecutionNodeResult = {
       nodeId: item.nodeId,
       iteration: item.iteration,
       status: "error",
@@ -298,6 +352,8 @@ async function executeQueueItem(
       startedAt,
       finishedAt
     };
+    recordExecutionResult(projectPath, request, result);
+    return result;
   }
 }
 
@@ -366,22 +422,6 @@ async function executeGenerationNode(
     assetPath: asset.path,
     assetMetadata: asset.metadata
   });
-  insertRunRecord(projectPath, {
-    status: "complete",
-    graphNodeId: item.nodeId,
-    metadata: {
-      provider: fakeProvider,
-      policy: request.policy,
-      iteration: item.iteration,
-      assetId: asset.id,
-      assetPath: asset.path,
-      prompt: assembly.prompt,
-      negativePrompt: assembly.negativePrompt,
-      references: assembly.references
-    },
-    startedAt,
-    finishedAt
-  });
 
   return {
     nodeId: item.nodeId,
@@ -390,6 +430,12 @@ async function executeGenerationNode(
     action: "fake-generate",
     assetId: asset.id,
     assetPath: asset.path,
+    metadata: {
+      provider: fakeProvider,
+      prompt: assembly.prompt,
+      negativePrompt: assembly.negativePrompt,
+      references: assembly.references
+    },
     startedAt,
     finishedAt
   };
@@ -451,10 +497,10 @@ function skipUnsupportedNode(
   now: string,
   kind: string
 ): ExecutionNodeResult {
+  const node = findNode(state.graph, item.nodeId);
+  const nextRerunState = node.data?.rerunState === "stale" ? "stale" : "ready";
   state.graph = setNodeData(state.graph, item.nodeId, {
-    status: "complete",
-    rerunState: "complete",
-    lastRunAt: now
+    rerunState: nextRerunState
   });
 
   return {
@@ -466,6 +512,48 @@ function skipUnsupportedNode(
     startedAt: now,
     finishedAt: now
   };
+}
+
+function canExecuteLocally(node: GraphNode) {
+  switch (node.data?.kind) {
+    case "Prompt":
+    case "Generation":
+      return true;
+    case "Store":
+      return node.data.subtype === "Collection" || node.data.subtype === "Directory";
+    default:
+      return false;
+  }
+}
+
+function unsupportedNodeLabel(node: GraphNode) {
+  if (node.data?.kind === "Store") {
+    return `Store ${node.data.subtype ?? ""}`.trim();
+  }
+
+  return node.data?.kind ?? "Unknown";
+}
+
+function recordExecutionResult(
+  projectPath: string,
+  request: ExecutionRequest,
+  result: ExecutionNodeResult
+) {
+  insertRunRecord(projectPath, {
+    status: result.status,
+    graphNodeId: result.nodeId,
+    metadata: {
+      action: result.action,
+      policy: request.policy,
+      iteration: result.iteration,
+      ...(result.reason ? { reason: result.reason } : {}),
+      ...(result.assetId ? { assetId: result.assetId } : {}),
+      ...(result.assetPath ? { assetPath: result.assetPath } : {}),
+      ...(result.metadata ?? {})
+    },
+    startedAt: result.startedAt,
+    finishedAt: result.finishedAt
+  });
 }
 
 function insertRunRecord(
@@ -524,15 +612,34 @@ function setNodeData(graph: EtherGraph, nodeId: string, data: Partial<CanvasNode
       node.id === nodeId
         ? {
             ...node,
-            data: {
-              ...node.data,
-              ...data
-            }
+            data: mergeNodeData(node.data, data)
           }
         : node
     ),
     updatedAt: now
   };
+}
+
+function mergeNodeData(
+  current: Partial<CanvasNodeData> | undefined,
+  updates: Partial<CanvasNodeData>
+) {
+  const next: Partial<CanvasNodeData> = {
+    ...current,
+    ...updates
+  };
+
+  for (const key of Object.keys(next) as Array<keyof CanvasNodeData>) {
+    if (next[key] === undefined) {
+      delete next[key];
+    }
+  }
+
+  if (updates.rerunState === "complete") {
+    delete next.staleSince;
+  }
+
+  return next;
 }
 
 function storeFolderName(node: GraphNode) {

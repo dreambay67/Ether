@@ -64,6 +64,22 @@ test("assembling a prompt node freezes a local prompt artifact", async ({ page }
   await expect(page.getByTestId("inspector-assembly-preview")).toContainText("Frozen");
 });
 
+test("editing a frozen prompt marks it stale and clears the old frozen preview", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-prompt-general").click();
+  await page.getByLabel("Instruction").fill("hero bottle on reflective glass");
+  await page.getByTestId("inspector-run-node").click();
+
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText("Frozen");
+
+  await page.getByLabel("Instruction").fill("revised reflective bottle");
+
+  await expect(page.getByTestId("ether-node")).toContainText("stale");
+  await expect(page.getByTestId("inspector-assembly-preview")).not.toContainText("Frozen");
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText("revised reflective bottle");
+});
+
 test("inspector exposes execution controls and lock disables node edits", async ({ page }) => {
   await page.goto("/");
 

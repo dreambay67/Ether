@@ -652,7 +652,8 @@ function InnerEtherCanvas(
                 selectedSnapshotId: graph?.selectedSnapshotId ?? null,
                 updatedAt: new Date().toISOString()
               },
-              [changedEdge.source]
+              [changedEdge.source],
+              { includeChanged: false }
             )
           : null;
 
@@ -758,7 +759,10 @@ function InnerEtherCanvas(
       const nextGraph = freezePromptNode(assemblyGraph, id);
       const nextNodes = normalizeNodes(nextGraph.nodes).map((node) => ({
         ...node,
-        data: node.id === id ? { ...node.data, rerunState: "complete" as const } : node.data,
+        data:
+          node.id === id
+            ? { ...node.data, rerunState: "complete" as const, staleSince: undefined }
+            : node.data,
         selected: node.id === id
       }));
       const nextEdges = normalizeEdges(nextGraph.edges);
@@ -813,6 +817,7 @@ function InnerEtherCanvas(
                   ...node.data,
                   status: "complete" as const,
                   rerunState: "complete" as const,
+                  staleSince: undefined,
                   storeAssetId: asset.id,
                   storePath: asset.path,
                   storeMetadata: asset.metadata
@@ -869,6 +874,7 @@ function InnerEtherCanvas(
                   ...node.data,
                   status: "complete" as const,
                   rerunState: "complete" as const,
+                  staleSince: undefined,
                   assetId: asset.id,
                   assetKind: asset.kind,
                   assetPath: asset.path,
@@ -984,6 +990,7 @@ function InnerEtherCanvas(
                 ...node.data,
                 status: "complete" as const,
                 rerunState: "complete" as const,
+                staleSince: undefined,
                 storeAssetId: collectionAsset.id,
                 storePath: collectionAsset.path,
                 storeMetadata: collectionAsset.metadata,

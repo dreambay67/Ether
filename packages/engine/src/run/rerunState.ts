@@ -16,12 +16,18 @@ type GraphEdge = EtherGraph["edges"][number] & {
 export function markDownstreamStale(
   graph: EtherGraph,
   changedNodeIds: string[],
-  now = new Date().toISOString()
+  now = new Date().toISOString(),
+  options: { includeChanged?: boolean } = {}
 ): EtherGraph {
   const changed = new Set(changedNodeIds);
   const staleNodeIds = new Set<string>();
+  const includeChanged = options.includeChanged ?? true;
 
   for (const nodeId of changed) {
+    if (includeChanged) {
+      staleNodeIds.add(nodeId);
+    }
+
     for (const downstreamId of collectDownstreamNodeIds(graph, nodeId, false)) {
       staleNodeIds.add(downstreamId);
     }
@@ -37,16 +43,65 @@ export function markDownstreamStale(
       staleNodeIds.has(node.id) && !node.data?.locked
         ? {
             ...node,
-            data: {
-              ...node.data,
-              rerunState: "stale",
-              staleSince: now
-            }
+            data: changed.has(node.id) && includeChanged
+              ? markChangedNodeStale(node.data, now)
+              : {
+                  ...node.data,
+                  rerunState: "stale",
+                  staleSince: now
+                }
           }
         : node
     ),
     updatedAt: now
   };
+}
+
+function markChangedNodeStale(data: Partial<CanvasNodeData> | undefined, now: string) {
+  const shouldMarkStale =
+    data?.rerunState === "complete" ||
+    data?.rerunState === "stale" ||
+    data?.status === "complete" ||
+    hasExecutionArtifact(data);
+  const next: Partial<CanvasNodeData> = {
+    ...data,
+    rerunState: shouldMarkStale ? "stale" : "ready",
+    staleSince: shouldMarkStale ? now : undefined,
+    artifactKind: undefined,
+    assembledPrompt: undefined,
+    assembledNegativePrompt: undefined,
+    assembledPromptArtifact: undefined,
+    lastRunAt: undefined,
+    assetId: undefined,
+    assetKind: undefined,
+    assetPath: undefined,
+    assetMetadata: undefined,
+    storeAssetId: undefined,
+    storePath: undefined,
+    storeMetadata: undefined,
+    lastMovedAssetId: undefined,
+    lastMovedAssetPath: undefined,
+    lastMovedAt: undefined
+  };
+
+  for (const key of Object.keys(next) as Array<keyof CanvasNodeData>) {
+    if (next[key] === undefined) {
+      delete next[key];
+    }
+  }
+
+  return next;
+}
+
+function hasExecutionArtifact(data: Partial<CanvasNodeData> | undefined) {
+  return Boolean(
+    data?.assembledPrompt ||
+      data?.assembledPromptArtifact ||
+      data?.assetId ||
+      data?.assetPath ||
+      data?.storeAssetId ||
+      data?.storePath
+  );
 }
 
 function collectDownstreamNodeIds(graph: EtherGraph, nodeId: string, includeSelf = true) {

@@ -155,6 +155,40 @@ describe("execution planning", () => {
     expect(executionIds(plan.items)).toEqual(["collection:1"]);
   });
 
+  it("spends a branch generation cap across generation nodes in branch order", () => {
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General"
+        }),
+        node("generation-a", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        }),
+        node("generation-b", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [
+        edge("edge-prompt-generation-a", "prompt", "generation-a"),
+        edge("edge-prompt-generation-b", "prompt", "generation-b")
+      ]
+    );
+
+    const plan = planExecution(canvas, {
+      policy: "branch",
+      targetNodeIds: ["prompt"],
+      runCountCap: 2
+    });
+
+    expect(executionIds(plan.items)).toEqual(["prompt:1", "generation-a:1", "generation-b:1"]);
+  });
+
   it("runs queue items sequentially by default and in parallel when requested", async () => {
     const items: ExecutionQueueItem[] = [
       { nodeId: "first", iteration: 1 },
@@ -199,6 +233,59 @@ describe("execution planning", () => {
     releaseParallel();
     await expect(parallelRun).resolves.toEqual(["first", "second"]);
   });
+
+  it("serializes parallel queue work per node while allowing independent nodes to start", async () => {
+    const starts: string[] = [];
+    let releaseSameFirst = () => undefined;
+    let releaseSameSecond = () => undefined;
+    let releaseOther = () => undefined;
+
+    const waitForSameFirst = new Promise<void>((resolve) => {
+      releaseSameFirst = resolve;
+    });
+    const waitForSameSecond = new Promise<void>((resolve) => {
+      releaseSameSecond = resolve;
+    });
+    const waitForOther = new Promise<void>((resolve) => {
+      releaseOther = resolve;
+    });
+
+    const parallelRun = runExecutionQueue(
+      [
+        { nodeId: "same", iteration: 1 },
+        { nodeId: "same", iteration: 2 },
+        { nodeId: "other", iteration: 1 }
+      ],
+      async (item) => {
+        starts.push(`${item.nodeId}:${item.iteration}`);
+
+        if (item.nodeId === "same" && item.iteration === 1) {
+          await waitForSameFirst;
+        }
+        if (item.nodeId === "same" && item.iteration === 2) {
+          await waitForSameSecond;
+        }
+        if (item.nodeId === "other") {
+          await waitForOther;
+        }
+
+        return `${item.nodeId}:${item.iteration}`;
+      },
+      { parallel: true }
+    );
+
+    await Promise.resolve();
+    expect(starts).toEqual(["same:1", "other:1"]);
+
+    releaseSameFirst();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(starts).toEqual(["same:1", "other:1", "same:2"]);
+
+    releaseSameSecond();
+    releaseOther();
+    await expect(parallelRun).resolves.toEqual(["same:1", "same:2", "other:1"]);
+  });
 });
 
 describe("fake local execution", () => {
@@ -237,12 +324,63 @@ describe("fake local execution", () => {
 
     expect(generationResults).toHaveLength(3);
     expect(generatedAssets).toHaveLength(3);
-    expect(runRecords).toHaveLength(3);
-    expect(runRecords.map((record) => record.graphNodeId)).toEqual([
-      "generation",
-      "generation",
-      "generation"
-    ]);
+    expect(runRecords).toHaveLength(4);
+    expect(runRecords.filter((record) => record.metadata.action === "assemble-prompt")).toHaveLength(
+      1
+    );
+    expect(runRecords.filter((record) => record.metadata.action === "fake-generate")).toHaveLength(
+      3
+    );
+    expect(runRecords.filter((record) => record.graphNodeId === "prompt")).toHaveLength(1);
+    expect(runRecords.filter((record) => record.graphNodeId === "generation")).toHaveLength(3);
+  });
+
+  it("keeps parallel multi-iteration generation graph assets aligned with deterministic result order", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Parallel Fold" });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "bright deterministic asset"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [edge("edge-prompt-generation", "prompt", "generation")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "branch",
+      targetNodeIds: ["prompt"],
+      runCountCap: 3,
+      parallel: true
+    });
+
+    const generationResults = result.results.filter(
+      (entry) => entry.nodeId === "generation" && entry.status === "complete"
+    );
+    const finalGenerationResult = generationResults.at(-1);
+    const finalGenerationNode = result.graph.nodes.find((candidate) => candidate.id === "generation");
+
+    expect(finalGenerationResult).toMatchObject({
+      action: "fake-generate",
+      iteration: 3,
+      status: "complete"
+    });
+    expect(finalGenerationNode?.data?.assetId).toBe(finalGenerationResult?.assetId);
+    expect(finalGenerationNode?.data?.assetPath).toBe(finalGenerationResult?.assetPath);
+    expect(finalGenerationNode?.data?.assetMetadata).toMatchObject({
+      generationNodeId: "generation",
+      lineage: {
+        iteration: 3
+      }
+    });
   });
 
   it("refreshes prompts upstream before generating and writes fake provider lineage", async () => {
@@ -407,5 +545,86 @@ describe("fake local execution", () => {
       rerunState: "complete",
       assembledPrompt: "revised prompt"
     });
+    expect(rerunGeneration?.data?.staleSince).toBeUndefined();
+  });
+
+  it("skips unsupported selected nodes without marking them complete and records the skip", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Unsupported Skip" });
+    const canvas = graph(
+      [
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          status: "idle",
+          rerunState: "stale",
+          staleSince: "2026-06-17T16:00:00.000Z"
+        })
+      ],
+      []
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["reference"]
+    });
+
+    const referenceAfterRun = result.graph.nodes.find((candidate) => candidate.id === "reference");
+    const runRecords = await listRunRecords(project.path);
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "reference",
+        status: "skipped",
+        action: "unsupported"
+      })
+    ]);
+    expect(referenceAfterRun?.data?.status).toBe("idle");
+    expect(referenceAfterRun?.data?.rerunState).toBe("stale");
+    expect(runRecords).toHaveLength(1);
+    expect(runRecords[0]?.status).toBe("skipped");
+    expect(runRecords[0]?.metadata).toMatchObject({
+      action: "unsupported",
+      iteration: 1,
+      policy: "selected"
+    });
+  });
+
+  it("records prompt and store execution ledger entries", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Ledger Entries" });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "catalog the asset"
+        }),
+        node("collection", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          collectionName: "finals"
+        })
+      ],
+      []
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["prompt", "collection"]
+    });
+
+    expect(result.results.map((entry) => entry.action)).toEqual([
+      "assemble-prompt",
+      "ensure-collection"
+    ]);
+    expect(
+      (await listRunRecords(project.path))
+        .map((record) => record.metadata.action)
+        .sort()
+    ).toEqual(["assemble-prompt", "ensure-collection"].sort());
   });
 });
