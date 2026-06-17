@@ -36,6 +36,7 @@ export {
 } from "./graph/promptAssembly.js";
 export {
   executeGraphRun,
+  getGenerationProviderDiagnostics,
   listRunRecords,
   planExecution,
   runExecutionQueue

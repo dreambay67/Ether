@@ -14,6 +14,14 @@ export type ProjectSession = ProjectOpenResult & {
   projectId: string;
 };
 
+export type ProviderDiagnostics = {
+  providers: Array<{
+    id: string;
+    name: string;
+    availability: "available" | "unavailable";
+  }>;
+};
+
 declare global {
   interface Window {
     ether: {
@@ -60,6 +68,9 @@ declare global {
           graph: EtherGraph,
           request: Omit<ExecutionRequest, "now">
         ): Promise<ExecutionRunResult>;
+      };
+      provider?: {
+        diagnostics(): Promise<ProviderDiagnostics>;
       };
     };
   }

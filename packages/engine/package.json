@@ -44,9 +44,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "pnpm --filter @ether/providers build && tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@ether/providers": "workspace:*",
     "better-sqlite3": "^11.10.0",
     "zod": "^3.25.67"
   },

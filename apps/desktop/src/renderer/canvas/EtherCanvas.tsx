@@ -1052,7 +1052,7 @@ function InnerEtherCanvas(
         const failed = result.results.filter((entry) => entry.status === "error").length;
         const lastGeneratedAsset = [...result.results]
           .reverse()
-          .find((entry) => entry.action === "fake-generate");
+          .find((entry) => entry.action === "generate");
         const summary = failed > 0
           ? `Run finished with ${failed} error${failed === 1 ? "" : "s"}`
           : `Run complete: ${completed} complete, ${skipped} skipped`;

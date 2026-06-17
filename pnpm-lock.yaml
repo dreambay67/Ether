@@ -70,6 +70,9 @@ importers:
 
   packages/engine:
     dependencies:
+      '@ether/providers':
+        specifier: workspace:*
+        version: link:../providers
       better-sqlite3:
         specifier: ^11.10.0
         version: 11.10.0
@@ -81,6 +84,8 @@ importers:
         specifier: ^7.6.13
         version: 7.6.13
 
+  packages/providers: {}
+
   packages/testing:
     dependencies:
       '@ether/brand':
@@ -89,6 +94,9 @@ importers:
       '@ether/engine':
         specifier: workspace:*
         version: link:../engine
+      '@ether/providers':
+        specifier: workspace:*
+        version: link:../providers
 
 packages:
 

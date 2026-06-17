@@ -1,5 +1,15 @@
 import Database from "better-sqlite3";
+import {
+  FAKE_PROVIDER_ID,
+  ProviderUnavailableError,
+  createDefaultProviderRegistry,
+  diagnoseProviderRegistry,
+  type GeneratedArtifact,
+  type GenerationProviderInput,
+  type ProviderRegistryDiagnostics
+} from "@ether/providers";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   ensureCollectionFolder,
@@ -25,6 +35,7 @@ export type ExecutionRequest = {
   targetNodeIds: string[];
   runCountCap?: number;
   parallel?: boolean;
+  providerId?: string;
   now?: () => Date;
 };
 
@@ -98,7 +109,9 @@ type MutableExecutionState = {
   graph: EtherGraph;
 };
 
-const fakeProvider = "ether-fake-local";
+export async function getGenerationProviderDiagnostics(): Promise<ProviderRegistryDiagnostics> {
+  return diagnoseProviderRegistry(createDefaultProviderRegistry());
+}
 
 export function planExecution(graph: EtherGraph, request: ExecutionRequest): ExecutionPlan {
   const nodeIds = planNodeIds(graph, request);
@@ -471,6 +484,7 @@ async function executeQueueItem(
     return result;
   } catch (error) {
     const finishedAt = (request.now?.() ?? new Date()).toISOString();
+    const action = node.data?.kind === "Generation" ? "generate" : "execute";
     state.graph = setNodeData(state.graph, item.nodeId, {
       status: "error",
       rerunState: "error",
@@ -481,7 +495,7 @@ async function executeQueueItem(
       nodeId: item.nodeId,
       iteration: item.iteration,
       status: "error",
-      action: "execute",
+      action,
       reason: error instanceof Error ? error.message : "Execution failed",
       startedAt,
       finishedAt
@@ -520,28 +534,77 @@ async function executeGenerationNode(
 ): Promise<ExecutionNodeResult> {
   const assembly = assembleGenerationInputs(state.graph, item.nodeId);
   const startedAt = startedDate.toISOString();
-  const asset = await saveGeneratedAsset(projectPath, {
+  const registry = createDefaultProviderRegistry();
+  const providerId = request.providerId ?? FAKE_PROVIDER_ID;
+  const provider = registry.require(providerId);
+  const diagnostic = await provider.diagnose();
+
+  if (diagnostic.availability !== "available") {
+    throw new ProviderUnavailableError(diagnostic);
+  }
+
+  const providerInput: GenerationProviderInput = {
+    projectPath,
+    runId: randomUUID(),
     generationNodeId: item.nodeId,
-    fileName: `fake-output-${item.nodeId}-${item.iteration}.txt`,
-    content: fakeGeneratedContent(item.nodeId, item.iteration, assembly),
-    mimeType: "text/plain",
-    lineage: {
-      provider: fakeProvider,
-      policy: request.policy,
-      iteration: item.iteration,
-      prompt: assembly.prompt,
-      negativePrompt: assembly.negativePrompt,
-      sections: assembly.sections,
-      references: assembly.references,
-      edgeRoles: assembly.edgeRoles
-    },
-    metadata: {
-      provider: fakeProvider,
-      policy: request.policy,
-      iteration: item.iteration
-    },
-    now: startedDate
-  });
+    iteration: item.iteration,
+    prompt: assembly.prompt,
+    negativePrompt: assembly.negativePrompt,
+    sections: assembly.sections,
+    references: assembly.references,
+    edgeRoles: assembly.edgeRoles,
+    requestedAt: startedAt
+  };
+  const providerResult = await provider.generate(providerInput);
+  const providerDescriptor = provider.descriptor;
+
+  if (providerResult.artifacts.length === 0) {
+    throw new Error(`Generation provider "${providerId}" returned no image artifacts.`);
+  }
+
+  const assets: AssetRecord[] = [];
+
+  for (const [artifactIndex, artifact] of providerResult.artifacts.entries()) {
+    assets.push(
+      await saveGeneratedAsset(projectPath, {
+        generationNodeId: item.nodeId,
+        fileName: artifact.fileName,
+        content: await generatedArtifactContent(artifact),
+        mimeType: artifact.mimeType,
+        lineage: {
+          provider: {
+            id: providerResult.providerId,
+            name: providerResult.providerName,
+            route: providerDescriptor.route,
+            capabilities: providerResult.capabilities
+          },
+          providerJob: providerResult.metadata ?? {},
+          artifact: artifact.metadata ?? {},
+          artifactIndex,
+          policy: request.policy,
+          iteration: item.iteration,
+          prompt: assembly.prompt,
+          negativePrompt: assembly.negativePrompt,
+          sections: assembly.sections,
+          references: assembly.references,
+          edgeRoles: assembly.edgeRoles
+        },
+        metadata: {
+          provider: providerResult.providerId,
+          providerName: providerResult.providerName,
+          providerRoute: providerDescriptor.route,
+          providerCapabilities: providerResult.capabilities,
+          providerJob: providerResult.metadata ?? {},
+          artifact: artifact.metadata ?? {},
+          policy: request.policy,
+          iteration: item.iteration
+        },
+        now: startedDate
+      })
+    );
+  }
+
+  const asset = assets.at(-1)!;
   const finishedAt = (request.now?.() ?? new Date()).toISOString();
 
   state.graph = setNodeData(state.graph, item.nodeId, {
@@ -561,11 +624,18 @@ async function executeGenerationNode(
     nodeId: item.nodeId,
     iteration: item.iteration,
     status: "complete",
-    action: "fake-generate",
+    action: "generate",
     assetId: asset.id,
     assetPath: asset.path,
     metadata: {
-      provider: fakeProvider,
+      provider: {
+        id: providerResult.providerId,
+        name: providerResult.providerName,
+        route: providerDescriptor.route,
+        capabilities: providerResult.capabilities
+      },
+      providerJob: providerResult.metadata ?? {},
+      generatedAssetIds: assets.map((entry) => entry.id),
       prompt: assembly.prompt,
       negativePrompt: assembly.negativePrompt,
       references: assembly.references
@@ -721,20 +791,16 @@ function insertRunRecord(
   }
 }
 
-function fakeGeneratedContent(
-  nodeId: string,
-  iteration: number,
-  assembly: ReturnType<typeof assembleGenerationInputs>
-) {
-  return [
-    "ETHER_FAKE_GENERATED_ASSET",
-    `provider=${fakeProvider}`,
-    `nodeId=${nodeId}`,
-    `iteration=${iteration}`,
-    `prompt=${assembly.prompt}`,
-    `negativePrompt=${assembly.negativePrompt}`,
-    `references=${JSON.stringify(assembly.references)}`
-  ].join("\n");
+async function generatedArtifactContent(artifact: GeneratedArtifact) {
+  if (artifact.content !== undefined) {
+    return artifact.content;
+  }
+
+  if (artifact.sourcePath) {
+    return readFile(artifact.sourcePath);
+  }
+
+  throw new Error(`Generated artifact "${artifact.fileName}" did not include content or sourcePath.`);
 }
 
 function setNodeData(graph: EtherGraph, nodeId: string, data: Partial<CanvasNodeData>): EtherGraph {

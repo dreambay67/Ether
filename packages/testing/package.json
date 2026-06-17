@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@ether/brand": "workspace:*",
-    "@ether/engine": "workspace:*"
+    "@ether/engine": "workspace:*",
+    "@ether/providers": "workspace:*"
   }
 }

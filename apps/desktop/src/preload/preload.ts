@@ -24,6 +24,10 @@ const executionChannels = {
   run: "ether:execution:run"
 } as const;
 
+const providerChannels = {
+  diagnostics: "ether:provider:diagnostics"
+} as const;
+
 const getDroppedFilePath = createDroppedFilePathReader(webUtils);
 
 contextBridge.exposeInMainWorld("ether", {
@@ -65,5 +69,8 @@ contextBridge.exposeInMainWorld("ether", {
   execution: {
     run: (projectId: string, graph: unknown, request: unknown) =>
       ipcRenderer.invoke(executionChannels.run, projectId, graph, request)
+  },
+  provider: {
+    diagnostics: () => ipcRenderer.invoke(providerChannels.diagnostics)
   }
 });

@@ -227,13 +227,31 @@ function referenceForNode(source: GraphNode, role: string): ReferenceArtifact | 
 
   const steeringText = nodeText(source);
 
-  return {
+  const reference: ReferenceArtifact = {
     nodeId: source.id,
     role,
     title: sectionTitle(source),
     sourceKind: cleanText(source.data?.subtype) || cleanText(source.data?.kind) || "Reference",
     ...(steeringText ? { steeringText } : {})
   };
+
+  if (source.data?.assetId) {
+    reference.assetId = source.data.assetId;
+  }
+
+  if (source.data?.assetKind) {
+    reference.assetKind = source.data.assetKind;
+  }
+
+  if (source.data?.assetPath) {
+    reference.assetPath = source.data.assetPath;
+  }
+
+  if (source.data?.assetMetadata) {
+    reference.assetMetadata = source.data.assetMetadata;
+  }
+
+  return reference;
 }
 
 function collectReferences(graph: EtherGraph, nodeId: string) {

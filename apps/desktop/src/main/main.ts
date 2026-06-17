@@ -7,6 +7,7 @@ import {
   ensureCollectionFolder,
   ensureDirectoryRoot,
   executeGraphRun,
+  getGenerationProviderDiagnostics,
   type AssetKind,
   type EtherGraph,
   type ExecutionPolicy,
@@ -46,6 +47,10 @@ const assetChannels = {
 
 const executionChannels = {
   run: "ether:execution:run"
+} as const;
+
+const providerChannels = {
+  diagnostics: "ether:provider:diagnostics"
 } as const;
 
 type ProjectSession = ProjectOpenResult & {
@@ -118,7 +123,8 @@ function assertExecutionRequest(value: unknown): Omit<ExecutionRequest, "now"> {
     policy: policy as ExecutionPolicy,
     targetNodeIds: assertStringArray(request.targetNodeIds, "targetNodeIds"),
     runCountCap: optionalRunCountCap(request.runCountCap),
-    parallel: request.parallel === true
+    parallel: request.parallel === true,
+    providerId: optionalString(request.providerId, "providerId")
   };
 }
 
@@ -326,6 +332,10 @@ function registerExecutionIpc() {
   );
 }
 
+function registerProviderIpc() {
+  ipcMain.handle(providerChannels.diagnostics, () => getGenerationProviderDiagnostics());
+}
+
 const createMainWindow = () => {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -355,6 +365,7 @@ const createMainWindow = () => {
 registerProjectIpc();
 registerAssetIpc();
 registerExecutionIpc();
+registerProviderIpc();
 
 app.whenReady().then(() => {
   createMainWindow();

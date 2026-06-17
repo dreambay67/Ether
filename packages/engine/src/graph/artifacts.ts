@@ -12,6 +12,10 @@ export type ReferenceArtifact = {
   title: string;
   sourceKind: string;
   steeringText?: string;
+  assetId?: string;
+  assetKind?: string;
+  assetPath?: string;
+  assetMetadata?: Record<string, unknown>;
 };
 
 export type EdgeRoleArtifact = {

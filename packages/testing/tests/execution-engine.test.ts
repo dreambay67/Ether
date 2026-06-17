@@ -382,6 +382,127 @@ describe("execution planning", () => {
 });
 
 describe("fake local execution", () => {
+  it("uses the default fake image provider and records provider lineage", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Fake Provider Image" });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "deterministic electric blue product render"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [edge("edge-prompt-generation", "prompt", "generation")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "refresh-upstream",
+      targetNodeIds: ["generation"],
+      now: () => new Date("2026-06-17T12:30:00.000Z")
+    });
+
+    const generatedAsset = (await listAssets(project.path, { kind: "generated" }))[0];
+
+    expect(result.results.find((entry) => entry.nodeId === "generation")).toMatchObject({
+      status: "complete",
+      action: "generate",
+      metadata: {
+        provider: {
+          id: "ether-fake-local",
+          name: "Ether Fake Local"
+        }
+      }
+    });
+    expect(generatedAsset?.path.endsWith(".svg")).toBe(true);
+    expect(generatedAsset?.metadata).toMatchObject({
+      provider: "ether-fake-local",
+      mimeType: "image/svg+xml",
+      lineage: {
+        provider: {
+          id: "ether-fake-local",
+          name: "Ether Fake Local",
+          capabilities: ["image.generate"]
+        },
+        iteration: 1,
+        prompt: "deterministic electric blue product render"
+      }
+    });
+    await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain(
+      "ETHER_FAKE_GENERATED_IMAGE"
+    );
+  });
+
+  it("reports a missing provider without writing generated assets", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Missing Provider" });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      []
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["generation"],
+      providerId: "missing-provider"
+    } as any);
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "generation",
+        status: "error",
+        action: "generate",
+        reason: expect.stringMatching(/missing-provider.*not registered/i)
+      })
+    ]);
+    expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
+  });
+
+  it("reports unavailable provider diagnostics without writing generated assets", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Unavailable Provider" });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      []
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["generation"],
+      providerId: "google-nano-banana-pro"
+    } as any);
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "generation",
+        status: "error",
+        action: "generate",
+        reason: expect.stringMatching(/google-nano-banana-pro.*clean local CLI\/MCP route/i)
+      })
+    ]);
+    expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
+  });
+
   it("runs a branch with exactly the requested fake generation count", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Branch Cap" });
@@ -421,9 +542,7 @@ describe("fake local execution", () => {
     expect(runRecords.filter((record) => record.metadata.action === "assemble-prompt")).toHaveLength(
       1
     );
-    expect(runRecords.filter((record) => record.metadata.action === "fake-generate")).toHaveLength(
-      3
-    );
+    expect(runRecords.filter((record) => record.metadata.action === "generate")).toHaveLength(3);
     expect(runRecords.filter((record) => record.graphNodeId === "prompt")).toHaveLength(1);
     expect(runRecords.filter((record) => record.graphNodeId === "generation")).toHaveLength(3);
   });
@@ -462,7 +581,7 @@ describe("fake local execution", () => {
     const finalGenerationNode = result.graph.nodes.find((candidate) => candidate.id === "generation");
 
     expect(finalGenerationResult).toMatchObject({
-      action: "fake-generate",
+      action: "generate",
       iteration: 3,
       status: "complete"
     });
@@ -573,7 +692,9 @@ describe("fake local execution", () => {
       provider: "ether-fake-local",
       generationNodeId: "generation",
       lineage: {
-        provider: "ether-fake-local",
+        provider: {
+          id: "ether-fake-local"
+        },
         prompt: "glass bottle under crisp studio light",
         negativePrompt: "no warped labels"
       }

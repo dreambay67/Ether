@@ -9,7 +9,7 @@ test("renders the React Flow canvas, library, inspector, run panel, and minimap"
   await expect(page.getByTestId("panel-node-library")).toBeVisible();
   await expect(page.getByTestId("panel-inspector")).toBeVisible();
   await expect(page.getByTestId("panel-run-trace")).toBeVisible();
-  await expect(page.getByText("Providers offline")).toBeVisible();
+  await expect(page.getByText(/Fake ready.*Nano unavailable/)).toBeVisible();
 });
 
 test("creates a node from the library and selects it", async ({ page }) => {

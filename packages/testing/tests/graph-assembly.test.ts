@@ -369,6 +369,42 @@ describe("prompt assembly", () => {
     expect(assembleGenerationInputs(canvas, "generation").references[0].role).toBe("colourPalette");
   });
 
+  it("includes linked reference asset paths for provider image inputs", () => {
+    const canvas = graph(
+      [
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          title: "Product Reference",
+          assetId: "asset-reference-1",
+          assetKind: "reference",
+          assetPath: "C:\\Project\\references\\product.png",
+          assetMetadata: {
+            originalName: "product.png"
+          }
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [{ id: "edge-reference-generation", source: "reference", target: "generation", label: "product" }]
+    );
+
+    expect(assembleGenerationInputs(canvas, "generation").references[0]).toMatchObject({
+      nodeId: "reference",
+      role: "product",
+      assetId: "asset-reference-1",
+      assetKind: "reference",
+      assetPath: "C:\\Project\\references\\product.png",
+      assetMetadata: {
+        originalName: "product.png"
+      }
+    });
+  });
+
   it("collects prompt sections, negative constraints, and references for generation nodes", () => {
     const canvas = graph(
       [

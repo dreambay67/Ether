@@ -185,6 +185,7 @@ export function App() {
     updatedAt: string;
   } | null>(null);
   const [projectMessage, setProjectMessage] = useState("No project open");
+  const [providerMessage, setProviderMessage] = useState("Fake ready; Nano unavailable");
 
   const appendTrace = useCallback((message: string) => {
     setTraceEntries((entries) => [message, ...entries].slice(0, 12));
@@ -200,6 +201,26 @@ export function App() {
     setProjectPath(result.path);
     setActiveGraph(result.graph);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    window.ether?.provider?.diagnostics()
+      .then((diagnostics) => {
+        if (!cancelled) {
+          setProviderMessage(formatProviderDiagnostics(diagnostics));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProviderMessage("Fake ready; Nano unavailable");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const createLocalProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -293,7 +314,7 @@ export function App() {
         </div>
         <div className="provider-status" aria-label="Provider status">
           <span className="status-dot" />
-          Providers offline
+          {providerMessage}
         </div>
       </header>
 
@@ -369,4 +390,16 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function formatProviderDiagnostics(diagnostics: Awaited<ReturnType<NonNullable<typeof window.ether.provider>["diagnostics"]>>) {
+  const fake = diagnostics.providers.find((provider) => provider.id === "ether-fake-local");
+  const codex = diagnostics.providers.find((provider) => provider.id === "codex-chatgpt-image-2");
+  const nanoUnavailable = diagnostics.providers.filter(
+    (provider) => provider.id.startsWith("google-nano-banana") && provider.availability === "unavailable"
+  ).length;
+  const fakeText = fake?.availability === "available" ? "Fake ready" : "Fake unavailable";
+  const codexText = codex?.availability === "available" ? "Codex ready" : "Codex unavailable";
+
+  return `${fakeText}; ${codexText}; Nano unavailable (${nanoUnavailable})`;
 }
