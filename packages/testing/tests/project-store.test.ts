@@ -60,6 +60,18 @@ describe("project store", () => {
     expect(reopened.database.tables.sort()).toEqual([...REQUIRED_DATABASE_TABLES].sort());
   });
 
+  it("creates missing parent directories during first-run project creation", async () => {
+    const root = await createTempRoot();
+    const parentDirectory = path.join(root, "Documents", "Ether Projects");
+
+    const project = await createProject({ parentDirectory, name: "Tryout 1" });
+
+    expect(project.path).toBe(path.join(parentDirectory, "Tryout 1.ether"));
+    await expect(readFile(path.join(project.path, "project.json"), "utf8")).resolves.toContain(
+      "Tryout 1"
+    );
+  });
+
   it("round-trips graph JSON through saveGraph and loadGraph", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Graph Roundtrip" });

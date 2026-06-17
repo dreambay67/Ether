@@ -24,6 +24,7 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
     throw new Error(`Project folder already exists: ${projectPath}`);
   }
 
+  await mkdir(options.parentDirectory, { recursive: true });
   await mkdir(projectPath);
   for (const directory of REQUIRED_DIRECTORIES) {
     await mkdir(path.join(projectPath, directory), { recursive: true });
