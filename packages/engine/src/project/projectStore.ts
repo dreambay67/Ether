@@ -21,6 +21,11 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
   const projectPath = path.join(options.parentDirectory, `${safeName}.ether`);
 
   if (await exists(projectPath)) {
+    const repaired = await repairPartialProject(projectPath, options.name);
+    if (repaired) {
+      return repaired;
+    }
+
     throw new Error(`Project folder already exists: ${projectPath}`);
   }
 
@@ -67,6 +72,55 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
     graph,
     database
   };
+}
+
+async function repairPartialProject(
+  projectPath: string,
+  displayName: string
+): Promise<ProjectOpenResult | null> {
+  try {
+    const root = await stat(projectPath);
+
+    if (!root.isDirectory()) {
+      return null;
+    }
+
+    const paths = projectPaths(projectPath);
+
+    if (await exists(paths.database)) {
+      return null;
+    }
+
+    const metadata = ProjectMetadataSchema.parse(await readJson(paths.projectJson));
+    const graph = EtherGraphSchema.parse(await readJson(paths.graphJson));
+
+    if (metadata.displayName.trim() !== displayName.trim()) {
+      return null;
+    }
+
+    for (const directory of REQUIRED_DIRECTORIES) {
+      await mkdir(path.join(projectPath, directory), { recursive: true });
+    }
+
+    if (!(await exists(paths.linkedIndex))) {
+      await writeJson(paths.linkedIndex, { references: [] });
+    }
+
+    if (!(await exists(paths.runLog))) {
+      await writeFile(paths.runLog, "");
+    }
+
+    const database = initializeDatabase(paths.database);
+
+    return {
+      path: projectPath,
+      metadata,
+      graph,
+      database
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function openProject(projectPath: string): Promise<ProjectOpenResult> {

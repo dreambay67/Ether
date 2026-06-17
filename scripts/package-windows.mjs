@@ -5,20 +5,8 @@ import { fileURLToPath } from "node:url";
 const rootFromScript = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimeDependencies = [
   {
-    packageName: "better-sqlite3",
-    sourceRelativePath: "packages/engine/node_modules/better-sqlite3"
-  },
-  {
     packageName: "zod",
     sourceRelativePath: "packages/engine/node_modules/zod"
-  },
-  {
-    packageName: "bindings",
-    sourceRelativePath: "node_modules/.pnpm/bindings@1.5.0/node_modules/bindings"
-  },
-  {
-    packageName: "file-uri-to-path",
-    sourceRelativePath: "node_modules/.pnpm/file-uri-to-path@1.0.0/node_modules/file-uri-to-path"
   }
 ];
 

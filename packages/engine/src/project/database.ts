@@ -1,7 +1,7 @@
-import Database from "better-sqlite3";
 import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { HealthIssue, ProjectDatabaseStatus, SnapshotRecord, SnapshotSlot } from "./schema.js";
+import { openDatabase, runInTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export const REQUIRED_DATABASE_TABLES = [
   "assets",
@@ -11,10 +11,8 @@ export const REQUIRED_DATABASE_TABLES = [
   "health_issues"
 ] as const;
 
-type SqliteDatabase = Database.Database;
-
 export function initializeDatabase(databasePath: string): ProjectDatabaseStatus {
-  const db = new Database(databasePath);
+  const db = openDatabase(databasePath);
 
   try {
     db.exec(`
@@ -86,7 +84,7 @@ export function initializeDatabase(databasePath: string): ProjectDatabaseStatus 
 }
 
 export function getDatabaseStatus(databasePath: string, existingDb?: SqliteDatabase): ProjectDatabaseStatus {
-  const db = existingDb ?? new Database(databasePath, { readonly: true });
+  const db = existingDb ?? openDatabase(databasePath, { readonly: true });
 
   try {
     const tables = db
@@ -122,13 +120,13 @@ export function insertSnapshot(
   },
   snapshotsDirectory = path.join(path.dirname(databasePath), "snapshots")
 ) {
-  const db = new Database(databasePath);
+  const db = openDatabase(databasePath);
 
   try {
     const oldRows = db
       .prepare("SELECT file_path as path FROM snapshots WHERE slot = ?")
       .all(snapshot.slot) as Array<{ path: string }>;
-    const replaceSlot = db.transaction(() => {
+    runInTransaction(db, () => {
       db.prepare(
         `INSERT INTO snapshots (id, slot, label, file_path, created_at)
          VALUES (@id, @slot, @label, @path, @createdAt)
@@ -139,8 +137,6 @@ export function insertSnapshot(
            created_at = excluded.created_at`
       ).run(snapshot);
     });
-
-    replaceSlot();
 
     const cleanupBoundary = getSnapshotCleanupBoundary(databasePath, snapshotsDirectory);
 
@@ -241,7 +237,7 @@ function normalizePathForComparison(filePath: string) {
 }
 
 export function getSnapshot(databasePath: string, snapshotId: string): SnapshotRecord {
-  const db = new Database(databasePath, { readonly: true });
+  const db = openDatabase(databasePath, { readonly: true });
 
   try {
     const row = db
@@ -263,10 +259,10 @@ export function getSnapshot(databasePath: string, snapshotId: string): SnapshotR
 }
 
 export function replaceHealthIssues(databasePath: string, issues: HealthIssue[]) {
-  const db = new Database(databasePath);
+  const db = openDatabase(databasePath);
 
   try {
-    const replace = db.transaction(() => {
+    runInTransaction(db, () => {
       db.prepare("DELETE FROM health_issues").run();
       const insert = db.prepare(
         `INSERT INTO health_issues (id, code, severity, message, path, detected_at)
@@ -277,8 +273,6 @@ export function replaceHealthIssues(databasePath: string, issues: HealthIssue[])
         insert.run(issue);
       }
     });
-
-    replace();
   } finally {
     db.close();
   }

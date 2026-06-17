@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import {
   FAKE_PROVIDER_ID,
   ProviderUnavailableError,
@@ -26,6 +25,7 @@ import {
 } from "../project/assets.js";
 import { initializeDatabase } from "../project/database.js";
 import { projectPaths } from "../project/paths.js";
+import { openDatabase } from "../project/sqlite.js";
 import type { EtherGraph } from "../project/schema.js";
 import {
   assembleGenerationInputs,
@@ -305,7 +305,7 @@ export async function executeGraphRun(
 export async function listRunRecords(projectPath: string): Promise<RunRecord[]> {
   const databasePath = projectPaths(projectPath).database;
   initializeDatabase(databasePath);
-  const db = new Database(databasePath, { readonly: true });
+  const db = openDatabase(databasePath, { readonly: true });
 
   try {
     const rows = db
@@ -1746,7 +1746,7 @@ function insertRunRecord(
 ) {
   const databasePath = projectPaths(projectPath).database;
   initializeDatabase(databasePath);
-  const db = new Database(databasePath);
+  const db = openDatabase(databasePath);
 
   try {
     db.prepare(

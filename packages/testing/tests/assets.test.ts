@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import Database from "../../../packages/engine/node_modules/better-sqlite3";
+import { DatabaseSync as Database } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createProject,

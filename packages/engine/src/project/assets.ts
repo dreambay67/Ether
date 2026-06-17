@@ -1,4 +1,3 @@
-import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { constants, renameSync, unlinkSync } from "node:fs";
 import { access, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -7,6 +6,7 @@ import { initializeDatabase } from "./database.js";
 import { projectPaths } from "./paths.js";
 import { LinkedIndexSchema } from "./schema.js";
 import { readJson, writeJson } from "./projectStore.js";
+import { openDatabase, runInTransaction } from "./sqlite.js";
 
 export type AssetKind = "reference" | "generated" | "collection" | "directory" | "mask";
 
@@ -262,7 +262,7 @@ export async function listAssets(
   const paths = projectPaths(projectPath);
   initializeDatabase(paths.database);
 
-  const db = new Database(paths.database, { readonly: true });
+  const db = openDatabase(paths.database, { readonly: true });
 
   try {
     const rows = query.kind
@@ -325,7 +325,7 @@ export async function moveAssetToCollection(
   const now = toTimestamp(options.now);
   const toPath = await reserveAvailablePath(path.join(collection.path, path.basename(asset.path)));
   const moveId = randomUUID();
-  const db = new Database(paths.database);
+  const db = openDatabase(paths.database);
   let physicallyMoved = false;
   let reservationStillExists = true;
 
@@ -334,7 +334,7 @@ export async function moveAssetToCollection(
     physicallyMoved = true;
     reservationStillExists = false;
 
-    const moveAsset = db.transaction(() => {
+    runInTransaction(db, () => {
       db.prepare(
         `UPDATE assets
          SET path = @toPath, updated_at = @movedAt
@@ -352,8 +352,6 @@ export async function moveAssetToCollection(
         movedAt: now
       });
     });
-
-    moveAsset();
   } catch (error) {
     if (physicallyMoved) {
       try {
@@ -401,7 +399,7 @@ export async function listAssetMoves(
   const paths = projectPaths(projectPath);
   initializeDatabase(paths.database);
 
-  const db = new Database(paths.database, { readonly: true });
+  const db = openDatabase(paths.database, { readonly: true });
 
   try {
     const rows = query.assetId
@@ -472,7 +470,7 @@ function insertAsset(
     now: string;
   }
 ) {
-  const db = new Database(databasePath);
+  const db = openDatabase(databasePath);
 
   try {
     db.prepare(
@@ -499,7 +497,7 @@ function updateAssetMetadataRecord(
   metadata: Record<string, unknown>,
   now: string
 ) {
-  const db = new Database(databasePath);
+  const db = openDatabase(databasePath);
   const mergedMetadata = { ...asset.metadata, ...metadata };
 
   try {
@@ -524,7 +522,7 @@ function findAssetByKindAndPath(
   kind: AssetKind,
   assetPath: string
 ): AssetRecord | null {
-  const db = new Database(databasePath, { readonly: true });
+  const db = openDatabase(databasePath, { readonly: true });
 
   try {
     const row = db
@@ -544,7 +542,7 @@ function findAssetByKindAndPath(
 }
 
 function getAssetById(databasePath: string, assetId: string): AssetRecord {
-  const db = new Database(databasePath, { readonly: true });
+  const db = openDatabase(databasePath, { readonly: true });
 
   try {
     const row = db

@@ -72,6 +72,21 @@ describe("project store", () => {
     );
   });
 
+  it("repairs a partial first-run project that is missing its database", async () => {
+    const parentDirectory = await createTempRoot();
+    const partial = await createProject({ parentDirectory, name: "Interrupted Create" });
+
+    await rm(path.join(partial.path, "ether.db"), { force: true });
+    await rm(path.join(partial.path, "ether.db-shm"), { force: true });
+    await rm(path.join(partial.path, "ether.db-wal"), { force: true });
+
+    const repaired = await createProject({ parentDirectory, name: "Interrupted Create" });
+
+    expect(repaired.path).toBe(partial.path);
+    expect(repaired.metadata.displayName).toBe("Interrupted Create");
+    expect(repaired.database.tables.sort()).toEqual([...REQUIRED_DATABASE_TABLES].sort());
+  });
+
   it("round-trips graph JSON through saveGraph and loadGraph", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Graph Roundtrip" });

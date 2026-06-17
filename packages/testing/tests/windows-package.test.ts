@@ -1,11 +1,15 @@
-import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   packageWindowsApp,
   requiredPackageInputs
 } from "../../../scripts/package-windows.mjs";
+
+const execFileAsync = promisify(execFile);
 
 async function createFile(filePath: string, content = "") {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -42,17 +46,7 @@ async function createFakePackageRoot() {
     path.join(root, "packages/providers/package.json"),
     JSON.stringify({ name: "@ether/providers", main: "dist/index.js", type: "commonjs" })
   );
-  await createLinkedPackage(
-    root,
-    "packages/engine/node_modules/better-sqlite3",
-    "store/better-sqlite3"
-  );
   await createLinkedPackage(root, "packages/engine/node_modules/zod", "store/zod");
-  await createFile(path.join(root, "node_modules/.pnpm/bindings@1.5.0/node_modules/bindings/package.json"), "{}");
-  await createFile(
-    path.join(root, "node_modules/.pnpm/file-uri-to-path@1.0.0/node_modules/file-uri-to-path/package.json"),
-    "{}"
-  );
 
   return root;
 }
@@ -67,10 +61,7 @@ describe("Windows desktop package", () => {
       "apps\\desktop\\dist-electron\\main\\main.js",
       "packages\\engine\\dist\\index.js",
       "packages\\providers\\dist\\index.js",
-      "packages\\engine\\node_modules\\better-sqlite3\\package.json",
-      "packages\\engine\\node_modules\\zod\\package.json",
-      "node_modules\\.pnpm\\bindings@1.5.0\\node_modules\\bindings\\package.json",
-      "node_modules\\.pnpm\\file-uri-to-path@1.0.0\\node_modules\\file-uri-to-path\\package.json"
+      "packages\\engine\\node_modules\\zod\\package.json"
     ]);
   });
 
@@ -92,17 +83,52 @@ describe("Windows desktop package", () => {
     await expect(
       readFile(path.join(result.outputDir, "resources/app/node_modules/@ether/providers/dist/index.js"), "utf8")
     ).resolves.toContain("module.exports");
-    await expect(
-      readFile(path.join(result.outputDir, "resources/app/node_modules/bindings/package.json"), "utf8")
-    ).resolves.toBe("{}");
-    await expect(
-      readFile(path.join(result.outputDir, "resources/app/node_modules/file-uri-to-path/package.json"), "utf8")
-    ).resolves.toBe("{}");
-    expect(
-      (await lstat(path.join(result.outputDir, "resources/app/node_modules/better-sqlite3"))).isSymbolicLink()
-    ).toBe(false);
     expect(
       (await lstat(path.join(result.outputDir, "resources/app/node_modules/zod"))).isSymbolicLink()
     ).toBe(false);
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "creates a project through the packaged Electron runtime",
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "ether-package-runtime-"));
+
+      try {
+        const result = await packageWindowsApp({
+          outputDir: path.join(root, "release", "ether-windows-unpacked")
+        });
+        const appRoot = path.join(result.outputDir, "resources", "app");
+        const projectParent = path.join(root, "Documents", "Ether Projects");
+        const script = `
+          const { createProject } = require(${JSON.stringify(path.join(appRoot, "node_modules", "@ether", "engine"))});
+          createProject({ parentDirectory: ${JSON.stringify(projectParent)}, name: "Packaged Runtime" })
+            .then((project) => {
+              console.log("PACKAGED_PROJECT_CREATED");
+              console.log(project.path);
+              console.log(project.database.tables.join(","));
+            })
+            .catch((error) => {
+              console.error(error && error.stack ? error.stack : error);
+              process.exit(1);
+            });
+        `;
+
+        const { stdout, stderr } = await execFileAsync(result.executablePath, ["-e", script], {
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: "1"
+          },
+          timeout: 30000,
+          windowsHide: true
+        });
+
+        expect(stderr).not.toContain("NODE_MODULE_VERSION");
+        expect(stdout).toContain("PACKAGED_PROJECT_CREATED");
+        expect(stdout).toContain("asset_moves,assets,health_issues,runs,snapshots");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    60000
+  );
 });
