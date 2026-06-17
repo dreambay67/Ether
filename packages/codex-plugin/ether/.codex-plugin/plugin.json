@@ -1,0 +1,27 @@
+{
+  "name": "ether",
+  "version": "0.1.0",
+  "description": "Local Ether node canvas workflow control for Codex.",
+  "author": {
+    "name": "DreamBay",
+    "email": "local@dreambay.invalid"
+  },
+  "license": "UNLICENSED",
+  "keywords": ["ether", "node-canvas", "image-workflow", "codex"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Ether",
+    "shortDescription": "Local node canvas workflow control",
+    "longDescription": "Create, inspect, edit, and explicitly run local Ether image workflow graphs through Codex.",
+    "developerName": "DreamBay",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Use Ether to create a new image workflow branch.",
+      "Inspect this Ether project graph before running anything.",
+      "Add a review router to my current Ether workflow."
+    ],
+    "brandColor": "#1470DB"
+  }
+}

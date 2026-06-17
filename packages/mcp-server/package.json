@@ -1,0 +1,20 @@
+{
+  "name": "@ether/mcp-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ether-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "pnpm --filter @ether/engine build && tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ether/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.32"
+  }
+}

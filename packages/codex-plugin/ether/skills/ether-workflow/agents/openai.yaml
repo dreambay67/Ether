@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ether Workflow"
+  short_description: "Inspect and edit Ether node workflows"
+  brand_color: "#1470DB"
+  default_prompt: "Use $ether-workflow to inspect my Ether project before changing or running it."
+
+policy:
+  allow_implicit_invocation: true
