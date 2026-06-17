@@ -58,10 +58,11 @@ function providerInput(projectPath: string): GenerationProviderInput {
   };
 }
 
-const validPngBytes = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  Buffer.from("ether-test-png")
-]);
+const pngSignatureBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const validPngBytes = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=",
+  "base64"
+);
 
 describe("generation provider registry", () => {
   it("lists provider capabilities and diagnostics without enabling OpenAI API fallback", async () => {
@@ -312,7 +313,7 @@ describe("generation provider registry", () => {
     await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/image\.png/i);
   });
 
-  it("rejects Codex image.png outputs that are not PNG bytes", async () => {
+  it("rejects Codex image.png outputs with a PNG header but corrupt chunk structure", async () => {
     const projectPath = await createTempRoot();
     const provider = new CodexCliImageProvider({
       codexCliPath: "C:\\Tools\\codex.exe",
@@ -323,7 +324,7 @@ describe("generation provider registry", () => {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
         const imagePath = path.join(outputDir, "image.png");
-        await writeFile(imagePath, "not a png");
+        await writeFile(imagePath, Buffer.concat([pngSignatureBytes, Buffer.from("not a real PNG")]));
         await writeFile(
           path.join(outputDir, "result.json"),
           JSON.stringify({

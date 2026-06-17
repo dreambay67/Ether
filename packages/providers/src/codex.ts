@@ -50,6 +50,7 @@ const windowsAppsCodexMessage =
 const defaultProcessTimeoutMs = 10 * 60 * 1000;
 const defaultOutputLimitBytes = 1024 * 1024;
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const crc32Table = createCrc32Table();
 
 export class CodexCliImageProvider implements GenerationProvider {
   readonly descriptor = {
@@ -363,19 +364,106 @@ async function readRequiredPngOutput(filePath: string) {
     );
   }
 
-  if (!hasPngSignature(content)) {
-    throw new Error(`Codex image worker output is not valid PNG bytes: ${filePath}`);
+  const invalidReason = getPngValidationError(content);
+
+  if (invalidReason) {
+    throw new Error(`Codex image worker output is not valid PNG bytes: ${filePath} (${invalidReason})`);
   }
 
   return content;
 }
 
-function hasPngSignature(content: Uint8Array) {
+function getPngValidationError(content: Buffer) {
   if (content.length < pngSignature.length) {
-    return false;
+    return "missing PNG signature";
   }
 
-  return pngSignature.every((byte, index) => content[index] === byte);
+  if (!pngSignature.every((byte, index) => content[index] === byte)) {
+    return "invalid PNG signature";
+  }
+
+  let offset = pngSignature.length;
+  let chunkIndex = 0;
+  let foundIend = false;
+
+  while (offset < content.length) {
+    if (content.length - offset < 12) {
+      return "truncated PNG chunk header";
+    }
+
+    const length = content.readUInt32BE(offset);
+    offset += 4;
+    const typeStart = offset;
+    const type = content.toString("ascii", typeStart, typeStart + 4);
+    offset += 4;
+    const dataStart = offset;
+    const dataEnd = dataStart + length;
+    const crcEnd = dataEnd + 4;
+
+    if (dataEnd > content.length || crcEnd > content.length) {
+      return `PNG chunk ${type || "(unknown)"} length exceeds file bounds`;
+    }
+
+    if (chunkIndex === 0 && (type !== "IHDR" || length !== 13)) {
+      return "first PNG chunk must be IHDR with length 13";
+    }
+
+    const expectedCrc = content.readUInt32BE(dataEnd);
+    const actualCrc = calculateCrc32(content.subarray(typeStart, dataEnd));
+
+    if (actualCrc !== expectedCrc) {
+      return `PNG chunk ${type} CRC mismatch`;
+    }
+
+    offset = crcEnd;
+    chunkIndex += 1;
+
+    if (type === "IEND") {
+      if (length !== 0) {
+        return "PNG IEND chunk must have length 0";
+      }
+
+      foundIend = true;
+
+      if (offset !== content.length) {
+        return "PNG data has trailing bytes after IEND";
+      }
+
+      break;
+    }
+  }
+
+  if (!foundIend) {
+    return "PNG is missing IEND chunk";
+  }
+
+  return null;
+}
+
+function createCrc32Table() {
+  const table = new Uint32Array(256);
+
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+
+    table[index] = value >>> 0;
+  }
+
+  return table;
+}
+
+function calculateCrc32(content: Uint8Array) {
+  let crc = 0xffffffff;
+
+  for (const byte of content) {
+    crc = crc32Table[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 async function readCodexWorkerResult(resultPath: string) {
