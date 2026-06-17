@@ -27,6 +27,7 @@ import {
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl";
 import { assertImageFilePathForIpc } from "./assetIpcValidation";
 import { createDesktopSettingsStore } from "./settingsStore";
+import { createMainWindowOptions } from "./windowOptions";
 
 const projectChannels = {
   create: "ether:project:create",
@@ -377,20 +378,9 @@ function registerSettingsIpc() {
 }
 
 const createMainWindow = () => {
-  const mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1120,
-    minHeight: 720,
-    title: "Ether",
-    backgroundColor: "#070B12",
-    webPreferences: {
-      preload: path.join(__dirname, "../preload/preload.js"),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
+  const mainWindow = new BrowserWindow(
+    createMainWindowOptions(path.join(__dirname, "../preload/preload.js"))
+  );
 
   const rendererUrl = process.env.ETHER_RENDERER_URL;
   const canLoadDevelopmentUrl = isLocalDevelopmentRendererUrl(rendererUrl, !app.isPackaged);
