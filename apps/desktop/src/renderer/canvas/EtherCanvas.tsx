@@ -79,6 +79,7 @@ const nodeTypes = { etherNode: EtherNode };
 
 const defaultViewport: Viewport = { x: 0, y: 0, zoom: 1 };
 const imageFileExtensionPattern = /\.(avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
+const relationshipLockMessage = "Unlock connected nodes before changing relationships";
 
 function normalizeNodes(nodes: EtherGraph["nodes"]): Node<CanvasNodeData>[] {
   return nodes.map((node) => {
@@ -115,6 +116,21 @@ function getBasename(filePath: string) {
 
 function isSupportedImageFile(file: File) {
   return file.type.startsWith("image/") || imageFileExtensionPattern.test(file.name);
+}
+
+function edgeTouchesLockedNode(edge: Edge | null | undefined, nodes: Node<CanvasNodeData>[]) {
+  if (!edge) {
+    return false;
+  }
+
+  return nodes.some((node) => (node.id === edge.source || node.id === edge.target) && node.data.locked);
+}
+
+function connectionTouchesLockedNode(
+  source: Node<CanvasNodeData> | undefined,
+  target: Node<CanvasNodeData> | undefined
+) {
+  return source?.data.locked === true || target?.data.locked === true;
 }
 
 function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
@@ -252,6 +268,11 @@ function InnerEtherCanvas(
     [onTrace]
   );
 
+  const reportRelationshipLocked = useCallback(() => {
+    setLocalRunStatus(relationshipLockMessage);
+    onStatus(relationshipLockMessage);
+  }, [onStatus]);
+
   const replaceSelection = useCallback((selection: OnSelectionChangeParams<Node<CanvasNodeData>, Edge>) => {
     setHistory((current) => ({
       ...current,
@@ -316,15 +337,31 @@ function InnerEtherCanvas(
     });
   }, []);
 
-  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
-    setHistory((current) => {
-      const nextEdges = applyEdgeChanges(changes, current.present.edges);
-      const editsGraph = changes.some((change) => change.type !== "select");
-      const next = { nodes: current.present.nodes, edges: nextEdges };
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<Edge>[]) => {
+      const blockedRelationshipChange = changes.some((change) => {
+        if (change.type === "select" || !("id" in change)) {
+          return false;
+        }
 
-      return editsGraph ? pushCanvasHistory(current, next) : { ...current, present: next };
-    });
-  }, []);
+        return edgeTouchesLockedNode(edges.find((edge) => edge.id === change.id), nodes);
+      });
+
+      if (blockedRelationshipChange) {
+        reportRelationshipLocked();
+        return;
+      }
+
+      setHistory((current) => {
+        const nextEdges = applyEdgeChanges(changes, current.present.edges);
+        const editsGraph = changes.some((change) => change.type !== "select");
+        const next = { nodes: current.present.nodes, edges: nextEdges };
+
+        return editsGraph ? pushCanvasHistory(current, next) : { ...current, present: next };
+      });
+    },
+    [edges, nodes, reportRelationshipLocked]
+  );
 
   const createNode = useCallback(
     (definition: EtherNodeDefinition, position: { x: number; y: number }) => {
@@ -439,6 +476,12 @@ function InnerEtherCanvas(
       const duplicate = edges.some(
         (edge) => edge.source === connection.source && edge.target === connection.target
       );
+
+      if (connectionTouchesLockedNode(source, target)) {
+        reportRelationshipLocked();
+        return;
+      }
+
       const result = canConnectNodeKinds(source?.data.kind ?? "", target?.data.kind ?? "", {
         sourceId: connection.source,
         targetId: connection.target,
@@ -466,13 +509,20 @@ function InnerEtherCanvas(
       commitSnapshot(nodes, addEdge(edge, edges), `Connected ${source?.data.title} to ${target?.data.title}`);
       onStatus(`Connected with ${label} edge`);
     },
-    [commitSnapshot, edges, nodes, onStatus]
+    [commitSnapshot, edges, nodes, onStatus, reportRelationshipLocked]
   );
 
   const connectFirstValidPair = useCallback(() => {
+    let skippedLockedEndpoint = false;
+
     for (const source of nodes) {
       for (const target of nodes) {
         if (source.id === target.id) {
+          continue;
+        }
+
+        if (connectionTouchesLockedNode(source, target)) {
+          skippedLockedEndpoint = true;
           continue;
         }
 
@@ -510,8 +560,13 @@ function InnerEtherCanvas(
       }
     }
 
+    if (skippedLockedEndpoint) {
+      reportRelationshipLocked();
+      return;
+    }
+
     onStatus("Add a valid source and target node before connecting.");
-  }, [commitSnapshot, edges, nodes, onStatus]);
+  }, [commitSnapshot, edges, nodes, onStatus, reportRelationshipLocked]);
 
   const previewNode = useCallback(
     (id: string, updates: Partial<CanvasNodeData>) => {
@@ -558,6 +613,11 @@ function InnerEtherCanvas(
 
   const previewEdge = useCallback(
     (id: string, label: string) => {
+      if (edgeTouchesLockedNode(edges.find((edge) => edge.id === id), nodes)) {
+        reportRelationshipLocked();
+        return;
+      }
+
       setHistory((current) => {
         textEditBaselineRef.current ??= current.present;
         const nextEdges = current.present.edges.map((edge) =>
@@ -583,7 +643,7 @@ function InnerEtherCanvas(
         });
       });
     },
-    [graph?.selectedSnapshotId, viewport]
+    [edges, graph?.selectedSnapshotId, nodes, reportRelationshipLocked, viewport]
   );
 
   const commitTextEdit = useCallback(() => {
@@ -625,11 +685,21 @@ function InnerEtherCanvas(
       const hasLockedNode = nodes.some(
         (node) => requestedNodeIds.includes(node.id) && node.data.locked
       );
+      const requestedEdgeIds =
+        selection?.edgeIds ?? edges.filter((edge) => edge.selected).map((edge) => edge.id);
+      const hasLockedRelationship = requestedEdgeIds.some((edgeId) =>
+        edgeTouchesLockedNode(edges.find((edge) => edge.id === edgeId), nodes)
+      );
 
       if (hasLockedNode) {
         const message = "Unlock the node before changing it.";
         setLocalRunStatus(message);
         onStatus(message);
+        return;
+      }
+
+      if (hasLockedRelationship) {
+        reportRelationshipLocked();
         return;
       }
 
@@ -643,7 +713,7 @@ function InnerEtherCanvas(
       onTrace("Deleted selection");
       onStatus("Selection deleted");
     },
-    [edges, nodes, onStatus, onTrace]
+    [edges, nodes, onStatus, onTrace, reportRelationshipLocked]
   );
 
   const deleteSelection = useCallback(() => {
@@ -1137,6 +1207,12 @@ function InnerEtherCanvas(
         return;
       }
 
+      if (dragged.data.locked || edgeTouchesLockedNode(targetEdge, latestNodes)) {
+        commitDragOnly();
+        reportRelationshipLocked();
+        return;
+      }
+
       const firstRule = canConnectNodeKinds(sourceNode.data.kind, dragged.data.kind, {
         sourceId: sourceNode.id,
         targetId: dragged.id
@@ -1184,7 +1260,7 @@ function InnerEtherCanvas(
       onTrace("Inserted node onto edge");
       onStatus("Node inserted between connected nodes");
     },
-    [edges, nodes, onStatus, onTrace]
+    [edges, nodes, onStatus, onTrace, reportRelationshipLocked]
   );
 
   const onNodeDragStart = useCallback(() => {

@@ -47,6 +47,18 @@ type InspectorPanelProps = {
   hasOpenProject: boolean;
 };
 
+function edgeTouchesLockedNode(edge: Edge | null, graph: EtherGraph) {
+  if (!edge) {
+    return false;
+  }
+
+  return graph.nodes.some((candidate) => {
+    const node = candidate as Node<CanvasNodeData>;
+
+    return (node.id === edge.source || node.id === edge.target) && node.data.locked;
+  });
+}
+
 export function InspectorPanel({
   selectedNode,
   selectedEdge,
@@ -423,6 +435,8 @@ export function InspectorPanel({
   }
 
   if (selectedEdge) {
+    const isRelationshipLocked = edgeTouchesLockedNode(selectedEdge, graph);
+
     return (
       <div className="inspector-form">
         <div className="inspector-meta">
@@ -434,16 +448,26 @@ export function InspectorPanel({
           <input
             value={edgeLabelDraft}
             onChange={(event) => {
+              if (isRelationshipLocked) {
+                return;
+              }
+
               const label = event.target.value;
               setEdgeLabelDraft(label);
               onPreviewEdge(selectedEdge.id, label);
             }}
             onBlur={commitEdgeDraft}
             onKeyDown={commitInputOnEnter}
+            disabled={isRelationshipLocked}
             data-testid="inspector-edge-label"
           />
         </label>
-        <button type="button" className="danger-button" onClick={onDeleteSelection}>
+        <button
+          type="button"
+          className="danger-button"
+          onClick={onDeleteSelection}
+          disabled={isRelationshipLocked}
+        >
           <Trash2 size={15} aria-hidden="true" />
           Delete selection
         </button>
