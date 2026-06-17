@@ -476,6 +476,47 @@ describe("fake local execution", () => {
     });
   });
 
+  it("preflights cyclic parallel dependencies before independent durable work starts", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Parallel Cycle Preflight" });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        }),
+        node("prompt-a", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "cycle prompt a"
+        }),
+        node("prompt-b", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "cycle prompt b"
+        })
+      ],
+      [
+        edge("edge-prompt-a-prompt-b", "prompt-a", "prompt-b"),
+        edge("edge-prompt-b-prompt-a", "prompt-b", "prompt-a")
+      ]
+    );
+
+    await expect(
+      executeGraphRun(project.path, canvas, {
+        policy: "selected",
+        targetNodeIds: ["generation", "prompt-a", "prompt-b"],
+        parallel: true
+      })
+    ).rejects.toThrow(/cyclic|unsatisfied/i);
+
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
+    await expect(listRunRecords(project.path)).resolves.toEqual([]);
+  });
+
   it("refreshes prompts upstream before generating and writes fake provider lineage", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Refresh Upstream" });

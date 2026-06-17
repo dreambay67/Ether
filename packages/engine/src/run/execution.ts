@@ -122,6 +122,7 @@ export async function runExecutionQueue<T>(
     const results = new Array<T>(items.length);
     const groups = groupQueueItems(items);
     const dependencies = normalizeQueueDependencies(options.dependencies, groups);
+    assertQueueDependenciesRunnable(dependencies, groups);
     const completed = new Set<string>();
     const pending = new Set(groups.keys());
 
@@ -198,13 +199,55 @@ function normalizeQueueDependencies(
 
     normalized.set(
       nodeId,
-      uniqueInOrder(dependencyIds).filter(
-        (dependencyId) => dependencyId !== nodeId && groupIds.has(dependencyId)
-      )
+      uniqueInOrder(dependencyIds)
     );
   }
 
   return normalized;
+}
+
+function assertQueueDependenciesRunnable(
+  dependencies: Map<string, string[]>,
+  groups: Map<string, Array<{ item: ExecutionQueueItem; index: number }>>
+) {
+  const groupIds = new Set(groups.keys());
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  for (const [nodeId, dependencyIds] of dependencies) {
+    for (const dependencyId of dependencyIds) {
+      if (!groupIds.has(dependencyId)) {
+        throw new Error("Execution queue has cyclic or unsatisfied dependencies");
+      }
+    }
+
+    if (!groupIds.has(nodeId)) {
+      throw new Error("Execution queue has cyclic or unsatisfied dependencies");
+    }
+  }
+
+  function visit(nodeId: string) {
+    if (visited.has(nodeId)) {
+      return;
+    }
+
+    if (visiting.has(nodeId)) {
+      throw new Error("Execution queue has cyclic or unsatisfied dependencies");
+    }
+
+    visiting.add(nodeId);
+
+    for (const dependencyId of dependencies.get(nodeId) ?? []) {
+      visit(dependencyId);
+    }
+
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  }
+
+  for (const nodeId of groupIds) {
+    visit(nodeId);
+  }
 }
 
 export async function executeGraphRun(
