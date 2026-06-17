@@ -38,6 +38,8 @@ const runtimeFailureHints = [
   "failed to initialize in-process app-server client",
   "operation not permitted"
 ];
+const windowsAppsCodexMessage =
+  "WindowsApps Codex alias paths are blocked because they can return Access is denied. Configure a real user-local CODEX_CLI_PATH in C:\\Users\\<you>\\.codex\\config.toml.";
 
 export class CodexCliImageProvider implements GenerationProvider {
   readonly descriptor = {
@@ -77,6 +79,19 @@ export class CodexCliImageProvider implements GenerationProvider {
           "CODEX_CLI_PATH was not found in the user Codex config. PATH lookup is intentionally not used."
         ],
         details: {
+          imageGenerationFeatureStable: true
+        }
+      };
+    }
+
+    if (isWindowsAppsCodexAlias(codexCliPath)) {
+      return {
+        ...this.descriptor,
+        capabilities: [...this.descriptor.capabilities],
+        availability: "unavailable",
+        messages: [windowsAppsCodexMessage],
+        details: {
+          codexCliPath,
           imageGenerationFeatureStable: true
         }
       };
@@ -322,6 +337,14 @@ function resolveCodexCliPath(
   }
 
   return null;
+}
+
+function isWindowsAppsCodexAlias(filePath: string) {
+  const normalized = path.normalize(filePath).toLowerCase();
+  const segments = normalized.split(path.sep).filter(Boolean);
+  const fileName = segments.at(-1);
+
+  return fileName === "codex.exe" && segments.includes("windowsapps");
 }
 
 async function pathExists(filePath: string) {

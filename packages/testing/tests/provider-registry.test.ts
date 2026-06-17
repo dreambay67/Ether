@@ -193,6 +193,29 @@ describe("generation provider registry", () => {
     });
   });
 
+  it("rejects the WindowsApps Codex alias even when it exists", async () => {
+    const projectPath = await createTempRoot();
+    const calls: ProviderProcessCall[] = [];
+    const provider = new CodexCliImageProvider({
+      env: {
+        USERPROFILE: projectPath,
+        CODEX_CLI_PATH: "C:\\Users\\deny7\\AppData\\Local\\Microsoft\\WindowsApps\\codex.exe"
+      },
+      fileExists: async () => true,
+      runner: async (call) => {
+        calls.push(call);
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(provider.diagnose()).resolves.toMatchObject({
+      availability: "unavailable",
+      messages: [expect.stringMatching(/WindowsApps.*blocked.*user-local CODEX_CLI_PATH/i)]
+    });
+    await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/WindowsApps.*blocked/i);
+    expect(calls).toEqual([]);
+  });
+
   it("classifies Codex local state failures separately from prompt or generation failures", () => {
     expect(classifyCodexCliFailure("failed to initialize state runtime: readonly database")).toMatchObject({
       category: "local-runtime-or-sandbox",
