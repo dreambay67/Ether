@@ -63,6 +63,10 @@ const validPngBytes = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=",
   "base64"
 );
+const noIdatPngBytes = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAElFTkSuQmCC",
+  "base64"
+);
 
 describe("generation provider registry", () => {
   it("lists provider capabilities and diagnostics without enabling OpenAI API fallback", async () => {
@@ -340,6 +344,35 @@ describe("generation provider registry", () => {
     });
 
     await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/not valid PNG bytes/i);
+  });
+
+  it("rejects CRC-valid Codex PNG outputs without IDAT image data", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex prompt.");
+        }
+        const imagePath = path.join(outputDir, "image.png");
+        await writeFile(imagePath, noIdatPngBytes);
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-1-generation-2",
+            status: "complete",
+            image_path: imagePath,
+            error: null
+          }),
+          "utf8"
+        );
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(provider.generate(providerInput(projectPath))).rejects.toThrow(/IDAT/i);
   });
 
   it("reports a useful error when Codex result.json points at a missing image.png", async () => {

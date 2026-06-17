@@ -385,6 +385,7 @@ function getPngValidationError(content: Buffer) {
   let offset = pngSignature.length;
   let chunkIndex = 0;
   let foundIend = false;
+  let totalIdatDataLength = 0;
 
   while (offset < content.length) {
     if (content.length - offset < 12) {
@@ -415,12 +416,20 @@ function getPngValidationError(content: Buffer) {
       return `PNG chunk ${type} CRC mismatch`;
     }
 
+    if (type === "IDAT") {
+      totalIdatDataLength += length;
+    }
+
     offset = crcEnd;
     chunkIndex += 1;
 
     if (type === "IEND") {
       if (length !== 0) {
         return "PNG IEND chunk must have length 0";
+      }
+
+      if (totalIdatDataLength <= 0) {
+        return "PNG is missing non-empty IDAT image data";
       }
 
       foundIend = true;
