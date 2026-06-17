@@ -75,6 +75,15 @@ type ContextMenuState = {
   position: { x: number; y: number };
 } | null;
 
+type ImageAssetDragPayload = {
+  nodeId: string;
+  assetId?: string;
+  assetKind?: string;
+  assetPath: string;
+  assetMetadata?: Record<string, unknown>;
+  title?: string;
+};
+
 const nodeTypes = { etherNode: EtherNode };
 
 const defaultViewport: Viewport = { x: 0, y: 0, zoom: 1 };
@@ -175,6 +184,40 @@ function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
     assetPath: asset.path,
     assetMetadata: asset.metadata
   };
+}
+
+function parseImageAssetDragPayload(value: string): ImageAssetDragPayload | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const candidate = parsed as Partial<ImageAssetDragPayload>;
+
+    if (typeof candidate.nodeId !== "string" || typeof candidate.assetPath !== "string") {
+      return null;
+    }
+
+    return {
+      nodeId: candidate.nodeId,
+      assetId: typeof candidate.assetId === "string" ? candidate.assetId : undefined,
+      assetKind: typeof candidate.assetKind === "string" ? candidate.assetKind : undefined,
+      assetPath: candidate.assetPath,
+      assetMetadata:
+        candidate.assetMetadata && typeof candidate.assetMetadata === "object" && !Array.isArray(candidate.assetMetadata)
+          ? candidate.assetMetadata
+          : undefined,
+      title: typeof candidate.title === "string" ? candidate.title : undefined
+    };
+  } catch {
+    return null;
+  }
 }
 
 function InnerEtherCanvas(
@@ -460,6 +503,69 @@ function InnerEtherCanvas(
       setContextMenu(null);
     },
     [commitDurableSnapshot, edges, nodes, onStatus]
+  );
+
+  const createEditNodeFromImage = useCallback(
+    (payload: ImageAssetDragPayload, position: { x: number; y: number }) => {
+      const sourceNode = nodes.find((node) => node.id === payload.nodeId);
+
+      if (!sourceNode) {
+        onStatus("Source image node was not found.");
+        return;
+      }
+
+      if (sourceNode.data.locked) {
+        reportRelationshipLocked();
+        return;
+      }
+
+      const definition = getNodeDefinition("edit-inpaint");
+      const connection = canConnectNodeKinds(sourceNode.data.kind, definition.category, {
+        sourceId: sourceNode.id
+      });
+
+      if (!connection.allowed) {
+        onStatus(connection.reason ?? "Image source cannot connect to an Edit node.");
+        return;
+      }
+
+      nodeCounterRef.current += 1;
+      const editNodeId = `node-${definition.id}-${Date.now()}-${nodeCounterRef.current}`;
+      const editNode: Node<CanvasNodeData> = {
+        id: editNodeId,
+        type: "etherNode",
+        position,
+        width: 260,
+        height: 220,
+        selected: true,
+        data: {
+          ...createGraphNodeData(definition.id),
+          instruction: `Edit ${payload.title ?? sourceNode.data.title}`,
+          sourceAssetId: payload.assetId,
+          sourceAssetKind: payload.assetKind,
+          sourceAssetPath: payload.assetPath,
+          sourceAssetMetadata: payload.assetMetadata
+        }
+      };
+      const edge = normalizeEdges([
+        {
+          id: `edge-${sourceNode.id}-${editNodeId}-${Date.now()}`,
+          source: sourceNode.id,
+          target: editNodeId,
+          label: "image",
+          data: { label: "image" }
+        }
+      ])[0]!;
+      const nextNodes = nodes.map((node) => ({ ...node, selected: false })).concat(editNode);
+      const nextEdges = edges.map((candidate) => ({ ...candidate, selected: false })).concat(edge);
+      const message = "Created Inpaint edit from image";
+
+      commitSnapshot(nextNodes, nextEdges, message);
+      setLocalRunStatus(message);
+      onStatus(message);
+      setContextMenu(null);
+    },
+    [commitSnapshot, edges, nodes, onStatus, reportRelationshipLocked]
   );
 
   const linkReferenceImage = useCallback(async () => {
@@ -895,6 +1001,81 @@ function InnerEtherCanvas(
     [commitDurableSnapshot, edges, nodes, onStatus, projectId]
   );
 
+  const createMaskAssetForNode = useCallback(
+    async (id: string) => {
+      const target = nodes.find((node) => node.id === id);
+
+      if (!target || target.data.kind !== "Edit") {
+        onStatus("Select an Edit node first.");
+        return;
+      }
+
+      if (target.data.locked) {
+        const message = "Node is locked";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      if (!projectId) {
+        const message = "Open a project to save mask overlays";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      const sourceAssetPath = target.data.sourceAssetPath ?? target.data.assetPath;
+
+      if (!sourceAssetPath) {
+        const message = "Add a source image before creating a mask.";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      try {
+        const asset = await window.ether.asset.saveMask(projectId, {
+          editNodeId: target.id,
+          sourceAssetId: target.data.sourceAssetId ?? target.data.assetId,
+          sourceAssetPath,
+          fileName: `mask-${target.id}-${Date.now()}.svg`,
+          mimeType: "image/svg+xml",
+          instruction: target.data.instruction,
+          notes: target.data.notes,
+          metadata: {
+            sourceAssetKind: target.data.sourceAssetKind ?? target.data.assetKind,
+            sourceAssetMetadata: target.data.sourceAssetMetadata ?? target.data.assetMetadata ?? {}
+          }
+        });
+        const now = new Date().toISOString();
+        const nextNodes = nodes.map((node) =>
+          node.id === target.id
+            ? {
+                ...node,
+                selected: true,
+                data: {
+                  ...node.data,
+                  maskAssetId: asset.id,
+                  maskAssetPath: asset.path,
+                  maskMetadata: asset.metadata,
+                  rerunState: node.data.assetId ? ("stale" as const) : (node.data.rerunState ?? "ready"),
+                  staleSince: node.data.assetId ? now : node.data.staleSince
+                }
+              }
+            : { ...node, selected: false }
+        );
+        const message = "Mask overlay saved";
+
+        commitDurableSnapshot(nextNodes, edges, message);
+        setLocalRunStatus(message);
+        onStatus(message);
+      } catch (error) {
+        onStatus(error instanceof Error ? error.message : "Mask overlay save failed");
+      }
+    },
+    [commitDurableSnapshot, edges, nodes, onStatus, projectId]
+  );
+
   const moveLatestGeneratedAssetToCollection = useCallback(
     async (collectionNodeId: string) => {
       const collectionNode = nodes.find((node) => node.id === collectionNodeId);
@@ -1134,6 +1315,18 @@ function InnerEtherCanvas(
   const onDrop = useCallback(
     async (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
+      const imagePayload = parseImageAssetDragPayload(
+        event.dataTransfer.getData("application/ether-image-asset")
+      );
+
+      if (event.shiftKey && imagePayload && flowRef.current) {
+        createEditNodeFromImage(
+          imagePayload,
+          flowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        );
+        return;
+      }
+
       const definitionId = event.dataTransfer.getData("application/ether-node-definition");
       const definition = definitionId ? getNodeDefinition(definitionId) : null;
 
@@ -1194,7 +1387,7 @@ function InnerEtherCanvas(
         flowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
       );
     },
-    [createNode, createReferenceNodes, onStatus, onTrace, projectId]
+    [createEditNodeFromImage, createNode, createReferenceNodes, onStatus, onTrace, projectId]
   );
 
   const onNodeDragStop = useCallback(
@@ -1369,6 +1562,7 @@ function InnerEtherCanvas(
           onExecuteRun={executeRun}
           onEnsureStoreFolder={ensureStoreFolderForNode}
           onSaveFakeGeneratedAsset={saveFakeGeneratedAssetForNode}
+          onCreateMaskAsset={createMaskAssetForNode}
           onMoveLatestGeneratedAssetToCollection={moveLatestGeneratedAssetToCollection}
           onDeleteSelection={deleteSelection}
           executionPolicy={executionPolicy}

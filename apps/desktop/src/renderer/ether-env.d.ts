@@ -56,6 +56,20 @@ declare global {
           projectId: string,
           options: { generationNodeId: string; fileName: string; content?: string; mimeType?: string }
         ): Promise<AssetRecord>;
+        saveMask(
+          projectId: string,
+          options: {
+            editNodeId: string;
+            sourceAssetId?: string;
+            sourceAssetPath?: string;
+            fileName?: string;
+            content?: string;
+            mimeType?: string;
+            instruction?: string;
+            notes?: string;
+            metadata?: Record<string, unknown>;
+          }
+        ): Promise<AssetRecord>;
         moveToCollection(
           projectId: string,
           options: { assetId: string; collectionId?: string; collectionName?: string; reason?: string }

@@ -54,10 +54,10 @@ function editContract(definition: EtherNodeDefinition): NodeContract {
   return {
     definitionId: definition.id,
     acceptedInputs: ["image", "prompt", "negativePrompt", "reference", "mask", "note"],
-    producedOutputs: ["editedImage", "metadata"],
-    runnable: false,
-    runLabel: "Prepare Edit",
-    description: `${definition.title} prepares edit inputs without executing a provider.`
+    producedOutputs: ["editedImage", "mask", "metadata"],
+    runnable: true,
+    runLabel: definition.subtype === "Upscale" ? "Upscale" : "Run Edit",
+    description: `${definition.title} executes a provider or local edit path and stores edited image lineage.`
   };
 }
 
@@ -111,9 +111,9 @@ function generationContract(definition: EtherNodeDefinition): NodeContract {
     definitionId: definition.id,
     acceptedInputs: ["prompt", "negativePrompt", "reference", "metadata"],
     producedOutputs: ["image", "metadata", "prompt"],
-    runnable: false,
-    runLabel: "Prepare Generation",
-    description: `${definition.title} assembles generation inputs without executing an image provider.`
+    runnable: true,
+    runLabel: "Generate",
+    description: `${definition.title} assembles inputs, executes a configured image provider, and stores output lineage.`
   };
 }
 

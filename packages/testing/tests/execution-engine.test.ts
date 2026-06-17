@@ -10,6 +10,7 @@ import {
   markDownstreamStale,
   planExecution,
   runExecutionQueue,
+  saveGeneratedAsset,
   type CanvasNodeData,
   type EtherGraph,
   type ExecutionQueueItem
@@ -382,6 +383,235 @@ describe("execution planning", () => {
 });
 
 describe("fake local execution", () => {
+  it("runs an Inpaint edit with the fake provider and records parent lineage", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Fake Edit Lineage" });
+    const parentAsset = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "parent.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>parent</title></svg>",
+      mimeType: "image/svg+xml",
+      lineage: { prompt: "original parent" },
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: parentAsset.id,
+          assetKind: parentAsset.kind,
+          assetPath: parentAsset.path,
+          assetMetadata: parentAsset.metadata
+        }),
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "replace the label with a clean blue mark"
+        }),
+        node("edit", {
+          definitionId: "edit-inpaint",
+          kind: "Edit",
+          subtype: "Inpaint",
+          instruction: "repair only the label area",
+          maskAssetId: "mask-asset-1" as any,
+          maskAssetPath: path.join(project.path, "assets", "masks", "mask.svg") as any,
+          maskMetadata: { overlay: "label area" } as any
+        } as any)
+      ],
+      [
+        edge("edge-generation-edit", "generation", "edit", "image"),
+        edge("edge-prompt-edit", "prompt", "edit", "prompt")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "cached-inputs",
+      targetNodeIds: ["edit"],
+      now: () => new Date("2026-06-17T12:45:00.000Z")
+    });
+
+    const editResult = result.results.find((entry) => entry.nodeId === "edit");
+    const editNode = result.graph.nodes.find((candidate) => candidate.id === "edit");
+    const generatedAssets = await listAssets(project.path, { kind: "generated" });
+    const editedAsset = generatedAssets.find((asset) => asset.id === editResult?.assetId);
+
+    expect(editResult).toMatchObject({
+      status: "complete",
+      action: "edit",
+      metadata: {
+        provider: {
+          id: "ether-fake-local",
+          name: "Ether Fake Local",
+          capabilities: expect.arrayContaining(["image.edit"])
+        },
+        sourceAsset: {
+          id: parentAsset.id,
+          path: parentAsset.path
+        },
+        mask: {
+          assetId: "mask-asset-1",
+          assetPath: path.join(project.path, "assets", "masks", "mask.svg")
+        }
+      }
+    });
+    expect(editNode?.data).toMatchObject({
+      status: "complete",
+      rerunState: "complete",
+      assetId: editedAsset?.id,
+      assetKind: "generated",
+      assetPath: editedAsset?.path,
+      sourceAssetId: parentAsset.id,
+      sourceAssetPath: parentAsset.path,
+      maskAssetId: "mask-asset-1",
+      maskAssetPath: path.join(project.path, "assets", "masks", "mask.svg")
+    });
+    expect(editedAsset?.metadata).toMatchObject({
+      provider: "ether-fake-local",
+      editNodeId: "edit",
+      editSubtype: "Inpaint",
+      lineage: {
+        edit: {
+          nodeId: "edit",
+          subtype: "Inpaint",
+          instruction: "repair only the label area"
+        },
+        parent: {
+          assetId: parentAsset.id,
+          assetPath: parentAsset.path
+        },
+        mask: {
+          assetId: "mask-asset-1",
+          assetPath: path.join(project.path, "assets", "masks", "mask.svg")
+        },
+        prompt: "replace the label with a clean blue mark"
+      }
+    });
+    await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain("ETHER_FAKE_EDITED_IMAGE");
+  });
+
+  it("reports a missing edit provider without writing generated edit assets", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Missing Edit Provider" });
+    const parentAsset = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "parent.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>parent</title></svg>"
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: parentAsset.id,
+          assetKind: parentAsset.kind,
+          assetPath: parentAsset.path,
+          assetMetadata: parentAsset.metadata
+        }),
+        node("edit", {
+          definitionId: "edit-draw-and-note",
+          kind: "Edit",
+          subtype: "Draw & Note",
+          instruction: "try a small annotation"
+        })
+      ],
+      [edge("edge-generation-edit", "generation", "edit", "image")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["edit"],
+      providerId: "missing-provider"
+    } as any);
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "edit",
+        status: "error",
+        action: "edit",
+        reason: expect.stringMatching(/missing-provider.*not registered/i)
+      })
+    ]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "edit")?.data?.assetId).toBeUndefined();
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
+      expect.objectContaining({ id: parentAsset.id })
+    ]);
+  });
+
+  it("runs fake/local Upscale edits with explicit local metadata", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Fake Upscale" });
+    const parentAsset = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "parent.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>parent</title></svg>"
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: parentAsset.id,
+          assetKind: parentAsset.kind,
+          assetPath: parentAsset.path,
+          assetMetadata: parentAsset.metadata
+        }),
+        node("upscale", {
+          definitionId: "edit-upscale",
+          kind: "Edit",
+          subtype: "Upscale",
+          instruction: "2x clean presentation upscale"
+        })
+      ],
+      [edge("edge-generation-upscale", "generation", "upscale", "image")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["upscale"]
+    });
+    const upscaleResult = result.results.find((entry) => entry.nodeId === "upscale");
+    const editedAsset = (await listAssets(project.path, { kind: "generated" })).find(
+      (asset) => asset.id === upscaleResult?.assetId
+    );
+
+    expect(upscaleResult).toMatchObject({
+      status: "complete",
+      action: "upscale",
+      metadata: {
+        provider: {
+          id: "ether-fake-local",
+          route: "local-fake"
+        },
+        operation: "upscale",
+        localTool: {
+          kind: "fake-deterministic-upscale",
+          route: "local-fake"
+        }
+      }
+    });
+    expect(editedAsset?.metadata).toMatchObject({
+      editSubtype: "Upscale",
+      providerRoute: "local-fake",
+      localTool: {
+        kind: "fake-deterministic-upscale",
+        route: "local-fake"
+      },
+      lineage: {
+        edit: {
+          operation: "upscale"
+        }
+      }
+    });
+  });
+
   it("uses the default fake image provider and records provider lineage", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Fake Provider Image" });
@@ -428,7 +658,7 @@ describe("fake local execution", () => {
         provider: {
           id: "ether-fake-local",
           name: "Ether Fake Local",
-          capabilities: ["image.generate"]
+          capabilities: expect.arrayContaining(["image.generate"])
         },
         iteration: 1,
         prompt: "deterministic electric blue product render"

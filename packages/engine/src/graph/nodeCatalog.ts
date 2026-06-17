@@ -40,6 +40,13 @@ export type CanvasNodeData = {
   assetKind?: string;
   assetPath?: string;
   assetMetadata?: Record<string, unknown>;
+  sourceAssetId?: string;
+  sourceAssetKind?: string;
+  sourceAssetPath?: string;
+  sourceAssetMetadata?: Record<string, unknown>;
+  maskAssetId?: string;
+  maskAssetPath?: string;
+  maskMetadata?: Record<string, unknown>;
   storeAssetId?: string;
   storePath?: string;
   storeMetadata?: Record<string, unknown>;

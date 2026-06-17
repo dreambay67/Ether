@@ -59,14 +59,25 @@ describe("graph node catalog", () => {
     expect(data.instruction).toContain("General");
   });
 
-  it("marks only prompt contracts runnable for current local Task 3 execution", () => {
+  it("marks locally executable Prompt, Generation, and Edit contracts runnable", () => {
     const runnableContracts = NODE_CONTRACTS.filter((contract) => contract.runnable);
 
     expect(runnableContracts.map((contract) => contract.definitionId).sort()).toEqual(
-      NODE_DEFINITIONS.filter((definition) => definition.category === "Prompt")
+      NODE_DEFINITIONS.filter((definition) =>
+        ["Prompt", "Generation", "Edit"].includes(definition.category)
+      )
         .map((definition) => definition.id)
         .sort()
     );
+    expect(getOptionalNodeContract("edit-inpaint")).toMatchObject({
+      runnable: true,
+      runLabel: "Run Edit",
+      producedOutputs: expect.arrayContaining(["editedImage", "mask", "metadata"])
+    });
+    expect(getOptionalNodeContract("edit-upscale")).toMatchObject({
+      runnable: true,
+      runLabel: "Upscale"
+    });
   });
 
   it("offers a safe optional contract lookup for malformed persisted nodes", () => {
@@ -94,6 +105,7 @@ describe("connection rules", () => {
     ["Prompt", "Generation"],
     ["Reference", "Generation"],
     ["Generation", "Edit"],
+    ["Edit", "Edit"],
     ["Generation", "Store"],
     ["Generation", "Compare"],
     ["Evaluate", "Filter"],

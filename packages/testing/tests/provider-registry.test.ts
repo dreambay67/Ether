@@ -136,6 +136,57 @@ describe("generation provider registry", () => {
     expect(String(first.artifacts[0]?.content)).toContain("glass bottle under crisp studio light");
   });
 
+  it("produces deterministic fake edit artifacts for offline edit and upscale tests", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new FakeImageProvider();
+    const editInput = {
+      projectPath,
+      runId: "run-edit-1",
+      editNodeId: "edit-upscale",
+      editSubtype: "Upscale",
+      operation: "upscale",
+      iteration: 1,
+      prompt: "make the edges cleaner",
+      negativePrompt: "",
+      instruction: "2x clean presentation upscale",
+      notes: "retain proportions",
+      sections: [],
+      references: [],
+      edgeRoles: [],
+      sourceImage: {
+        assetId: "parent-asset-1",
+        assetKind: "generated",
+        assetPath: path.join(projectPath, "parent.svg"),
+        assetMetadata: { generationNodeId: "generation" }
+      },
+      mask: null,
+      requestedAt: "2026-06-17T13:30:00.000Z"
+    };
+    const first = await (provider as any).edit(editInput);
+    const second = await (provider as any).edit(editInput);
+
+    expect(provider.descriptor.capabilities).toEqual(
+      expect.arrayContaining(["image.generate", "image.edit", "image.reference-input"])
+    );
+    expect(first).toEqual(second);
+    expect(first.providerId).toBe("ether-fake-local");
+    expect(first.artifacts).toHaveLength(1);
+    expect(first.artifacts[0]).toMatchObject({
+      fileName: "fake-edit-edit-upscale-upscale-1.svg",
+      mimeType: "image/svg+xml",
+      metadata: {
+        deterministic: true,
+        operation: "upscale",
+        localTool: {
+          kind: "fake-deterministic-upscale",
+          route: "local-fake"
+        }
+      }
+    });
+    expect(String(first.artifacts[0]?.content)).toContain("ETHER_FAKE_EDITED_IMAGE");
+    expect(String(first.artifacts[0]?.content)).toContain("parent-asset-1");
+  });
+
   it("builds a Codex CLI image invocation and withholds OpenAI API keys from the child process", async () => {
     const projectPath = await createTempRoot();
     const referencePath = path.join(projectPath, "reference.png");

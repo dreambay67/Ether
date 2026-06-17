@@ -1,6 +1,7 @@
 import type {
   GenerationProvider,
   GenerationProviderInput,
+  ImageEditProviderInput,
   ProviderDescriptor,
   ProviderDiagnostic
 } from "./types.js";
@@ -23,6 +24,10 @@ export class UnavailableImageProvider implements GenerationProvider {
   }
 
   async generate(_input: GenerationProviderInput): Promise<never> {
+    throw new ProviderUnavailableError(this.diagnose());
+  }
+
+  async edit(_input: ImageEditProviderInput): Promise<never> {
     throw new ProviderUnavailableError(this.diagnose());
   }
 }

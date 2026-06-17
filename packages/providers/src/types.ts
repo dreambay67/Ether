@@ -73,6 +73,40 @@ export type GenerationProviderInput = {
   requestedAt: string;
 };
 
+export type ImageEditOperation = "inpaint" | "outpaint" | "draw-note" | "upscale";
+
+export type ImageEditSourceInput = {
+  assetId?: string;
+  assetKind?: string;
+  assetPath: string;
+  assetMetadata?: Record<string, unknown>;
+};
+
+export type ImageEditMaskInput = {
+  assetId?: string;
+  assetPath?: string;
+  assetMetadata?: Record<string, unknown>;
+} | null;
+
+export type ImageEditProviderInput = {
+  projectPath: string;
+  runId: string;
+  editNodeId: string;
+  editSubtype: string;
+  operation: ImageEditOperation;
+  iteration: number;
+  prompt: string;
+  negativePrompt: string;
+  instruction: string;
+  notes: string;
+  sections: GenerationProviderInput["sections"];
+  references: GenerationReferenceInput[];
+  edgeRoles: GenerationProviderInput["edgeRoles"];
+  sourceImage: ImageEditSourceInput;
+  mask: ImageEditMaskInput;
+  requestedAt: string;
+};
+
 export type GeneratedArtifact = {
   fileName: string;
   mimeType: string;
@@ -110,4 +144,5 @@ export interface GenerationProvider {
   readonly descriptor: ProviderDescriptor;
   diagnose(context?: ProviderDiagnosticContext): Promise<ProviderDiagnostic> | ProviderDiagnostic;
   generate(input: GenerationProviderInput): Promise<ProviderGenerationResult>;
+  edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult>;
 }

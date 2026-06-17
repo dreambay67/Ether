@@ -16,6 +16,7 @@ const assetChannels = {
   ensureDirectory: "ether:asset:ensureDirectory",
   list: "ether:asset:list",
   saveFakeGenerated: "ether:asset:saveFakeGenerated",
+  saveMask: "ether:asset:saveMask",
   moveToCollection: "ether:asset:moveToCollection",
   listMoves: "ether:asset:listMoves"
 } as const;
@@ -59,6 +60,20 @@ contextBridge.exposeInMainWorld("ether", {
       projectId: string,
       options: { generationNodeId: string; fileName: string; content?: string; mimeType?: string }
     ) => ipcRenderer.invoke(assetChannels.saveFakeGenerated, projectId, options),
+    saveMask: (
+      projectId: string,
+      options: {
+        editNodeId: string;
+        sourceAssetId?: string;
+        sourceAssetPath?: string;
+        fileName?: string;
+        content?: string;
+        mimeType?: string;
+        instruction?: string;
+        notes?: string;
+        metadata?: Record<string, unknown>;
+      }
+    ) => ipcRenderer.invoke(assetChannels.saveMask, projectId, options),
     moveToCollection: (
       projectId: string,
       options: { assetId: string; collectionId?: string; collectionName?: string; reason?: string }

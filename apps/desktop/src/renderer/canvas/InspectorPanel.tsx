@@ -7,6 +7,7 @@ import {
   ImagePlus,
   ListChecks,
   Lock,
+  Paintbrush,
   Play,
   Route,
   Trash2,
@@ -35,6 +36,7 @@ type InspectorPanelProps = {
   onExecuteRun(policy: ExecutionPolicy): void;
   onEnsureStoreFolder(id: string): void;
   onSaveFakeGeneratedAsset(id: string): void;
+  onCreateMaskAsset(id: string): void;
   onMoveLatestGeneratedAssetToCollection(id: string): void;
   onDeleteSelection(): void;
   executionPolicy: ExecutionPolicy;
@@ -71,6 +73,7 @@ export function InspectorPanel({
   onExecuteRun,
   onEnsureStoreFolder,
   onSaveFakeGeneratedAsset,
+  onCreateMaskAsset,
   onMoveLatestGeneratedAssetToCollection,
   onDeleteSelection,
   executionPolicy,
@@ -350,6 +353,30 @@ export function InspectorPanel({
               </button>
             </div>
             {nodeData.assetPath ? <pre>{nodeData.assetPath}</pre> : <p>Open a project to save fake output.</p>}
+          </section>
+        ) : null}
+        {nodeData.kind === "Edit" ? (
+          <section className="inspector-preview" data-testid="inspector-mask-metadata">
+            <div>
+              <span>Mask Overlay</span>
+              <button
+                type="button"
+                className="run-node-button"
+                onClick={() => onCreateMaskAsset(selectedNode.id)}
+                disabled={!hasOpenProject || isLocked || !(nodeData.sourceAssetPath || nodeData.assetPath)}
+              >
+                <Paintbrush size={14} aria-hidden="true" />
+                Create mask overlay
+              </button>
+            </div>
+            {nodeData.sourceAssetPath ? (
+              <>
+                <span>Source</span>
+                <pre>{nodeData.sourceAssetPath}</pre>
+              </>
+            ) : null}
+            {nodeData.maskAssetId ? <p>ID: {nodeData.maskAssetId}</p> : null}
+            {nodeData.maskAssetPath ? <pre>{nodeData.maskAssetPath}</pre> : <p>No mask saved.</p>}
           </section>
         ) : null}
         {canMirrorStoreFolder ? (

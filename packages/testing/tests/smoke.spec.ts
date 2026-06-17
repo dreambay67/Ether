@@ -535,3 +535,357 @@ test("undo and redo restore and remove a node", async ({ page }) => {
   await page.getByTestId("canvas-redo").click();
   await expect(page.getByTestId("ether-node")).toHaveCount(1);
 });
+
+test("generated image nodes expose preview and inspect controls", async ({ page }) => {
+  await page.addInitScript(() => {
+    const graph = {
+      nodes: [
+        {
+          id: "generation",
+          type: "etherNode",
+          position: { x: 420, y: 220 },
+          width: 260,
+          height: 220,
+          selected: true,
+          data: {
+            definitionId: "generation-image",
+            kind: "Generation",
+            subtype: "Image",
+            title: "Image",
+            label: "Generated preview",
+            notes: "",
+            instruction: "",
+            status: "complete",
+            rerunState: "complete",
+            assetId: "generated-asset-1",
+            assetKind: "generated",
+            assetPath: "C:\\Fake\\Preview.ether\\assets\\generated\\image.svg",
+            assetMetadata: { mimeType: "image/svg+xml" }
+          }
+        }
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-17T12:00:00.000Z"
+    };
+    const project = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      path: "C:\\Fake\\Preview.ether",
+      metadata: {
+        id: "22222222-2222-4222-8222-222222222222",
+        displayName: "Preview",
+        appVersion: "0.1.0",
+        createdAt: "2026-06-17T12:00:00.000Z",
+        updatedAt: "2026-06-17T12:00:00.000Z",
+        brandLockup: "ETHER by DreamBay",
+        autosave: { enabled: true, intervalMs: 60000 },
+        providerPreferences: {},
+        activeSnapshotId: null
+      },
+      graph,
+      database: { path: "C:\\Fake\\Preview.ether\\ether.db", tables: [], healthIssueCount: 0 }
+    };
+
+    Object.assign(window, {
+      ether: {
+        shell: "desktop",
+        file: { getDroppedFilePath: () => null },
+        project: {
+          create: async () => project,
+          open: async () => project,
+          saveGraph: async () => graph,
+          loadGraph: async () => graph,
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => {
+            throw new Error("not used");
+          },
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => {
+            throw new Error("not used");
+          },
+          saveMask: async () => {
+            throw new Error("not used");
+          },
+          moveToCollection: async () => {
+            throw new Error("not used");
+          },
+          listMoves: async () => []
+        },
+        execution: {
+          run: async () => {
+            throw new Error("not used");
+          }
+        }
+      }
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Parent directory").fill("C:\\Fake");
+  await page.getByRole("button", { name: "Create" }).click();
+
+  await expect(page.getByTestId("node-image-preview")).toBeVisible();
+  await page.getByRole("button", { name: "Inspect image asset" }).click();
+  await expect(page.getByTestId("node-image-inspector")).toBeVisible();
+});
+
+test("Shift-dragging a generated image payload creates an Edit node", async ({ page }) => {
+  await page.addInitScript(() => {
+    const graph = {
+      nodes: [
+        {
+          id: "generation",
+          type: "etherNode",
+          position: { x: 380, y: 220 },
+          width: 260,
+          height: 220,
+          selected: true,
+          data: {
+            definitionId: "generation-image",
+            kind: "Generation",
+            subtype: "Image",
+            title: "Image",
+            label: "Generated source",
+            notes: "",
+            instruction: "",
+            status: "complete",
+            rerunState: "complete",
+            assetId: "generated-asset-1",
+            assetKind: "generated",
+            assetPath: "C:\\Fake\\ShiftDrag.ether\\assets\\generated\\image.svg",
+            assetMetadata: { prompt: "source prompt" }
+          }
+        }
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-17T12:00:00.000Z"
+    };
+    const project = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      path: "C:\\Fake\\ShiftDrag.ether",
+      metadata: {
+        id: "22222222-2222-4222-8222-222222222222",
+        displayName: "Shift Drag",
+        appVersion: "0.1.0",
+        createdAt: "2026-06-17T12:00:00.000Z",
+        updatedAt: "2026-06-17T12:00:00.000Z",
+        brandLockup: "ETHER by DreamBay",
+        autosave: { enabled: true, intervalMs: 60000 },
+        providerPreferences: {},
+        activeSnapshotId: null
+      },
+      graph,
+      database: { path: "C:\\Fake\\ShiftDrag.ether\\ether.db", tables: [], healthIssueCount: 0 }
+    };
+
+    Object.assign(window, {
+      ether: {
+        shell: "desktop",
+        file: { getDroppedFilePath: () => null },
+        project: {
+          create: async () => project,
+          open: async () => project,
+          saveGraph: async () => graph,
+          loadGraph: async () => graph,
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => {
+            throw new Error("not used");
+          },
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => {
+            throw new Error("not used");
+          },
+          saveMask: async () => {
+            throw new Error("not used");
+          },
+          moveToCollection: async () => {
+            throw new Error("not used");
+          },
+          listMoves: async () => []
+        },
+        execution: {
+          run: async () => {
+            throw new Error("not used");
+          }
+        }
+      }
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Parent directory").fill("C:\\Fake");
+  await page.getByRole("button", { name: "Create" }).click();
+
+  const dataTransfer = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.setData(
+      "application/ether-image-asset",
+      JSON.stringify({
+        nodeId: "generation",
+        assetId: "generated-asset-1",
+        assetKind: "generated",
+        assetPath: "C:\\Fake\\ShiftDrag.ether\\assets\\generated\\image.svg",
+        assetMetadata: { prompt: "source prompt" },
+        title: "Image"
+      })
+    );
+    return transfer;
+  });
+
+  await page.locator(".react-flow").dispatchEvent("drop", {
+    clientX: 760,
+    clientY: 360,
+    shiftKey: true,
+    dataTransfer
+  });
+
+  await expect(page.getByTestId("ether-node")).toHaveCount(2);
+  await expect(page.getByTestId("ether-node").getByRole("heading", { name: "Inpaint" })).toBeVisible();
+  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
+  await expect(page.getByTestId("canvas-status")).toContainText("Created Inpaint edit");
+});
+
+test("mask creation control saves overlay metadata and reloads through graph state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const testWindow = window as typeof window & { __maskCalls: number };
+    let savedGraph: any = null;
+    const graph = {
+      nodes: [
+        {
+          id: "edit",
+          type: "etherNode",
+          position: { x: 420, y: 220 },
+          width: 260,
+          height: 220,
+          selected: true,
+          data: {
+            definitionId: "edit-inpaint",
+            kind: "Edit",
+            subtype: "Inpaint",
+            title: "Inpaint",
+            label: "Face repair",
+            notes: "soft edge",
+            instruction: "mask the face only",
+            status: "idle",
+            sourceAssetId: "generated-asset-1",
+            sourceAssetKind: "generated",
+            sourceAssetPath: "C:\\Fake\\Mask.ether\\assets\\generated\\image.svg",
+            sourceAssetMetadata: { prompt: "source prompt" }
+          }
+        }
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-17T12:00:00.000Z"
+    };
+    const project = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      path: "C:\\Fake\\Mask.ether",
+      metadata: {
+        id: "22222222-2222-4222-8222-222222222222",
+        displayName: "Mask",
+        appVersion: "0.1.0",
+        createdAt: "2026-06-17T12:00:00.000Z",
+        updatedAt: "2026-06-17T12:00:00.000Z",
+        brandLockup: "ETHER by DreamBay",
+        autosave: { enabled: true, intervalMs: 60000 },
+        providerPreferences: {},
+        activeSnapshotId: null
+      },
+      graph,
+      database: { path: "C:\\Fake\\Mask.ether\\ether.db", tables: [], healthIssueCount: 0 }
+    };
+
+    Object.assign(testWindow, {
+      __maskCalls: 0,
+      ether: {
+        shell: "desktop",
+        file: { getDroppedFilePath: () => null },
+        project: {
+          create: async () => ({ ...project, graph: savedGraph ?? graph }),
+          open: async () => ({ ...project, graph: savedGraph ?? graph }),
+          saveGraph: async (_projectId: string, nextGraph: any) => {
+            savedGraph = nextGraph;
+            return nextGraph;
+          },
+          loadGraph: async () => savedGraph ?? graph,
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => {
+            throw new Error("not used");
+          },
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => {
+            throw new Error("not used");
+          },
+          saveMask: async () => {
+            testWindow.__maskCalls += 1;
+            return {
+              id: "mask-asset-1",
+              kind: "mask",
+              path: "C:\\Fake\\Mask.ether\\assets\\masks\\edit\\mask.svg",
+              metadata: { editNodeId: "edit", overlay: "deterministic", sourceAssetId: "generated-asset-1" },
+              createdAt: "2026-06-17T12:00:00.000Z",
+              updatedAt: "2026-06-17T12:00:00.000Z"
+            };
+          },
+          moveToCollection: async () => {
+            throw new Error("not used");
+          },
+          listMoves: async () => []
+        },
+        execution: {
+          run: async () => {
+            throw new Error("not used");
+          }
+        }
+      }
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Parent directory").fill("C:\\Fake");
+  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "Create mask overlay" }).click();
+
+  await expect(page.getByTestId("inspector-mask-metadata")).toContainText("mask-asset-1");
+  await expect(page.getByTestId("node-mask-overlay")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __maskCalls: number }).__maskCalls))
+    .toBe(1);
+
+  await page.getByRole("button", { name: "Save Graph" }).click();
+  await page.getByRole("button", { name: "Load Graph" }).click();
+
+  await expect(page.getByTestId("inspector-mask-metadata")).toContainText("mask-asset-1");
+});

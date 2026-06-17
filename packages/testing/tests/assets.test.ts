@@ -13,6 +13,7 @@ import {
   moveAssetToCollection,
   saveGeneratedAsset
 } from "@ether/engine";
+import * as engine from "@ether/engine";
 
 const tempRoots: string[] = [];
 
@@ -27,6 +28,68 @@ afterEach(async () => {
 });
 
 describe("asset service", () => {
+  it("saves mask overlays under assets/masks and lists them as first-class assets", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Mask Overlay" });
+    const saveMaskAsset = (
+      engine as typeof engine & {
+        saveMaskAsset: (projectPath: string, options: {
+          editNodeId: string;
+          sourceAssetId: string;
+          sourceAssetPath: string;
+          fileName: string;
+          content: string;
+          mimeType: string;
+          metadata: Record<string, unknown>;
+          now: Date;
+        }) => Promise<Awaited<ReturnType<typeof saveGeneratedAsset>>>;
+      }
+    ).saveMaskAsset;
+
+    expect(typeof saveMaskAsset).toBe("function");
+
+    const mask = await saveMaskAsset(project.path, {
+      editNodeId: "edit-node-1",
+      sourceAssetId: "generated-parent-1",
+      sourceAssetPath: path.join(project.path, "assets", "generated", "parent.svg"),
+      fileName: "..\\unsafe mask.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\" /></svg>",
+      mimeType: "image/svg+xml",
+      metadata: { label: "face repair" },
+      now: new Date("2026-06-17T12:30:00.000Z")
+    });
+
+    expect(mask).toMatchObject({
+      kind: "mask",
+      path: path.join(
+        project.path,
+        "assets",
+        "masks",
+        "2026",
+        "06",
+        "edit-node-1",
+        "unsafe mask.svg"
+      ),
+      metadata: {
+        editNodeId: "edit-node-1",
+        sourceAssetId: "generated-parent-1",
+        sourceAssetPath: path.join(project.path, "assets", "generated", "parent.svg"),
+        originalName: "unsafe mask.svg",
+        mimeType: "image/svg+xml",
+        label: "face repair",
+        lineage: {
+          kind: "mask",
+          editNodeId: "edit-node-1",
+          sourceAssetId: "generated-parent-1"
+        }
+      }
+    });
+    await expect(readFile(mask.path, "utf8")).resolves.toContain("<rect");
+    await expect(listAssets(project.path, { kind: "mask" as any })).resolves.toEqual([
+      expect.objectContaining({ id: mask.id, path: mask.path, kind: "mask" })
+    ]);
+  });
+
   it("links an external reference without copying it and records the linked index", async () => {
     const parentDirectory = await createTempRoot();
     const externalDirectory = path.join(parentDirectory, "external");

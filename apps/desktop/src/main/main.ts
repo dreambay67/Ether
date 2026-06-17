@@ -21,6 +21,7 @@ import {
   openProject,
   runHealthCheck,
   saveGeneratedAsset,
+  saveMaskAsset,
   saveGraph
 } from "@ether/engine";
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl";
@@ -41,6 +42,7 @@ const assetChannels = {
   ensureDirectory: "ether:asset:ensureDirectory",
   list: "ether:asset:list",
   saveFakeGenerated: "ether:asset:saveFakeGenerated",
+  saveMask: "ether:asset:saveMask",
   moveToCollection: "ether:asset:moveToCollection",
   listMoves: "ether:asset:listMoves"
 } as const;
@@ -289,6 +291,26 @@ function registerAssetIpc() {
       fileName: assertString(generatedOptions.fileName, "fileName"),
       content: optionalString(generatedOptions.content, "content") ?? "",
       mimeType: optionalString(generatedOptions.mimeType, "mimeType")
+    });
+  });
+
+  ipcMain.handle(assetChannels.saveMask, (_event, projectId: unknown, options: unknown) => {
+    const maskOptions = assertOptions(options, "mask asset options");
+    const metadata =
+      maskOptions.metadata && typeof maskOptions.metadata === "object" && !Array.isArray(maskOptions.metadata)
+        ? (maskOptions.metadata as Record<string, unknown>)
+        : undefined;
+
+    return saveMaskAsset(getRegisteredProjectPath(projectId), {
+      editNodeId: assertString(maskOptions.editNodeId, "editNodeId"),
+      sourceAssetId: optionalString(maskOptions.sourceAssetId, "sourceAssetId"),
+      sourceAssetPath: optionalString(maskOptions.sourceAssetPath, "sourceAssetPath"),
+      fileName: optionalString(maskOptions.fileName, "fileName"),
+      content: optionalString(maskOptions.content, "content"),
+      mimeType: optionalString(maskOptions.mimeType, "mimeType"),
+      instruction: optionalString(maskOptions.instruction, "instruction"),
+      notes: optionalString(maskOptions.notes, "notes"),
+      metadata
     });
   });
 

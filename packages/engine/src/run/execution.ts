@@ -6,6 +6,11 @@ import {
   diagnoseProviderRegistry,
   type GeneratedArtifact,
   type GenerationProviderInput,
+  type GenerationReferenceInput,
+  type ImageEditMaskInput,
+  type ImageEditOperation,
+  type ImageEditProviderInput,
+  type ImageEditSourceInput,
   type ProviderRegistryDiagnostics
 } from "@ether/providers";
 import { randomUUID } from "node:crypto";
@@ -20,8 +25,14 @@ import {
 import { initializeDatabase } from "../project/database.js";
 import { projectPaths } from "../project/paths.js";
 import type { EtherGraph } from "../project/schema.js";
-import { assembleGenerationInputs, freezePromptNode } from "../graph/promptAssembly.js";
+import {
+  assembleGenerationInputs,
+  assemblePromptForNode,
+  freezePromptNode,
+  resolveReferenceRole
+} from "../graph/promptAssembly.js";
 import type { CanvasNodeData } from "../graph/nodeCatalog.js";
+import type { EdgeRoleArtifact, PromptSectionArtifact } from "../graph/artifacts.js";
 
 export type ExecutionPolicy =
   | "cached-inputs"
@@ -94,6 +105,8 @@ type GraphEdge = EtherGraph["edges"][number] & {
   id: string;
   source: string;
   target: string;
+  label?: unknown;
+  data?: { label?: unknown };
 };
 
 type RunRecordRow = {
@@ -472,6 +485,9 @@ async function executeQueueItem(
       case "Generation":
         result = await executeGenerationNode(projectPath, state, request, item, startedDate);
         break;
+      case "Edit":
+        result = await executeEditNode(projectPath, state, request, item, startedDate);
+        break;
       case "Store":
         result = await executeStoreNode(projectPath, state, item, startedDate);
         break;
@@ -484,7 +500,8 @@ async function executeQueueItem(
     return result;
   } catch (error) {
     const finishedAt = (request.now?.() ?? new Date()).toISOString();
-    const action = node.data?.kind === "Generation" ? "generate" : "execute";
+    const action =
+      node.data?.kind === "Generation" ? "generate" : node.data?.kind === "Edit" ? "edit" : "execute";
     state.graph = setNodeData(state.graph, item.nodeId, {
       status: "error",
       rerunState: "error",
@@ -645,6 +662,196 @@ async function executeGenerationNode(
   };
 }
 
+async function executeEditNode(
+  projectPath: string,
+  state: MutableExecutionState,
+  request: ExecutionRequest,
+  item: ExecutionQueueItem,
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
+  const node = findNode(state.graph, item.nodeId);
+  const assembly = assembleEditInputs(state.graph, item.nodeId);
+  const startedAt = startedDate.toISOString();
+  const registry = createDefaultProviderRegistry();
+  const providerId = request.providerId ?? FAKE_PROVIDER_ID;
+  const provider = registry.require(providerId);
+  const diagnostic = await provider.diagnose();
+
+  if (diagnostic.availability !== "available") {
+    throw new ProviderUnavailableError(diagnostic);
+  }
+
+  if (!diagnostic.capabilities.includes("image.edit")) {
+    throw new Error(`Provider "${providerId}" does not support image.edit.`);
+  }
+
+  const providerInput: ImageEditProviderInput = {
+    projectPath,
+    runId: randomUUID(),
+    editNodeId: item.nodeId,
+    editSubtype: node.data?.subtype ?? "Edit",
+    operation: editOperationForSubtype(node.data?.subtype),
+    iteration: item.iteration,
+    prompt: assembly.prompt,
+    negativePrompt: assembly.negativePrompt,
+    instruction: cleanText(node.data?.instruction),
+    notes: cleanText(node.data?.notes),
+    sections: assembly.sections,
+    references: assembly.references,
+    edgeRoles: assembly.edgeRoles,
+    sourceImage: assembly.sourceImage,
+    mask: assembly.mask,
+    requestedAt: startedAt
+  };
+  const providerResult = await provider.edit(providerInput);
+  const providerDescriptor = provider.descriptor;
+
+  if (providerResult.artifacts.length === 0) {
+    throw new Error(`Edit provider "${providerId}" returned no image artifacts.`);
+  }
+
+  const assets: AssetRecord[] = [];
+
+  for (const [artifactIndex, artifact] of providerResult.artifacts.entries()) {
+    const localTool = localToolFromMetadata(providerResult.metadata, artifact.metadata);
+
+    assets.push(
+      await saveGeneratedAsset(projectPath, {
+        generationNodeId: item.nodeId,
+        fileName: artifact.fileName,
+        content: await generatedArtifactContent(artifact),
+        mimeType: artifact.mimeType,
+        lineage: {
+          provider: {
+            id: providerResult.providerId,
+            name: providerResult.providerName,
+            route: providerDescriptor.route,
+            capabilities: providerResult.capabilities
+          },
+          providerJob: providerResult.metadata ?? {},
+          artifact: artifact.metadata ?? {},
+          artifactIndex,
+          policy: request.policy,
+          iteration: item.iteration,
+          prompt: assembly.prompt,
+          negativePrompt: assembly.negativePrompt,
+          sections: assembly.sections,
+          references: assembly.references,
+          edgeRoles: assembly.edgeRoles,
+          edit: {
+            nodeId: item.nodeId,
+            subtype: node.data?.subtype ?? "Edit",
+            operation: providerInput.operation,
+            instruction: cleanText(node.data?.instruction),
+            notes: cleanText(node.data?.notes)
+          },
+          parent: {
+            assetId: assembly.sourceImage.assetId,
+            assetKind: assembly.sourceImage.assetKind,
+            assetPath: assembly.sourceImage.assetPath,
+            assetMetadata: assembly.sourceImage.assetMetadata
+          },
+          mask: assembly.mask
+            ? {
+                assetId: assembly.mask.assetId,
+                assetPath: assembly.mask.assetPath,
+                assetMetadata: assembly.mask.assetMetadata
+              }
+            : null,
+          upstreamReferences: assembly.references,
+          ...(localTool ? { localTool } : {})
+        },
+        metadata: {
+          provider: providerResult.providerId,
+          providerName: providerResult.providerName,
+          providerRoute: providerDescriptor.route,
+          providerCapabilities: providerResult.capabilities,
+          providerJob: providerResult.metadata ?? {},
+          artifact: artifact.metadata ?? {},
+          policy: request.policy,
+          iteration: item.iteration,
+          editNodeId: item.nodeId,
+          editSubtype: node.data?.subtype ?? "Edit",
+          operation: providerInput.operation,
+          sourceAssetId: assembly.sourceImage.assetId,
+          sourceAssetKind: assembly.sourceImage.assetKind,
+          sourceAssetPath: assembly.sourceImage.assetPath,
+          sourceAssetMetadata: assembly.sourceImage.assetMetadata,
+          maskAssetId: assembly.mask?.assetId,
+          maskAssetPath: assembly.mask?.assetPath,
+          maskMetadata: assembly.mask?.assetMetadata,
+          ...(localTool ? { localTool } : {})
+        },
+        now: startedDate
+      })
+    );
+  }
+
+  const asset = assets.at(-1)!;
+  const finishedAt = (request.now?.() ?? new Date()).toISOString();
+
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    status: "complete",
+    rerunState: "complete",
+    assembledPrompt: assembly.prompt,
+    assembledNegativePrompt: assembly.negativePrompt,
+    lastRunAt: finishedAt,
+    assetId: asset.id,
+    assetKind: asset.kind,
+    assetPath: asset.path,
+    assetMetadata: asset.metadata,
+    sourceAssetId: assembly.sourceImage.assetId,
+    sourceAssetKind: assembly.sourceImage.assetKind,
+    sourceAssetPath: assembly.sourceImage.assetPath,
+    sourceAssetMetadata: assembly.sourceImage.assetMetadata,
+    maskAssetId: assembly.mask?.assetId,
+    maskAssetPath: assembly.mask?.assetPath,
+    maskMetadata: assembly.mask?.assetMetadata
+  });
+
+  const action = providerInput.operation === "upscale" ? "upscale" : "edit";
+  const localTool = localToolFromMetadata(providerResult.metadata, asset.metadata);
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "complete",
+    action,
+    assetId: asset.id,
+    assetPath: asset.path,
+    metadata: {
+      provider: {
+        id: providerResult.providerId,
+        name: providerResult.providerName,
+        route: providerDescriptor.route,
+        capabilities: providerResult.capabilities
+      },
+      providerJob: providerResult.metadata ?? {},
+      editedAssetIds: assets.map((entry) => entry.id),
+      operation: providerInput.operation,
+      sourceAsset: {
+        id: assembly.sourceImage.assetId,
+        kind: assembly.sourceImage.assetKind,
+        path: assembly.sourceImage.assetPath,
+        metadata: assembly.sourceImage.assetMetadata
+      },
+      mask: assembly.mask
+        ? {
+            assetId: assembly.mask.assetId,
+            assetPath: assembly.mask.assetPath,
+            assetMetadata: assembly.mask.assetMetadata
+          }
+        : null,
+      prompt: assembly.prompt,
+      negativePrompt: assembly.negativePrompt,
+      references: assembly.references,
+      ...(localTool ? { localTool } : {})
+    },
+    startedAt,
+    finishedAt
+  };
+}
+
 async function executeStoreNode(
   projectPath: string,
   state: MutableExecutionState,
@@ -722,6 +929,7 @@ function canExecuteLocally(node: GraphNode) {
   switch (node.data?.kind) {
     case "Prompt":
     case "Generation":
+    case "Edit":
       return true;
     case "Store":
       return node.data.subtype === "Collection" || node.data.subtype === "Directory";
@@ -801,6 +1009,231 @@ async function generatedArtifactContent(artifact: GeneratedArtifact) {
   }
 
   throw new Error(`Generated artifact "${artifact.fileName}" did not include content or sourcePath.`);
+}
+
+type EditInputAssembly = {
+  prompt: string;
+  negativePrompt: string;
+  sections: PromptSectionArtifact[];
+  references: GenerationReferenceInput[];
+  edgeRoles: EdgeRoleArtifact[];
+  sourceImage: ImageEditSourceInput;
+  mask: ImageEditMaskInput;
+};
+
+function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAssembly {
+  const editNode = findNode(graph, editNodeId);
+  const sections: PromptSectionArtifact[] = [];
+  const references: GenerationReferenceInput[] = [];
+  const edgeRoles: EdgeRoleArtifact[] = [];
+  let sourceImage = sourceImageFromNodeData(editNode.data);
+  let mask = maskFromNodeData(editNode.data);
+
+  for (const edge of incomingEdges(graph, editNodeId)) {
+    const source = findNode(graph, edge.source);
+    const label = normalizeRoleKey(edgeLabel(edge));
+
+    if (source.data?.kind === "Prompt") {
+      const assembly = assemblePromptForNode(graph, source.id, edge);
+
+      for (const section of assembly.sections) {
+        appendUniqueSection(sections, section);
+      }
+    }
+
+    if (!mask && (label === "mask" || source.data?.assetKind === "mask")) {
+      mask = maskFromAssetNode(source);
+    }
+
+    if (!sourceImage && label !== "mask" && isImageAssetSource(source)) {
+      sourceImage = sourceImageFromAssetNode(source);
+    }
+
+    const reference = referenceForEditSource(edge, source);
+    if (reference) {
+      references.push(reference);
+      edgeRoles.push({ edgeId: edge.id, role: reference.role });
+    }
+  }
+
+  if (!sourceImage) {
+    throw new Error("Edit node requires an upstream image asset or sourceAssetPath.");
+  }
+
+  return {
+    prompt: joinSections(sections, "prompt"),
+    negativePrompt: joinSections(sections, "negativePrompt"),
+    sections,
+    references,
+    edgeRoles,
+    sourceImage,
+    mask
+  };
+}
+
+function sourceImageFromNodeData(data: Partial<CanvasNodeData> | undefined): ImageEditSourceInput | null {
+  if (!data?.sourceAssetPath) {
+    return null;
+  }
+
+  return {
+    assetId: data.sourceAssetId,
+    assetKind: data.sourceAssetKind,
+    assetPath: data.sourceAssetPath,
+    assetMetadata: data.sourceAssetMetadata
+  };
+}
+
+function sourceImageFromAssetNode(node: GraphNode): ImageEditSourceInput | null {
+  if (!node.data?.assetPath) {
+    return null;
+  }
+
+  return {
+    assetId: node.data.assetId,
+    assetKind: node.data.assetKind,
+    assetPath: node.data.assetPath,
+    assetMetadata: node.data.assetMetadata
+  };
+}
+
+function maskFromNodeData(data: Partial<CanvasNodeData> | undefined): ImageEditMaskInput {
+  if (!data?.maskAssetId && !data?.maskAssetPath) {
+    return null;
+  }
+
+  return {
+    assetId: data.maskAssetId,
+    assetPath: data.maskAssetPath,
+    assetMetadata: data.maskMetadata
+  };
+}
+
+function maskFromAssetNode(node: GraphNode): ImageEditMaskInput {
+  if (!node.data?.assetId && !node.data?.assetPath) {
+    return null;
+  }
+
+  return {
+    assetId: node.data.assetId,
+    assetPath: node.data.assetPath,
+    assetMetadata: node.data.assetMetadata
+  };
+}
+
+function isImageAssetSource(node: GraphNode) {
+  if (!node.data?.assetPath) {
+    return false;
+  }
+
+  if (node.data.assetKind === "mask") {
+    return false;
+  }
+
+  return node.data.kind === "Generation" || node.data.kind === "Edit" || node.data.kind === "Reference";
+}
+
+function referenceForEditSource(edge: GraphEdge, source: GraphNode): GenerationReferenceInput | null {
+  if (source.data?.kind !== "Reference" && source.data?.kind !== "Note") {
+    return null;
+  }
+
+  const role = resolveReferenceRole(edge, source);
+  const steeringText = nodeText(source);
+  const reference: GenerationReferenceInput = {
+    nodeId: source.id,
+    role,
+    title: sectionTitle(source),
+    sourceKind: cleanText(source.data?.subtype) || cleanText(source.data?.kind) || "Reference",
+    ...(steeringText ? { steeringText } : {})
+  };
+
+  if (source.data?.assetId) {
+    reference.assetId = source.data.assetId;
+  }
+
+  if (source.data?.assetKind) {
+    reference.assetKind = source.data.assetKind;
+  }
+
+  if (source.data?.assetPath) {
+    reference.assetPath = source.data.assetPath;
+  }
+
+  if (source.data?.assetMetadata) {
+    reference.assetMetadata = source.data.assetMetadata;
+  }
+
+  return reference;
+}
+
+function editOperationForSubtype(subtype: unknown): ImageEditOperation {
+  switch (subtype) {
+    case "Expand / Outpaint":
+      return "outpaint";
+    case "Draw & Note":
+      return "draw-note";
+    case "Upscale":
+      return "upscale";
+    case "Inpaint":
+    default:
+      return "inpaint";
+  }
+}
+
+function localToolFromMetadata(...metadataEntries: Array<Record<string, unknown> | undefined>) {
+  for (const metadata of metadataEntries) {
+    const localTool = metadata?.localTool;
+
+    if (localTool && typeof localTool === "object" && !Array.isArray(localTool)) {
+      return localTool as Record<string, unknown>;
+    }
+  }
+
+  return undefined;
+}
+
+function incomingEdges(graph: EtherGraph, nodeId: string) {
+  return edgesOf(graph)
+    .filter((edge) => edge.target === nodeId)
+    .sort(edgeSorter(graph, "source"));
+}
+
+function edgeLabel(edge: GraphEdge) {
+  return String(edge.label ?? edge.data?.label ?? "").trim();
+}
+
+function normalizeRoleKey(value: string) {
+  return value.trim().replace(/\s+/g, "-").toLowerCase();
+}
+
+function cleanText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function nodeText(node: GraphNode) {
+  const instruction = cleanText(node.data?.instruction);
+  const notes = cleanText(node.data?.notes);
+
+  return [instruction, notes].filter(Boolean).join("\n");
+}
+
+function sectionTitle(node: GraphNode) {
+  return cleanText(node.data?.title) || cleanText(node.data?.label) || cleanText(node.data?.subtype) || "Reference";
+}
+
+function appendUniqueSection(sections: PromptSectionArtifact[], section: PromptSectionArtifact) {
+  if (!sections.some((candidate) => candidate.nodeId === section.nodeId)) {
+    sections.push(section);
+  }
+}
+
+function joinSections(sections: PromptSectionArtifact[], kind: PromptSectionArtifact["kind"]) {
+  return sections
+    .filter((section) => section.kind === kind)
+    .map((section) => section.text)
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function setNodeData(graph: EtherGraph, nodeId: string, data: Partial<CanvasNodeData>): EtherGraph {

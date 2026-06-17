@@ -8,7 +8,7 @@ import { projectPaths } from "./paths.js";
 import { LinkedIndexSchema } from "./schema.js";
 import { readJson, writeJson } from "./projectStore.js";
 
-export type AssetKind = "reference" | "generated" | "collection" | "directory";
+export type AssetKind = "reference" | "generated" | "collection" | "directory" | "mask";
 
 export type AssetRecord = {
   id: string;
@@ -43,6 +43,19 @@ export type SaveGeneratedAssetOptions = {
   content: string | Uint8Array;
   mimeType?: string;
   lineage?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  now?: Date;
+};
+
+export type SaveMaskAssetOptions = {
+  editNodeId: string;
+  sourceAssetId?: string;
+  sourceAssetPath?: string;
+  fileName?: string;
+  content?: string | Uint8Array;
+  mimeType?: string;
+  instruction?: string;
+  notes?: string;
   metadata?: Record<string, unknown>;
   now?: Date;
 };
@@ -165,6 +178,57 @@ export async function saveGeneratedAsset(
       originalName: path.basename(options.fileName),
       mimeType: options.mimeType ?? inferMimeType(safeFileName),
       lineage: options.lineage ?? {}
+    },
+    now
+  });
+}
+
+export async function saveMaskAsset(
+  projectPath: string,
+  options: SaveMaskAssetOptions
+): Promise<AssetRecord> {
+  const paths = projectPaths(projectPath);
+  initializeDatabase(paths.database);
+
+  const nowDate = options.now ?? new Date();
+  const now = toTimestamp(nowDate);
+  const year = String(nowDate.getUTCFullYear()).padStart(4, "0");
+  const month = String(nowDate.getUTCMonth() + 1).padStart(2, "0");
+  const safeEditNodeId = sanitizePathSegment(options.editNodeId, "editNodeId");
+  const safeFileName = sanitizeFileName(options.fileName ?? "mask.svg");
+  const masksDirectory = path.join(projectPath, "assets", "masks");
+  const outputDirectory = path.join(masksDirectory, year, month, safeEditNodeId);
+
+  assertPathInsideDirectory(outputDirectory, masksDirectory, "Mask output directory");
+  await mkdir(outputDirectory, { recursive: true });
+
+  const outputPath = await writeFileToAvailablePath(
+    path.join(outputDirectory, safeFileName),
+    options.content ?? buildDefaultMaskSvg(options)
+  );
+  assertPathInsideDirectory(outputPath, masksDirectory, "Mask asset path");
+
+  return insertAsset(paths.database, {
+    id: randomUUID(),
+    kind: "mask",
+    path: outputPath,
+    metadata: {
+      ...options.metadata,
+      editNodeId: options.editNodeId,
+      safeEditNodeId,
+      sourceAssetId: options.sourceAssetId,
+      sourceAssetPath: options.sourceAssetPath,
+      instruction: options.instruction,
+      notes: options.notes,
+      originalName: path.basename(safeFileName),
+      mimeType: options.mimeType ?? inferMimeType(safeFileName),
+      role: "mask",
+      lineage: {
+        kind: "mask",
+        editNodeId: options.editNodeId,
+        sourceAssetId: options.sourceAssetId,
+        sourceAssetPath: options.sourceAssetPath
+      }
     },
     now
   });
@@ -671,6 +735,12 @@ function assertCollectionPathLexicallyInsideProject(projectPath: string, collect
   }
 }
 
+function assertPathInsideDirectory(filePath: string, directoryPath: string, label: string) {
+  if (!isPathInsideDirectory(filePath, directoryPath)) {
+    throw new Error(`${label} must stay inside ${directoryPath}.`);
+  }
+}
+
 async function assertCollectionPathReallyInsideProject(projectPath: string, collectionPath: string) {
   const collectionsDirectory = path.join(projectPath, "collections");
   const [realProjectRoot, realCollectionsDirectory, realCollectionPath] = await Promise.all([
@@ -700,4 +770,30 @@ function isPathInsideDirectory(filePath: string, directoryPath: string) {
 
 function isNodeErrorWithCode(error: unknown, code: string) {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
+}
+
+function buildDefaultMaskSvg(options: SaveMaskAssetOptions) {
+  const instruction = escapeXml(options.instruction?.trim() || "Mask overlay");
+  const notes = escapeXml(options.notes?.trim() || "Deterministic Ether mask");
+  const source = escapeXml(options.sourceAssetId ?? options.sourceAssetPath ?? "untracked-source");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="ETHER mask overlay">
+  <title>ETHER_MASK_OVERLAY</title>
+  <rect width="1024" height="1024" fill="transparent"/>
+  <path d="M248 240 C402 152 640 176 770 336 C874 464 818 682 638 782 C482 870 264 780 200 604 C148 462 142 320 248 240 Z" fill="#37e6ea" opacity="0.38"/>
+  <path d="M306 316 C442 238 622 258 716 376 C790 470 752 626 620 706 C494 782 330 718 282 594 C244 490 230 376 306 316 Z" fill="#8a5cff" opacity="0.24"/>
+  <text x="72" y="924" font-size="28" font-family="Arial, sans-serif" fill="#1470db">edit=${escapeXml(
+    options.editNodeId
+  )}</text>
+  <text x="72" y="966" font-size="22" font-family="Arial, sans-serif" fill="#0e1824">${instruction}</text>
+  <desc>${notes}; source=${source}</desc>
+</svg>`;
+}
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

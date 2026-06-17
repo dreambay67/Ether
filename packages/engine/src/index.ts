@@ -14,7 +14,8 @@ export {
   listAssetMoves,
   listAssets,
   moveAssetToCollection,
-  saveGeneratedAsset
+  saveGeneratedAsset,
+  saveMaskAsset
 } from "./project/assets.js";
 export {
   NODE_CATEGORIES,
@@ -90,5 +91,6 @@ export type {
   ListAssetMovesQuery,
   ListAssetsQuery,
   MoveAssetToCollectionOptions,
-  SaveGeneratedAssetOptions
+  SaveGeneratedAssetOptions,
+  SaveMaskAssetOptions
 } from "./project/assets.js";

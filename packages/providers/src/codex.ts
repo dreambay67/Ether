@@ -10,6 +10,7 @@ import type {
   GeneratedArtifact,
   GenerationProvider,
   GenerationProviderInput,
+  ImageEditProviderInput,
   ProviderDiagnostic,
   ProviderDiagnosticContext,
   ProviderGenerationResult,
@@ -144,17 +145,7 @@ export class CodexCliImageProvider implements GenerationProvider {
   }
 
   async generate(input: GenerationProviderInput): Promise<ProviderGenerationResult> {
-    const diagnostic = await this.diagnose();
-
-    if (diagnostic.availability !== "available") {
-      throw new ProviderUnavailableError(diagnostic);
-    }
-
-    const codexCliPath = this.codexCliPath;
-
-    if (!codexCliPath) {
-      throw new ProviderUnavailableError(diagnostic);
-    }
+    const codexCliPath = await this.requireAvailableCodexCliPath();
 
     const job = await createJobPaths(input);
     const requestPath = path.join(job.jobDir, "request.json");
@@ -193,6 +184,62 @@ export class CodexCliImageProvider implements GenerationProvider {
         route: this.descriptor.route
       }
     };
+  }
+
+  async edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult> {
+    const codexCliPath = await this.requireAvailableCodexCliPath();
+    const job = await createJobPaths(input);
+    const requestPath = path.join(job.jobDir, "request.json");
+    const lastMessagePath = path.join(job.jobDir, "last-message.txt");
+
+    await writeFile(requestPath, JSON.stringify({ ...input, outputDirectory: job.outputDir }, null, 2), "utf8");
+
+    const prompt = buildCodexEditPrompt(input, job.outputDir);
+    const args = buildCodexEditExecArgs(input, prompt, lastMessagePath);
+    const result = await this.runner({
+      command: codexCliPath,
+      args,
+      cwd: input.projectPath,
+      env: sanitizeProviderEnv(this.env)
+    });
+
+    await writeFile(path.join(job.jobDir, "codex-stdout.txt"), result.stdout, "utf8");
+    await writeFile(path.join(job.jobDir, "codex-stderr.txt"), result.stderr, "utf8");
+
+    if (result.exitCode !== 0) {
+      const classification = classifyCodexCliFailure(`${result.stderr}\n${result.stdout}`);
+      throw new Error(`${classification.message}\nCodex CLI exited with ${result.exitCode}.`);
+    }
+
+    const artifacts = await collectOutputArtifacts(job.outputDir, job.jobId);
+
+    return {
+      providerId: this.descriptor.id,
+      providerName: this.descriptor.name,
+      capabilities: [...this.descriptor.capabilities],
+      artifacts,
+      metadata: {
+        jobId: job.jobId,
+        jobDir: job.jobDir,
+        outputDir: job.outputDir,
+        route: this.descriptor.route,
+        operation: input.operation
+      }
+    };
+  }
+
+  private async requireAvailableCodexCliPath() {
+    const diagnostic = await this.diagnose();
+
+    if (diagnostic.availability !== "available") {
+      throw new ProviderUnavailableError(diagnostic);
+    }
+
+    if (!this.codexCliPath) {
+      throw new ProviderUnavailableError(diagnostic);
+    }
+
+    return this.codexCliPath;
   }
 }
 
@@ -233,6 +280,43 @@ function buildCodexExecArgs(
     "--config",
     'model_reasoning_effort="low"'
   ];
+
+  for (const reference of input.references) {
+    if (reference.assetPath) {
+      args.push("--image", reference.assetPath);
+    }
+  }
+
+  args.push(prompt);
+  return args;
+}
+
+function buildCodexEditExecArgs(
+  input: ImageEditProviderInput,
+  prompt: string,
+  lastMessagePath: string
+) {
+  const args = [
+    "exec",
+    "--cd",
+    input.projectPath,
+    "--skip-git-repo-check",
+    "--sandbox",
+    "workspace-write",
+    "--ephemeral",
+    "--ignore-rules",
+    "--output-last-message",
+    lastMessagePath,
+    "--json",
+    "--config",
+    'model_reasoning_effort="low"',
+    "--image",
+    input.sourceImage.assetPath
+  ];
+
+  if (input.mask?.assetPath) {
+    args.push("--image", input.mask.assetPath);
+  }
 
   for (const reference of input.references) {
     if (reference.assetPath) {
@@ -300,8 +384,84 @@ Rules:
 `;
 }
 
-async function createJobPaths(input: GenerationProviderInput) {
-  const jobId = `${sanitizePathSegment(input.generationNodeId)}-${input.iteration}-${randomUUID()}`;
+function buildCodexEditPrompt(input: ImageEditProviderInput, outputDir: string) {
+  const pngPath = path.join(outputDir, "image.png");
+  const resultPath = path.join(outputDir, "result.json");
+  const references = input.references
+    .map((reference, index) =>
+      [
+        `${index + 1}. role=${reference.role}`,
+        `title=${reference.title}`,
+        `path=${reference.assetPath ?? "not provided"}`,
+        reference.steeringText ? `guidance=${reference.steeringText}` : ""
+      ]
+        .filter(Boolean)
+        .join("; ")
+    )
+    .join("\n");
+
+  return `Edit exactly one PNG image with the native image_gen.imagegen tool.
+
+Use Codex native image generation/editing only. Do not use OPENAI_API_KEY, the OpenAI Platform API, direct image APIs, SDKs, curl, Firebase, browser automation, or desktop automation.
+
+Edit operation:
+${input.operation}
+
+Edit subtype:
+${input.editSubtype}
+
+Source image:
+${input.sourceImage.assetPath}
+
+Mask image:
+${input.mask?.assetPath ?? "None"}
+
+Instruction:
+${input.instruction || "(empty instruction)"}
+
+Prompt context:
+${input.prompt || "(empty prompt)"}
+
+Negative prompt:
+${input.negativePrompt || "(none)"}
+
+Notes:
+${input.notes || "(none)"}
+
+Reference images:
+${references || "None"}
+
+Output directory:
+${outputDir}
+
+Save the final PNG exactly here:
+${pngPath}
+
+Then write this minimal worker result JSON exactly here:
+${resultPath}
+
+Required JSON shape:
+{
+  "id": "${input.runId}-${input.editNodeId}-${input.iteration}",
+  "status": "complete",
+  "image_path": "${pngPath}",
+  "error": null,
+  "caveats": ""
+}
+
+Rules:
+- Use image_gen.imagegen; do not call direct image APIs.
+- Treat the first supplied image as the source image and the second supplied image as a mask when a mask is present.
+- Preserve the source image structure unless the edit instruction explicitly asks to expand or upscale it.
+- Do not create placeholder art with Python, PIL, SVG, canvas, HTML, or screenshots.
+- If native image editing is unavailable or the image cannot be saved, write the same JSON shape with "status": "failed", "image_path": null, and a concise "error".
+- Do not ask questions.
+`;
+}
+
+async function createJobPaths(input: GenerationProviderInput | ImageEditProviderInput) {
+  const nodeId = "generationNodeId" in input ? input.generationNodeId : input.editNodeId;
+  const jobId = `${sanitizePathSegment(nodeId)}-${input.iteration}-${randomUUID()}`;
   const jobDir = path.join(input.projectPath, "runs", "providers", input.runId, jobId);
   const outputDir = path.join(jobDir, "outputs");
 
