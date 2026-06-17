@@ -133,6 +133,25 @@ function connectionTouchesLockedNode(
   return source?.data.locked === true || target?.data.locked === true;
 }
 
+function nodeDeletionWouldRemoveLockedRelationship(
+  deletedNodeIds: string[],
+  nodes: Node<CanvasNodeData>[],
+  edges: Edge[]
+) {
+  const deleted = new Set(deletedNodeIds);
+
+  return edges.some((edge) => {
+    if (!deleted.has(edge.source) && !deleted.has(edge.target)) {
+      return false;
+    }
+
+    const otherNodeId = deleted.has(edge.source) ? edge.target : edge.source;
+    const otherNode = nodes.find((node) => node.id === otherNodeId);
+
+    return otherNode?.data.locked === true;
+  });
+}
+
 function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
   const baseData = createGraphNodeData("reference-image");
   const originalName =
@@ -689,7 +708,7 @@ function InnerEtherCanvas(
         selection?.edgeIds ?? edges.filter((edge) => edge.selected).map((edge) => edge.id);
       const hasLockedRelationship = requestedEdgeIds.some((edgeId) =>
         edgeTouchesLockedNode(edges.find((edge) => edge.id === edgeId), nodes)
-      );
+      ) || nodeDeletionWouldRemoveLockedRelationship(requestedNodeIds, nodes, edges);
 
       if (hasLockedNode) {
         const message = "Unlock the node before changing it.";
