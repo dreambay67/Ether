@@ -90,7 +90,107 @@ test("shows disabled manual asset validation controls until a project is open", 
   await page.locator("summary").filter({ hasText: "Store" }).click();
   await page.getByTestId("library-node-store-collection").click();
   await expect(page.getByRole("button", { name: "Mirror" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Move latest generated" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Move pending generated" })).toBeDisabled();
+});
+
+test("manual generated move consumes the pending generated asset once", async ({ page }) => {
+  await page.addInitScript(() => {
+    const testWindow = window as typeof window & { __moveCalls: number };
+    const graph = {
+      nodes: [],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-17T12:00:00.000Z"
+    };
+    const project = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      path: "C:\\Fake\\Manual.ether",
+      metadata: {
+        id: "22222222-2222-4222-8222-222222222222",
+        displayName: "Manual",
+        appVersion: "0.1.0",
+        createdAt: "2026-06-17T12:00:00.000Z",
+        updatedAt: "2026-06-17T12:00:00.000Z",
+        brandLockup: "ETHER by DreamBay",
+        autosave: { enabled: true, intervalMs: 60000 },
+        providerPreferences: {},
+        activeSnapshotId: null
+      },
+      graph,
+      database: { path: "C:\\Fake\\Manual.ether\\ether.db", tables: [], healthIssueCount: 0 }
+    };
+
+    Object.assign(testWindow, {
+      __moveCalls: 0,
+      ether: {
+        shell: "desktop",
+        file: {
+          getDroppedFilePath: () => null
+        },
+        project: {
+          create: async () => project,
+          open: async () => project,
+          saveGraph: async () => graph,
+          loadGraph: async () => graph,
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => ({
+            id: "collection-asset-1",
+            kind: "collection",
+            path: "C:\\Fake\\Manual.ether\\collections\\Collection",
+            metadata: {},
+            createdAt: "2026-06-17T12:00:00.000Z",
+            updatedAt: "2026-06-17T12:00:00.000Z"
+          }),
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => ({
+            id: "generated-asset-1",
+            kind: "generated",
+            path: "C:\\Fake\\Manual.ether\\assets\\generated\\fake.png",
+            metadata: {},
+            createdAt: "2026-06-17T12:00:00.000Z",
+            updatedAt: "2026-06-17T12:00:00.000Z"
+          }),
+          moveToCollection: async () => {
+            testWindow.__moveCalls += 1;
+            return {
+              id: "generated-asset-1",
+              kind: "generated",
+              path: `C:\\Fake\\Manual.ether\\collections\\Collection\\fake-${testWindow.__moveCalls}.png`,
+              metadata: {},
+              createdAt: "2026-06-17T12:00:00.000Z",
+              updatedAt: `2026-06-17T12:00:0${testWindow.__moveCalls}.000Z`
+            };
+          },
+          listMoves: async () => []
+        }
+      }
+    });
+  });
+  await page.goto("/");
+
+  await page.getByLabel("Parent directory").fill("C:\\Fake");
+  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByTestId("library-node-generation-image").click();
+  await page.getByRole("button", { name: "Save fake output" }).click();
+  await page.locator("summary").filter({ hasText: "Store" }).click();
+  await page.getByTestId("library-node-store-collection").click();
+  await page.getByRole("button", { name: "Move pending generated" }).click();
+  await page.getByRole("button", { name: "Move pending generated" }).click();
+
+  await expect(page.getByTestId("canvas-status")).toContainText("No pending generated output to move");
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __moveCalls: number }).__moveCalls))
+    .toBe(1);
 });
 
 test("creates an edge and edits the visible edge label", async ({ page }) => {

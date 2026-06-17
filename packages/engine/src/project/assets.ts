@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { constants, renameSync } from "node:fs";
-import { access, mkdir, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { initializeDatabase } from "./database.js";
 import { projectPaths } from "./paths.js";
@@ -145,8 +145,10 @@ export async function saveGeneratedAsset(
   );
 
   await mkdir(outputDirectory, { recursive: true });
-  const outputPath = await nextAvailablePath(path.join(outputDirectory, safeFileName));
-  await writeFile(outputPath, options.content);
+  const outputPath = await writeFileToAvailablePath(
+    path.join(outputDirectory, safeFileName),
+    options.content
+  );
 
   return insertAsset(paths.database, {
     id: randomUUID(),
@@ -241,16 +243,21 @@ export async function moveAssetToCollection(
     throw new Error("collectionId must identify a collection asset.");
   }
 
+  assertCollectionPathLexicallyInsideProject(projectPath, collection.path);
   await mkdir(collection.path, { recursive: true });
+  await assertCollectionPathReallyInsideProject(projectPath, collection.path);
 
   const now = toTimestamp(options.now);
   const toPath = await nextAvailablePath(path.join(collection.path, path.basename(asset.path)));
   const moveId = randomUUID();
   const db = new Database(paths.database);
+  let physicallyMoved = false;
 
   try {
+    renameSync(asset.path, toPath);
+    physicallyMoved = true;
+
     const moveAsset = db.transaction(() => {
-      renameSync(asset.path, toPath);
       db.prepare(
         `UPDATE assets
          SET path = @toPath, updated_at = @movedAt
@@ -270,6 +277,16 @@ export async function moveAssetToCollection(
     });
 
     moveAsset();
+  } catch (error) {
+    if (physicallyMoved) {
+      try {
+        renameSync(toPath, asset.path);
+      } catch {
+        // If recovery fails, preserve the original DB error so callers know the durable commit failed.
+      }
+    }
+
+    throw error;
   } finally {
     db.close();
   }
@@ -516,6 +533,33 @@ async function nextAvailablePath(basePath: string) {
   throw new Error(`Could not find an available file path for ${basePath}`);
 }
 
+async function writeFileToAvailablePath(basePath: string, content: string | Uint8Array) {
+  const directory = path.dirname(basePath);
+  const extension = path.extname(basePath);
+  const name = path.basename(basePath, extension);
+
+  for (let index = 1; index < 10000; index += 1) {
+    const candidate = index === 1 ? basePath : path.join(directory, `${name}-${index}${extension}`);
+    let fileHandle: Awaited<ReturnType<typeof open>> | null = null;
+
+    try {
+      fileHandle = await open(candidate, "wx");
+      await fileHandle.writeFile(content);
+      return candidate;
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "EEXIST")) {
+        continue;
+      }
+
+      throw error;
+    } finally {
+      await fileHandle?.close();
+    }
+  }
+
+  throw new Error(`Could not find an available file path for ${basePath}`);
+}
+
 async function exists(filePath: string) {
   try {
     await access(filePath, constants.F_OK);
@@ -561,6 +605,28 @@ function inferMimeType(filePath: string) {
   return mimeTypes[extension] ?? "application/octet-stream";
 }
 
+function assertCollectionPathLexicallyInsideProject(projectPath: string, collectionPath: string) {
+  if (!isPathInsideDirectory(collectionPath, path.join(projectPath, "collections"))) {
+    throw new Error("Collection path must stay inside the project collections directory.");
+  }
+}
+
+async function assertCollectionPathReallyInsideProject(projectPath: string, collectionPath: string) {
+  const collectionsDirectory = path.join(projectPath, "collections");
+  const [realCollectionsDirectory, realCollectionPath] = await Promise.all([
+    realpath(collectionsDirectory),
+    realpath(collectionPath)
+  ]);
+  const collectionStats = await stat(realCollectionPath);
+
+  if (
+    !collectionStats.isDirectory() ||
+    !isPathInsideDirectory(realCollectionPath, realCollectionsDirectory)
+  ) {
+    throw new Error("Collection path must stay inside the project collections directory.");
+  }
+}
+
 function toTimestamp(now = new Date()) {
   return now.toISOString();
 }
@@ -568,4 +634,8 @@ function toTimestamp(now = new Date()) {
 function isPathInsideDirectory(filePath: string, directoryPath: string) {
   const relativePath = path.relative(path.resolve(directoryPath), path.resolve(filePath));
   return Boolean(relativePath) && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+}
+
+function isNodeErrorWithCode(error: unknown, code: string) {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
 }

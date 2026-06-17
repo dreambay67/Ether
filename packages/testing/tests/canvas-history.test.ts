@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   createCanvasHistory,
   deleteCanvasElements,
+  pushCanvasHistory,
   pushCanvasHistoryFromBaseline,
   pushCanvasHistoryIfChanged,
   redoCanvasHistory,
+  replaceCanvasHistoryWithDurableCommit,
   shouldPushNodeChangesToHistory,
   undoCanvasHistory,
   updateCanvasHistoryPresent
@@ -115,5 +117,37 @@ describe("canvas node change history", () => {
     const history = createCanvasHistory(original);
 
     expect(pushCanvasHistoryIfChanged(history, original)).toBe(history);
+  });
+
+  it("uses a durable commit barrier for filesystem-backed asset changes", () => {
+    const original = {
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: { title: "Before" } }],
+      edges: []
+    };
+    const graphEdit = {
+      nodes: [{ id: "node-1", position: { x: 40, y: 0 }, data: { title: "Before" } }],
+      edges: []
+    };
+    const durableAssetEdit = {
+      nodes: [
+        {
+          id: "node-1",
+          position: { x: 40, y: 0 },
+          data: { title: "Before", assetId: "asset-1", assetPath: "C:\\asset.png" }
+        }
+      ],
+      edges: []
+    };
+    const history = pushCanvasHistory(createCanvasHistory(original), graphEdit);
+
+    const durableHistory = replaceCanvasHistoryWithDurableCommit(history, durableAssetEdit);
+    const undone = undoCanvasHistory(durableHistory);
+
+    expect(durableHistory).toEqual({
+      past: [],
+      present: durableAssetEdit,
+      future: []
+    });
+    expect(undone.present).toBe(durableAssetEdit);
   });
 });

@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import Database from "../../../packages/engine/node_modules/better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createProject,
@@ -207,5 +208,126 @@ describe("asset service", () => {
       expect.objectContaining({ id: reference.id, path: externalReferencePath })
     ]);
     await expect(listAssetMoves(project.path, { assetId: reference.id })).resolves.toEqual([]);
+  });
+
+  it("moves a generated asset back to its original path when audit insert fails", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Move Rollback" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation-node-1",
+      fileName: "rollback.png",
+      content: "rollback image",
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+    const collection = await ensureCollectionFolder(project.path, { name: "Rejected" });
+    const destinationPath = path.join(collection.path, "rollback.png");
+    const db = new Database(path.join(project.path, "ether.db"));
+
+    try {
+      db.exec(`
+        CREATE TRIGGER fail_asset_move_insert
+        BEFORE INSERT ON asset_moves
+        BEGIN
+          SELECT RAISE(FAIL, 'audit insert failed');
+        END;
+      `);
+    } finally {
+      db.close();
+    }
+
+    await expect(
+      moveAssetToCollection(project.path, {
+        assetId: generated.id,
+        collectionId: collection.id,
+        reason: "force-audit-failure"
+      })
+    ).rejects.toThrow("audit insert failed");
+
+    await expect(readFile(generated.path, "utf8")).resolves.toBe("rollback image");
+    await expect(readFile(destinationPath, "utf8")).rejects.toThrow();
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
+      expect.objectContaining({ id: generated.id, path: generated.path })
+    ]);
+    await expect(listAssetMoves(project.path, { assetId: generated.id })).resolves.toEqual([]);
+  });
+
+  it("rejects collection asset paths outside the project collections directory", async () => {
+    const parentDirectory = await createTempRoot();
+    const outsideDirectory = path.join(parentDirectory, "outside-collection");
+    const project = await createProject({ parentDirectory, name: "Outside Collection" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation-node-1",
+      fileName: "outside.png",
+      content: "outside guard",
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+    const collection = await ensureCollectionFolder(project.path, { name: "Corrupt Collection" });
+    const db = new Database(path.join(project.path, "ether.db"));
+
+    try {
+      db.prepare("UPDATE assets SET path = ? WHERE id = ?").run(outsideDirectory, collection.id);
+    } finally {
+      db.close();
+    }
+
+    await expect(
+      moveAssetToCollection(project.path, {
+        assetId: generated.id,
+        collectionId: collection.id
+      })
+    ).rejects.toThrow("Collection path must stay inside the project collections directory.");
+
+    await expect(readFile(generated.path, "utf8")).resolves.toBe("outside guard");
+  });
+
+  it("rejects collection folders that resolve outside the project through a junction", async () => {
+    const parentDirectory = await createTempRoot();
+    const outsideDirectory = path.join(parentDirectory, "outside-junction-target");
+    const project = await createProject({ parentDirectory, name: "Linked Collection" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation-node-1",
+      fileName: "linked.png",
+      content: "linked guard",
+      now: new Date("2026-06-17T12:00:00.000Z")
+    });
+    const collection = await ensureCollectionFolder(project.path, { name: "Linked Collection" });
+
+    await mkdir(outsideDirectory);
+    await rm(collection.path, { recursive: true, force: true });
+
+    try {
+      await symlink(outsideDirectory, collection.path, "junction");
+    } catch {
+      return;
+    }
+
+    await expect(
+      moveAssetToCollection(project.path, {
+        assetId: generated.id,
+        collectionId: collection.id
+      })
+    ).rejects.toThrow("Collection path must stay inside the project collections directory.");
+
+    await expect(readFile(generated.path, "utf8")).resolves.toBe("linked guard");
+  });
+
+  it("allocates generated output paths uniquely under concurrent saves", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Concurrent Generated" });
+    const now = new Date("2026-06-17T12:00:00.000Z");
+
+    const assets = await Promise.all(
+      Array.from({ length: 8 }, (_value, index) =>
+        saveGeneratedAsset(project.path, {
+          generationNodeId: "generation-node-1",
+          fileName: "parallel.png",
+          content: `parallel image ${index}`,
+          now
+        })
+      )
+    );
+
+    expect(new Set(assets.map((asset) => asset.path)).size).toBe(assets.length);
+    await expect(readdir(path.dirname(assets[0]!.path))).resolves.toHaveLength(assets.length);
   });
 });

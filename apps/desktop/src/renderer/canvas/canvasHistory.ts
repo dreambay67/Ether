@@ -97,6 +97,17 @@ export function updateCanvasHistoryPresent(
   };
 }
 
+export function replaceCanvasHistoryWithDurableCommit(
+  _history: CanvasHistory,
+  snapshot: CanvasSnapshot
+): CanvasHistory {
+  return {
+    past: [],
+    present: snapshot,
+    future: []
+  };
+}
+
 export function undoCanvasHistory(history: CanvasHistory): CanvasHistory {
   const previous = history.past.at(-1);
 

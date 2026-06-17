@@ -219,7 +219,7 @@ export function InspectorPanel({
                   disabled={!hasOpenProject}
                 >
                   <FolderInput size={14} aria-hidden="true" />
-                  Move latest generated
+                  Move pending generated
                 </button>
                 {nodeData.lastMovedAssetPath ? (
                   <>

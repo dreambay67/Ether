@@ -40,6 +40,7 @@ import {
 import { freezePromptNode } from "@ether/engine/graph/promptAssembly";
 import type { AssetRecord, EtherGraph } from "@ether/engine";
 import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
+import { linkDroppedReferenceFilesSequentially } from "./assetDrop";
 import { InspectorPanel } from "./InspectorPanel";
 import { NodeLibrary } from "./NodeLibrary";
 import {
@@ -50,6 +51,7 @@ import {
   pushCanvasHistoryFromBaseline,
   pushCanvasHistoryIfChanged,
   redoCanvasHistory,
+  replaceCanvasHistoryWithDurableCommit,
   shouldPushNodeChangesToHistory,
   updateCanvasHistoryPresent,
   undoCanvasHistory
@@ -159,6 +161,7 @@ function InnerEtherCanvas(
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [showMiniMap, setShowMiniMap] = useState(true);
   const [localRunStatus, setLocalRunStatus] = useState<string | null>(null);
+  const [pendingGeneratedAssetId, setPendingGeneratedAssetId] = useState<string | null>(null);
 
   const nodes = history.present.nodes as Node<CanvasNodeData>[];
   const edges = history.present.edges;
@@ -183,6 +186,7 @@ function InnerEtherCanvas(
     resizeBaselineRef.current = null;
     dragBaselineRef.current = null;
     textEditBaselineRef.current = null;
+    setPendingGeneratedAssetId(null);
     setViewport(graph.viewport);
     flowRef.current?.setViewport(graph.viewport);
     setHistory(
@@ -221,6 +225,22 @@ function InnerEtherCanvas(
     (nextNodes: Node<CanvasNodeData>[], nextEdges: Edge[], traceMessage?: string) => {
       setHistory((current) => pushCanvasHistory(current, { nodes: nextNodes, edges: nextEdges }));
       if (traceMessage) {
+        onTrace(traceMessage);
+      }
+    },
+    [onTrace]
+  );
+
+  const commitDurableSnapshot = useCallback(
+    (nextNodes: Node<CanvasNodeData>[], nextEdges: Edge[], traceMessage?: string) => {
+      resizeBaselineRef.current = null;
+      dragBaselineRef.current = null;
+      textEditBaselineRef.current = null;
+      setHistory((current) =>
+        replaceCanvasHistoryWithDurableCommit(current, { nodes: nextNodes, edges: nextEdges })
+      );
+      if (traceMessage) {
+        setLocalRunStatus(traceMessage);
         onTrace(traceMessage);
       }
     },
@@ -361,11 +381,11 @@ function InnerEtherCanvas(
           ? `Linked ${referenceNodes[0]?.data.title ?? "reference"}`
           : `Linked ${assets.length} references as separate nodes`;
 
-      commitSnapshot(nextNodes, nextEdges, message);
+      commitDurableSnapshot(nextNodes, nextEdges, message);
       onStatus(message);
       setContextMenu(null);
     },
-    [commitSnapshot, edges, nodes, onStatus]
+    [commitDurableSnapshot, edges, nodes, onStatus]
   );
 
   const linkReferenceImage = useCallback(async () => {
@@ -603,13 +623,13 @@ function InnerEtherCanvas(
         );
         const message = `${target.data.subtype} folder ready`;
 
-        commitSnapshot(nextNodes, edges, message);
+        commitDurableSnapshot(nextNodes, edges, message);
         onStatus(message);
       } catch (error) {
         onStatus(error instanceof Error ? error.message : "Folder mirror failed");
       }
     },
-    [commitSnapshot, edges, nodes, onStatus, projectId]
+    [commitDurableSnapshot, edges, nodes, onStatus, projectId]
   );
 
   const saveFakeGeneratedAssetForNode = useCallback(
@@ -652,13 +672,14 @@ function InnerEtherCanvas(
         );
         const message = "Saved fake generated output";
 
-        commitSnapshot(nextNodes, edges, message);
+        setPendingGeneratedAssetId(asset.id);
+        commitDurableSnapshot(nextNodes, edges, message);
         onStatus(message);
       } catch (error) {
         onStatus(error instanceof Error ? error.message : "Fake generated output save failed");
       }
     },
-    [commitSnapshot, edges, nodes, onStatus, projectId]
+    [commitDurableSnapshot, edges, nodes, onStatus, projectId]
   );
 
   const moveLatestGeneratedAssetToCollection = useCallback(
@@ -681,12 +702,25 @@ function InnerEtherCanvas(
         return;
       }
 
-      const sourceNode = [...nodes]
-        .reverse()
-        .find((node) => node.data.kind === "Generation" && node.data.assetKind === "generated" && node.data.assetId);
+      if (!pendingGeneratedAssetId) {
+        const message = "No pending generated output to move.";
+        setLocalRunStatus(message);
+        onStatus(message);
+        return;
+      }
+
+      const sourceNode = nodes.find(
+        (node) =>
+          node.data.kind === "Generation" &&
+          node.data.assetKind === "generated" &&
+          node.data.assetId === pendingGeneratedAssetId
+      );
 
       if (!sourceNode?.data.assetId) {
-        onStatus("Save fake generated output before moving it to a Collection.");
+        const message = "No pending generated output to move.";
+        setPendingGeneratedAssetId(null);
+        setLocalRunStatus(message);
+        onStatus(message);
         return;
       }
 
@@ -740,15 +774,16 @@ function InnerEtherCanvas(
 
           return { ...node, selected: false };
         });
-        const message = "Moved latest generated output to Collection";
+        const message = "Moved pending generated output to Collection";
 
-        commitSnapshot(nextNodes, edges, message);
+        setPendingGeneratedAssetId(null);
+        commitDurableSnapshot(nextNodes, edges, message);
         onStatus(message);
       } catch (error) {
         onStatus(error instanceof Error ? error.message : "Generated asset move failed");
       }
     },
-    [commitSnapshot, edges, nodes, onStatus, projectId]
+    [commitDurableSnapshot, edges, nodes, onStatus, pendingGeneratedAssetId, projectId]
   );
 
   const deleteNodeById = useCallback(
@@ -833,8 +868,10 @@ function InnerEtherCanvas(
         }
 
         try {
-          const assets = await Promise.all(
-            filePaths.map((filePath) => window.ether.asset.linkDroppedReference(projectId, filePath))
+          const assets = await linkDroppedReferenceFilesSequentially(
+            projectId,
+            filePaths,
+            window.ether.asset.linkDroppedReference
           );
           const position = flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) ?? {
             x: 320,

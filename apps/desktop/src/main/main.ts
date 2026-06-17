@@ -19,6 +19,7 @@ import {
   saveGraph
 } from "@ether/engine";
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl";
+import { assertImageFilePathForIpc } from "./assetIpcValidation";
 
 const projectChannels = {
   create: "ether:project:create",
@@ -171,20 +172,25 @@ function registerAssetIpc() {
       return null;
     }
 
+    assertImageFilePathForIpc(result.filePaths[0]);
+
     return linkExternalReference(projectPath, {
       filePath: result.filePaths[0],
       role: optionalString(assetOptions.role, "role")
     });
   });
 
-  ipcMain.handle(assetChannels.linkDroppedReference, (_event, projectId: unknown, filePath: unknown, options?: unknown) => {
+  ipcMain.handle(assetChannels.linkDroppedReference, (_event, projectId: unknown, filePathValue: unknown, options?: unknown) => {
     const assetOptions =
       options && typeof options === "object" && !Array.isArray(options)
         ? (options as Record<string, unknown>)
         : {};
+    const filePath = assertString(filePathValue, "filePath");
+
+    assertImageFilePathForIpc(filePath);
 
     return linkExternalReference(getRegisteredProjectPath(projectId), {
-      filePath: assertString(filePath, "filePath"),
+      filePath,
       role: optionalString(assetOptions.role, "role")
     });
   });
