@@ -8,7 +8,8 @@
     "test:unit": "pnpm --filter @ether/testing test:unit",
     "test:smoke": "pnpm --filter @ether/testing test:smoke",
     "desktop:dev": "pnpm --filter @ether/desktop dev",
-    "desktop:build": "pnpm --filter @ether/desktop build"
+    "desktop:build": "pnpm --filter @ether/desktop build",
+    "desktop:package:win": "pnpm desktop:build && node scripts/package-windows.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.1",

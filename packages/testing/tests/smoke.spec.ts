@@ -700,6 +700,7 @@ test("generated image nodes expose preview and inspect controls", async ({ page 
 
 test("Shift-dragging a generated image payload creates an Edit node", async ({ page }) => {
   await page.addInitScript(() => {
+    const testWindow = window as typeof window & { __savedGraph: any };
     const graph = {
       nodes: [
         {
@@ -749,14 +750,18 @@ test("Shift-dragging a generated image payload creates an Edit node", async ({ p
       database: { path: "C:\\Fake\\ShiftDrag.ether\\ether.db", tables: [], healthIssueCount: 0 }
     };
 
-    Object.assign(window, {
+    Object.assign(testWindow, {
+      __savedGraph: null,
       ether: {
         shell: "desktop",
         file: { getDroppedFilePath: () => null },
         project: {
           create: async () => project,
           open: async () => project,
-          saveGraph: async () => graph,
+          saveGraph: async (_projectId: string, nextGraph: any) => {
+            testWindow.__savedGraph = nextGraph;
+            return nextGraph;
+          },
           loadGraph: async () => graph,
           health: async () => ({ issues: [] })
         },
@@ -821,8 +826,14 @@ test("Shift-dragging a generated image payload creates an Edit node", async ({ p
 
   await expect(page.getByTestId("ether-node")).toHaveCount(2);
   await expect(page.getByTestId("ether-node").getByRole("heading", { name: "Inpaint" })).toBeVisible();
-  await expect(page.locator(".react-flow__edge")).toHaveCount(1);
   await expect(page.getByTestId("canvas-status")).toContainText("Created Inpaint edit");
+  await page.getByRole("button", { name: "Save Graph" }).click();
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __savedGraph: any }).__savedGraph?.edges?.length))
+    .toBe(1);
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __savedGraph: any }).__savedGraph?.edges?.[0]?.label))
+    .toBe("image");
 });
 
 test("mask creation control saves overlay metadata and reloads through graph state", async ({ page }) => {
@@ -947,4 +958,343 @@ test("mask creation control saves overlay metadata and reloads through graph sta
   await page.getByRole("button", { name: "Load Graph" }).click();
 
   await expect(page.getByTestId("inspector-mask-metadata")).toContainText("mask-asset-1");
+});
+
+test("loads and persists desktop project fields through settings", async ({ page }) => {
+  await page.addInitScript(() => {
+    const testWindow = window as typeof window & { __savedSettings: unknown[] };
+
+    Object.assign(testWindow, {
+      __savedSettings: [],
+      ether: {
+        shell: "desktop",
+        file: { getDroppedFilePath: () => null },
+        settings: {
+          load: async () => ({
+            parentDirectory: "C:\\Ether",
+            projectName: "Persisted Campaign",
+            projectPath: "C:\\Ether\\Persisted.ether",
+            recentProjects: ["C:\\Ether\\Persisted.ether"]
+          }),
+          save: async (settings: unknown) => {
+            testWindow.__savedSettings.push(settings);
+            return settings;
+          }
+        },
+        project: {
+          create: async () => {
+            throw new Error("not used");
+          },
+          open: async () => {
+            throw new Error("not used");
+          },
+          saveGraph: async () => {
+            throw new Error("not used");
+          },
+          loadGraph: async () => {
+            throw new Error("not used");
+          },
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => {
+            throw new Error("not used");
+          },
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => {
+            throw new Error("not used");
+          },
+          saveMask: async () => {
+            throw new Error("not used");
+          },
+          moveToCollection: async () => {
+            throw new Error("not used");
+          },
+          listMoves: async () => []
+        },
+        execution: {
+          run: async () => {
+            throw new Error("not used");
+          }
+        }
+      }
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByLabel("Parent directory")).toHaveValue("C:\\Ether");
+  await expect(page.getByLabel("Project name")).toHaveValue("Persisted Campaign");
+  await expect(page.getByLabel("Project path")).toHaveValue("C:\\Ether\\Persisted.ether");
+
+  await page.getByLabel("Project name").fill("Revised Campaign");
+
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __savedSettings: any[] }).__savedSettings.at(-1)))
+    .toMatchObject({ projectName: "Revised Campaign" });
+});
+
+test("desktop settings persistence keeps the newest rapid edit", async ({ page }) => {
+  await page.addInitScript(() => {
+    type DeferredSave = {
+      settings: any;
+      resolve: (value: any) => void;
+    };
+    const testWindow = window as typeof window & {
+      __settingsSaves: DeferredSave[];
+      __savedSettings: any[];
+    };
+
+    Object.assign(testWindow, {
+      __settingsSaves: [],
+      __savedSettings: [],
+      ether: {
+        shell: "desktop",
+        file: { getDroppedFilePath: () => null },
+        settings: {
+          load: async () => ({
+            parentDirectory: "",
+            projectName: "Untitled Ether Project",
+            projectPath: "",
+            recentProjects: []
+          }),
+          save: async (settings: any) => {
+            if (settings.projectName === "Untitled Ether Project") {
+              return settings;
+            }
+
+            return new Promise((resolve) => {
+              testWindow.__settingsSaves.push({
+                settings,
+                resolve: (value) => {
+                  testWindow.__savedSettings.push(value);
+                  resolve(value);
+                }
+              });
+            });
+          }
+        },
+        project: {
+          create: async () => {
+            throw new Error("not used");
+          },
+          open: async () => {
+            throw new Error("not used");
+          },
+          saveGraph: async () => {
+            throw new Error("not used");
+          },
+          loadGraph: async () => {
+            throw new Error("not used");
+          },
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => {
+            throw new Error("not used");
+          },
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => {
+            throw new Error("not used");
+          },
+          saveMask: async () => {
+            throw new Error("not used");
+          },
+          moveToCollection: async () => {
+            throw new Error("not used");
+          },
+          listMoves: async () => []
+        },
+        execution: {
+          run: async () => {
+            throw new Error("not used");
+          }
+        }
+      }
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByLabel("Project name")).toHaveValue("Untitled Ether Project");
+  await page.getByLabel("Project name").fill("A");
+
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __settingsSaves: any[] }).__settingsSaves.length))
+    .toBe(1);
+
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __settingsSaves: any[] }).__settingsSaves[0]?.settings))
+    .toMatchObject({ projectName: "A" });
+
+  await page.getByLabel("Project name").fill("AB");
+  await page.getByLabel("Project name").fill("ABC");
+
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      __settingsSaves: Array<{ settings: any; resolve: (value: any) => void }>;
+    };
+    const first = testWindow.__settingsSaves[0];
+
+    first.resolve(first.settings);
+  });
+
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __settingsSaves: any[] }).__settingsSaves.length))
+    .toBe(2);
+
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __settingsSaves: any[] }).__settingsSaves[1]?.settings))
+    .toMatchObject({ projectName: "ABC" });
+
+  await expect
+    .poll(() => page.evaluate(() => (window as typeof window & { __savedSettings: any[] }).__savedSettings.at(-1)))
+    .toMatchObject({ projectName: "A" });
+});
+
+test("provider run errors stay recoverable in the canvas", async ({ page }) => {
+  await page.addInitScript(() => {
+    const graph = {
+      nodes: [
+        {
+          id: "generation",
+          type: "etherNode",
+          position: { x: 420, y: 220 },
+          width: 260,
+          height: 180,
+          selected: true,
+          data: {
+            definitionId: "generation-image",
+            kind: "Generation",
+            subtype: "Image",
+            title: "Image",
+            label: "Recoverable generation",
+            notes: "",
+            instruction: "test unavailable provider",
+            status: "idle",
+            rerunState: "ready"
+          }
+        }
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-17T12:00:00.000Z"
+    };
+    const failedGraph = {
+      ...graph,
+      nodes: [
+        {
+          ...graph.nodes[0],
+          data: {
+            ...graph.nodes[0].data,
+            status: "error",
+            rerunState: "error",
+            lastRunAt: "2026-06-17T12:01:00.000Z"
+          }
+        }
+      ],
+      updatedAt: "2026-06-17T12:01:00.000Z"
+    };
+    const project = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      path: "C:\\Fake\\Recoverable.ether",
+      metadata: {
+        id: "22222222-2222-4222-8222-222222222222",
+        displayName: "Recoverable",
+        appVersion: "0.1.0",
+        createdAt: "2026-06-17T12:00:00.000Z",
+        updatedAt: "2026-06-17T12:00:00.000Z",
+        brandLockup: "ETHER by DreamBay",
+        autosave: { enabled: true, intervalMs: 60000 },
+        providerPreferences: {},
+        activeSnapshotId: null
+      },
+      graph,
+      database: { path: "C:\\Fake\\Recoverable.ether\\ether.db", tables: [], healthIssueCount: 0 }
+    };
+
+    Object.assign(window, {
+      ether: {
+        shell: "desktop",
+        file: { getDroppedFilePath: () => null },
+        project: {
+          create: async () => project,
+          open: async () => project,
+          saveGraph: async () => graph,
+          loadGraph: async () => graph,
+          health: async () => ({ issues: [] })
+        },
+        asset: {
+          selectReferenceImage: async () => null,
+          linkDroppedReference: async () => {
+            throw new Error("not used");
+          },
+          ensureCollection: async () => {
+            throw new Error("not used");
+          },
+          ensureDirectory: async () => {
+            throw new Error("not used");
+          },
+          list: async () => [],
+          saveFakeGenerated: async () => {
+            throw new Error("not used");
+          },
+          saveMask: async () => {
+            throw new Error("not used");
+          },
+          moveToCollection: async () => {
+            throw new Error("not used");
+          },
+          listMoves: async () => []
+        },
+        execution: {
+          run: async () => ({
+            graph: failedGraph,
+            plan: {
+              policy: "cached-inputs",
+              targetNodeIds: ["generation"],
+              nodeIds: ["generation"],
+              items: [{ nodeId: "generation", iteration: 1 }],
+              parallel: false,
+              runCountCap: 1
+            },
+            results: [
+              {
+                nodeId: "generation",
+                iteration: 1,
+                status: "error",
+                action: "generate",
+                reason: "Provider unavailable",
+                startedAt: "2026-06-17T12:01:00.000Z",
+                finishedAt: "2026-06-17T12:01:00.000Z"
+              }
+            ]
+          })
+        }
+      }
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Parent directory").fill("C:\\Fake");
+  await page.getByRole("button", { name: "Create" }).click();
+  await page.getByRole("button", { name: "Run Node" }).click();
+
+  await expect(page.getByTestId("canvas-status")).toContainText("Run finished with 1 error");
+  await expect(page.getByTestId("ether-node")).toContainText("error");
+  await expect(page.getByRole("button", { name: "Run Node" })).toBeEnabled();
 });

@@ -26,6 +26,7 @@ import {
 } from "@ether/engine";
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl";
 import { assertImageFilePathForIpc } from "./assetIpcValidation";
+import { createDesktopSettingsStore } from "./settingsStore";
 
 const projectChannels = {
   create: "ether:project:create",
@@ -55,6 +56,11 @@ const providerChannels = {
   diagnostics: "ether:provider:diagnostics"
 } as const;
 
+const settingsChannels = {
+  load: "ether:settings:load",
+  save: "ether:settings:save"
+} as const;
+
 type ProjectSession = ProjectOpenResult & {
   projectId: string;
 };
@@ -68,6 +74,7 @@ const executionPolicies = new Set<ExecutionPolicy>([
   "branch",
   "selected"
 ]);
+const settingsStore = createDesktopSettingsStore(() => path.join(app.getPath("userData"), "settings.json"));
 
 function assertString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -358,6 +365,17 @@ function registerProviderIpc() {
   ipcMain.handle(providerChannels.diagnostics, () => getGenerationProviderDiagnostics());
 }
 
+function registerSettingsIpc() {
+  ipcMain.handle(settingsChannels.load, () => settingsStore.load());
+  ipcMain.handle(settingsChannels.save, (_event, settings: unknown) => {
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      throw new Error("settings must be an object.");
+    }
+
+    return settingsStore.save(settings);
+  });
+}
+
 const createMainWindow = () => {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -388,6 +406,7 @@ registerProjectIpc();
 registerAssetIpc();
 registerExecutionIpc();
 registerProviderIpc();
+registerSettingsIpc();
 
 app.whenReady().then(() => {
   createMainWindow();

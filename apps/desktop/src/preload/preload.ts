@@ -29,6 +29,11 @@ const providerChannels = {
   diagnostics: "ether:provider:diagnostics"
 } as const;
 
+const settingsChannels = {
+  load: "ether:settings:load",
+  save: "ether:settings:save"
+} as const;
+
 const getDroppedFilePath = createDroppedFilePathReader(webUtils);
 
 contextBridge.exposeInMainWorld("ether", {
@@ -87,5 +92,9 @@ contextBridge.exposeInMainWorld("ether", {
   },
   provider: {
     diagnostics: () => ipcRenderer.invoke(providerChannels.diagnostics)
+  },
+  settings: {
+    load: () => ipcRenderer.invoke(settingsChannels.load),
+    save: (settings: unknown) => ipcRenderer.invoke(settingsChannels.save, settings)
   }
 });

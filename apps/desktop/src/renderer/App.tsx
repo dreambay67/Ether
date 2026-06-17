@@ -10,6 +10,7 @@ import {
 } from "react";
 import { brandTokens } from "@ether/brand";
 import type { EtherGraph } from "@ether/engine";
+import type { DesktopSettings } from "./ether-env";
 import etherLogo from "../../../../packages/brand/src/assets/Ether_logo.png";
 import { EtherCanvasWithProvider, type EtherCanvasHandle } from "./canvas/EtherCanvas";
 import { RunTracePanel } from "./canvas/RunTracePanel";
@@ -173,9 +174,13 @@ function FloatingPanel({
 
 export function App() {
   const canvasRef = useRef<EtherCanvasHandle>(null);
+  const settingsReadyRef = useRef(false);
+  const settingsSaveInFlightRef = useRef(false);
+  const pendingSettingsRef = useRef<DesktopSettings | null>(null);
   const [parentDirectory, setParentDirectory] = useState("");
   const [projectName, setProjectName] = useState("Untitled Ether Project");
   const [projectPath, setProjectPath] = useState("");
+  const [recentProjects, setRecentProjects] = useState<string[]>([]);
   const [activeGraph, setActiveGraph] = useState<EtherGraph | null>(null);
   const [traceEntries, setTraceEntries] = useState<string[]>([]);
   const [currentProject, setCurrentProject] = useState<{
@@ -199,8 +204,26 @@ export function App() {
       updatedAt: result.metadata.updatedAt
     });
     setProjectPath(result.path);
+    setRecentProjects((projects) => uniqueProjectPaths([result.path, ...projects]));
     setActiveGraph(result.graph);
   };
+
+  const flushSettingsSaveQueue = useCallback(() => {
+    if (settingsSaveInFlightRef.current || !pendingSettingsRef.current || !window.ether?.settings?.save) {
+      return;
+    }
+
+    const settings = pendingSettingsRef.current;
+    pendingSettingsRef.current = null;
+    settingsSaveInFlightRef.current = true;
+
+    void window.ether.settings.save(settings)
+      .catch(() => undefined)
+      .finally(() => {
+        settingsSaveInFlightRef.current = false;
+        flushSettingsSaveQueue();
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,6 +244,48 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    window.ether?.settings?.load()
+      .then((settings) => {
+        if (cancelled) {
+          return;
+        }
+
+        setParentDirectory(settings.parentDirectory);
+        setProjectName(settings.projectName);
+        setProjectPath(settings.projectPath);
+        setRecentProjects(settings.recentProjects);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) {
+          settingsReadyRef.current = true;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!settingsReadyRef.current || !window.ether?.settings?.save) {
+      return;
+    }
+
+    const settings: DesktopSettings = {
+      parentDirectory,
+      projectName,
+      projectPath,
+      recentProjects: uniqueProjectPaths([projectPath, ...recentProjects])
+    };
+
+    pendingSettingsRef.current = settings;
+    flushSettingsSaveQueue();
+  }, [flushSettingsSaveQueue, parentDirectory, projectName, projectPath, recentProjects]);
 
   const createLocalProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -402,4 +467,23 @@ function formatProviderDiagnostics(diagnostics: Awaited<ReturnType<NonNullable<t
   const codexText = codex?.availability === "available" ? "Codex ready" : "Codex unavailable";
 
   return `${fakeText}; ${codexText}; Nano unavailable (${nanoUnavailable})`;
+}
+
+function uniqueProjectPaths(projects: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const project of projects) {
+    const value = project.trim();
+    const key = value.toLowerCase();
+
+    if (!value || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(value);
+  }
+
+  return result.slice(0, 12);
 }

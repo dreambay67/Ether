@@ -8,7 +8,8 @@
     "build:electron": "tsc -p tsconfig.json",
     "dev:renderer": "vite --host 127.0.0.1",
     "dev": "pnpm --filter @ether/engine build && pnpm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env ETHER_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
-    "build": "pnpm --filter @ether/engine build && pnpm run build:electron && vite build"
+    "build": "pnpm --filter @ether/engine build && pnpm run build:electron && vite build",
+    "package:win": "pnpm --workspace-root desktop:package:win"
   },
   "dependencies": {
     "@ether/brand": "workspace:*",

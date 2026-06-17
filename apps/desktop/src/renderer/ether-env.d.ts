@@ -22,6 +22,13 @@ export type ProviderDiagnostics = {
   }>;
 };
 
+export type DesktopSettings = {
+  parentDirectory: string;
+  projectName: string;
+  projectPath: string;
+  recentProjects: string[];
+};
+
 declare global {
   interface Window {
     ether: {
@@ -85,6 +92,10 @@ declare global {
       };
       provider?: {
         diagnostics(): Promise<ProviderDiagnostics>;
+      };
+      settings?: {
+        load(): Promise<DesktopSettings>;
+        save(settings: DesktopSettings): Promise<DesktopSettings>;
       };
     };
   }
