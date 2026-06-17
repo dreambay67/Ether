@@ -84,12 +84,14 @@ function storeContract(definition: EtherNodeDefinition): NodeContract {
       "filterRule"
     ],
     producedOutputs: producedOutputs[definition.subtype] ?? ["metadata"],
-    runnable: false,
+    runnable: true,
     runLabel:
-      definition.subtype === "Compare" || definition.subtype === "Evaluate"
-        ? "Review"
+      definition.subtype === "Compare"
+        ? "Compare"
+        : definition.subtype === "Evaluate"
+          ? "Evaluate"
         : definition.subtype === "Filter"
-          ? "Route"
+          ? "Filter"
           : "Organize",
     description: `${definition.title} organizes, reviews, evaluates, or routes local artifacts.`
   };

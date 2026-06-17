@@ -85,7 +85,10 @@ function markChangedNodeStale(data: Partial<CanvasNodeData> | undefined, now: st
     storeMetadata: undefined,
     lastMovedAssetId: undefined,
     lastMovedAssetPath: undefined,
-    lastMovedAt: undefined
+    lastMovedAt: undefined,
+    compareArtifact: undefined,
+    evaluationArtifact: undefined,
+    filterResult: undefined
   };
 
   for (const key of Object.keys(next) as Array<keyof CanvasNodeData>) {
@@ -106,7 +109,10 @@ function hasExecutionArtifact(data: Partial<CanvasNodeData> | undefined) {
       data?.assetId ||
       data?.assetPath ||
       data?.storeAssetId ||
-      data?.storePath
+      data?.storePath ||
+      data?.compareArtifact ||
+      data?.evaluationArtifact ||
+      data?.filterResult
   );
 }
 

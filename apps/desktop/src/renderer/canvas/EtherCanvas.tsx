@@ -25,7 +25,7 @@ import {
   type ReactFlowInstance,
   type Viewport
 } from "@xyflow/react";
-import { Eye, EyeOff, ImagePlus, Link2, Redo2, Undo2 } from "lucide-react";
+import { Eye, EyeOff, GitBranch, ImagePlus, Link2, Redo2, Undo2 } from "lucide-react";
 import {
   type CanvasNodeData,
   type EtherNodeDefinition
@@ -183,6 +183,76 @@ function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
     assetKind: asset.kind,
     assetPath: asset.path,
     assetMetadata: asset.metadata
+  };
+}
+
+function createReviewRouterCanvasFragment(idPrefix: string, origin: { x: number; y: number }) {
+  const node = (
+    id: string,
+    definitionId: string,
+    x: number,
+    y: number,
+    data: Partial<CanvasNodeData>
+  ): Node<CanvasNodeData> => ({
+    id,
+    type: "etherNode",
+    position: { x, y },
+    width: 236,
+    height: 150,
+    data: {
+      ...createGraphNodeData(definitionId),
+      ...data
+    }
+  });
+  const edge = (id: string, source: string, target: string, label: string): Edge => ({
+    id,
+    source,
+    target,
+    label,
+    data: { label }
+  });
+
+  return {
+    nodes: [
+      node(`${idPrefix}-compare`, "store-compare", origin.x, origin.y, {
+        title: "Compare",
+        label: "Compare",
+        compareLayout: 4,
+        reviewDecision: "select"
+      }),
+      node(`${idPrefix}-evaluate`, "store-evaluate", origin.x + 280, origin.y, {
+        title: "Evaluate",
+        label: "Evaluate",
+        instruction: "Score each image against the campaign direction and route pass, needs-edit, or fail.",
+        evaluationThreshold: 70
+      }),
+      node(`${idPrefix}-filter`, "store-filter", origin.x + 560, origin.y, {
+        title: "Filter",
+        label: "Filter",
+        filterAutoApply: true,
+        filterDryRun: false,
+        filterRules: "pass -> Selected; needs-edit -> Needs Edit; fail -> Rejected"
+      }),
+      node(`${idPrefix}-selected`, "store-collection", origin.x + 840, origin.y - 120, {
+        title: "Selected",
+        label: "Selected"
+      }),
+      node(`${idPrefix}-needs-edit`, "store-collection", origin.x + 840, origin.y, {
+        title: "Needs Edit",
+        label: "Needs Edit"
+      }),
+      node(`${idPrefix}-rejected`, "store-collection", origin.x + 840, origin.y + 120, {
+        title: "Rejected",
+        label: "Rejected"
+      })
+    ],
+    edges: [
+      edge(`${idPrefix}-edge-compare-evaluate`, `${idPrefix}-compare`, `${idPrefix}-evaluate`, "review"),
+      edge(`${idPrefix}-edge-evaluate-filter`, `${idPrefix}-evaluate`, `${idPrefix}-filter`, "evaluation"),
+      edge(`${idPrefix}-edge-filter-selected`, `${idPrefix}-filter`, `${idPrefix}-selected`, "pass"),
+      edge(`${idPrefix}-edge-filter-needs-edit`, `${idPrefix}-filter`, `${idPrefix}-needs-edit`, "needs-edit"),
+      edge(`${idPrefix}-edge-filter-rejected`, `${idPrefix}-filter`, `${idPrefix}-rejected`, "fail")
+    ]
   };
 }
 
@@ -467,6 +537,29 @@ function InnerEtherCanvas(
       y: bounds.top + bounds.height / 2
     });
   }, [nodes.length]);
+
+  const addReviewRouterTemplate = useCallback(() => {
+    nodeCounterRef.current += 1;
+    const prefix = `review-${Date.now()}-${nodeCounterRef.current}`;
+    const fragment = createReviewRouterCanvasFragment(prefix, getCanvasCenterPosition());
+    const styledEdges = normalizeEdges(fragment.edges);
+    const compareNodeId = `${prefix}-compare`;
+    const nextNodes = nodes
+      .map((candidate) => ({ ...candidate, selected: false }))
+      .concat(
+        fragment.nodes.map((node) => ({
+          ...node,
+          type: "etherNode",
+          selected: node.id === compareNodeId
+        }))
+      );
+    const nextEdges = edges.map((edge) => ({ ...edge, selected: false })).concat(styledEdges);
+    const message = "Added Review Router";
+
+    commitSnapshot(nextNodes, nextEdges, message);
+    onStatus(message);
+    setContextMenu(null);
+  }, [commitSnapshot, edges, getCanvasCenterPosition, nodes, onStatus]);
 
   const createReferenceNodes = useCallback(
     (assets: AssetRecord[], position: { x: number; y: number }) => {
@@ -1543,6 +1636,14 @@ function InnerEtherCanvas(
         </button>
         <button type="button" aria-label="Connect first valid pair" onClick={connectFirstValidPair}>
           <Link2 size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label="Add review router"
+          data-testid="canvas-add-review-router"
+          onClick={addReviewRouterTemplate}
+        >
+          <GitBranch size={16} aria-hidden="true" />
         </button>
       </div>
       <aside className="canvas-overlay-panel canvas-node-library" aria-label="Node Library" data-testid="panel-node-library">

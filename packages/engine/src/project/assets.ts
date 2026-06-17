@@ -79,6 +79,12 @@ export type MoveAssetToCollectionOptions = {
   now?: Date;
 };
 
+export type UpdateAssetMetadataOptions = {
+  assetId: string;
+  metadata: Record<string, unknown>;
+  now?: Date;
+};
+
 export type ListAssetMovesQuery = {
   assetId?: string;
 };
@@ -371,6 +377,23 @@ export async function moveAssetToCollection(
   return getAssetById(paths.database, asset.id);
 }
 
+export async function updateAssetMetadata(
+  projectPath: string,
+  options: UpdateAssetMetadataOptions
+): Promise<AssetRecord> {
+  const paths = projectPaths(projectPath);
+  initializeDatabase(paths.database);
+
+  const asset = getAssetById(paths.database, options.assetId);
+
+  return updateAssetMetadataRecord(
+    paths.database,
+    asset,
+    options.metadata,
+    toTimestamp(options.now)
+  );
+}
+
 export async function listAssetMoves(
   projectPath: string,
   query: ListAssetMovesQuery = {}
@@ -427,7 +450,7 @@ async function ensureStoreFolder(
   };
 
   if (existing) {
-    return updateAssetMetadata(paths.database, existing, metadata, now);
+    return updateAssetMetadataRecord(paths.database, existing, metadata, now);
   }
 
   return insertAsset(paths.database, {
@@ -470,7 +493,7 @@ function insertAsset(
   return getAssetById(databasePath, asset.id);
 }
 
-function updateAssetMetadata(
+function updateAssetMetadataRecord(
   databasePath: string,
   asset: AssetRecord,
   metadata: Record<string, unknown>,

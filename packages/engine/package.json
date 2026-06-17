@@ -34,6 +34,10 @@
       "types": "./dist/graph/promptAssembly.d.ts",
       "default": "./dist/graph/promptAssembly.js"
     },
+    "./graph/reviewRouterTemplate": {
+      "types": "./dist/graph/reviewRouterTemplate.d.ts",
+      "default": "./dist/graph/reviewRouterTemplate.js"
+    },
     "./graph/textMutation": {
       "types": "./dist/graph/textMutation.d.ts",
       "default": "./dist/graph/textMutation.js"

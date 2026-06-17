@@ -67,6 +67,19 @@ export type CanvasNodeData = {
   lastMovedAssetId?: string;
   lastMovedAssetPath?: string;
   lastMovedAt?: string;
+  compareLayout?: number;
+  compareArtifact?: unknown;
+  reviewRating?: number;
+  reviewTags?: string;
+  reviewDecision?: string;
+  reviewNotes?: string;
+  evaluationThreshold?: number;
+  evaluationArtifact?: unknown;
+  filterAutoApply?: boolean;
+  filterDryRun?: boolean;
+  filterManualOverride?: string;
+  filterRules?: string;
+  filterResult?: unknown;
 };
 
 export type EtherNodeCategory = {

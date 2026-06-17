@@ -518,6 +518,47 @@ test("manual generated move consumes the pending generated asset once", async ({
     .toBe(1);
 });
 
+test("adds a Review Router template from the canvas toolbar", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Add review router" }).click();
+
+  await expect(page.getByTestId("ether-node")).toHaveCount(6);
+  await expect(page.getByTestId("ether-node").filter({ hasText: "Compare" })).toHaveCount(1);
+  await expect(page.getByTestId("ether-node").filter({ hasText: "Evaluate" })).toHaveCount(1);
+  await expect(page.getByTestId("ether-node").filter({ hasText: "Filter" })).toHaveCount(1);
+  await expect(page.getByTestId("ether-node").filter({ hasText: "Selected" })).toHaveCount(1);
+  await expect(page.getByTestId("ether-node").filter({ hasText: "Needs Edit" })).toHaveCount(1);
+  await expect(page.getByTestId("ether-node").filter({ hasText: "Rejected" })).toHaveCount(1);
+  await expect(page.getByText("pass", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("needs-edit", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("fail", { exact: true }).first()).toBeVisible();
+});
+
+test("Store review nodes expose Compare, Evaluate, and Filter inspector controls", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator("summary").filter({ hasText: "Store" }).click();
+  await page.getByTestId("library-node-store-compare").click();
+  await expect(page.getByTestId("inspector-compare-controls")).toBeVisible();
+  await page.getByLabel("Compare grid").selectOption("6");
+  await page.getByLabel("Rating").fill("4");
+  await page.getByLabel("Tags").fill("keeper, campaign");
+  await page.getByLabel("Decision").selectOption("select");
+  await page.getByLabel("Review notes").fill("Strong campaign candidate.");
+
+  await page.getByTestId("library-node-store-evaluate").click();
+  await expect(page.getByTestId("inspector-evaluate-controls")).toBeVisible();
+  await page.getByLabel("Evaluation threshold").fill("72");
+
+  await page.getByTestId("library-node-store-filter").click();
+  await expect(page.getByTestId("inspector-filter-controls")).toBeVisible();
+  await expect(page.getByLabel("Auto-apply routes")).toBeChecked();
+  await page.getByLabel("Dry run").check();
+  await page.getByLabel("Manual override").fill("Manual Picks");
+  await page.getByLabel("Routing rules").fill("pass -> Selected; needs-edit -> Needs Edit; fail -> Rejected");
+});
+
 test("creates an edge and edits the visible edge label", async ({ page }) => {
   await page.goto("/");
 

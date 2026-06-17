@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createProject,
   executeGraphRun,
+  listAssetMoves,
   listAssets,
   listRunRecords,
   markDownstreamStale,
@@ -31,7 +32,9 @@ afterEach(async () => {
 
 function node(
   id: string,
-  data: Partial<CanvasNodeData> & Pick<CanvasNodeData, "definitionId" | "kind" | "subtype">
+  data: Partial<CanvasNodeData> &
+    Pick<CanvasNodeData, "definitionId" | "kind" | "subtype"> &
+    Record<string, unknown>
 ) {
   const title = data.title ?? `${data.subtype} ${data.kind}`;
 
@@ -94,6 +97,339 @@ describe("execution planning", () => {
 
     expect(executionIds(plan.items)).toEqual(["prompt:1", "generation:1"]);
     expect(plan.parallel).toBe(false);
+  });
+
+  it("executes Compare nodes and writes manual ratings and tags into asset metadata", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Compare Metadata" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "hero.png",
+      content: "fake image bytes",
+      metadata: { variant: "hero" },
+      now: new Date("2026-06-17T17:00:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: generated.id,
+          assetKind: generated.kind,
+          assetPath: generated.path,
+          assetMetadata: generated.metadata
+        }),
+        node("compare", {
+          definitionId: "store-compare",
+          kind: "Store",
+          subtype: "Compare",
+          compareLayout: 4,
+          reviewRating: 5,
+          reviewTags: "keeper, on-brand",
+          reviewDecision: "select",
+          reviewNotes: "Best campaign hero so far."
+        })
+      ],
+      [edge("edge-generation-compare", "generation", "compare", "result")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["compare"],
+      now: () => new Date("2026-06-17T17:05:00.000Z")
+    });
+    const compareNode = result.graph.nodes.find((candidate) => candidate.id === "compare");
+    const assets = await listAssets(project.path, { kind: "generated" });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "compare",
+        status: "complete",
+        action: "compare"
+      })
+    ]);
+    expect(compareNode?.data).toMatchObject({
+      status: "complete",
+      rerunState: "complete",
+      compareArtifact: {
+        layout: 4,
+        items: [
+          expect.objectContaining({
+            assetId: generated.id,
+            rating: 5,
+            tags: ["keeper", "on-brand"],
+            decision: "select",
+            notes: "Best campaign hero so far."
+          })
+        ]
+      }
+    });
+    expect(assets[0]?.metadata).toMatchObject({
+      review: {
+        rating: 5,
+        tags: ["keeper", "on-brand"],
+        decision: "select",
+        notes: "Best campaign hero so far.",
+        compareNodeId: "compare"
+      }
+    });
+  });
+
+  it("executes Evaluate nodes and writes score, tags, decision, confidence, and explanation", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Evaluate Metadata" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "selected.png",
+      content: "fake image bytes",
+      metadata: { variant: "selected" },
+      now: new Date("2026-06-17T17:10:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: generated.id,
+          assetKind: generated.kind,
+          assetPath: generated.path,
+          assetMetadata: generated.metadata
+        }),
+        node("compare", {
+          definitionId: "store-compare",
+          kind: "Store",
+          subtype: "Compare",
+          compareLayout: 2,
+          reviewRating: 5,
+          reviewTags: "keeper, premium",
+          reviewDecision: "select"
+        }),
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          instruction: "Pass premium keeper assets for the DreamBay hero campaign.",
+          evaluationThreshold: 70
+        })
+      ],
+      [
+        edge("edge-generation-compare", "generation", "compare", "result"),
+        edge("edge-compare-evaluate", "compare", "evaluate", "review")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["compare", "evaluate"],
+      now: () => new Date("2026-06-17T17:15:00.000Z")
+    });
+    const evaluateNode = result.graph.nodes.find((candidate) => candidate.id === "evaluate");
+    const assets = await listAssets(project.path, { kind: "generated" });
+
+    expect(result.results.map((entry) => entry.action)).toEqual(["compare", "evaluate"]);
+    expect(evaluateNode?.data?.evaluationArtifact).toMatchObject({
+      items: [
+        expect.objectContaining({
+          assetId: generated.id,
+          decision: "pass",
+          tags: expect.arrayContaining(["keeper", "premium"]),
+          confidence: expect.any(Number),
+          explanation: expect.stringContaining("DreamBay hero campaign")
+        })
+      ]
+    });
+    expect(assets[0]?.metadata.evaluation).toMatchObject({
+      evaluateNodeId: "evaluate",
+      decision: "pass",
+      tags: expect.arrayContaining(["keeper", "premium"])
+    });
+    expect((assets[0]?.metadata.evaluation as { score?: number } | undefined)?.score).toBeGreaterThanOrEqual(70);
+  });
+
+  it("executes Filter nodes, auto-applies routing, and physically moves passed assets to collections", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Routing" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "winner.png",
+      content: "fake image bytes",
+      metadata: { variant: "winner" },
+      now: new Date("2026-06-17T17:20:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: generated.id,
+          assetKind: generated.kind,
+          assetPath: generated.path,
+          assetMetadata: generated.metadata
+        }),
+        node("compare", {
+          definitionId: "store-compare",
+          kind: "Store",
+          subtype: "Compare",
+          reviewRating: 5,
+          reviewTags: "keeper",
+          reviewDecision: "select"
+        }),
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          instruction: "Pass keeper images.",
+          evaluationThreshold: 70
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRules: "pass -> Selected; fail -> Rejected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        }),
+        node("rejected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Rejected",
+          label: "Rejected"
+        })
+      ],
+      [
+        edge("edge-generation-compare", "generation", "compare", "result"),
+        edge("edge-compare-evaluate", "compare", "evaluate", "review"),
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass"),
+        edge("edge-filter-rejected", "filter", "rejected", "fail")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["compare", "evaluate", "filter"],
+      now: () => new Date("2026-06-17T17:25:00.000Z")
+    });
+    const filterNode = result.graph.nodes.find((candidate) => candidate.id === "filter");
+    const [movedAsset] = await listAssets(project.path, { kind: "generated" });
+    const moves = await listAssetMoves(project.path, { assetId: generated.id });
+
+    expect(result.results.map((entry) => entry.action)).toEqual(["compare", "evaluate", "filter-route"]);
+    expect(movedAsset?.path).toContain(`${path.sep}collections${path.sep}Selected${path.sep}`);
+    expect(await readFile(movedAsset!.path, "utf8")).toBe("fake image bytes");
+    expect(moves).toHaveLength(1);
+    expect(moves[0]).toMatchObject({
+      assetId: generated.id,
+      reason: "Filter filter routed pass to Selected"
+    });
+    expect(filterNode?.data?.filterResult).toMatchObject({
+      dryRun: false,
+      autoApply: true,
+      routed: [
+        expect.objectContaining({
+          assetId: generated.id,
+          decision: "pass",
+          targetCollectionName: "Selected",
+          moved: true
+        })
+      ]
+    });
+  });
+
+  it("supports Filter dry-run and manual route overrides without moving assets", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Dry Run" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "manual.png",
+      content: "fake image bytes",
+      metadata: {
+        evaluation: {
+          evaluateNodeId: "evaluate",
+          decision: "fail",
+          score: 30,
+          tags: ["needs-edit"]
+        }
+      },
+      now: new Date("2026-06-17T17:30:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          status: "complete",
+          evaluationArtifact: {
+            items: [
+              {
+                assetId: generated.id,
+                assetPath: generated.path,
+                decision: "fail",
+                score: 30,
+                tags: ["needs-edit"]
+              }
+            ]
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterDryRun: true,
+          filterManualOverride: "Manual Picks",
+          filterRules: "fail -> Rejected"
+        }),
+        node("manual", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Manual Picks",
+          label: "Manual Picks"
+        })
+      ],
+      [
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-manual", "filter", "manual", "manual")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["filter"],
+      now: () => new Date("2026-06-17T17:35:00.000Z")
+    });
+    const [assetAfterDryRun] = await listAssets(project.path, { kind: "generated" });
+    const moves = await listAssetMoves(project.path, { assetId: generated.id });
+
+    expect(result.results[0]).toMatchObject({ action: "filter-dry-run", status: "complete" });
+    expect(assetAfterDryRun?.path).toBe(generated.path);
+    expect(moves).toEqual([]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+      dryRun: true,
+      routed: [
+        expect.objectContaining({
+          assetId: generated.id,
+          decision: "fail",
+          targetCollectionName: "Manual Picks",
+          moved: false
+        })
+      ]
+    });
   });
 
   it("refreshes upstream prompt artifacts before the target generation", () => {

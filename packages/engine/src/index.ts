@@ -15,7 +15,8 @@ export {
   listAssets,
   moveAssetToCollection,
   saveGeneratedAsset,
-  saveMaskAsset
+  saveMaskAsset,
+  updateAssetMetadata
 } from "./project/assets.js";
 export {
   NODE_CATEGORIES,
@@ -28,6 +29,7 @@ export {
 export { canConnectNodeKinds } from "./graph/connectionRules.js";
 export { distanceFromPointToSegment, findEdgeInsertionTarget } from "./graph/canvasGeometry.js";
 export { getNodeContract, getOptionalNodeContract, NODE_CONTRACTS } from "./graph/contracts.js";
+export { createReviewRouterTemplate } from "./graph/reviewRouterTemplate.js";
 export {
   assembleGenerationInputs,
   assemblePromptForNode,
@@ -59,6 +61,10 @@ export type {
 export type { ConnectionRuleResult } from "./graph/connectionRules.js";
 export type { GeometryEdge, GeometryNode, GraphPoint } from "./graph/canvasGeometry.js";
 export type { ContractArtifactKind, NodeContract } from "./graph/contracts.js";
+export type {
+  ReviewRouterTemplate,
+  ReviewRouterTemplateOptions
+} from "./graph/reviewRouterTemplate.js";
 export type {
   EdgeRoleArtifact,
   GenerationInputAssembly,
@@ -105,5 +111,6 @@ export type {
   ListAssetsQuery,
   MoveAssetToCollectionOptions,
   SaveGeneratedAssetOptions,
-  SaveMaskAssetOptions
+  SaveMaskAssetOptions,
+  UpdateAssetMetadataOptions
 } from "./project/assets.js";

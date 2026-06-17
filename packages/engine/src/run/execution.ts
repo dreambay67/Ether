@@ -19,7 +19,9 @@ import path from "node:path";
 import {
   ensureCollectionFolder,
   ensureDirectoryRoot,
+  moveAssetToCollection,
   saveGeneratedAsset,
+  updateAssetMetadata,
   type AssetRecord
 } from "../project/assets.js";
 import { initializeDatabase } from "../project/database.js";
@@ -947,22 +949,31 @@ async function executeStoreNode(
   let asset: AssetRecord | null = null;
   let action = "skip-store";
 
-  if (node.data?.subtype === "Collection") {
-    asset = await ensureCollectionFolder(projectPath, {
-      name: storeFolderName(node),
-      nodeId: node.id,
-      now: startedDate
-    });
-    action = "ensure-collection";
-  } else if (node.data?.subtype === "Directory") {
-    asset = await ensureDirectoryRoot(projectPath, {
-      name: storeFolderName(node),
-      nodeId: node.id,
-      now: startedDate
-    });
-    action = "ensure-directory";
-  } else {
-    return skipUnsupportedNode(state, item, finishedAt, `Store ${node.data?.subtype ?? ""}`.trim());
+  switch (node.data?.subtype) {
+    case "Collection":
+      asset = await ensureCollectionFolder(projectPath, {
+        name: storeFolderName(node),
+        nodeId: node.id,
+        now: startedDate
+      });
+      action = "ensure-collection";
+      break;
+    case "Directory":
+      asset = await ensureDirectoryRoot(projectPath, {
+        name: storeFolderName(node),
+        nodeId: node.id,
+        now: startedDate
+      });
+      action = "ensure-directory";
+      break;
+    case "Compare":
+      return executeCompareNode(projectPath, state, item, startedDate);
+    case "Evaluate":
+      return executeEvaluateNode(projectPath, state, item, startedDate);
+    case "Filter":
+      return executeFilterNode(projectPath, state, item, startedDate);
+    default:
+      return skipUnsupportedNode(state, item, finishedAt, `Store ${node.data?.subtype ?? ""}`.trim());
   }
 
   state.graph = setNodeData(state.graph, item.nodeId, {
@@ -984,6 +995,674 @@ async function executeStoreNode(
     startedAt: finishedAt,
     finishedAt
   };
+}
+
+async function executeCompareNode(
+  projectPath: string,
+  state: MutableExecutionState,
+  item: ExecutionQueueItem,
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
+  const node = findNode(state.graph, item.nodeId);
+  const finishedAt = startedDate.toISOString();
+  const layout = normalizeCompareLayout(node.data?.compareLayout);
+  const rating = normalizeRating(node.data?.reviewRating);
+  const tags = parseTags(node.data?.reviewTags);
+  const decision = normalizeReviewDecision(node.data?.reviewDecision, rating);
+  const notes = cleanText(node.data?.reviewNotes);
+  const inputs = collectReviewInputs(state.graph, item.nodeId);
+  const items = inputs.map((input) => ({
+    ...input,
+    rating,
+    tags: uniqueText([...input.tags, ...tags]),
+    decision,
+    notes
+  }));
+  const artifact = {
+    kind: "compare",
+    compareNodeId: item.nodeId,
+    layout,
+    reviewedAt: finishedAt,
+    items
+  };
+
+  for (const input of items) {
+    if (!input.assetId) {
+      continue;
+    }
+
+    await updateAssetMetadata(projectPath, {
+      assetId: input.assetId,
+      now: startedDate,
+      metadata: {
+        review: {
+          rating,
+          tags: input.tags,
+          decision,
+          notes,
+          compareNodeId: item.nodeId,
+          reviewedAt: finishedAt,
+          layout
+        }
+      }
+    });
+  }
+
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    status: "complete",
+    rerunState: "complete",
+    lastRunAt: finishedAt,
+    compareLayout: layout,
+    compareArtifact: artifact
+  });
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "complete",
+    action: "compare",
+    metadata: {
+      itemCount: items.length,
+      layout,
+      tags,
+      decision,
+      rating
+    },
+    startedAt: finishedAt,
+    finishedAt
+  };
+}
+
+async function executeEvaluateNode(
+  projectPath: string,
+  state: MutableExecutionState,
+  item: ExecutionQueueItem,
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
+  const node = findNode(state.graph, item.nodeId);
+  const finishedAt = startedDate.toISOString();
+  const threshold = normalizeThreshold(node.data?.evaluationThreshold);
+  const instruction = cleanText(node.data?.instruction);
+  const inputs = collectReviewInputs(state.graph, item.nodeId);
+  const items = inputs.map((input) => evaluateReviewInput(input, {
+    evaluateNodeId: item.nodeId,
+    threshold,
+    instruction,
+    evaluatedAt: finishedAt
+  }));
+  const artifact = {
+    kind: "evaluation",
+    evaluateNodeId: item.nodeId,
+    threshold,
+    instruction,
+    evaluatedAt: finishedAt,
+    items
+  };
+
+  for (const evaluated of items) {
+    if (!evaluated.assetId) {
+      continue;
+    }
+
+    await updateAssetMetadata(projectPath, {
+      assetId: evaluated.assetId,
+      now: startedDate,
+      metadata: {
+        evaluation: {
+          evaluateNodeId: item.nodeId,
+          decision: evaluated.decision,
+          score: evaluated.score,
+          tags: evaluated.tags,
+          confidence: evaluated.confidence,
+          explanation: evaluated.explanation,
+          evaluatedAt: finishedAt,
+          threshold
+        }
+      }
+    });
+  }
+
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    status: "complete",
+    rerunState: "complete",
+    lastRunAt: finishedAt,
+    evaluationThreshold: threshold,
+    evaluationArtifact: artifact
+  });
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "complete",
+    action: "evaluate",
+    metadata: {
+      itemCount: items.length,
+      threshold,
+      passCount: items.filter((entry) => entry.decision === "pass").length,
+      needsEditCount: items.filter((entry) => entry.decision === "needs-edit").length,
+      failCount: items.filter((entry) => entry.decision === "fail").length
+    },
+    startedAt: finishedAt,
+    finishedAt
+  };
+}
+
+async function executeFilterNode(
+  projectPath: string,
+  state: MutableExecutionState,
+  item: ExecutionQueueItem,
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
+  const node = findNode(state.graph, item.nodeId);
+  const finishedAt = startedDate.toISOString();
+  const inputs = collectReviewInputs(state.graph, item.nodeId);
+  const rules = parseFilterRules(node.data?.filterRules);
+  const dryRun = node.data?.filterDryRun === true;
+  const autoApply = node.data?.filterAutoApply !== false;
+  const manualOverride = cleanText(node.data?.filterManualOverride);
+  const routes = collectFilterRoutes(state.graph, item.nodeId);
+  const routed = [];
+  const collectionUpdates = new Map<string, Partial<CanvasNodeData>>();
+
+  for (const input of inputs) {
+    const decision = normalizeRoutingDecision(input.decision);
+    const route = selectFilterRoute({
+      decision,
+      manualOverride,
+      rules,
+      routes
+    });
+    let moved = false;
+    let movedAsset: AssetRecord | null = null;
+
+    if (input.assetId && autoApply && !dryRun) {
+      const collectionAsset = route.node
+        ? await ensureCollectionFolder(projectPath, {
+            name: route.collectionName,
+            nodeId: route.node.id,
+            now: startedDate
+          })
+        : null;
+
+      if (route.node && collectionAsset) {
+        collectionUpdates.set(route.node.id, {
+          status: "complete",
+          rerunState: "complete",
+          lastRunAt: finishedAt,
+          storeAssetId: collectionAsset.id,
+          storePath: collectionAsset.path,
+          storeMetadata: collectionAsset.metadata
+        });
+      }
+
+      movedAsset = await moveAssetToCollection(projectPath, {
+        assetId: input.assetId,
+        collectionId: collectionAsset?.id,
+        collectionName: collectionAsset ? undefined : route.collectionName,
+        reason: `Filter ${item.nodeId} routed ${decision} to ${route.collectionName}`,
+        now: startedDate
+      });
+      moved = true;
+
+      await updateAssetMetadata(projectPath, {
+        assetId: input.assetId,
+        now: startedDate,
+        metadata: {
+          filter: {
+            filterNodeId: item.nodeId,
+            decision,
+            targetCollectionName: route.collectionName,
+            rule: route.rule,
+            dryRun,
+            autoApply,
+            moved,
+            routedAt: finishedAt
+          }
+        }
+      });
+    }
+
+    routed.push({
+      assetId: input.assetId,
+      assetPath: movedAsset?.path ?? input.assetPath,
+      decision,
+      score: input.score,
+      targetCollectionName: route.collectionName,
+      rule: route.rule,
+      dryRun,
+      autoApply,
+      moved
+    });
+  }
+
+  for (const [nodeId, update] of collectionUpdates) {
+    state.graph = setNodeData(state.graph, nodeId, update);
+  }
+
+  const resultArtifact = {
+    kind: "filter",
+    filterNodeId: item.nodeId,
+    dryRun,
+    autoApply,
+    manualOverride: manualOverride || null,
+    routedAt: finishedAt,
+    routed
+  };
+
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    status: "complete",
+    rerunState: "complete",
+    lastRunAt: finishedAt,
+    filterResult: resultArtifact
+  });
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "complete",
+    action: dryRun ? "filter-dry-run" : autoApply ? "filter-route" : "filter-preview",
+    metadata: {
+      itemCount: routed.length,
+      dryRun,
+      autoApply,
+      manualOverride: manualOverride || null,
+      movedCount: routed.filter((entry) => entry.moved).length,
+      routes: routed
+    },
+    startedAt: finishedAt,
+    finishedAt
+  };
+}
+
+type ReviewInput = {
+  assetId?: string;
+  assetKind?: string;
+  assetPath?: string;
+  assetMetadata?: Record<string, unknown>;
+  sourceNodeId: string;
+  sourceNodeTitle: string;
+  rating?: number;
+  tags: string[];
+  decision?: string;
+  notes?: string;
+  score?: number;
+  confidence?: number;
+  explanation?: string;
+};
+
+type EvaluatedReviewInput = ReviewInput & {
+  score: number;
+  confidence: number;
+  decision: "pass" | "needs-edit" | "fail";
+  explanation: string;
+};
+
+type FilterRoute = {
+  collectionName: string;
+  rule: string;
+  node?: GraphNode;
+};
+
+function collectReviewInputs(graph: EtherGraph, nodeId: string): ReviewInput[] {
+  const inputs: ReviewInput[] = [];
+
+  for (const edge of incomingEdges(graph, nodeId)) {
+    const source = findNode(graph, edge.source);
+
+    appendReviewInputs(inputs, reviewInputsFromNode(source));
+  }
+
+  return inputs;
+}
+
+function reviewInputsFromNode(node: GraphNode): ReviewInput[] {
+  const inputs: ReviewInput[] = [];
+
+  if (isImageAssetSource(node)) {
+    appendReviewInputs(inputs, [reviewInputFromAssetNode(node)]);
+  }
+
+  appendReviewInputs(inputs, reviewInputsFromArtifact(node, node.data?.compareArtifact));
+  appendReviewInputs(inputs, reviewInputsFromArtifact(node, node.data?.evaluationArtifact));
+  appendReviewInputs(inputs, reviewInputsFromArtifact(node, node.data?.filterResult));
+
+  return inputs;
+}
+
+function reviewInputFromAssetNode(node: GraphNode): ReviewInput {
+  const metadata = node.data?.assetMetadata ?? {};
+  const review = recordFrom(metadata.review);
+  const evaluation = recordFrom(metadata.evaluation);
+
+  return {
+    assetId: node.data?.assetId,
+    assetKind: node.data?.assetKind,
+    assetPath: node.data?.assetPath,
+    assetMetadata: metadata,
+    sourceNodeId: node.id,
+    sourceNodeTitle: sectionTitle(node),
+    rating: numberFrom(review.rating),
+    tags: uniqueText([
+      ...tagsFromUnknown(review.tags),
+      ...tagsFromUnknown(evaluation.tags)
+    ]),
+    decision: stringFrom(evaluation.decision) || stringFrom(review.decision),
+    notes: stringFrom(review.notes),
+    score: numberFrom(evaluation.score),
+    confidence: numberFrom(evaluation.confidence),
+    explanation: stringFrom(evaluation.explanation)
+  };
+}
+
+function reviewInputsFromArtifact(node: GraphNode, artifact: unknown): ReviewInput[] {
+  const record = recordFrom(artifact);
+  const items = Array.isArray(record.items)
+    ? record.items
+    : Array.isArray(record.routed)
+      ? record.routed
+      : [];
+
+  return items.flatMap((item) => {
+    const itemRecord = recordFrom(item);
+    const assetId = stringFrom(itemRecord.assetId);
+    const assetPath = stringFrom(itemRecord.assetPath);
+
+    if (!assetId && !assetPath) {
+      return [];
+    }
+
+    return [
+      {
+        assetId,
+        assetKind: stringFrom(itemRecord.assetKind),
+        assetPath,
+        assetMetadata: recordFrom(itemRecord.assetMetadata),
+        sourceNodeId: node.id,
+        sourceNodeTitle: sectionTitle(node),
+        rating: numberFrom(itemRecord.rating),
+        tags: tagsFromUnknown(itemRecord.tags),
+        decision: stringFrom(itemRecord.decision),
+        notes: stringFrom(itemRecord.notes),
+        score: numberFrom(itemRecord.score),
+        confidence: numberFrom(itemRecord.confidence),
+        explanation: stringFrom(itemRecord.explanation)
+      }
+    ];
+  });
+}
+
+function appendReviewInputs(target: ReviewInput[], additions: ReviewInput[]) {
+  for (const addition of additions) {
+    const key = reviewInputKey(addition);
+    const existingIndex = target.findIndex((candidate) => reviewInputKey(candidate) === key);
+
+    if (existingIndex === -1) {
+      target.push(addition);
+      continue;
+    }
+
+    const existing = target[existingIndex]!;
+    target[existingIndex] = {
+      ...existing,
+      ...withoutUndefined(addition),
+      tags: uniqueText([...existing.tags, ...addition.tags]),
+      assetMetadata: {
+        ...(existing.assetMetadata ?? {}),
+        ...(addition.assetMetadata ?? {})
+      }
+    };
+  }
+}
+
+function reviewInputKey(input: ReviewInput) {
+  return input.assetId || input.assetPath || `${input.sourceNodeId}:${input.sourceNodeTitle}`;
+}
+
+function evaluateReviewInput(
+  input: ReviewInput,
+  context: {
+    evaluateNodeId: string;
+    threshold: number;
+    instruction: string;
+    evaluatedAt: string;
+  }
+): EvaluatedReviewInput {
+  const ratingScore = typeof input.rating === "number" ? input.rating * 20 : 50;
+  const decisionBonus = input.decision === "select" || input.decision === "favorite"
+    ? 8
+    : input.decision === "reject" || input.decision === "fail"
+      ? -22
+      : input.decision === "needs-edit"
+        ? -8
+        : 0;
+  const tagBonus = Math.min(10, input.tags.length * 2);
+  const score = clampInt(input.score ?? ratingScore + decisionBonus + tagBonus, 0, 100);
+  const decision = score >= context.threshold
+    ? "pass"
+    : score >= Math.max(0, context.threshold - 20)
+      ? "needs-edit"
+      : "fail";
+  const confidence = clampNumber(0.55 + score / 250, 0.55, 0.95);
+  const instructionSummary = context.instruction || "the configured evaluation direction";
+  const explanation =
+    input.explanation ||
+    `Scored ${score} against ${instructionSummary}; tags ${input.tags.join(", ") || "none"} and decision ${
+      input.decision || "unreviewed"
+    } informed the result.`;
+
+  return {
+    ...input,
+    tags: uniqueText(input.tags),
+    score,
+    confidence: Number(confidence.toFixed(2)),
+    decision,
+    explanation
+  };
+}
+
+function collectFilterRoutes(graph: EtherGraph, filterNodeId: string): FilterRoute[] {
+  const routes: FilterRoute[] = [];
+
+  for (const edge of outgoingEdges(graph, filterNodeId)) {
+    const target = findNode(graph, edge.target);
+
+    if (target.data?.kind !== "Store" || target.data.subtype !== "Collection") {
+      continue;
+    }
+
+    routes.push({
+      collectionName: storeFolderName(target),
+      rule: normalizeRoleKey(edgeLabel(edge)) || normalizeRoleKey(storeFolderName(target)),
+      node: target
+    });
+  }
+
+  return routes;
+}
+
+function selectFilterRoute(options: {
+  decision: string;
+  manualOverride: string;
+  rules: Map<string, string>;
+  routes: FilterRoute[];
+}): FilterRoute {
+  const requestedName =
+    options.manualOverride ||
+    options.rules.get(options.decision) ||
+    defaultCollectionForDecision(options.decision);
+  const requestedKey = normalizeRoleKey(requestedName);
+  const matchingRoute =
+    options.routes.find((route) => normalizeRoleKey(route.collectionName) === requestedKey) ||
+    options.routes.find((route) => route.rule === options.decision) ||
+    options.routes.find((route) => normalizeRoleKey(route.collectionName) === normalizeRoleKey(defaultCollectionForDecision(options.decision)));
+
+  if (matchingRoute) {
+    return {
+      ...matchingRoute,
+      rule: options.manualOverride ? "manual-override" : options.rules.has(options.decision) ? options.decision : matchingRoute.rule
+    };
+  }
+
+  return {
+    collectionName: requestedName,
+    rule: options.manualOverride ? "manual-override" : options.rules.has(options.decision) ? options.decision : "default"
+  };
+}
+
+function parseFilterRules(value: unknown) {
+  const rules = new Map<string, string>();
+  const text = cleanText(value);
+
+  for (const part of text.split(/[;\n]+/)) {
+    const [rawDecision, rawCollection] = part.split(/->|=>/).map((entry) => entry?.trim());
+
+    if (!rawDecision || !rawCollection) {
+      continue;
+    }
+
+    rules.set(normalizeRoutingDecision(rawDecision), rawCollection);
+  }
+
+  return rules;
+}
+
+function defaultCollectionForDecision(decision: string) {
+  switch (decision) {
+    case "pass":
+      return "Selected";
+    case "needs-edit":
+      return "Needs Edit";
+    case "fail":
+    default:
+      return "Rejected";
+  }
+}
+
+function normalizeRoutingDecision(value: unknown) {
+  const decision = normalizeRoleKey(stringFrom(value) || "needs-edit");
+
+  if (decision === "pass" || decision === "select" || decision === "selected" || decision === "favorite") {
+    return "pass";
+  }
+
+  if (decision === "fail" || decision === "reject" || decision === "rejected") {
+    return "fail";
+  }
+
+  return "needs-edit";
+}
+
+function normalizeReviewDecision(value: unknown, rating: number | undefined) {
+  const decision = normalizeRoleKey(stringFrom(value));
+
+  if (decision === "favorite") {
+    return "favorite";
+  }
+
+  if (decision === "select" || decision === "selected" || decision === "pass") {
+    return "select";
+  }
+
+  if (decision === "reject" || decision === "rejected" || decision === "fail") {
+    return "reject";
+  }
+
+  if (decision === "needs-edit" || decision === "edit") {
+    return "needs-edit";
+  }
+
+  if (typeof rating === "number") {
+    if (rating >= 4) {
+      return "select";
+    }
+
+    if (rating <= 2) {
+      return "reject";
+    }
+  }
+
+  return "review";
+}
+
+function normalizeCompareLayout(value: unknown) {
+  const layout = numberFrom(value);
+  return layout && [2, 3, 4, 6, 8].includes(layout) ? layout : 4;
+}
+
+function normalizeRating(value: unknown) {
+  const rating = numberFrom(value);
+  return rating ? clampInt(rating, 1, 5) : undefined;
+}
+
+function normalizeThreshold(value: unknown) {
+  const threshold = numberFrom(value);
+  return threshold ? clampInt(threshold, 0, 100) : 70;
+}
+
+function parseTags(value: unknown) {
+  return uniqueText(cleanText(value).split(/[,;\n]+/));
+}
+
+function tagsFromUnknown(value: unknown) {
+  if (Array.isArray(value)) {
+    return uniqueText(value.map((entry) => stringFrom(entry)));
+  }
+
+  return parseTags(value);
+}
+
+function uniqueText(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const text = cleanText(value);
+    const key = text.toLowerCase();
+
+    if (!text || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(text);
+  }
+
+  return result;
+}
+
+function recordFrom(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function numberFrom(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function stringFrom(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function clampInt(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function withoutUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
 }
 
 function skipUnsupportedNode(
@@ -1017,7 +1696,9 @@ function canExecuteLocally(node: GraphNode) {
     case "Edit":
       return true;
     case "Store":
-      return node.data.subtype === "Collection" || node.data.subtype === "Directory";
+      return ["Collection", "Directory", "Compare", "Evaluate", "Filter"].includes(
+        node.data.subtype ?? ""
+      );
     default:
       return false;
   }
@@ -1290,6 +1971,12 @@ function incomingEdges(graph: EtherGraph, nodeId: string) {
   return edgesOf(graph)
     .filter((edge) => edge.target === nodeId)
     .sort(edgeSorter(graph, "source"));
+}
+
+function outgoingEdges(graph: EtherGraph, nodeId: string) {
+  return edgesOf(graph)
+    .filter((edge) => edge.source === nodeId)
+    .sort(edgeSorter(graph, "target"));
 }
 
 function edgeLabel(edge: GraphEdge) {

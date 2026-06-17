@@ -59,6 +59,27 @@ const mutationPresets = [
   "Radical Concept"
 ];
 
+function artifactItems(artifact: Record<string, unknown> | null) {
+  const items = Array.isArray(artifact?.items) ? artifact.items : [];
+
+  return items
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .slice(0, 8);
+}
+
+function localImageSource(filePath: string) {
+  if (/^(file|https?|data):/i.test(filePath)) {
+    return filePath;
+  }
+
+  const normalizedPath = filePath.replace(/\\/g, "/");
+  const url = normalizedPath.startsWith("/")
+    ? `file://${normalizedPath}`
+    : `file:///${normalizedPath}`;
+
+  return encodeURI(url);
+}
+
 function edgeTouchesLockedNode(edge: Edge | null, graph: EtherGraph) {
   if (!edge) {
     return false;
@@ -143,10 +164,28 @@ export function InspectorPanel({
       (nodeData.subtype === "Collection" || nodeData.subtype === "Directory");
     const isLocked = nodeData.locked === true;
     const canMutateText = nodeData.kind === "Prompt" || nodeData.kind === "Assistant";
+    const isCompareNode = nodeData.kind === "Store" && nodeData.subtype === "Compare";
+    const isEvaluateNode = nodeData.kind === "Store" && nodeData.subtype === "Evaluate";
+    const isFilterNode = nodeData.kind === "Store" && nodeData.subtype === "Filter";
     const mutationArtifact =
       nodeData.mutationArtifact && typeof nodeData.mutationArtifact === "object"
         ? (nodeData.mutationArtifact as Record<string, unknown>)
         : null;
+    const compareArtifact =
+      nodeData.compareArtifact && typeof nodeData.compareArtifact === "object"
+        ? (nodeData.compareArtifact as Record<string, unknown>)
+        : null;
+    const evaluationArtifact =
+      nodeData.evaluationArtifact && typeof nodeData.evaluationArtifact === "object"
+        ? (nodeData.evaluationArtifact as Record<string, unknown>)
+        : null;
+    const filterResult =
+      nodeData.filterResult && typeof nodeData.filterResult === "object"
+        ? (nodeData.filterResult as Record<string, unknown>)
+        : null;
+    const compareItems = artifactItems(compareArtifact);
+    const compareLayout = Number(nodeDraft.compareLayout ?? nodeData.compareLayout ?? 4);
+    const compareColumns = Number.isFinite(compareLayout) ? Math.min(4, Math.max(1, compareLayout)) : 4;
 
     return (
       <div className="inspector-form">
@@ -386,6 +425,259 @@ export function InspectorPanel({
                 disabled={isLocked}
               />
             </label>
+          </section>
+        ) : null}
+        {isCompareNode ? (
+          <section className="inspector-preview" data-testid="inspector-compare-controls">
+            <div>
+              <span>Manual Review</span>
+              <strong>{nodeDraft.reviewDecision ?? "review"}</strong>
+            </div>
+            <label>
+              Compare grid
+              <select
+                aria-label="Compare grid"
+                value={String(nodeDraft.compareLayout ?? 4)}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const compareLayout = Number(event.target.value);
+                  setNodeDraft((draft) => ({ ...draft, compareLayout }));
+                  onPreviewNode(selectedNode.id, { compareLayout });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              >
+                {[2, 3, 4, 6, 8].map((layout) => (
+                  <option key={layout} value={layout}>
+                    {layout}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Rating
+              <input
+                aria-label="Rating"
+                type="number"
+                min={1}
+                max={5}
+                value={nodeDraft.reviewRating ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const reviewRating = event.target.value ? Number(event.target.value) : undefined;
+                  setNodeDraft((draft) => ({ ...draft, reviewRating }));
+                  onPreviewNode(selectedNode.id, { reviewRating });
+                }}
+                onBlur={commitNodeDraft}
+                onKeyDown={commitInputOnEnter}
+                disabled={isLocked}
+              />
+            </label>
+            <label>
+              Tags
+              <input
+                aria-label="Tags"
+                value={nodeDraft.reviewTags ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const reviewTags = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, reviewTags }));
+                  onPreviewNode(selectedNode.id, { reviewTags });
+                }}
+                onBlur={commitNodeDraft}
+                onKeyDown={commitInputOnEnter}
+                disabled={isLocked}
+              />
+            </label>
+            <label>
+              Decision
+              <select
+                aria-label="Decision"
+                value={nodeDraft.reviewDecision ?? "review"}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const reviewDecision = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, reviewDecision }));
+                  onPreviewNode(selectedNode.id, { reviewDecision });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              >
+                <option value="review">Review</option>
+                <option value="select">Select</option>
+                <option value="favorite">Favorite</option>
+                <option value="needs-edit">Needs edit</option>
+                <option value="reject">Reject</option>
+              </select>
+            </label>
+            <label>
+              Review notes
+              <textarea
+                aria-label="Review notes"
+                value={nodeDraft.reviewNotes ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const reviewNotes = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, reviewNotes }));
+                  onPreviewNode(selectedNode.id, { reviewNotes });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              />
+            </label>
+            {compareItems.length > 0 ? (
+              <div
+                className="compare-review-grid"
+                data-testid="inspector-compare-grid"
+                style={{ gridTemplateColumns: `repeat(${compareColumns}, minmax(0, 1fr))` }}
+              >
+                {compareItems.map((item, index) => {
+                  const assetPath = typeof item.assetPath === "string" ? item.assetPath : "";
+                  const assetId = typeof item.assetId === "string" ? item.assetId : `item-${index + 1}`;
+                  const decision = typeof item.decision === "string" ? item.decision : "review";
+
+                  return (
+                    <article key={`${assetId}-${index}`} className="compare-review-tile">
+                      {assetPath ? <img src={localImageSource(assetPath)} alt="" /> : null}
+                      <strong>{decision}</strong>
+                      <span>{assetId}</span>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+        {isEvaluateNode ? (
+          <section className="inspector-preview" data-testid="inspector-evaluate-controls">
+            <div>
+              <span>Evaluation</span>
+              <strong>{nodeDraft.evaluationThreshold ?? 70}</strong>
+            </div>
+            <label>
+              Evaluation threshold
+              <input
+                aria-label="Evaluation threshold"
+                type="number"
+                min={0}
+                max={100}
+                value={nodeDraft.evaluationThreshold ?? 70}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const evaluationThreshold = Number(event.target.value);
+                  setNodeDraft((draft) => ({ ...draft, evaluationThreshold }));
+                  onPreviewNode(selectedNode.id, { evaluationThreshold });
+                }}
+                onBlur={commitNodeDraft}
+                onKeyDown={commitInputOnEnter}
+                disabled={isLocked}
+              />
+            </label>
+            {evaluationArtifact ? (
+              <pre>{JSON.stringify(evaluationArtifact, null, 2)}</pre>
+            ) : null}
+          </section>
+        ) : null}
+        {isFilterNode ? (
+          <section className="inspector-preview" data-testid="inspector-filter-controls">
+            <div>
+              <span>Filter Routing</span>
+              <strong>{nodeDraft.filterDryRun ? "dry run" : "auto"}</strong>
+            </div>
+            <label className="execution-toggle">
+              <input
+                aria-label="Auto-apply routes"
+                type="checkbox"
+                checked={nodeDraft.filterAutoApply !== false}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const filterAutoApply = event.target.checked;
+                  setNodeDraft((draft) => ({ ...draft, filterAutoApply }));
+                  onPreviewNode(selectedNode.id, { filterAutoApply });
+                }}
+                disabled={isLocked}
+              />
+              Auto-apply
+            </label>
+            <label className="execution-toggle">
+              <input
+                aria-label="Dry run"
+                type="checkbox"
+                checked={nodeDraft.filterDryRun === true}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const filterDryRun = event.target.checked;
+                  setNodeDraft((draft) => ({ ...draft, filterDryRun }));
+                  onPreviewNode(selectedNode.id, { filterDryRun });
+                }}
+                disabled={isLocked}
+              />
+              Dry run
+            </label>
+            <label>
+              Manual override
+              <input
+                aria-label="Manual override"
+                value={nodeDraft.filterManualOverride ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const filterManualOverride = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, filterManualOverride }));
+                  onPreviewNode(selectedNode.id, { filterManualOverride });
+                }}
+                onBlur={commitNodeDraft}
+                onKeyDown={commitInputOnEnter}
+                disabled={isLocked}
+              />
+            </label>
+            <label>
+              Routing rules
+              <textarea
+                aria-label="Routing rules"
+                value={nodeDraft.filterRules ?? "pass -> Selected; needs-edit -> Needs Edit; fail -> Rejected"}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const filterRules = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, filterRules }));
+                  onPreviewNode(selectedNode.id, { filterRules });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              />
+            </label>
+            {filterResult ? (
+              <pre>{JSON.stringify(filterResult, null, 2)}</pre>
+            ) : null}
           </section>
         ) : null}
         <section

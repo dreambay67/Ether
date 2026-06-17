@@ -804,6 +804,50 @@ button {
   text-transform: none;
 }
 
+.inspector-preview .compare-review-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.compare-review-tile {
+  min-width: 0;
+  aspect-ratio: 1;
+  border: 1px solid rgba(126, 244, 215, 0.24);
+  border-radius: 6px;
+  background: rgba(5, 9, 15, 0.62);
+  overflow: hidden;
+  display: grid;
+  align-content: end;
+}
+
+.compare-review-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  grid-row: 1 / 3;
+  grid-column: 1;
+}
+
+.compare-review-tile strong,
+.compare-review-tile span {
+  grid-column: 1;
+  padding: 3px 5px;
+  background: rgba(5, 9, 15, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-review-tile strong {
+  font-size: 0.7rem;
+  color: #7ef4d7;
+}
+
+.compare-review-tile span {
+  font-size: 0.64rem;
+  color: rgba(244, 248, 255, 0.72);
+}
+
 .inspector-preview ul {
   display: grid;
   gap: 4px;

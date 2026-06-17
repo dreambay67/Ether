@@ -5,6 +5,7 @@ import {
   NODE_DEFINITIONS,
   canConnectNodeKinds,
   coerceCanvasNodeData,
+  createReviewRouterTemplate,
   createGraphNodeData,
   getOptionalNodeContract,
   findEdgeInsertionTarget
@@ -59,12 +60,14 @@ describe("graph node catalog", () => {
     expect(data.instruction).toContain("General");
   });
 
-  it("marks locally executable Prompt, Assistant, Generation, and Edit contracts runnable", () => {
+  it("marks locally executable Prompt, Assistant, Generation, Edit, and Store review contracts runnable", () => {
     const runnableContracts = NODE_CONTRACTS.filter((contract) => contract.runnable);
 
     expect(runnableContracts.map((contract) => contract.definitionId).sort()).toEqual(
       NODE_DEFINITIONS.filter((definition) =>
-        ["Prompt", "Assistant", "Generation", "Edit"].includes(definition.category)
+        ["Prompt", "Assistant", "Generation", "Edit"].includes(definition.category) ||
+        (definition.category === "Store" &&
+          ["Directory", "Collection", "Compare", "Evaluate", "Filter"].includes(definition.subtype))
       )
         .map((definition) => definition.id)
         .sort()
@@ -82,6 +85,19 @@ describe("graph node catalog", () => {
       runnable: true,
       runLabel: "Run Assistant",
       producedOutputs: expect.arrayContaining(["text", "prompt", "metadata"])
+    });
+    expect(getOptionalNodeContract("store-compare")).toMatchObject({
+      runnable: true,
+      runLabel: "Compare",
+      producedOutputs: expect.arrayContaining(["evaluation", "metadata"])
+    });
+    expect(getOptionalNodeContract("store-evaluate")).toMatchObject({
+      runnable: true,
+      runLabel: "Evaluate"
+    });
+    expect(getOptionalNodeContract("store-filter")).toMatchObject({
+      runnable: true,
+      runLabel: "Filter"
     });
   });
 
@@ -102,6 +118,39 @@ describe("graph node catalog", () => {
       notes: "",
       status: "idle"
     });
+  });
+});
+
+describe("review router template", () => {
+  it("creates a reusable Compare -> Evaluate -> Filter router with collection destinations", () => {
+    const template = createReviewRouterTemplate({
+      idPrefix: "review",
+      origin: { x: 120, y: 240 }
+    });
+
+    expect(template.nodes.map((node) => node.id)).toEqual([
+      "review-compare",
+      "review-evaluate",
+      "review-filter",
+      "review-selected",
+      "review-needs-edit",
+      "review-rejected"
+    ]);
+    expect(template.nodes.map((node) => node.data.subtype)).toEqual([
+      "Compare",
+      "Evaluate",
+      "Filter",
+      "Collection",
+      "Collection",
+      "Collection"
+    ]);
+    expect(template.edges.map((edge) => [edge.source, edge.target, edge.label])).toEqual([
+      ["review-compare", "review-evaluate", "review"],
+      ["review-evaluate", "review-filter", "evaluation"],
+      ["review-filter", "review-selected", "pass"],
+      ["review-filter", "review-needs-edit", "needs-edit"],
+      ["review-filter", "review-rejected", "fail"]
+    ]);
   });
 });
 
