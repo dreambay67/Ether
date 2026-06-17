@@ -49,6 +49,16 @@ type InspectorPanelProps = {
   hasOpenProject: boolean;
 };
 
+const mutationPresets = [
+  "Whisper",
+  "Lens Shift",
+  "Costume Drift",
+  "Lighting Weather",
+  "Material Swap",
+  "Composition Nudge",
+  "Radical Concept"
+];
+
 function edgeTouchesLockedNode(edge: Edge | null, graph: EtherGraph) {
   if (!edge) {
     return false;
@@ -132,6 +142,11 @@ export function InspectorPanel({
       nodeData.kind === "Store" &&
       (nodeData.subtype === "Collection" || nodeData.subtype === "Directory");
     const isLocked = nodeData.locked === true;
+    const canMutateText = nodeData.kind === "Prompt" || nodeData.kind === "Assistant";
+    const mutationArtifact =
+      nodeData.mutationArtifact && typeof nodeData.mutationArtifact === "object"
+        ? (nodeData.mutationArtifact as Record<string, unknown>)
+        : null;
 
     return (
       <div className="inspector-form">
@@ -220,6 +235,159 @@ export function InspectorPanel({
             disabled={isLocked}
           />
         </label>
+        {canMutateText ? (
+          <section className="inspector-preview" data-testid="inspector-mutation-controls">
+            <div>
+              <span>Mutation</span>
+              <strong>{nodeDraft.mutationPreset ?? "Whisper"}</strong>
+            </div>
+            <label className="execution-toggle">
+              <input
+                aria-label="Enable prompt mutation"
+                type="checkbox"
+                checked={nodeDraft.mutationEnabled === true}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const mutationEnabled = event.target.checked;
+                  setNodeDraft((draft) => ({ ...draft, mutationEnabled }));
+                  onPreviewNode(selectedNode.id, { mutationEnabled });
+                }}
+                disabled={isLocked}
+              />
+              Enable
+            </label>
+            <label>
+              Preset
+              <select
+                aria-label="Mutation preset"
+                value={nodeDraft.mutationPreset ?? "Whisper"}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const mutationPreset = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, mutationPreset }));
+                  onPreviewNode(selectedNode.id, { mutationPreset });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              >
+                {mutationPresets.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {preset}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Seed
+              <input
+                aria-label="Mutation seed"
+                value={nodeDraft.mutationSeed ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const mutationSeed = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, mutationSeed }));
+                  onPreviewNode(selectedNode.id, { mutationSeed });
+                }}
+                onBlur={commitNodeDraft}
+                onKeyDown={commitInputOnEnter}
+                disabled={isLocked}
+              />
+            </label>
+            {[
+              ["Variation strength", "variationStrength"],
+              ["Novelty", "novelty"],
+              ["Drift", "drift"],
+              ["Preserve subject", "preserveSubject"],
+              ["Preserve style", "preserveStyle"]
+            ].map(([label, key]) => (
+              <label key={key}>
+                {label}
+                <input
+                  aria-label={label}
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Number(nodeDraft[key as keyof CanvasNodeData] ?? 50)}
+                  onChange={(event) => {
+                    if (isLocked) {
+                      return;
+                    }
+
+                    const value = Number(event.target.value);
+                    const updates = { [key]: value } as Partial<CanvasNodeData>;
+                    setNodeDraft((draft) => ({ ...draft, ...updates }));
+                    onPreviewNode(selectedNode.id, updates);
+                  }}
+                  onBlur={commitNodeDraft}
+                  disabled={isLocked}
+                />
+              </label>
+            ))}
+            <label>
+              Locked terms
+              <textarea
+                aria-label="Locked terms"
+                value={nodeDraft.lockedTerms ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const lockedTerms = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, lockedTerms }));
+                  onPreviewNode(selectedNode.id, { lockedTerms });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              />
+            </label>
+            <label>
+              Negative constraints
+              <textarea
+                aria-label="Negative constraints"
+                value={nodeDraft.negativeConstraints ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const negativeConstraints = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, negativeConstraints }));
+                  onPreviewNode(selectedNode.id, { negativeConstraints });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              />
+            </label>
+            <label>
+              Mutation direction
+              <textarea
+                aria-label="Mutation direction"
+                value={nodeDraft.mutationInstruction ?? ""}
+                onChange={(event) => {
+                  if (isLocked) {
+                    return;
+                  }
+
+                  const mutationInstruction = event.target.value;
+                  setNodeDraft((draft) => ({ ...draft, mutationInstruction }));
+                  onPreviewNode(selectedNode.id, { mutationInstruction });
+                }}
+                onBlur={commitNodeDraft}
+                disabled={isLocked}
+              />
+            </label>
+          </section>
+        ) : null}
         <section
           className="inspector-preview inspector-execution"
           data-testid="inspector-execution-controls"
@@ -336,6 +504,37 @@ export function InspectorPanel({
             </div>
             {nodeData.assetId ? <p>ID: {nodeData.assetId}</p> : null}
             {nodeData.assetPath ? <pre>{nodeData.assetPath}</pre> : null}
+          </section>
+        ) : null}
+        {nodeData.textOutput ? (
+          <section className="inspector-preview" data-testid="inspector-text-output">
+            <div>
+              <span>Text Output</span>
+              <strong>{nodeData.kind}</strong>
+            </div>
+            <pre>{nodeData.textOutput}</pre>
+          </section>
+        ) : null}
+        {mutationArtifact ? (
+          <section className="inspector-preview" data-testid="inspector-mutation-lineage">
+            <div>
+              <span>Mutation Lineage</span>
+              <strong>{String(mutationArtifact.engine ?? "local")}</strong>
+            </div>
+            <p>Seed: {String(mutationArtifact.seed ?? "")}</p>
+            <p>Lineage: {String(mutationArtifact.lineageId ?? "")}</p>
+            {typeof mutationArtifact.sourceText === "string" ? (
+              <>
+                <span>Before</span>
+                <pre>{mutationArtifact.sourceText}</pre>
+              </>
+            ) : null}
+            {typeof mutationArtifact.resultText === "string" ? (
+              <>
+                <span>After</span>
+                <pre>{mutationArtifact.resultText}</pre>
+              </>
+            ) : null}
           </section>
         ) : null}
         {nodeData.kind === "Generation" ? (

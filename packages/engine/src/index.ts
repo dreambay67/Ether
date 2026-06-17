@@ -43,6 +43,13 @@ export {
   runExecutionQueue
 } from "./run/execution.js";
 export { markDownstreamStale } from "./run/rerunState.js";
+export {
+  MUTATION_PRESETS,
+  createTextMutationArtifact,
+  normalizeMutationSettings,
+  shouldApplyMutation,
+  textForNode
+} from "./graph/textMutation.js";
 export type {
   CanvasNodeData,
   EtherNodeCategory,
@@ -59,6 +66,12 @@ export type {
   PromptSectionArtifact,
   ReferenceArtifact
 } from "./graph/artifacts.js";
+export type {
+  MutationPreset,
+  MutationSettings,
+  TextMutationArtifact,
+  TextMutationKind
+} from "./graph/textMutation.js";
 export type {
   ExecutionNodeResult,
   ExecutionPlan,

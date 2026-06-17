@@ -33,6 +33,10 @@ import {
 } from "../graph/promptAssembly.js";
 import type { CanvasNodeData } from "../graph/nodeCatalog.js";
 import type { EdgeRoleArtifact, PromptSectionArtifact } from "../graph/artifacts.js";
+import {
+  createTextMutationArtifact,
+  textForNode
+} from "../graph/textMutation.js";
 
 export type ExecutionPolicy =
   | "cached-inputs"
@@ -482,6 +486,9 @@ async function executeQueueItem(
       case "Prompt":
         result = executePromptNode(state, item, startedAt);
         break;
+      case "Assistant":
+        result = executeAssistantNode(state, item, startedAt);
+        break;
       case "Generation":
         result = await executeGenerationNode(projectPath, state, request, item, startedDate);
         break;
@@ -528,6 +535,8 @@ function executePromptNode(
   startedAt: string
 ): ExecutionNodeResult {
   state.graph = freezePromptNode(state.graph, item.nodeId, startedAt);
+  const node = findNode(state.graph, item.nodeId);
+  const mutationArtifact = node.data?.mutationArtifact;
   state.graph = setNodeData(state.graph, item.nodeId, {
     rerunState: "complete"
   });
@@ -536,10 +545,85 @@ function executePromptNode(
     nodeId: item.nodeId,
     iteration: item.iteration,
     status: "complete",
-    action: "assemble-prompt",
+    action: mutationArtifact ? "mutate-prompt" : "assemble-prompt",
+    metadata: mutationArtifact && typeof mutationArtifact === "object" && !Array.isArray(mutationArtifact)
+      ? { mutation: mutationArtifact as Record<string, unknown> }
+      : undefined,
     startedAt,
     finishedAt: startedAt
   };
+}
+
+function executeAssistantNode(
+  state: MutableExecutionState,
+  item: ExecutionQueueItem,
+  startedAt: string
+): ExecutionNodeResult {
+  const node = findNode(state.graph, item.nodeId);
+  const sourceText = assembleAssistantSourceText(state.graph, item.nodeId) || nodeText(node) || node.data?.title || "Assistant context";
+  const operation = `Assistant ${cleanText(node.data?.subtype) || "Text"}`;
+  const mutationArtifact = createTextMutationArtifact(sourceText, node.data, {
+    kind: "assistant-text",
+    operation
+  });
+  const resultText = assistantTextForSubtype(cleanText(node.data?.subtype), mutationArtifact.resultText);
+  const textOutputArtifact = {
+    ...mutationArtifact,
+    resultText
+  };
+
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    status: "complete",
+    rerunState: "complete",
+    textOutput: resultText,
+    textOutputArtifact,
+    mutationArtifact: textOutputArtifact,
+    lastRunAt: startedAt
+  });
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "complete",
+    action: "assistant-text",
+    metadata: {
+      text: textOutputArtifact
+    },
+    startedAt,
+    finishedAt: startedAt
+  };
+}
+
+function assembleAssistantSourceText(graph: EtherGraph, assistantNodeId: string) {
+  const sections: string[] = [];
+
+  for (const edge of incomingEdges(graph, assistantNodeId)) {
+    const source = findNode(graph, edge.source);
+
+    if (source.data?.kind === "Prompt" || source.data?.kind === "Assistant") {
+      const assembly = assemblePromptForNode(graph, source.id, edge);
+      sections.push(assembly.prompt, assembly.negativePrompt);
+      continue;
+    }
+
+    sections.push(nodeText(source));
+  }
+
+  return sections.map(cleanText).filter(Boolean).join("\n\n");
+}
+
+function assistantTextForSubtype(subtype: string, resultText: string) {
+  switch (subtype) {
+    case "Brainstormer":
+      return `Brainstorm routes\n${resultText}`;
+    case "Expander":
+      return `Expanded prompt\n${resultText}`;
+    case "Reinforcer":
+      return `Reinforced direction\n${resultText}`;
+    case "Mutator":
+    default:
+      return resultText;
+  }
 }
 
 async function executeGenerationNode(
@@ -928,6 +1012,7 @@ function skipUnsupportedNode(
 function canExecuteLocally(node: GraphNode) {
   switch (node.data?.kind) {
     case "Prompt":
+    case "Assistant":
     case "Generation":
     case "Edit":
       return true;
@@ -1220,10 +1305,13 @@ function cleanText(value: unknown) {
 }
 
 function nodeText(node: GraphNode) {
-  const instruction = cleanText(node.data?.instruction);
-  const notes = cleanText(node.data?.notes);
+  const output = textForNode(node.data);
 
-  return [instruction, notes].filter(Boolean).join("\n");
+  if (output) {
+    return output;
+  }
+
+  return [cleanText(node.data?.instruction), cleanText(node.data?.notes)].filter(Boolean).join("\n");
 }
 
 function sectionTitle(node: GraphNode) {

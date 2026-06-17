@@ -34,6 +34,10 @@
       "types": "./dist/graph/promptAssembly.d.ts",
       "default": "./dist/graph/promptAssembly.js"
     },
+    "./graph/textMutation": {
+      "types": "./dist/graph/textMutation.d.ts",
+      "default": "./dist/graph/textMutation.js"
+    },
     "./run/execution": {
       "types": "./dist/run/execution.d.ts",
       "default": "./dist/run/execution.js"

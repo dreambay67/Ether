@@ -17,7 +17,7 @@ const validTargets: Record<EtherNodeKind, EtherNodeKind[]> = {
   Reference: ["Prompt", "Generation", "Edit", "Store"],
   Edit: ["Edit", "Generation", "Store"],
   Store: ["Store"],
-  Assistant: ["Prompt", "Reference", "Note"],
+  Assistant: ["Assistant", "Prompt", "Reference", "Note", "Generation"],
   Generation: ["Edit", "Store"],
   Note: ["Prompt", "Reference", "Store"]
 };
@@ -35,6 +35,8 @@ const defaultLabels: Record<string, string> = {
   "Edit:Store": "result",
   "Store:Store": "route",
   "Assistant:Prompt": "prompt",
+  "Assistant:Assistant": "context",
+  "Assistant:Generation": "prompt",
   "Assistant:Reference": "reference",
   "Assistant:Note": "note",
   "Generation:Edit": "variant",

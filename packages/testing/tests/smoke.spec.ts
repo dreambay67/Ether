@@ -64,6 +64,24 @@ test("assembling a prompt node freezes a local prompt artifact", async ({ page }
   await expect(page.getByTestId("inspector-assembly-preview")).toContainText("Frozen");
 });
 
+test("prompt mutation controls store seeded lineage in the run trace", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByTestId("library-node-prompt-general").click();
+  await page.getByLabel("Instruction").fill("minimal studio product image");
+  await page.getByLabel("Enable prompt mutation").check();
+  await page.getByLabel("Mutation preset").selectOption("Lens Shift");
+  await page.getByLabel("Mutation seed").fill("smoke-seed");
+  await page.getByLabel("Variation strength").fill("62");
+  await page.getByLabel("Locked terms").fill("chrome bottle");
+  await page.getByLabel("Mutation direction").fill("keep it premium");
+  await page.getByTestId("inspector-run-node").click();
+
+  await expect(page.getByTestId("panel-run-trace")).toContainText("Mutation");
+  await expect(page.getByTestId("inspector-mutation-lineage")).toContainText("smoke-seed");
+  await expect(page.getByTestId("inspector-assembly-preview")).toContainText("chrome bottle");
+});
+
 test("editing a frozen prompt marks it stale and clears the old frozen preview", async ({ page }) => {
   await page.goto("/");
 

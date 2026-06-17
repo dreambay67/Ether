@@ -290,6 +290,38 @@ describe("prompt assembly", () => {
     ]);
   });
 
+  it("uses visible Assistant output as a downstream generation prompt artifact", () => {
+    const canvas = graph(
+      [
+        node("mutator", {
+          definitionId: "assistant-mutator",
+          kind: "Assistant",
+          subtype: "Mutator",
+          title: "Mutator",
+          instruction: "original mutator instruction",
+          textOutput: "seeded editorial variation with chrome bottle" as any
+        } as any),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [{ id: "edge-mutator-generation", source: "mutator", target: "generation", label: "prompt" }]
+    );
+
+    const assembly = assembleGenerationInputs(canvas, "generation");
+
+    expect(assembly.prompt).toBe("seeded editorial variation with chrome bottle");
+    expect(assembly.sections).toEqual([
+      expect.objectContaining({
+        nodeId: "mutator",
+        section: "Mutator",
+        text: "seeded editorial variation with chrome bottle"
+      })
+    ]);
+  });
+
   it("uses an edited prompt label as the assembled section name", () => {
     const canvas = graph(
       [

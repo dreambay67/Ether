@@ -72,6 +72,9 @@ function markChangedNodeStale(data: Partial<CanvasNodeData> | undefined, now: st
     assembledPrompt: undefined,
     assembledNegativePrompt: undefined,
     assembledPromptArtifact: undefined,
+    textOutput: undefined,
+    textOutputArtifact: undefined,
+    mutationArtifact: undefined,
     lastRunAt: undefined,
     assetId: preserveLinkedAsset ? data?.assetId : undefined,
     assetKind: preserveLinkedAsset ? data?.assetKind : undefined,
@@ -96,8 +99,10 @@ function markChangedNodeStale(data: Partial<CanvasNodeData> | undefined, now: st
 
 function hasExecutionArtifact(data: Partial<CanvasNodeData> | undefined) {
   return Boolean(
-    data?.assembledPrompt ||
+      data?.assembledPrompt ||
       data?.assembledPromptArtifact ||
+      data?.textOutput ||
+      data?.textOutputArtifact ||
       data?.assetId ||
       data?.assetPath ||
       data?.storeAssetId ||

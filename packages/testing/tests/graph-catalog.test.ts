@@ -59,12 +59,12 @@ describe("graph node catalog", () => {
     expect(data.instruction).toContain("General");
   });
 
-  it("marks locally executable Prompt, Generation, and Edit contracts runnable", () => {
+  it("marks locally executable Prompt, Assistant, Generation, and Edit contracts runnable", () => {
     const runnableContracts = NODE_CONTRACTS.filter((contract) => contract.runnable);
 
     expect(runnableContracts.map((contract) => contract.definitionId).sort()).toEqual(
       NODE_DEFINITIONS.filter((definition) =>
-        ["Prompt", "Generation", "Edit"].includes(definition.category)
+        ["Prompt", "Assistant", "Generation", "Edit"].includes(definition.category)
       )
         .map((definition) => definition.id)
         .sort()
@@ -77,6 +77,11 @@ describe("graph node catalog", () => {
     expect(getOptionalNodeContract("edit-upscale")).toMatchObject({
       runnable: true,
       runLabel: "Upscale"
+    });
+    expect(getOptionalNodeContract("assistant-mutator")).toMatchObject({
+      runnable: true,
+      runLabel: "Run Assistant",
+      producedOutputs: expect.arrayContaining(["text", "prompt", "metadata"])
     });
   });
 
@@ -114,6 +119,8 @@ describe("connection rules", () => {
     ["Reference", "Prompt"],
     ["Store", "Store"],
     ["Assistant", "Prompt"],
+    ["Assistant", "Assistant"],
+    ["Assistant", "Generation"],
     ["Note", "Prompt"]
   ])("accepts %s -> %s", (sourceKind, targetKind) => {
     expect(canConnectNodeKinds(sourceKind, targetKind)).toMatchObject({ allowed: true });

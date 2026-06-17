@@ -872,7 +872,14 @@ function InnerEtherCanvas(
         selected: node.id === id
       }));
       const nextEdges = normalizeEdges(nextGraph.edges);
-      const message = `Assembled ${target.data.title}`;
+      const nextTarget = nextNodes.find((node) => node.id === id);
+      const mutationArtifact =
+        nextTarget?.data.mutationArtifact && typeof nextTarget.data.mutationArtifact === "object"
+          ? (nextTarget.data.mutationArtifact as Record<string, unknown>)
+          : null;
+      const message = mutationArtifact
+        ? `Mutation ${target.data.title} (${String(mutationArtifact.seed ?? "seeded")})`
+        : `Assembled ${target.data.title}`;
 
       commitSnapshot(nextNodes, nextEdges, message);
       setLocalRunStatus(message);

@@ -1,5 +1,11 @@
 import type { EtherGraph } from "../project/schema.js";
 import type { CanvasNodeData } from "./nodeCatalog.js";
+import {
+  cleanText,
+  createTextMutationArtifact,
+  shouldApplyMutation,
+  textForNode
+} from "./textMutation.js";
 import type {
   EdgeRoleArtifact,
   GenerationInputAssembly,
@@ -19,6 +25,10 @@ type GraphEdge = EtherGraph["edges"][number] & {
   target: string;
   label?: unknown;
   data?: { label?: unknown };
+};
+
+type PromptAssemblyOptions = {
+  ignoreTextOutputForNodeIds?: Set<string>;
 };
 
 const acceptedReferenceRoles = new Map<string, string>(
@@ -78,15 +88,16 @@ function normalizeRoleKey(value: string) {
   return value.trim().replace(/\s+/g, "-").toLowerCase();
 }
 
-function cleanText(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
+function nodeText(node: GraphNode, options: PromptAssemblyOptions = {}) {
+  if (!options.ignoreTextOutputForNodeIds?.has(node.id)) {
+    const output = textForNode(node.data);
 
-function nodeText(node: GraphNode) {
-  const instruction = cleanText(node.data?.instruction);
-  const notes = cleanText(node.data?.notes);
+    if (output) {
+      return output;
+    }
+  }
 
-  return [instruction, notes].filter(Boolean).join("\n");
+  return [cleanText(node.data?.instruction), cleanText(node.data?.notes)].filter(Boolean).join("\n");
 }
 
 function sectionName(node: GraphNode) {
@@ -117,13 +128,14 @@ function isNegativePromptNode(node: GraphNode) {
 function textSectionForNode(
   node: GraphNode,
   incomingEdge?: GraphEdge,
-  branchKind?: PromptSectionArtifact["kind"]
+  branchKind?: PromptSectionArtifact["kind"],
+  options: PromptAssemblyOptions = {}
 ): PromptSectionArtifact | null {
   if (!canContributeTextSection(node)) {
     return null;
   }
 
-  const text = nodeText(node);
+  const text = nodeText(node, options);
 
   if (!text) {
     return null;
@@ -153,7 +165,8 @@ function collectPromptSections(
   nodeId: string,
   seen = new Set<string>(),
   selfIncomingEdge?: GraphEdge,
-  branchKind?: PromptSectionArtifact["kind"]
+  branchKind?: PromptSectionArtifact["kind"],
+  options: PromptAssemblyOptions = {}
 ): PromptSectionArtifact[] {
   if (seen.has(nodeId)) {
     return [];
@@ -164,23 +177,30 @@ function collectPromptSections(
   const node = findNode(graph, nodeId);
   const sections: PromptSectionArtifact[] = [];
   const nodeBranchKind = branchKind ?? (isNegativePromptNode(node) ? "negativePrompt" : undefined);
+  const hasVisibleOutput =
+    !options.ignoreTextOutputForNodeIds?.has(node.id) && Boolean(cleanText(node.data?.textOutput));
+
+  if (hasVisibleOutput) {
+    const outputSection = textSectionForNode(node, selfIncomingEdge, nodeBranchKind, options);
+    return outputSection ? [outputSection] : [];
+  }
 
   for (const edge of incomingEdges(graph, nodeId)) {
     const source = findNode(graph, edge.source);
     const nextBranchKind = nodeBranchKind ?? (isNegativeEdge(edge) ? "negativePrompt" : undefined);
 
-    for (const section of collectPromptSections(graph, source.id, new Set(seen), edge, nextBranchKind)) {
+    for (const section of collectPromptSections(graph, source.id, new Set(seen), edge, nextBranchKind, options)) {
       appendUniqueSection(sections, section);
     }
 
-    const sourceSection = textSectionForNode(source, edge, nextBranchKind);
+    const sourceSection = textSectionForNode(source, edge, nextBranchKind, options);
     if (sourceSection) {
       appendUniqueSection(sections, sourceSection);
     }
   }
 
   const selfBranchKind = nodeBranchKind ?? (isNegativeEdge(selfIncomingEdge) ? "negativePrompt" : undefined);
-  const selfSection = textSectionForNode(node, selfIncomingEdge, selfBranchKind);
+  const selfSection = textSectionForNode(node, selfIncomingEdge, selfBranchKind, options);
   if (selfSection) {
     appendUniqueSection(sections, selfSection);
   }
@@ -276,9 +296,14 @@ export function getUpstreamNodes(graph: EtherGraph, nodeId: string) {
   return incomingEdges(graph, nodeId).map((edge) => findNode(graph, edge.source));
 }
 
-export function assemblePromptForNode(graph: EtherGraph, nodeId: string, incomingEdge?: GraphEdge): PromptAssembly {
+export function assemblePromptForNode(
+  graph: EtherGraph,
+  nodeId: string,
+  incomingEdge?: GraphEdge,
+  options: PromptAssemblyOptions = {}
+): PromptAssembly {
   const branchKind = isNegativeEdge(incomingEdge) ? "negativePrompt" : undefined;
-  const sections = collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge, branchKind);
+  const sections = collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge, branchKind, options);
 
   return {
     nodeId,
@@ -295,7 +320,7 @@ export function assembleGenerationInputs(graph: EtherGraph, generationNodeId: st
   for (const edge of incomingEdges(graph, generationNodeId)) {
     const source = findNode(graph, edge.source);
 
-    if (source.data?.kind !== "Prompt") {
+    if (source.data?.kind !== "Prompt" && source.data?.kind !== "Assistant") {
       continue;
     }
 
@@ -318,7 +343,17 @@ export function assembleGenerationInputs(graph: EtherGraph, generationNodeId: st
 }
 
 export function freezePromptNode(graph: EtherGraph, nodeId: string, now = new Date().toISOString()): EtherGraph {
-  const assembly = assemblePromptForNode(graph, nodeId);
+  const node = findNode(graph, nodeId);
+  const baseAssembly = assemblePromptForNode(graph, nodeId, undefined, {
+    ignoreTextOutputForNodeIds: new Set([nodeId])
+  });
+  const mutationArtifact = shouldApplyMutation(node.data)
+    ? createTextMutationArtifact(baseAssembly.prompt || baseAssembly.negativePrompt, node.data, {
+        kind: "prompt-mutation",
+        operation: "Prompt Mutation"
+      })
+    : null;
+  const assembly = mutationArtifact ? mutatePromptAssembly(baseAssembly, node, mutationArtifact.resultText) : baseAssembly;
 
   return {
     ...graph,
@@ -332,6 +367,9 @@ export function freezePromptNode(graph: EtherGraph, nodeId: string, now = new Da
               assembledPrompt: assembly.prompt,
               assembledNegativePrompt: assembly.negativePrompt,
               assembledPromptArtifact: assembly,
+              textOutput: mutationArtifact ? mutationArtifact.resultText : undefined,
+              textOutputArtifact: mutationArtifact ?? undefined,
+              mutationArtifact: mutationArtifact ?? undefined,
               lastRunAt: now,
               status: "complete"
             }
@@ -339,5 +377,22 @@ export function freezePromptNode(graph: EtherGraph, nodeId: string, now = new Da
         : node
     ),
     updatedAt: now
+  };
+}
+
+function mutatePromptAssembly(assembly: PromptAssembly, node: GraphNode, resultText: string): PromptAssembly {
+  const negativeSections = assembly.sections.filter((section) => section.kind === "negativePrompt");
+  const mutatedSection: PromptSectionArtifact = {
+    nodeId: node.id,
+    kind: "prompt",
+    section: sectionName(node),
+    title: sectionTitle(node),
+    text: resultText
+  };
+
+  return {
+    ...assembly,
+    prompt: resultText,
+    sections: [...negativeSections, mutatedSection]
   };
 }

@@ -384,6 +384,196 @@ describe("execution planning", () => {
 });
 
 describe("fake local execution", () => {
+  it("runs Assistant text nodes and stores visible deterministic lineage", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Assistant Text" });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "chrome bottle in a quiet campaign set"
+        }),
+        ...[
+          ["brainstormer", "Brainstormer"],
+          ["mutator", "Mutator"],
+          ["expander", "Expander"],
+          ["reinforcer", "Reinforcer"]
+        ].map(([id, subtype]) =>
+          node(id, {
+            definitionId: `assistant-${subtype.toLowerCase()}`,
+            kind: "Assistant",
+            subtype,
+            instruction: `${subtype} direction`,
+            mutationSeed: "phase-8-seed",
+            mutationPreset: "Lens Shift",
+            variationStrength: 55,
+            lockedTerms: "chrome bottle"
+          } as any)
+        )
+      ],
+      [
+        edge("edge-prompt-brainstormer", "prompt", "brainstormer", "context"),
+        edge("edge-prompt-mutator", "prompt", "mutator", "context"),
+        edge("edge-prompt-expander", "prompt", "expander", "context"),
+        edge("edge-prompt-reinforcer", "prompt", "reinforcer", "context")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["brainstormer", "mutator", "expander", "reinforcer"],
+      now: () => new Date("2026-06-17T15:00:00.000Z")
+    });
+
+    expect(result.results.map((entry) => [entry.nodeId, entry.action, entry.status])).toEqual([
+      ["brainstormer", "assistant-text", "complete"],
+      ["mutator", "assistant-text", "complete"],
+      ["expander", "assistant-text", "complete"],
+      ["reinforcer", "assistant-text", "complete"]
+    ]);
+
+    for (const assistantId of ["brainstormer", "mutator", "expander", "reinforcer"]) {
+      const assistantNode = result.graph.nodes.find((candidate) => candidate.id === assistantId);
+
+      expect(assistantNode?.data).toMatchObject({
+        status: "complete",
+        rerunState: "complete",
+        textOutput: expect.stringContaining("chrome bottle"),
+        textOutputArtifact: expect.objectContaining({
+          engine: "local-deterministic-text-engine",
+          sourceText: expect.stringContaining("chrome bottle"),
+          resultText: expect.stringContaining("chrome bottle"),
+          settings: expect.objectContaining({
+            seed: "phase-8-seed",
+            preset: "Lens Shift"
+          })
+        })
+      });
+    }
+  });
+
+  it("applies seed-stable prompt mutation while preserving locked terms", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Prompt Mutation" });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-subject",
+          kind: "Prompt",
+          subtype: "Subject",
+          instruction: "a reflective launch portrait",
+          mutationEnabled: true,
+          mutationSeed: "same-seed",
+          mutationPreset: "Material Swap",
+          variationStrength: 70,
+          novelty: 45,
+          drift: 20,
+          preserveSubject: 90,
+          preserveStyle: 70,
+          lockedTerms: "ETHER mark, chrome bottle",
+          negativeConstraints: "no distorted logo",
+          mutationInstruction: "keep the product premium"
+        } as any)
+      ],
+      []
+    );
+
+    const request = {
+      policy: "selected" as const,
+      targetNodeIds: ["prompt"],
+      now: () => new Date("2026-06-17T15:10:00.000Z")
+    };
+    const first = await executeGraphRun(project.path, canvas, request);
+    const second = await executeGraphRun(project.path, canvas, request);
+    const changedSeed = await executeGraphRun(
+      project.path,
+      graph(
+        [
+          {
+            ...canvas.nodes[0]!,
+            data: {
+              ...canvas.nodes[0]!.data,
+              mutationSeed: "different-seed"
+            }
+          }
+        ],
+        []
+      ),
+      request
+    );
+
+    const firstPrompt = first.graph.nodes[0]?.data.assembledPrompt;
+    const secondPrompt = second.graph.nodes[0]?.data.assembledPrompt;
+    const changedPrompt = changedSeed.graph.nodes[0]?.data.assembledPrompt;
+
+    expect(firstPrompt).toBe(secondPrompt);
+    expect(changedPrompt).not.toBe(firstPrompt);
+    expect(firstPrompt).toContain("ETHER mark");
+    expect(firstPrompt).toContain("chrome bottle");
+    expect(first.graph.nodes[0]?.data.textOutputArtifact).toMatchObject({
+      kind: "prompt-mutation",
+      sourceText: "a reflective launch portrait",
+      resultText: firstPrompt,
+      settings: expect.objectContaining({
+        seed: "same-seed",
+        preset: "Material Swap",
+        variationStrength: 70,
+        novelty: 45,
+        drift: 20,
+        preserveSubject: 90,
+        preserveStyle: 70,
+        lockedTerms: ["ETHER mark", "chrome bottle"],
+        negativeConstraints: "no distorted logo"
+      })
+    });
+  });
+
+  it("passes mutated prompt artifacts into downstream generation", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Mutated Generation" });
+    const canvas = graph(
+      [
+        node("prompt", {
+          definitionId: "prompt-general",
+          kind: "Prompt",
+          subtype: "General",
+          instruction: "minimal studio product image",
+          mutationEnabled: true,
+          mutationSeed: "generation-seed",
+          mutationPreset: "Lighting Weather",
+          variationStrength: 60,
+          lockedTerms: "DreamBay bottle"
+        } as any),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [edge("edge-prompt-generation", "prompt", "generation", "prompt")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "refresh-upstream",
+      targetNodeIds: ["generation"],
+      now: () => new Date("2026-06-17T15:20:00.000Z")
+    });
+    const promptNode = result.graph.nodes.find((candidate) => candidate.id === "prompt");
+    const generationNode = result.graph.nodes.find((candidate) => candidate.id === "generation");
+    const generatedAssets = await listAssets(project.path, { kind: "generated" });
+    const generatedAsset = generatedAssets.find((asset) => asset.id === generationNode?.data.assetId);
+
+    expect(promptNode?.data.assembledPrompt).toContain("DreamBay bottle");
+    expect(promptNode?.data.assembledPrompt).not.toBe("minimal studio product image");
+    expect(generationNode?.data.assembledPrompt).toBe(promptNode?.data.assembledPrompt);
+    expect(generatedAsset?.metadata.lineage).toMatchObject({
+      prompt: promptNode?.data.assembledPrompt,
+      sections: [expect.objectContaining({ nodeId: "prompt", text: promptNode?.data.assembledPrompt })]
+    });
+  });
+
   it("runs an Inpaint edit with the fake provider and records parent lineage", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Fake Edit Lineage" });

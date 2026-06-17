@@ -100,16 +100,16 @@ function assistantContract(definition: EtherNodeDefinition): NodeContract {
     definitionId: definition.id,
     acceptedInputs: ["prompt", "negativePrompt", "reference", "metadata", "note", "text"],
     producedOutputs: ["text", "prompt", "metadata"],
-    runnable: false,
-    runLabel: "Prepare Assistant Text",
-    description: `${definition.title} prepares editable assistant text for later workflow stages.`
+    runnable: true,
+    runLabel: "Run Assistant",
+    description: `${definition.title} creates deterministic editable assistant text for later workflow stages.`
   };
 }
 
 function generationContract(definition: EtherNodeDefinition): NodeContract {
   return {
     definitionId: definition.id,
-    acceptedInputs: ["prompt", "negativePrompt", "reference", "metadata"],
+    acceptedInputs: ["prompt", "negativePrompt", "reference", "metadata", "text"],
     producedOutputs: ["image", "metadata", "prompt"],
     runnable: true,
     runLabel: "Generate",
