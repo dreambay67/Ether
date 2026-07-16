@@ -5,16 +5,39 @@ import { randomUUID } from "node:crypto";
 import { initializeDatabase } from "./database.js";
 import { projectPaths, REQUIRED_DIRECTORIES, REQUIRED_FILES, sanitizeProjectFolderName } from "./paths.js";
 import {
-  EtherGraphSchema,
+  createInitialGraphRevision,
+  getLatestGraphRevision,
+  saveGraphRevision
+} from "../revisions/revisionStore.js";
+import type { GraphRevision } from "../revisions/types.js";
+import {
+  LATEST_GRAPH_VERSION,
   ProjectMetadataSchema,
+  normalizeEtherGraph,
   type CreateProjectOptions,
   type EtherGraph,
+  type EtherGraphInput,
   type ProjectMetadata,
   type ProjectOpenResult
 } from "./schema.js";
 
 const APP_VERSION = "0.1.0";
 const BRAND_LOCKUP = "ETHER by DreamBay";
+
+type WriteJson = typeof writeJson;
+type TestWriteJson = (
+  filePath: string,
+  value: unknown,
+  writeDefault: WriteJson
+) => Promise<void>;
+
+let writeJsonForProjectStore: TestWriteJson = (filePath, value, writeDefault) =>
+  writeDefault(filePath, value);
+
+export function __setProjectStoreTestHooks(hooks: { writeJson?: TestWriteJson }) {
+  writeJsonForProjectStore =
+    hooks.writeJson ?? ((filePath, value, writeDefault) => writeDefault(filePath, value));
+}
 
 export async function createProject(options: CreateProjectOptions): Promise<ProjectOpenResult> {
   const safeName = sanitizeProjectFolderName(options.name);
@@ -51,6 +74,7 @@ export async function createProject(options: CreateProjectOptions): Promise<Proj
     activeSnapshotId: null
   };
   const graph: EtherGraph = {
+    graphVersion: LATEST_GRAPH_VERSION,
     nodes: [],
     edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
@@ -92,7 +116,7 @@ async function repairPartialProject(
     }
 
     const metadata = ProjectMetadataSchema.parse(await readJson(paths.projectJson));
-    const graph = EtherGraphSchema.parse(await readJson(paths.graphJson));
+    const graph = normalizeEtherGraph(await readJson(paths.graphJson));
 
     if (metadata.displayName.trim() !== displayName.trim()) {
       return null;
@@ -127,8 +151,27 @@ export async function openProject(projectPath: string): Promise<ProjectOpenResul
   await validateProjectBundle(projectPath);
   const paths = projectPaths(projectPath);
   const metadata = ProjectMetadataSchema.parse(await readJson(paths.projectJson));
-  const graph = EtherGraphSchema.parse(await readJson(paths.graphJson));
   const database = initializeDatabase(paths.database);
+  const latestRevision = await getLatestGraphRevision(projectPath);
+
+  if (latestRevision) {
+    return {
+      path: projectPath,
+      metadata,
+      graph: latestRevision.graph,
+      database
+    };
+  }
+
+  const graphJson = normalizeEtherGraph(await readJson(paths.graphJson));
+  const graph =
+    (
+      await createInitialGraphRevision(projectPath, {
+        graph: graphJson,
+        reason: "legacy-import",
+        actor: "system"
+      })
+    ).graph;
 
   return {
     path: projectPath,
@@ -138,26 +181,72 @@ export async function openProject(projectPath: string): Promise<ProjectOpenResul
   };
 }
 
-export async function saveGraph(projectPath: string, graph: EtherGraph): Promise<EtherGraph> {
+export type SaveGraphOptions = {
+  baseRevisionId?: string | null;
+  reason?: string;
+  actor?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type SaveGraphWithRevisionResult = {
+  graph: EtherGraph;
+  revision: GraphRevision;
+};
+
+export async function saveGraph(
+  projectPath: string,
+  graph: EtherGraphInput,
+  options: SaveGraphOptions = {}
+): Promise<EtherGraph> {
+  return (await saveGraphWithRevision(projectPath, graph, options)).graph;
+}
+
+export async function saveGraphWithRevision(
+  projectPath: string,
+  graph: EtherGraphInput,
+  options: SaveGraphOptions = {}
+): Promise<SaveGraphWithRevisionResult> {
   const paths = projectPaths(projectPath);
   const now = new Date().toISOString();
-  const nextGraph = EtherGraphSchema.parse({
+  const nextGraph = normalizeEtherGraph({
     ...graph,
     updatedAt: now
   });
   const metadata = ProjectMetadataSchema.parse(await readJson(paths.projectJson));
-
-  await writeJson(paths.graphJson, nextGraph);
-  await writeJson(paths.projectJson, {
-    ...metadata,
-    updatedAt: now
+  const revision = await saveGraphRevision(projectPath, {
+    graph: nextGraph,
+    baseRevisionId: options.baseRevisionId,
+    reason: options.reason ?? "manual",
+    actor: options.actor ?? "system",
+    metadata: options.metadata
   });
 
-  return nextGraph;
+  try {
+    await writeJsonForProjectStore(paths.graphJson, revision.graph, writeJson);
+  } catch {
+    // graph.json is a best-effort mirror; graph revisions are the source of truth.
+  }
+
+  await writeJson(paths.projectJson, {
+    ...metadata,
+    updatedAt: revision.graph.updatedAt
+  });
+
+  return {
+    graph: revision.graph,
+    revision
+  };
 }
 
 export async function loadGraph(projectPath: string): Promise<EtherGraph> {
-  return EtherGraphSchema.parse(await readJson(projectPaths(projectPath).graphJson));
+  initializeDatabase(projectPaths(projectPath).database);
+  const latestRevision = await getLatestGraphRevision(projectPath);
+
+  if (latestRevision) {
+    return latestRevision.graph;
+  }
+
+  return normalizeEtherGraph(await readJson(projectPaths(projectPath).graphJson));
 }
 
 export async function readProjectMetadata(projectPath: string): Promise<ProjectMetadata> {

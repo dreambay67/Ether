@@ -1,19 +1,22 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const port = Number(process.env.ETHER_PLAYWRIGHT_PORT ?? 5174);
+const baseURL = `http://127.0.0.1:${port}`;
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.ts",
   outputDir: "../../test-results",
   timeout: 30_000,
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL,
     trace: "on-first-retry"
   },
   webServer: {
-    command: "pnpm.cmd --filter @ether/desktop dev:renderer",
+    command: `pnpm.cmd --filter @ether/desktop exec vite --host 127.0.0.1 --port ${port} --strictPort`,
     cwd: "../..",
-    url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
+    url: baseURL,
+    reuseExistingServer: process.env.ETHER_PLAYWRIGHT_REUSE_SERVER === "1",
     timeout: 60_000
   },
   projects: [

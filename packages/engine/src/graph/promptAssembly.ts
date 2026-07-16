@@ -1,5 +1,6 @@
 import type { EtherGraph } from "../project/schema.js";
-import type { CanvasNodeData } from "./nodeCatalog.js";
+import { CONNECTION_ROLES, DEFAULT_CONNECTION_ROLE, type ConnectionRole } from "./channels.js";
+import { referenceAssetsFromNodeData, type CanvasNodeData, type ReferenceAssetEntry } from "./nodeCatalog.js";
 import {
   cleanText,
   createTextMutationArtifact,
@@ -24,7 +25,7 @@ type GraphEdge = EtherGraph["edges"][number] & {
   source: string;
   target: string;
   label?: unknown;
-  data?: { label?: unknown };
+  data?: { label?: unknown; role?: unknown };
 };
 
 type PromptAssemblyOptions = {
@@ -43,12 +44,9 @@ const acceptedReferenceRoles = new Map<string, string>(
     "lighting",
     "colourPalette",
     "typography",
-    "custom",
     "negative",
     "product",
-    "face",
-    "reference",
-    "context"
+    "face"
   ].map((role) => [normalizeRoleKey(role), role])
 );
 
@@ -57,6 +55,55 @@ acceptedReferenceRoles.set("color-palette", "colourPalette");
 acceptedReferenceRoles.set("palette", "colourPalette");
 acceptedReferenceRoles.set("colour", "colourPalette");
 acceptedReferenceRoles.set("color", "colourPalette");
+
+const connectionRoleAliases = new Map<string, ConnectionRole>(
+  CONNECTION_ROLES.map((role) => [roleAliasKey(role), role])
+);
+
+for (const [alias, role] of [
+  ["context", "general"],
+  ["prompt", "general"],
+  ["instruction", "general"],
+  ["reference", "general"],
+  ["custom", "general"],
+  ["negativePrompt", "negative"],
+  ["avoid", "negative"],
+  ["exclude", "negative"],
+  ["colour", "colourPalette"],
+  ["color", "colourPalette"],
+  ["palette", "colourPalette"],
+  ["colorPalette", "colourPalette"],
+  ["type", "typography"],
+  ["font", "typography"],
+  ["movement", "motion"],
+  ["action", "motion"],
+  ["cameraMove", "motion"],
+  ["rhythm", "timing"],
+  ["pace", "timing"],
+  ["duration", "timing"],
+  ["time", "timing"],
+  ["timecode", "timing"]
+] as Array<[string, ConnectionRole]>) {
+  connectionRoleAliases.set(roleAliasKey(alias), role);
+}
+
+const roleCaptions: Record<ConnectionRole, string> = {
+  general: "General",
+  negative: "Negative",
+  subject: "Subject",
+  product: "Product",
+  face: "Face",
+  clothing: "Clothing",
+  pose: "Pose",
+  setting: "Setting",
+  composition: "Composition",
+  style: "Style",
+  lighting: "Lighting",
+  colourPalette: "Colour Palette",
+  typography: "Typography",
+  motion: "Motion",
+  timing: "Timing"
+};
 
 function nodesOf(graph: EtherGraph): GraphNode[] {
   return graph.nodes as GraphNode[];
@@ -88,6 +135,34 @@ function normalizeRoleKey(value: string) {
   return value.trim().replace(/\s+/g, "-").toLowerCase();
 }
 
+function roleAliasKey(value: string) {
+  return value.trim().replace(/[^a-z0-9]+/gi, "").toLowerCase();
+}
+
+function connectionRoleFromUnknown(value: unknown): ConnectionRole | undefined {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
+  return connectionRoleAliases.get(roleAliasKey(value));
+}
+
+function connectionRoleForEdge(edge?: GraphEdge) {
+  return (
+    connectionRoleFromUnknown(edge?.data?.role) ??
+    connectionRoleFromUnknown(edge?.data?.label) ??
+    connectionRoleFromUnknown(edge?.label)
+  );
+}
+
+function sectionRoleForEdge(edge?: GraphEdge, branchKind?: PromptSectionArtifact["kind"]): ConnectionRole {
+  if (branchKind === "negativePrompt") {
+    return "negative";
+  }
+
+  return connectionRoleForEdge(edge) ?? DEFAULT_CONNECTION_ROLE;
+}
+
 function nodeText(node: GraphNode, options: PromptAssemblyOptions = {}) {
   if (!options.ignoreTextOutputForNodeIds?.has(node.id)) {
     const output = textForNode(node.data);
@@ -100,16 +175,12 @@ function nodeText(node: GraphNode, options: PromptAssemblyOptions = {}) {
   return [cleanText(node.data?.instruction), cleanText(node.data?.notes)].filter(Boolean).join("\n");
 }
 
-function sectionName(node: GraphNode) {
-  return cleanText(node.data?.label) || cleanText(node.data?.subtype) || cleanText(node.data?.title) || "General";
-}
-
 function sectionTitle(node: GraphNode) {
-  return cleanText(node.data?.title) || cleanText(node.data?.label) || sectionName(node);
+  return cleanText(node.data?.title) || cleanText(node.data?.label) || cleanText(node.data?.subtype) || "General";
 }
 
 function isNegativeEdge(edge?: GraphEdge) {
-  return edge ? normalizeRoleKey(edgeLabel(edge)) === "negative" : false;
+  return connectionRoleForEdge(edge) === "negative";
 }
 
 function canContributeTextSection(node: GraphNode) {
@@ -121,8 +192,8 @@ function canContributeTextSection(node: GraphNode) {
   );
 }
 
-function isNegativePromptNode(node: GraphNode) {
-  return node.data?.kind === "Prompt" && node.data.subtype === "Negative";
+function isNegativePromptNode(_node: GraphNode) {
+  return false;
 }
 
 function textSectionForNode(
@@ -148,7 +219,7 @@ function textSectionForNode(
       (isNegativePromptNode(node) || (node.data?.kind === "Prompt" && isNegativeEdge(incomingEdge))
         ? "negativePrompt"
         : "prompt"),
-    section: sectionName(node),
+    section: roleCaptions[sectionRoleForEdge(incomingEdge, branchKind)],
     title: sectionTitle(node),
     text
   };
@@ -158,6 +229,46 @@ function appendUniqueSection(sections: PromptSectionArtifact[], section: PromptS
   if (!sections.some((candidate) => candidate.nodeId === section.nodeId)) {
     sections.push(section);
   }
+}
+
+function baseSectionName(section: string) {
+  return section.replace(/\s+\d+$/, "");
+}
+
+function isPromptHelperSection(graph: EtherGraph, section: PromptSectionArtifact) {
+  const node = nodesOf(graph).find((candidate) => candidate.id === section.nodeId);
+
+  return (
+    node?.data?.kind === "Assistant" ||
+    (node?.data?.kind === "Prompt" && cleanText(node.data?.subtype) !== "Prompt")
+  );
+}
+
+function mergeSameRoleBranchSections(graph: EtherGraph, sections: PromptSectionArtifact[]) {
+  const merged: PromptSectionArtifact[] = [];
+
+  for (const section of sections) {
+    const previous = merged.at(-1);
+    const sectionName = baseSectionName(section.section);
+
+    if (
+      previous &&
+      previous.kind === section.kind &&
+      baseSectionName(previous.section) === sectionName &&
+      (isPromptHelperSection(graph, previous) || isPromptHelperSection(graph, section))
+    ) {
+      previous.text = [previous.text, section.text].filter(Boolean).join("\n\n");
+      previous.title = section.title || previous.title;
+      continue;
+    }
+
+    merged.push({
+      ...section,
+      section: sectionName
+    });
+  }
+
+  return merged;
 }
 
 function collectPromptSections(
@@ -211,9 +322,37 @@ function collectPromptSections(
 function joinSections(sections: PromptSectionArtifact[], kind: PromptSectionArtifact["kind"]) {
   return sections
     .filter((section) => section.kind === kind)
+    .map((section) => formatSectionText(section))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function joinRawSections(sections: PromptSectionArtifact[], kind: PromptSectionArtifact["kind"]) {
+  return sections
+    .filter((section) => section.kind === kind)
     .map((section) => section.text)
     .filter(Boolean)
     .join("\n\n");
+}
+
+function formatSectionText(section: PromptSectionArtifact) {
+  return `${section.section}: ${section.text}`;
+}
+
+function numberRepeatedSections(sections: PromptSectionArtifact[]) {
+  const counts = new Map<string, number>();
+
+  return sections.map((section) => {
+    const baseSection = section.section.replace(/\s+\d+$/, "");
+    const key = `${section.kind}:${baseSection}`;
+    const nextCount = (counts.get(key) ?? 0) + 1;
+    counts.set(key, nextCount);
+
+    return {
+      ...section,
+      section: nextCount === 1 ? baseSection : `${baseSection} ${nextCount}`
+    };
+  });
 }
 
 function fallbackReferenceRole(node: GraphNode) {
@@ -227,51 +366,83 @@ function fallbackReferenceRole(node: GraphNode) {
     case "Moodboard":
       return "style";
     case "Video Reference":
-      return "reference";
+      return "general";
     case "Image":
-      return "reference";
+      return "general";
     default:
-      return node.data?.kind === "Note" ? "context" : "reference";
+      return "general";
   }
 }
 
 export function resolveReferenceRole(edge: GraphEdge, sourceNode: GraphNode) {
-  const normalized = normalizeRoleKey(edgeLabel(edge));
-  return acceptedReferenceRoles.get(normalized) ?? fallbackReferenceRole(sourceNode);
-}
+  for (const value of [edge.data?.role, edge.data?.label, edge.label]) {
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
 
-function referenceForNode(source: GraphNode, role: string): ReferenceArtifact | null {
-  if (source.data?.kind !== "Reference" && source.data?.kind !== "Note") {
-    return null;
+    const acceptedRole = acceptedReferenceRoles.get(normalizeRoleKey(value));
+    if (acceptedRole) {
+      return acceptedRole;
+    }
+
+    const connectionRole = connectionRoleFromUnknown(value);
+    if (connectionRole) {
+      return connectionRole;
+    }
   }
 
-  const steeringText = nodeText(source);
+  return fallbackReferenceRole(sourceNode);
+}
 
+function referenceForAsset(
+  source: GraphNode,
+  role: string,
+  steeringText: string,
+  asset: ReferenceAssetEntry | null,
+  index: number,
+  total: number
+): ReferenceArtifact {
+  const baseTitle = sectionTitle(source);
   const reference: ReferenceArtifact = {
     nodeId: source.id,
     role,
-    title: sectionTitle(source),
+    title: asset?.title || (total > 1 ? `${baseTitle} ${index + 1}` : baseTitle),
     sourceKind: cleanText(source.data?.subtype) || cleanText(source.data?.kind) || "Reference",
     ...(steeringText ? { steeringText } : {})
   };
 
-  if (source.data?.assetId) {
-    reference.assetId = source.data.assetId;
+  if (asset?.assetId) {
+    reference.assetId = asset.assetId;
   }
 
-  if (source.data?.assetKind) {
-    reference.assetKind = source.data.assetKind;
+  if (asset?.assetKind) {
+    reference.assetKind = asset.assetKind;
   }
 
-  if (source.data?.assetPath) {
-    reference.assetPath = source.data.assetPath;
+  if (asset?.assetPath) {
+    reference.assetPath = asset.assetPath;
   }
 
-  if (source.data?.assetMetadata) {
-    reference.assetMetadata = source.data.assetMetadata;
+  if (asset?.assetMetadata) {
+    reference.assetMetadata = asset.assetMetadata;
   }
 
   return reference;
+}
+
+function referencesForNode(source: GraphNode, role: string): ReferenceArtifact[] {
+  if (source.data?.kind !== "Reference" && source.data?.kind !== "Note") {
+    return [];
+  }
+
+  const steeringText = nodeText(source);
+  const assets = referenceAssetsFromNodeData(source.data);
+
+  if (assets.length === 0) {
+    return [referenceForAsset(source, role, steeringText, null, 0, 1)];
+  }
+
+  return assets.map((asset, index) => referenceForAsset(source, role, steeringText, asset, index, assets.length));
 }
 
 function collectReferences(graph: EtherGraph, nodeId: string) {
@@ -281,10 +452,10 @@ function collectReferences(graph: EtherGraph, nodeId: string) {
   for (const edge of incomingEdges(graph, nodeId)) {
     const source = findNode(graph, edge.source);
     const role = resolveReferenceRole(edge, source);
-    const reference = referenceForNode(source, role);
+    const sourceReferences = referencesForNode(source, role);
 
-    if (reference) {
-      references.push(reference);
+    if (sourceReferences.length > 0) {
+      references.push(...sourceReferences);
       edgeRoles.push({ edgeId: edge.id, role });
     }
   }
@@ -303,7 +474,9 @@ export function assemblePromptForNode(
   options: PromptAssemblyOptions = {}
 ): PromptAssembly {
   const branchKind = isNegativeEdge(incomingEdge) ? "negativePrompt" : undefined;
-  const sections = collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge, branchKind, options);
+  const sections = numberRepeatedSections(
+    collectPromptSections(graph, nodeId, new Set<string>(), incomingEdge, branchKind, options)
+  );
 
   return {
     nodeId,
@@ -315,7 +488,7 @@ export function assemblePromptForNode(
 }
 
 export function assembleGenerationInputs(graph: EtherGraph, generationNodeId: string): GenerationInputAssembly {
-  const sections: PromptSectionArtifact[] = [];
+  const rawSections: PromptSectionArtifact[] = [];
 
   for (const edge of incomingEdges(graph, generationNodeId)) {
     const source = findNode(graph, edge.source);
@@ -324,12 +497,18 @@ export function assembleGenerationInputs(graph: EtherGraph, generationNodeId: st
       continue;
     }
 
-    const assembly = assemblePromptForNode(graph, source.id, edge);
-    for (const section of assembly.sections) {
-      appendUniqueSection(sections, section);
+    const branchKind = isNegativeEdge(edge) ? "negativePrompt" : undefined;
+    const branchSections = mergeSameRoleBranchSections(
+      graph,
+      collectPromptSections(graph, source.id, new Set<string>(), edge, branchKind)
+    );
+
+    for (const section of branchSections) {
+      appendUniqueSection(rawSections, section);
     }
   }
 
+  const sections = numberRepeatedSections(rawSections);
   const { references, edgeRoles } = collectReferences(graph, generationNodeId);
 
   return {
@@ -347,8 +526,10 @@ export function freezePromptNode(graph: EtherGraph, nodeId: string, now = new Da
   const baseAssembly = assemblePromptForNode(graph, nodeId, undefined, {
     ignoreTextOutputForNodeIds: new Set([nodeId])
   });
+  const mutationSourceText =
+    joinRawSections(baseAssembly.sections, "prompt") || joinRawSections(baseAssembly.sections, "negativePrompt");
   const mutationArtifact = shouldApplyMutation(node.data)
-    ? createTextMutationArtifact(baseAssembly.prompt || baseAssembly.negativePrompt, node.data, {
+    ? createTextMutationArtifact(mutationSourceText, node.data, {
         kind: "prompt-mutation",
         operation: "Prompt Mutation"
       })
@@ -385,14 +566,14 @@ function mutatePromptAssembly(assembly: PromptAssembly, node: GraphNode, resultT
   const mutatedSection: PromptSectionArtifact = {
     nodeId: node.id,
     kind: "prompt",
-    section: sectionName(node),
+    section: roleCaptions[DEFAULT_CONNECTION_ROLE],
     title: sectionTitle(node),
     text: resultText
   };
 
   return {
     ...assembly,
-    prompt: resultText,
+    prompt: formatSectionText(mutatedSection),
     sections: [...negativeSections, mutatedSection]
   };
 }

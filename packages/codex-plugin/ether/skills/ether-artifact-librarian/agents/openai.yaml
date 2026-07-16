@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ether Artifact Librarian"
+  short_description: "Organize Ether 2.5 six-channel assets"
+  brand_color: "#1470DB"
+  default_prompt: "Use $ether-artifact-librarian to organize Ether 2.5 six-channel assets and collections."
+
+policy:
+  allow_implicit_invocation: true

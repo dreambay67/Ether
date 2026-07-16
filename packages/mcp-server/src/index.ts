@@ -3,16 +3,21 @@ import path from "node:path";
 import {
   NODE_CONTRACTS,
   canConnectNodeKinds,
+  applyGraphPatch,
   createGraphNodeData,
   createProject,
   executeGraphRun,
+  getLatestGraphRevision,
   linkExternalReference,
   listAssets,
   listRunRecords,
   loadGraph,
   openProject,
+  previewGraphPatch,
   runHealthCheck,
   saveGraph,
+  saveGraphWithRevision,
+  type CoPilotGraphPatch,
   type CanvasNodeData,
   type EtherGraph,
   type ExecutionPolicy
@@ -26,6 +31,9 @@ export type EtherMcpToolName =
   | "ether_node_create"
   | "ether_edge_create"
   | "ether_node_update"
+  | "ether_graph_patch_propose"
+  | "ether_graph_patch_apply"
+  | "ether_graph_patch_reject"
   | "ether_run_node"
   | "ether_run_selected"
   | "ether_run_branch"
@@ -69,6 +77,21 @@ const toolDescriptors: EtherMcpToolDescriptor[] = [
   inspectTool("ether_node_create", "Create a graph node without executing it.", ["projectPath", "node"]),
   inspectTool("ether_edge_create", "Create a validated graph edge without executing nodes.", ["projectPath", "edge"]),
   inspectTool("ether_node_update", "Patch one graph node's editable data.", ["projectPath", "nodeId", "patch"]),
+  inspectTool(
+    "ether_graph_patch_propose",
+    "Preview a Codex co-pilot graph patch without changing the graph or running nodes.",
+    ["projectPath", "patch"]
+  ),
+  inspectTool(
+    "ether_graph_patch_apply",
+    "Apply an inspected graph patch against an explicit base revision without running nodes.",
+    ["projectPath", "baseRevisionId", "patch"]
+  ),
+  inspectTool(
+    "ether_graph_patch_reject",
+    "Reject a proposed graph patch without changing the graph or running nodes.",
+    ["projectPath", "baseRevisionId", "patchId"]
+  ),
   runTool("ether_run_node", "Explicitly run one Ether node and save the resulting graph.", ["projectPath", "nodeId"]),
   runTool("ether_run_selected", "Explicitly run selected Ether nodes in dependency order.", ["projectPath", "nodeIds"]),
   runTool("ether_run_branch", "Explicitly run a branch with a generation cap.", ["projectPath", "nodeId"]),
@@ -103,6 +126,23 @@ export async function callEtherTool(name: EtherMcpToolName | string, input: Reco
         requiredString(input, "projectPath"),
         requiredString(input, "nodeId"),
         requiredRecord(input.patch, "patch")
+      );
+    case "ether_graph_patch_propose":
+      return proposeGraphPatch(
+        requiredString(input, "projectPath"),
+        requiredGraphPatch(input.patch)
+      );
+    case "ether_graph_patch_apply":
+      return applyProposedGraphPatch(
+        requiredString(input, "projectPath"),
+        requiredString(input, "baseRevisionId"),
+        requiredGraphPatch(input.patch)
+      );
+    case "ether_graph_patch_reject":
+      return rejectGraphPatch(
+        requiredString(input, "projectPath"),
+        requiredString(input, "baseRevisionId"),
+        requiredString(input, "patchId")
       );
     case "ether_run_node":
       return runAndSave(requiredString(input, "projectPath"), {
@@ -295,6 +335,55 @@ async function updateNode(projectPath: string, nodeId: string, patch: Record<str
   return saveGraph(projectPath, nextGraph);
 }
 
+async function proposeGraphPatch(projectPath: string, patch: CoPilotGraphPatch) {
+  const graph = await loadGraph(projectPath);
+  const baseRevision = await getLatestGraphRevision(projectPath);
+  const preview = previewGraphPatch(graph, patch);
+
+  return {
+    patch,
+    baseRevisionId: baseRevision?.id ?? null,
+    preview,
+    applied: false,
+    executionStarted: false
+  };
+}
+
+async function applyProposedGraphPatch(projectPath: string, baseRevisionId: string, patch: CoPilotGraphPatch) {
+  const graph = await loadGraph(projectPath);
+  const preview = previewGraphPatch(graph, patch);
+  const saved = await saveGraphWithRevision(projectPath, applyGraphPatch(graph, patch), {
+    baseRevisionId,
+    reason: "codex-graph-patch",
+    actor: "codex",
+    metadata: {
+      patchId: patch.id ?? null,
+      patchTitle: patch.title ?? null,
+      executionStarted: false
+    }
+  });
+
+  return {
+    graph: saved.graph,
+    revision: saved.revision,
+    preview,
+    applied: true,
+    executionStarted: false
+  };
+}
+
+async function rejectGraphPatch(projectPath: string, baseRevisionId: string, patchId: string) {
+  await loadGraph(projectPath);
+
+  return {
+    status: "rejected",
+    patchId,
+    baseRevisionId,
+    graphChanged: false,
+    executionStarted: false
+  };
+}
+
 async function runAndSave(
   projectPath: string,
   request: {
@@ -360,15 +449,66 @@ function tool(
     inputSchema: {
       type: "object",
       required,
-      properties: Object.fromEntries(required.map((entry) => [entry, { type: "string" }]))
+      properties: Object.fromEntries(required.map((entry) => [entry, inputSchemaForField(name, entry)]))
     }
   };
+}
+
+function inputSchemaForField(toolName: EtherMcpToolName, field: string) {
+  if (field === "graph" || field === "node" || field === "edge") {
+    return { type: "object" };
+  }
+
+  if (field === "patch") {
+    return toolName === "ether_graph_patch_propose" || toolName === "ether_graph_patch_apply"
+      ? {
+          type: "object",
+          required: ["operations"],
+          properties: {
+            id: { type: "string" },
+            title: { type: "string" },
+            description: { type: "string" },
+            operations: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["type"],
+                properties: {
+                  type: { type: "string" }
+                },
+                additionalProperties: true
+              }
+            }
+          },
+          additionalProperties: true
+        }
+      : { type: "object" };
+  }
+
+  if (field === "nodeIds") {
+    return {
+      type: "array",
+      items: { type: "string" }
+    };
+  }
+
+  return { type: "string" };
 }
 
 function requiredGraph(value: unknown): EtherGraph {
   const graph = requiredRecord(value, "graph");
 
   return graph as EtherGraph;
+}
+
+function requiredGraphPatch(value: unknown): CoPilotGraphPatch {
+  const patch = requiredRecord(value, "patch");
+
+  if (!Array.isArray(patch.operations)) {
+    throw new Error("patch.operations must be an array.");
+  }
+
+  return patch as CoPilotGraphPatch;
 }
 
 function requiredRecord(value: unknown, field: string): Record<string, unknown> {

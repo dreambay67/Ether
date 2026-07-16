@@ -2,6 +2,8 @@
 
 This checklist is the review gate for Ether V1 packaging and acceptance. It is meant to be run on Windows before considering the local build ready for deeper personal workflow testing.
 
+Ether 2.0 supersedes and extends this Phase 11 path. Keep this document as V1/Phase 11 regression coverage for the Windows package and local settings checks, but use `docs/product/ether-2.0-acceptance.md` for the public-grade Ether 2.0 acceptance gate.
+
 ## Windows Package
 
 Build and package the unpacked desktop app:
@@ -17,7 +19,7 @@ Expected result:
 - `resources/app/dist-electron/main/main.js` exists.
 - `resources/app/node_modules/@ether/engine/dist/index.js` exists.
 - `resources/app/node_modules/@ether/providers/dist/index.js` exists.
-- runtime dependencies required by the engine, including `better-sqlite3` and `zod`, are copied into `resources/app/node_modules`.
+- runtime dependencies required by the engine are copied into `resources/app/node_modules`; the current package uses Node's `node:sqlite` runtime plus copied dependencies such as `zod`.
 
 This is an unpacked package, not an installer. It is enough for Phase 11 acceptance because it proves the Windows desktop runtime can be assembled locally without Firebase, API fallback, or web deployment.
 
@@ -86,3 +88,5 @@ Required visual checks:
 ## Pass Criteria
 
 Phase 11 passes when automated tests are green, `pnpm desktop:package:win` completes, the package folder contains a runnable app shape, and the manual workflow above can be completed without graph loss or hidden API fallback.
+
+For Ether 2.0, this is necessary but not sufficient. Run the 2.0 checklist in `docs/product/ether-2.0-acceptance.md`, which adds Project Health/privacy cleanup, provider opt-in policy, Codex CLI default routing, real-asset generation when available, lineage inspection, recovery, and Codex diff acceptance.

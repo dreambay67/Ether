@@ -3,7 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 export type SqliteDatabase = DatabaseSync;
 
 export function openDatabase(databasePath: string, options: { readonly?: boolean } = {}) {
-  return new DatabaseSync(databasePath, options.readonly ? { readOnly: true } : {});
+  const db = new DatabaseSync(databasePath, options.readonly ? { readOnly: true } : {});
+  db.exec("PRAGMA foreign_keys = ON");
+  return db;
 }
 
 export function runInTransaction<T>(db: SqliteDatabase, task: () => T): T {

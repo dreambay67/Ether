@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { HealthIssue, ProjectDatabaseStatus, SnapshotRecord, SnapshotSlot } from "./schema.js";
+import { runDatabaseMigrations } from "./migrations.js";
 import { openDatabase, runInTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export const REQUIRED_DATABASE_TABLES = [
@@ -8,7 +9,8 @@ export const REQUIRED_DATABASE_TABLES = [
   "runs",
   "snapshots",
   "asset_moves",
-  "health_issues"
+  "health_issues",
+  "graph_revisions"
 ] as const;
 
 export function initializeDatabase(databasePath: string): ProjectDatabaseStatus {
@@ -77,6 +79,8 @@ export function initializeDatabase(databasePath: string): ProjectDatabaseStatus 
       CREATE UNIQUE INDEX IF NOT EXISTS snapshots_slot_unique_idx ON snapshots (slot);
     `);
 
+    runDatabaseMigrations(db);
+
     return getDatabaseStatus(databasePath, db);
   } finally {
     db.close();
@@ -89,7 +93,9 @@ export function getDatabaseStatus(databasePath: string, existingDb?: SqliteDatab
   try {
     const tables = db
       .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?, ?) ORDER BY name"
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${REQUIRED_DATABASE_TABLES.map(
+          () => "?"
+        ).join(", ")}) ORDER BY name`
       )
       .all(...REQUIRED_DATABASE_TABLES)
       .map((row) => (row as { name: string }).name);

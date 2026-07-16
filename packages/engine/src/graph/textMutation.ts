@@ -7,6 +7,10 @@ export const MUTATION_PRESETS = [
   "Lighting Weather",
   "Material Swap",
   "Composition Nudge",
+  "Product Fidelity",
+  "Character Anchor",
+  "Palette Drift",
+  "Era Shift",
   "Radical Concept"
 ] as const;
 
@@ -77,6 +81,26 @@ const presetPhrases: Record<MutationPreset, string[]> = {
     "rebalance the layout",
     "shift subject placement",
     "tighten the visual hierarchy"
+  ],
+  "Product Fidelity": [
+    "protect the product silhouette",
+    "keep brand marks and product color stable",
+    "vary only supporting scene details"
+  ],
+  "Character Anchor": [
+    "preserve facial identity",
+    "keep character continuity intact",
+    "vary pose and styling without changing the person"
+  ],
+  "Palette Drift": [
+    "shift the supporting color palette",
+    "change accent-color relationships",
+    "explore a controlled hue and contrast branch"
+  ],
+  "Era Shift": [
+    "translate the idea into a distinct visual period",
+    "change era-specific styling cues",
+    "reinterpret the scene through period design language"
   ],
   "Radical Concept": [
     "push the concept into a bolder territory",

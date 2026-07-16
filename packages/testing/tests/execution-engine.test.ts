@@ -1,18 +1,28 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CODEX_PROVIDER_ID, FAKE_PROVIDER_ID, type ProviderProcessCall } from "@ether/providers";
 import {
+  completeProviderRun,
+  createArtifact,
+  createProviderRun,
   createProject,
   executeGraphRun,
+  ensureCollectionFolder,
+  failProviderRun,
+  listArtifacts,
+  listArtifactsByCollection,
   listAssetMoves,
   listAssets,
+  listProviderRuns,
   listRunRecords,
   markDownstreamStale,
   planExecution,
   runExecutionQueue,
   saveGeneratedAsset,
   saveMaskAsset,
+  updateAssetMetadata,
   type CanvasNodeData,
   type EtherGraph,
   type ExecutionQueueItem
@@ -57,6 +67,34 @@ function edge(id: string, source: string, target: string, label = "prompt") {
   return { id, source, target, label, data: { label } };
 }
 
+function unavailableAdapterEdge(
+  id: string,
+  source: string,
+  target: string,
+  data: Record<string, unknown> = {}
+) {
+  return {
+    id,
+    source,
+    target,
+    label: "reference",
+    data: {
+      label: "reference",
+      graphVersion: "2.5",
+      sourceChannel: "image",
+      targetChannel: "text",
+      role: "reference",
+      adapter: {
+        operation: "caption",
+        providerId: "visual-description",
+        status: "unavailable",
+        reason: "Adapter reason from provider setup."
+      },
+      ...data
+    }
+  };
+}
+
 function graph(nodes: EtherGraph["nodes"], edges: EtherGraph["edges"]): EtherGraph {
   return {
     nodes,
@@ -71,7 +109,115 @@ function executionIds(items: ExecutionQueueItem[]) {
   return items.map((item) => `${item.nodeId}:${item.iteration}`);
 }
 
+function providerStdin(call: ProviderProcessCall) {
+  return (call as ProviderProcessCall & { stdin?: string }).stdin ?? "";
+}
+
+const simulationProvider = {
+  providerId: FAKE_PROVIDER_ID
+};
+
 describe("execution planning", () => {
+  it("persists failed provider runs when Error objects contain enumerable cycles", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Cyclic Provider Error" });
+    const providerRun = createProviderRun(project.path, {
+      runId: "run-cyclic-error",
+      providerId: "provider-cyclic-error",
+      request: { operation: "image.generate" },
+      now: new Date("2026-06-30T12:00:00.000Z")
+    });
+    const error = new Error("Provider error with cyclic diagnostic.");
+    (error as Error & { self?: unknown }).self = error;
+
+    const failed = failProviderRun(
+      project.path,
+      providerRun.id,
+      error,
+      new Date("2026-06-30T12:01:00.000Z")
+    );
+    const [listed] = await listProviderRuns(project.path);
+
+    expect(failed).toMatchObject({
+      id: providerRun.id,
+      status: "failed",
+      error: expect.objectContaining({
+        name: "Error",
+        message: "Provider error with cyclic diagnostic.",
+        self: "[omitted:cyclic]"
+      })
+    });
+    expect(listed).toMatchObject({
+      id: providerRun.id,
+      error: expect.objectContaining({
+        self: "[omitted:cyclic]"
+      })
+    });
+  });
+
+  it("bounds huge provider run JSON strings in requests responses and errors", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Bounded Provider Strings" });
+    const hugeDataUri = `data:image/png;base64,${"a".repeat(20000)}`;
+    const requestRun = createProviderRun(project.path, {
+      runId: "run-huge-request",
+      providerId: "provider-huge-request",
+      request: { dataUri: hugeDataUri }
+    });
+    const responseRun = createProviderRun(project.path, {
+      runId: "run-huge-response",
+      providerId: "provider-huge-response",
+      request: { ok: true }
+    });
+    const errorRun = createProviderRun(project.path, {
+      runId: "run-huge-error",
+      providerId: "provider-huge-error",
+      request: { ok: true }
+    });
+
+    completeProviderRun(project.path, responseRun.id, { outputText: hugeDataUri });
+    failProviderRun(project.path, errorRun.id, { message: hugeDataUri });
+
+    const providerRuns = await listProviderRuns(project.path);
+    const request = providerRuns.find((entry) => entry.id === requestRun.id)?.request as { dataUri?: string };
+    const response = providerRuns.find((entry) => entry.id === responseRun.id)?.response as { outputText?: string };
+    const error = providerRuns.find((entry) => entry.id === errorRun.id)?.error as { message?: string };
+
+    expect(request.dataUri?.length).toBeLessThan(6000);
+    expect(response.outputText?.length).toBeLessThan(6000);
+    expect(error.message?.length).toBeLessThan(6000);
+    expect(request.dataUri).toContain("[truncated:");
+    expect(response.outputText).toContain("[truncated:");
+    expect(error.message).toContain("[truncated:");
+  });
+
+  it("does not overwrite terminal provider run rows", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Terminal Provider Run" });
+    const providerRun = createProviderRun(project.path, {
+      runId: "run-terminal",
+      providerId: "provider-terminal",
+      request: { operation: "image.generate" }
+    });
+
+    completeProviderRun(project.path, providerRun.id, { ok: true });
+
+    expect(() => failProviderRun(project.path, providerRun.id, { message: "late failure" })).toThrow(
+      /already complete|only running|not found/i
+    );
+    expect(() => completeProviderRun(project.path, "missing-provider-run", { ok: true })).toThrow(
+      /not found|not running/i
+    );
+
+    const [listed] = await listProviderRuns(project.path);
+    expect(listed).toMatchObject({
+      id: providerRun.id,
+      status: "complete",
+      response: { ok: true },
+      error: null
+    });
+  });
+
   it("plans selected nodes in dependency order", () => {
     const canvas = graph(
       [
@@ -99,6 +245,113 @@ describe("execution planning", () => {
     expect(plan.parallel).toBe(false);
   });
 
+  it("skips generation execution before provider work when an incoming adapter edge is unavailable", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Adapter Blocked Generation" });
+    const reason = "Image reference needs a caption adapter before this node can run.";
+    let providerCalled = false;
+    const canvas = graph(
+      [
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [
+        unavailableAdapterEdge("edge-reference-generation", "reference", "generation", {
+          disabledReason: reason,
+          adapter: {
+            operation: "caption",
+            providerId: "visual-description",
+            status: "unavailable",
+            reason: "Lower priority adapter reason."
+          }
+        })
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["generation"],
+      imageProviderRunner: async () => {
+        providerCalled = true;
+        throw new Error("Provider runner should not be called.");
+      },
+      imageProviderFileExists: async () => true,
+      imageCodexCliPath: "C:\\Tools\\codex.exe",
+      now: () => new Date("2026-06-30T12:00:00.000Z")
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "generation",
+        status: "skipped",
+        action: "adapter-blocked",
+        reason
+      })
+    ]);
+    expect(providerCalled).toBe(false);
+    expect(listProviderRuns(project.path)).toEqual([]);
+  });
+
+  it("keeps locked execution precedence over disabled incoming adapter edges", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Locked Adapter Generation" });
+    let providerCalled = false;
+    const canvas = graph(
+      [
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image"
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          locked: true
+        })
+      ],
+      [
+        unavailableAdapterEdge("edge-reference-generation", "reference", "generation", {
+          disabledReason: "Adapter should not hide the locked state."
+        })
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["generation"],
+      imageProviderRunner: async () => {
+        providerCalled = true;
+        throw new Error("Provider runner should not be called.");
+      },
+      imageProviderFileExists: async () => true,
+      imageCodexCliPath: "C:\\Tools\\codex.exe",
+      now: () => new Date("2026-06-30T12:00:00.000Z")
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "generation",
+        status: "skipped",
+        action: "locked",
+        reason: "Node is locked"
+      })
+    ]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "generation")?.data).not.toMatchObject({
+      rerunState: "ready"
+    });
+    expect(providerCalled).toBe(false);
+    expect(listProviderRuns(project.path)).toEqual([]);
+  });
+
   it("executes Compare nodes and writes manual ratings and tags into asset metadata", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Compare Metadata" });
@@ -122,8 +375,8 @@ describe("execution planning", () => {
           assetMetadata: generated.metadata
         }),
         node("compare", {
-          definitionId: "store-compare",
-          kind: "Store",
+          definitionId: "review-compare",
+          kind: "Review",
           subtype: "Compare",
           compareLayout: 4,
           reviewRating: 5,
@@ -175,6 +428,28 @@ describe("execution planning", () => {
         compareNodeId: "compare"
       }
     });
+    await expect(listArtifacts(project.path, { kind: "compare" })).resolves.toEqual([
+      expect.objectContaining({
+        kind: "compare",
+        nodeId: "compare",
+        metadata: expect.objectContaining({
+          kind: "compare",
+          compareNodeId: "compare",
+          membership: [
+            expect.objectContaining({
+              assetId: generated.id,
+              rating: 5,
+              tags: ["keeper", "on-brand"],
+              decision: "select",
+              notes: "Best campaign hero so far."
+            })
+          ],
+          winnerAssetId: generated.id,
+          rating: 5,
+          notes: "Best campaign hero so far."
+        })
+      })
+    ]);
   });
 
   it("executes Evaluate nodes and writes score, tags, decision, confidence, and explanation", async () => {
@@ -200,8 +475,8 @@ describe("execution planning", () => {
           assetMetadata: generated.metadata
         }),
         node("compare", {
-          definitionId: "store-compare",
-          kind: "Store",
+          definitionId: "review-compare",
+          kind: "Review",
           subtype: "Compare",
           compareLayout: 2,
           reviewRating: 5,
@@ -209,9 +484,9 @@ describe("execution planning", () => {
           reviewDecision: "select"
         }),
         node("evaluate", {
-          definitionId: "store-evaluate",
-          kind: "Store",
-          subtype: "Evaluate",
+          definitionId: "review-evaluation",
+          kind: "Review",
+          subtype: "Evaluation",
           instruction: "Pass premium keeper assets for the DreamBay hero campaign.",
           evaluationThreshold: 70
         })
@@ -223,6 +498,7 @@ describe("execution planning", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "selected",
       targetNodeIds: ["compare", "evaluate"],
       now: () => new Date("2026-06-17T17:15:00.000Z")
@@ -248,6 +524,128 @@ describe("execution planning", () => {
       tags: expect.arrayContaining(["keeper", "premium"])
     });
     expect((assets[0]?.metadata.evaluation as { score?: number } | undefined)?.score).toBeGreaterThanOrEqual(70);
+    await expect(listArtifacts(project.path, { kind: "evaluation" })).resolves.toEqual([
+      expect.objectContaining({
+        kind: "evaluation",
+        nodeId: "evaluate",
+        metadata: expect.objectContaining({
+          kind: "evaluation",
+          evaluateNodeId: "evaluate",
+          threshold: 70,
+          items: [
+            expect.objectContaining({
+              assetId: generated.id,
+              decision: "pass",
+              score: expect.any(Number),
+              tags: expect.arrayContaining(["keeper", "premium"]),
+              confidence: expect.any(Number),
+              explanation: expect.stringContaining("DreamBay hero campaign"),
+              detectedIssues: []
+            })
+          ]
+        })
+      })
+    ]);
+  });
+
+  it("sends channel and role payload envelopes to vision evaluation providers", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Provider Evaluation Payloads" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "subject.png",
+      content: "fake image bytes",
+      mimeType: "image/png",
+      metadata: { variant: "subject" },
+      now: new Date("2026-06-17T17:30:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: generated.id,
+          assetKind: generated.kind,
+          assetPath: generated.path,
+          assetMetadata: generated.metadata
+        }),
+        node("evaluate", {
+          definitionId: "review-evaluation",
+          kind: "Review",
+          subtype: "Evaluation",
+          instruction: "Rate the subject using the configured review rubric.",
+          evaluationThreshold: 75
+        })
+      ],
+      [
+        {
+          ...edge("edge-generation-evaluate", "generation", "evaluate", "subject"),
+          data: {
+            label: "subject",
+            graphVersion: "2.5",
+            sourceChannel: "image",
+            targetChannel: "image",
+            role: "subject"
+          }
+        }
+      ]
+    );
+
+    await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["evaluate"],
+      evaluationCodexCliPath: "C:\\Tools\\codex.exe",
+      evaluationProviderFileExists: async () => true,
+      evaluationProviderRunner: async (call: ProviderProcessCall) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\nWrite/.exec(providerStdin(call))?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex evaluation prompt.");
+        }
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-evaluation",
+            status: "complete",
+            items: [
+              {
+                id: generated.id,
+                assetId: generated.id,
+                assetPath: generated.path,
+                score: 88,
+                tags: ["subject"],
+                decision: "pass",
+                confidence: 0.9,
+                explanation: "The subject is clear and meets the review direction.",
+                detectedIssues: []
+              }
+            ],
+            summary: "One subject image passed.",
+            error: null,
+            caveats: ""
+          }),
+          "utf8"
+        );
+        return { stdout: "ok", stderr: "", exitCode: 0 };
+      },
+      now: () => new Date("2026-06-17T17:35:00.000Z")
+    });
+
+    const [providerRun] = await listProviderRuns(project.path);
+    const providerInput = providerRun?.request.providerInput as
+      | { inputs?: Array<Record<string, unknown>> }
+      | undefined;
+    expect(providerInput?.inputs).toEqual([
+      expect.objectContaining({
+        channel: "image",
+        role: "subject",
+        assetId: generated.id,
+        assetPath: generated.path,
+        sourceNodeId: "generation",
+        sourceEdgeId: "edge-generation-evaluate"
+      })
+    ]);
   });
 
   it("executes Filter nodes, auto-applies routing, and physically moves passed assets to collections", async () => {
@@ -273,23 +671,23 @@ describe("execution planning", () => {
           assetMetadata: generated.metadata
         }),
         node("compare", {
-          definitionId: "store-compare",
-          kind: "Store",
+          definitionId: "review-compare",
+          kind: "Review",
           subtype: "Compare",
           reviewRating: 5,
           reviewTags: "keeper",
           reviewDecision: "select"
         }),
         node("evaluate", {
-          definitionId: "store-evaluate",
-          kind: "Store",
-          subtype: "Evaluate",
+          definitionId: "review-evaluation",
+          kind: "Review",
+          subtype: "Evaluation",
           instruction: "Pass keeper images.",
           evaluationThreshold: 70
         }),
         node("filter", {
-          definitionId: "store-filter",
-          kind: "Store",
+          definitionId: "review-filter",
+          kind: "Review",
           subtype: "Filter",
           filterAutoApply: true,
           filterRules: "pass -> Selected; fail -> Rejected"
@@ -319,6 +717,7 @@ describe("execution planning", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "selected",
       targetNodeIds: ["compare", "evaluate", "filter"],
       now: () => new Date("2026-06-17T17:25:00.000Z")
@@ -391,6 +790,7 @@ describe("execution planning", () => {
           subtype: "Filter",
           filterAutoApply: true,
           filterDryRun: true,
+          filterRouteMode: "copy",
           filterManualOverride: "Manual Picks",
           filterRules: "fail -> Rejected"
         }),
@@ -426,10 +826,682 @@ describe("execution planning", () => {
           assetId: generated.id,
           decision: "fail",
           targetCollectionName: "Manual Picks",
+          mode: "copy",
+          preview: true,
           moved: false
         })
       ]
     });
+    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+      candidateRoutes: [
+        expect.objectContaining({
+          assetId: generated.id,
+          destinationCollectionName: "Manual Picks",
+          mode: "copy",
+          metadataChanges: expect.objectContaining({
+            filter: expect.objectContaining({
+              filterNodeId: "filter",
+              decision: "fail",
+              targetCollectionName: "Manual Picks",
+              mode: "copy"
+            })
+          })
+        })
+      ]
+    });
+  });
+
+  it("executes legacy Store Evaluation nodes through the review evaluator", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Legacy Store Evaluation" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "legacy-evaluation.png",
+      content: "fake image bytes",
+      metadata: { variant: "legacy" },
+      now: new Date("2026-06-17T17:36:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: generated.id,
+          assetKind: generated.kind,
+          assetPath: generated.path,
+          assetMetadata: generated.metadata
+        }),
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluation",
+          instruction: "Pass legacy evaluation assets.",
+          evaluationThreshold: 70
+        })
+      ],
+      [edge("edge-generation-evaluate", "generation", "evaluate", "evaluation")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
+      policy: "selected",
+      targetNodeIds: ["evaluate"],
+      now: () => new Date("2026-06-17T17:37:00.000Z")
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "evaluate",
+        status: "complete",
+        action: "evaluate"
+      })
+    ]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "evaluate")?.data).toMatchObject({
+      status: "complete",
+      rerunState: "complete",
+      evaluationArtifact: expect.objectContaining({
+        evaluateNodeId: "evaluate"
+      })
+    });
+  });
+
+  it("links routed artifacts into collections without moving the source file", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Link Mode" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "linked.png",
+      content: "fake image bytes",
+      metadata: {
+        evaluation: {
+          evaluateNodeId: "evaluate",
+          decision: "pass",
+          score: 92,
+          tags: ["keeper"]
+        }
+      },
+      now: new Date("2026-06-17T17:40:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          status: "complete",
+          evaluationArtifact: {
+            items: [
+              {
+                assetId: generated.id,
+                assetPath: generated.path,
+                decision: "pass",
+                score: 92,
+                tags: ["keeper"]
+              }
+            ]
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRouteMode: "link",
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        })
+      ],
+      [
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["filter"],
+      now: () => new Date("2026-06-17T17:45:00.000Z")
+    });
+    const [assetAfterRoute] = await listAssets(project.path, { kind: "generated" });
+    const moves = await listAssetMoves(project.path, { assetId: generated.id });
+    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+
+    expect(assetAfterRoute?.path).toBe(generated.path);
+    expect(moves).toEqual([]);
+    expect(selectedCollectionId).toEqual(expect.any(String));
+    await expect(listArtifactsByCollection(project.path, selectedCollectionId as string)).resolves.toEqual([
+      expect.objectContaining({
+        id: generated.metadata.artifactId,
+        path: generated.path
+      })
+    ]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+      routed: [
+        expect.objectContaining({
+          assetId: generated.id,
+          mode: "link",
+          linked: true,
+          moved: false
+        })
+      ]
+    });
+  });
+
+  it("copies routed artifacts into collections while preserving the source asset", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Copy Mode" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "copied.png",
+      content: "fake image bytes",
+      metadata: {
+        evaluation: {
+          evaluateNodeId: "evaluate",
+          decision: "pass",
+          score: 94,
+          tags: ["keeper"]
+        }
+      },
+      now: new Date("2026-06-17T17:46:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          status: "complete",
+          evaluationArtifact: {
+            items: [
+              {
+                assetId: generated.id,
+                assetPath: generated.path,
+                decision: "pass",
+                score: 94,
+                tags: ["keeper"]
+              }
+            ]
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRouteMode: "copy",
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        })
+      ],
+      [
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["filter"],
+      now: () => new Date("2026-06-17T17:47:00.000Z")
+    });
+    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+    const [assetAfterRoute] = await listAssets(project.path, { kind: "generated" });
+    const moves = await listAssetMoves(project.path, { assetId: generated.id });
+
+    expect(assetAfterRoute?.path).toBe(generated.path);
+    expect(moves).toEqual([]);
+    expect(selectedCollectionId).toEqual(expect.any(String));
+    const collectionArtifacts = await listArtifactsByCollection(project.path, selectedCollectionId as string);
+
+    expect(collectionArtifacts).toEqual([
+      expect.objectContaining({
+        path: expect.stringContaining(`${path.sep}collections${path.sep}Selected${path.sep}copied.png`),
+        metadata: expect.objectContaining({
+          copiedFromAssetId: generated.id,
+          routeMode: "copy"
+        })
+      })
+    ]);
+    expect(collectionArtifacts[0]?.metadata.assetId).toBeUndefined();
+    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+      routed: [
+        expect.objectContaining({
+          assetId: generated.id,
+          mode: "copy",
+          copied: true,
+          moved: false,
+          copiedPath: expect.stringContaining(`${path.sep}collections${path.sep}Selected${path.sep}copied.png`)
+        })
+      ]
+    });
+  });
+
+  it("cleans up copied files and copied artifacts when copy-mode routing fails after the file copy", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Copy Rollback" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "copy-rollback.png",
+      content: "fake image bytes",
+      metadata: {
+        evaluation: {
+          evaluateNodeId: "evaluate",
+          decision: "pass",
+          score: 94,
+          tags: ["keeper"]
+        }
+      },
+      now: new Date("2026-06-17T17:48:00.000Z")
+    });
+    const copiedPath = path.join(project.path, "collections", "Selected", "copy-rollback.png");
+    const canvas = graph(
+      [
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          status: "complete",
+          evaluationArtifact: {
+            items: [
+              {
+                assetId: generated.id,
+                assetPath: generated.path,
+                assetMetadata: { artifactId: "missing-copy-parent-artifact" },
+                decision: "pass",
+                score: 94,
+                tags: ["keeper"]
+              }
+            ]
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRouteMode: "copy",
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        })
+      ],
+      [
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["filter"],
+      now: () => new Date("2026-06-17T17:49:00.000Z")
+    });
+    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "filter",
+        status: "error"
+      })
+    ]);
+    await expect(access(copiedPath)).rejects.toThrow();
+    expect((await listArtifacts(project.path, { kind: "image" })).filter((artifact) => artifact.path === copiedPath)).toEqual([]);
+    if (typeof selectedCollectionId === "string") {
+      await expect(listArtifactsByCollection(project.path, selectedCollectionId)).resolves.toEqual([]);
+    }
+  });
+
+  it("preserves existing copy destinations and writes copied routes to the next available filename", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Copy Collision" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "collision.png",
+      content: "new image bytes",
+      metadata: {
+        evaluation: {
+          evaluateNodeId: "evaluate",
+          decision: "pass",
+          score: 94,
+          tags: ["keeper"]
+        }
+      },
+      now: new Date("2026-06-17T17:49:10.000Z")
+    });
+    const selectedDirectory = path.join(project.path, "collections", "Selected");
+    const existingPath = path.join(selectedDirectory, "collision.png");
+    const copiedPath = path.join(selectedDirectory, "collision-2.png");
+    await mkdir(selectedDirectory, { recursive: true });
+    await writeFile(existingPath, "existing image bytes");
+    const canvas = graph(
+      [
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          status: "complete",
+          evaluationArtifact: {
+            items: [
+              {
+                assetId: generated.id,
+                assetPath: generated.path,
+                decision: "pass",
+                score: 94,
+                tags: ["keeper"]
+              }
+            ]
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRouteMode: "copy",
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        })
+      ],
+      [
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["filter"],
+      now: () => new Date("2026-06-17T17:49:20.000Z")
+    });
+
+    expect(result.results[0]).toMatchObject({ status: "complete" });
+    await expect(readFile(existingPath, "utf8")).resolves.toBe("existing image bytes");
+    await expect(readFile(copiedPath, "utf8")).resolves.toBe("new image bytes");
+    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+      routed: [
+        expect.objectContaining({
+          copiedPath
+        })
+      ]
+    });
+  });
+
+  it("routes copied artifact-only browser payloads without treating artifact ids as asset ids", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Artifact Only Review" });
+    const copiedPath = path.join(project.path, "collections", "Selected", "artifact-only.png");
+    const copiedArtifact = await createArtifact(project.path, {
+      kind: "image",
+      nodeId: "filter-source",
+      path: copiedPath,
+      metadata: {
+        title: "Copied artifact only",
+        artifactId: "artifact-only-source",
+        copiedFromAssetId: "source-generated-asset",
+        copiedFromPath: path.join(project.path, "assets", "generated", "source.png")
+      },
+      now: new Date("2026-06-17T17:49:30.000Z")
+    });
+    const canvas = graph(
+      [
+        node("artifact-reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          status: "complete",
+          assetKind: "generated",
+          assetPath: copiedPath,
+          assetMetadata: {
+            artifactId: copiedArtifact.id,
+            copiedFromAssetId: "source-generated-asset",
+            copiedFromPath: path.join(project.path, "assets", "generated", "source.png")
+          }
+        }),
+        node("compare", {
+          definitionId: "store-compare",
+          kind: "Store",
+          subtype: "Compare",
+          reviewRating: 5,
+          reviewTags: "keeper",
+          reviewDecision: "select"
+        }),
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          instruction: "Pass copied artifact-only images.",
+          evaluationThreshold: 70
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRouteMode: "link",
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        })
+      ],
+      [
+        edge("edge-artifact-compare", "artifact-reference", "compare", "image"),
+        edge("edge-compare-evaluate", "compare", "evaluate", "review"),
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
+      policy: "selected",
+      targetNodeIds: ["compare", "evaluate", "filter"],
+      now: () => new Date("2026-06-17T17:49:40.000Z")
+    });
+    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+
+    expect(result.results.map((entry) => entry.status)).toEqual(["complete", "complete", "complete"]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "compare")?.data?.compareArtifact).toMatchObject({
+      items: [
+        expect.objectContaining({
+          artifactId: copiedArtifact.id,
+          assetId: undefined
+        })
+      ]
+    });
+    expect(selectedCollectionId).toEqual(expect.any(String));
+    await expect(listArtifactsByCollection(project.path, selectedCollectionId as string)).resolves.toEqual([
+      expect.objectContaining({
+        id: copiedArtifact.id,
+        path: copiedPath
+      })
+    ]);
+  });
+
+  it("fails artifact-only copied inputs in move-mode filters instead of completing as a no-op", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Artifact Only Move Reject" });
+    const copiedPath = path.join(project.path, "collections", "Selected", "artifact-only.png");
+    const copiedArtifact = await createArtifact(project.path, {
+      kind: "image",
+      nodeId: "filter-source",
+      path: copiedPath,
+      metadata: {
+        title: "Copied artifact only",
+        artifactId: "artifact-only-source",
+        copiedFromAssetId: "source-generated-asset",
+        copiedFromPath: path.join(project.path, "assets", "generated", "source.png")
+      },
+      now: new Date("2026-06-17T17:49:45.000Z")
+    });
+    const selectedCollection = await ensureCollectionFolder(project.path, {
+      name: "Selected",
+      now: new Date("2026-06-17T17:49:46.000Z")
+    });
+    const canvas = graph(
+      [
+        node("artifact-reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          status: "complete",
+          assetKind: "generated",
+          assetPath: copiedPath,
+          assetMetadata: {
+            artifactId: copiedArtifact.id,
+            copiedFromAssetId: "source-generated-asset",
+            copiedFromPath: path.join(project.path, "assets", "generated", "source.png")
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected",
+          storeAssetId: selectedCollection.id,
+          storePath: selectedCollection.path,
+          storeMetadata: selectedCollection.metadata
+        })
+      ],
+      [
+        edge("edge-artifact-filter", "artifact-reference", "filter", "image"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["filter"],
+      now: () => new Date("2026-06-17T17:49:50.000Z")
+    });
+
+    expect(result.results[0]).toMatchObject({
+      status: "error",
+      reason: expect.stringContaining("cannot be moved without an asset id")
+    });
+    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toBeUndefined();
+    await expect(listAssetMoves(project.path)).resolves.toEqual([]);
+    await expect(listArtifactsByCollection(project.path, selectedCollection.id)).resolves.toEqual([]);
+  });
+
+  it("rolls back the source file and move audit when a physical filter move fails", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Filter Move Rollback" });
+    const generated = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "rollback.png",
+      content: "fake image bytes",
+      metadata: {
+        evaluation: {
+          evaluateNodeId: "evaluate",
+          decision: "pass",
+          score: 92,
+          tags: ["keeper"]
+        }
+      },
+      now: new Date("2026-06-17T17:50:00.000Z")
+    });
+    await updateAssetMetadata(project.path, {
+      assetId: generated.id,
+      metadata: { artifactId: "missing-artifact-for-rollback" },
+      now: new Date("2026-06-17T17:51:00.000Z")
+    });
+    const canvas = graph(
+      [
+        node("evaluate", {
+          definitionId: "store-evaluate",
+          kind: "Store",
+          subtype: "Evaluate",
+          status: "complete",
+          evaluationArtifact: {
+            items: [
+              {
+                assetId: generated.id,
+                assetPath: generated.path,
+                decision: "pass",
+                score: 92,
+                tags: ["keeper"]
+              }
+            ]
+          }
+        }),
+        node("filter", {
+          definitionId: "store-filter",
+          kind: "Store",
+          subtype: "Filter",
+          filterAutoApply: true,
+          filterRouteMode: "move",
+          filterRules: "pass -> Selected"
+        }),
+        node("selected", {
+          definitionId: "store-collection",
+          kind: "Store",
+          subtype: "Collection",
+          title: "Selected",
+          label: "Selected"
+        })
+      ],
+      [
+        edge("edge-evaluate-filter", "evaluate", "filter", "evaluation"),
+        edge("edge-filter-selected", "filter", "selected", "pass")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+        policy: "selected",
+        targetNodeIds: ["filter"],
+        now: () => new Date("2026-06-17T17:55:00.000Z")
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "filter",
+        status: "error",
+        reason: expect.stringContaining("missing-artifact-for-rollback")
+      })
+    ]);
+    await expect(readFile(generated.path, "utf8")).resolves.toBe("fake image bytes");
+    await expect(listAssetMoves(project.path, { assetId: generated.id })).resolves.toEqual([]);
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
+      expect.objectContaining({ id: generated.id, path: generated.path })
+    ]);
   });
 
   it("refreshes upstream prompt artifacts before the target generation", () => {
@@ -720,74 +1792,310 @@ describe("execution planning", () => {
 });
 
 describe("fake local execution", () => {
-  it("runs Assistant text nodes and stores visible deterministic lineage", async () => {
+  it("runs Prompt helper nodes through Codex vision workers without overwriting downstream Prompt instructions", async () => {
     const parentDirectory = await createTempRoot();
-    const project = await createProject({ parentDirectory, name: "Assistant Text" });
+    const project = await createProject({ parentDirectory, name: "Assistant Vision" });
+    const referencePath = path.join(project.path, "red-texture-reference.png");
+    await writeFile(referencePath, "reference-image-bytes");
+    const calls: ProviderProcessCall[] = [];
     const canvas = graph(
       [
         node("prompt", {
-          definitionId: "prompt-general",
+          definitionId: "prompt-prompt",
           kind: "Prompt",
-          subtype: "General",
+          subtype: "Prompt",
           instruction: "chrome bottle in a quiet campaign set"
         }),
-        ...[
-          ["brainstormer", "Brainstormer"],
-          ["mutator", "Mutator"],
-          ["expander", "Expander"],
-          ["reinforcer", "Reinforcer"]
-        ].map(([id, subtype]) =>
-          node(id, {
-            definitionId: `assistant-${subtype.toLowerCase()}`,
-            kind: "Assistant",
-            subtype,
-            instruction: `${subtype} direction`,
-            mutationSeed: "phase-8-seed",
-            mutationPreset: "Lens Shift",
-            variationStrength: 55,
-            lockedTerms: "chrome bottle"
-          } as any)
-        )
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          title: "red texture reference",
+          assetId: "reference-1",
+          assetKind: "reference",
+          assetPath: referencePath,
+          assetMetadata: { mimeType: "image/png" },
+          notes: "Use the red texture as a surface read."
+        }),
+        node("assistant", {
+          definitionId: "prompt-brainstormer",
+          kind: "Prompt",
+          subtype: "Brainstormer",
+          instruction: "Inspect the reference and propose three image directions."
+        }),
+        node("assistant-prompt", {
+          definitionId: "prompt-prompt",
+          kind: "Prompt",
+          subtype: "Prompt",
+          instruction: "Waiting for assistant."
+        })
       ],
       [
-        edge("edge-prompt-brainstormer", "prompt", "brainstormer", "context"),
-        edge("edge-prompt-mutator", "prompt", "mutator", "context"),
-        edge("edge-prompt-expander", "prompt", "expander", "context"),
-        edge("edge-prompt-reinforcer", "prompt", "reinforcer", "context")
+        edge("edge-prompt-assistant", "prompt", "assistant", "context"),
+        edge("edge-reference-assistant", "reference", "assistant", "style"),
+        edge("edge-assistant-prompt", "assistant", "assistant-prompt", "prompt")
       ]
     );
 
     const result = await executeGraphRun(project.path, canvas, {
       policy: "selected",
-      targetNodeIds: ["brainstormer", "mutator", "expander", "reinforcer"],
+      targetNodeIds: ["assistant"],
+      assistantCodexCliPath: "C:\\Tools\\codex.exe",
+      assistantProviderFileExists: async () => true,
+      assistantProviderRunner: async (call: ProviderProcessCall) => {
+        calls.push(call);
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\nWrite/.exec(providerStdin(call))?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex assistant prompt.");
+        }
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-assistant",
+            status: "complete",
+            text: "Brainstorm routes\n1. Make the chrome bottle pick up the red texture as a glossy reflection.",
+            error: null,
+            caveats: ""
+          }),
+          "utf8"
+        );
+        return { stdout: "ok", stderr: "", exitCode: 0 };
+      },
       now: () => new Date("2026-06-17T15:00:00.000Z")
     });
 
-    expect(result.results.map((entry) => [entry.nodeId, entry.action, entry.status])).toEqual([
-      ["brainstormer", "assistant-text", "complete"],
-      ["mutator", "assistant-text", "complete"],
-      ["expander", "assistant-text", "complete"],
-      ["reinforcer", "assistant-text", "complete"]
-    ]);
-
-    for (const assistantId of ["brainstormer", "mutator", "expander", "reinforcer"]) {
-      const assistantNode = result.graph.nodes.find((candidate) => candidate.id === assistantId);
-
-      expect(assistantNode?.data).toMatchObject({
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "assistant",
+        action: "assistant-codex",
         status: "complete",
-        rerunState: "complete",
-        textOutput: expect.stringContaining("chrome bottle"),
-        textOutputArtifact: expect.objectContaining({
-          engine: "local-deterministic-text-engine",
-          sourceText: expect.stringContaining("chrome bottle"),
-          resultText: expect.stringContaining("chrome bottle"),
-          settings: expect.objectContaining({
-            seed: "phase-8-seed",
-            preset: "Lens Shift"
+        metadata: expect.objectContaining({
+          text: expect.objectContaining({
+            provider: expect.objectContaining({ id: "codex-vision-assistant" }),
+            prompt: expect.stringContaining("General: chrome bottle in a quiet campaign set"),
+            references: [
+              expect.objectContaining({
+                nodeId: "reference",
+                role: "style",
+                assetPath: referencePath
+              })
+            ]
           })
         })
-      });
-    }
+      })
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toContain("--image");
+    expect(calls[0]?.args).toContain(referencePath);
+    expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
+    expect(calls[0]?.args.at(-1)).toBe("-");
+    expect(providerStdin(calls[0]!)).toContain("Inspect any supplied images directly");
+    expect(providerStdin(calls[0]!)).toContain("General: chrome bottle in a quiet campaign set");
+
+    const [assistantProviderRun] = await listProviderRuns(project.path);
+    const assistantProviderInput = assistantProviderRun?.request.providerInput as
+      | { inputs?: Array<Record<string, unknown>> }
+      | undefined;
+    expect(assistantProviderInput?.inputs).toEqual([
+      expect.objectContaining({
+        channel: "text",
+        role: "general",
+        text: "chrome bottle in a quiet campaign set",
+        sourceNodeId: "prompt",
+        sourceEdgeId: "edge-prompt-assistant"
+      }),
+      expect.objectContaining({
+        channel: "image",
+        role: "style",
+        assetId: "reference-1",
+        assetPath: referencePath,
+        sourceNodeId: "reference",
+        sourceEdgeId: "edge-reference-assistant"
+      })
+    ]);
+
+    const assistantNode = result.graph.nodes.find((candidate) => candidate.id === "assistant");
+    const downstreamPromptNode = result.graph.nodes.find((candidate) => candidate.id === "assistant-prompt");
+    expect(assistantNode?.data).toMatchObject({
+      status: "complete",
+      rerunState: "complete",
+      textOutput: expect.stringContaining("glossy reflection"),
+      textOutputArtifact: expect.objectContaining({
+        provider: expect.objectContaining({ id: "codex-vision-assistant" }),
+        resultText: expect.stringContaining("glossy reflection"),
+        references: [
+          expect.objectContaining({
+            role: "style",
+            assetPath: referencePath
+          })
+        ]
+      })
+    });
+    expect((assistantNode?.data?.textOutputArtifact as Record<string, unknown> | undefined)?.populatedPromptNodeIds).toBeUndefined();
+    expect(downstreamPromptNode?.data).toMatchObject({
+      instruction: "Waiting for assistant.",
+      status: "idle"
+    });
+  });
+
+  it("allows Prompt helper nodes to consume unavailable image-to-text adapter edges through Codex vision", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Assistant Native Vision Adapter" });
+    const referencePath = path.join(project.path, "subject-reference.png");
+    await writeFile(referencePath, "reference-image-bytes");
+    const calls: ProviderProcessCall[] = [];
+    const canvas = graph(
+      [
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          title: "subject reference",
+          assetId: "reference-subject",
+          assetKind: "reference",
+          assetPath: referencePath,
+          assetMetadata: { mimeType: "image/png" }
+        }),
+        node("assistant", {
+          definitionId: "prompt-brainstormer",
+          kind: "Prompt",
+          subtype: "Brainstormer",
+          instruction: "Describe the subject from the image in prompt-ready language."
+        })
+      ],
+      [
+        unavailableAdapterEdge("edge-reference-assistant", "reference", "assistant", {
+          label: "subject",
+          role: "subject",
+          disabledReason: "Visual caption adapter is unavailable."
+        })
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["assistant"],
+      assistantCodexCliPath: "C:\\Tools\\codex.exe",
+      assistantProviderFileExists: async () => true,
+      assistantProviderRunner: async (call: ProviderProcessCall) => {
+        calls.push(call);
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\nWrite/.exec(providerStdin(call))?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex assistant prompt.");
+        }
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-assistant-vision",
+            status: "complete",
+            text: "Subject: elegant gentleman with autumn styling and cinematic posture.",
+            error: null,
+            caveats: ""
+          }),
+          "utf8"
+        );
+        return { stdout: "ok", stderr: "", exitCode: 0 };
+      },
+      now: () => new Date("2026-06-17T15:05:00.000Z")
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "assistant",
+        action: "assistant-codex",
+        status: "complete"
+      })
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toContain("--image");
+    expect(calls[0]?.args).toContain(referencePath);
+    expect(calls[0]?.args.at(-1)).toBe("-");
+    expect(providerStdin(calls[0]!)).toContain("Describe the subject from the image");
+
+    const [assistantProviderRun] = await listProviderRuns(project.path);
+    const assistantProviderInput = assistantProviderRun?.request.providerInput as
+      | { inputs?: Array<Record<string, unknown>>; references?: Array<Record<string, unknown>> }
+      | undefined;
+    expect(assistantProviderInput?.inputs).toEqual([
+      expect.objectContaining({
+        channel: "image",
+        role: "subject",
+        assetId: "reference-subject",
+        assetPath: referencePath,
+        sourceNodeId: "reference",
+        sourceEdgeId: "edge-reference-assistant"
+      })
+    ]);
+    expect(assistantProviderInput?.references).toEqual([
+      expect.objectContaining({
+        nodeId: "reference",
+        role: "subject",
+        assetPath: referencePath
+      })
+    ]);
+  });
+
+  it("normalizes assistant rewrite outputs so mutations do not narrate previous-state changes", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Assistant Rewrite Normalization" });
+    const canvas = graph(
+      [
+        node("subject", {
+          definitionId: "prompt-prompt",
+          kind: "Prompt",
+          subtype: "Prompt",
+          instruction: "Brazilian woman holding a watermelon"
+        }),
+        node("mutator", {
+          definitionId: "prompt-mutator",
+          kind: "Prompt",
+          subtype: "Mutator",
+          instruction: "Change the fruit to pineapple."
+        }),
+        node("expander", {
+          definitionId: "prompt-expander",
+          kind: "Prompt",
+          subtype: "Expander",
+          instruction: "Make the subject more detailed."
+        })
+      ],
+      [
+        edge("edge-subject-mutator", "subject", "mutator", "subject"),
+        edge("edge-mutator-expander", "mutator", "expander", "subject")
+      ]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["mutator"],
+      assistantCodexCliPath: "C:\\Tools\\codex.exe",
+      assistantProviderFileExists: async () => true,
+      assistantProviderRunner: async (call: ProviderProcessCall) => {
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\nWrite/.exec(providerStdin(call))?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex assistant prompt.");
+        }
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-mutator",
+            status: "complete",
+            text: "Holding a ripe pineapple instead of a watermelon.",
+            error: null,
+            caveats: ""
+          }),
+          "utf8"
+        );
+        return { stdout: "ok", stderr: "", exitCode: 0 };
+      },
+      now: () => new Date("2026-06-17T15:10:00.000Z")
+    });
+
+    const mutatorNode = result.graph.nodes.find((candidate) => candidate.id === "mutator");
+    const expanderNode = result.graph.nodes.find((candidate) => candidate.id === "expander");
+
+    expect(mutatorNode?.data?.textOutput).toBe("Holding a ripe pineapple.");
+    expect(expanderNode?.data?.instruction).toBe("Make the subject more detailed.");
   });
 
   it("applies seed-stable prompt mutation while preserving locked terms", async () => {
@@ -851,7 +2159,7 @@ describe("fake local execution", () => {
     expect(first.graph.nodes[0]?.data.textOutputArtifact).toMatchObject({
       kind: "prompt-mutation",
       sourceText: "a reflective launch portrait",
-      resultText: firstPrompt,
+      resultText: expect.stringContaining("a reflective launch portrait"),
       settings: expect.objectContaining({
         seed: "same-seed",
         preset: "Material Swap",
@@ -892,6 +2200,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "refresh-upstream",
       targetNodeIds: ["generation"],
       now: () => new Date("2026-06-17T15:20:00.000Z")
@@ -906,8 +2215,57 @@ describe("fake local execution", () => {
     expect(generationNode?.data.assembledPrompt).toBe(promptNode?.data.assembledPrompt);
     expect(generatedAsset?.metadata.lineage).toMatchObject({
       prompt: promptNode?.data.assembledPrompt,
-      sections: [expect.objectContaining({ nodeId: "prompt", text: promptNode?.data.assembledPrompt })]
+      sections: [expect.objectContaining({ nodeId: "prompt", text: promptNode?.data.textOutput })]
     });
+  });
+
+  it("passes generation aspect ratio and resolution into provider input and lineage", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Generation Size" });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          generationAspectRatio: "9:16",
+          generationResolution: "1536-long-edge",
+          generationWidth: 864,
+          generationHeight: 1536
+        } as any)
+      ],
+      []
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
+      policy: "cached-inputs",
+      targetNodeIds: ["generation"],
+      now: () => new Date("2026-06-17T15:30:00.000Z")
+    });
+    const [providerRun] = await listProviderRuns(project.path);
+    const providerInput = providerRun?.request.providerInput as
+      | { output?: Record<string, unknown> }
+      | undefined;
+    const generationNode = result.graph.nodes.find((candidate) => candidate.id === "generation");
+    const generatedAssets = await listAssets(project.path, { kind: "generated" });
+    const generatedAsset = generatedAssets.find((asset) => asset.id === generationNode?.data.assetId);
+
+    expect(providerInput?.output).toMatchObject({
+      aspectRatio: "9:16",
+      resolution: "1536-long-edge",
+      width: 864,
+      height: 1536
+    });
+    expect(generatedAsset?.metadata.lineage).toMatchObject({
+      output: {
+        aspectRatio: "9:16",
+        resolution: "1536-long-edge",
+        width: 864,
+        height: 1536
+      }
+    });
+    await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain('width="864" height="1536"');
   });
 
   it("runs an Inpaint edit with the fake provider and records parent lineage", async () => {
@@ -956,6 +2314,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "cached-inputs",
       targetNodeIds: ["edit"],
       now: () => new Date("2026-06-17T12:45:00.000Z")
@@ -1014,10 +2373,100 @@ describe("fake local execution", () => {
           assetId: "mask-asset-1",
           assetPath: path.join(project.path, "assets", "masks", "mask.svg")
         },
-        prompt: "replace the label with a clean blue mark"
+        prompt: "General: replace the label with a clean blue mark"
       }
     });
+    const [providerRun] = await listProviderRuns(project.path);
+    const providerInput = providerRun?.request.providerInput as
+      | { inputs?: Array<Record<string, unknown>> }
+      | undefined;
+    expect(providerInput?.inputs).toEqual([
+      expect.objectContaining({
+        channel: "image",
+        role: "general",
+        assetId: parentAsset.id,
+        assetPath: parentAsset.path,
+        sourceNodeId: "generation",
+        sourceEdgeId: "edge-generation-edit"
+      }),
+      expect.objectContaining({
+        channel: "text",
+        role: "general",
+        text: "replace the label with a clean blue mark",
+        sourceNodeId: "prompt",
+        sourceEdgeId: "edge-prompt-edit"
+      })
+    ]);
     await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain("ETHER_FAKE_EDITED_IMAGE");
+  });
+
+  it("records a failed provider run when Codex edit fails after invocation", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Failed Edit Provider Run" });
+    const parentAsset = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "parent.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>parent</title></svg>"
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: parentAsset.id,
+          assetKind: parentAsset.kind,
+          assetPath: parentAsset.path,
+          assetMetadata: parentAsset.metadata
+        }),
+        node("edit", {
+          definitionId: "edit-inpaint",
+          kind: "Edit",
+          subtype: "Inpaint",
+          instruction: "repair only the label area"
+        })
+      ],
+      [edge("edge-generation-edit", "generation", "edit", "image")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["edit"],
+      imageCodexCliPath: "C:\\Tools\\codex.exe",
+      imageProviderFileExists: async () => true,
+      imageProviderRunner: async () => {
+        throw new Error("Codex edit worker crashed after launch.");
+      }
+    });
+    const providerRuns = await listProviderRuns(project.path);
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "edit",
+        status: "error",
+        action: "edit",
+        reason: expect.stringContaining("Codex edit worker crashed after launch")
+      })
+    ]);
+    expect(providerRuns).toEqual([
+      expect.objectContaining({
+        providerId: CODEX_PROVIDER_ID,
+        status: "failed",
+        request: expect.objectContaining({
+          operation: "image.edit",
+          nodeId: "edit",
+          iteration: 1
+        }),
+        error: expect.objectContaining({
+          name: "Error",
+          message: "Codex edit worker crashed after launch."
+        })
+      })
+    ]);
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
+      expect.objectContaining({ id: parentAsset.id })
+    ]);
   });
 
   it("uses freshly rerun upstream image and mask assets before cached edit fields", async () => {
@@ -1099,6 +2548,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "refresh-upstream",
       targetNodeIds: ["edit"],
       now: () => new Date("2026-06-17T12:00:00.000Z")
@@ -1125,6 +2575,7 @@ describe("fake local execution", () => {
         }
       }
     });
+    expect(editResult?.metadata.references).toEqual([]);
     expect(editNode?.data).toMatchObject({
       sourceAssetId: freshParentAsset?.id,
       sourceAssetPath: freshParentAsset?.path,
@@ -1147,6 +2598,8 @@ describe("fake local execution", () => {
         }
       }
     });
+    expect(editedAsset?.metadata.lineage.references).toEqual([]);
+    expect(editedAsset?.metadata.lineage.edgeRoles).toEqual([]);
     await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain(freshParentAsset!.id);
     await expect(readFile(editedAsset!.path, "utf8")).resolves.not.toContain(staleParentAsset.id);
   });
@@ -1232,6 +2685,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "selected",
       targetNodeIds: ["upscale"]
     });
@@ -1270,7 +2724,7 @@ describe("fake local execution", () => {
     });
   });
 
-  it("uses the default fake image provider and records provider lineage", async () => {
+  it("uses the explicit simulation image provider and records provider lineage", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Fake Provider Image" });
     const canvas = graph(
@@ -1291,12 +2745,14 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "refresh-upstream",
       targetNodeIds: ["generation"],
       now: () => new Date("2026-06-17T12:30:00.000Z")
     });
 
     const generatedAsset = (await listAssets(project.path, { kind: "generated" }))[0];
+    const providerRuns = await listProviderRuns(project.path);
 
     expect(result.results.find((entry) => entry.nodeId === "generation")).toMatchObject({
       status: "complete",
@@ -1319,12 +2775,125 @@ describe("fake local execution", () => {
           capabilities: expect.arrayContaining(["image.generate"])
         },
         iteration: 1,
-        prompt: "deterministic electric blue product render"
+        prompt: "General: deterministic electric blue product render"
       }
     });
     await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain(
       "ETHER_FAKE_GENERATED_IMAGE"
     );
+    expect(providerRuns).toEqual([
+      expect.objectContaining({
+        runId: expect.any(String),
+        providerId: "ether-fake-local",
+        model: "deterministic-svg",
+        status: "complete",
+        request: expect.objectContaining({
+          operation: "image.generate",
+          nodeId: "generation",
+          iteration: 1,
+          policy: "refresh-upstream",
+          provider: expect.objectContaining({
+            id: "ether-fake-local",
+            route: "local-fake",
+            capabilities: expect.arrayContaining(["image.generate"])
+          }),
+          providerInput: expect.objectContaining({
+            generationNodeId: "generation",
+            prompt: "General: deterministic electric blue product render"
+          })
+        }),
+        response: expect.objectContaining({
+          providerId: "ether-fake-local",
+          artifactCount: 1,
+          artifactIds: expect.arrayContaining([generatedAsset?.id])
+        }),
+        error: null
+      })
+    ]);
+  });
+
+  it("defaults image generation to Codex CLI and reports unavailable Codex instead of falling back to simulation", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Codex Default Unavailable" });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      []
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["generation"],
+      imageCodexCliPath: "C:\\Tools\\missing-codex.exe",
+      imageProviderFileExists: async () => false
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "generation",
+        status: "error",
+        action: "generate",
+        reason: expect.stringMatching(/missing-codex\.exe|codex cli/i)
+      })
+    ]);
+    expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
+  });
+
+  it("defaults image edits to Codex CLI and reports unavailable Codex instead of falling back to simulation", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Codex Default Edit Unavailable" });
+    const parentAsset = await saveGeneratedAsset(project.path, {
+      generationNodeId: "generation",
+      fileName: "parent.svg",
+      content: "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>parent</title></svg>"
+    });
+    const canvas = graph(
+      [
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image",
+          status: "complete",
+          assetId: parentAsset.id,
+          assetKind: parentAsset.kind,
+          assetPath: parentAsset.path,
+          assetMetadata: parentAsset.metadata
+        }),
+        node("edit", {
+          definitionId: "edit-inpaint",
+          kind: "Edit",
+          subtype: "Inpaint",
+          instruction: "repair only the label area"
+        })
+      ],
+      [edge("edge-generation-edit", "generation", "edit", "image")]
+    );
+
+    const result = await executeGraphRun(project.path, canvas, {
+      policy: "selected",
+      targetNodeIds: ["edit"],
+      imageCodexCliPath: "C:\\Tools\\missing-codex.exe",
+      imageProviderFileExists: async () => false
+    });
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        nodeId: "edit",
+        status: "error",
+        action: "edit",
+        reason: expect.stringMatching(/missing-codex\.exe|codex cli/i)
+      })
+    ]);
+    expect(result.graph.nodes.find((candidate) => candidate.id === "edit")?.data?.assetId).toBeUndefined();
+    await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
+      expect.objectContaining({ id: parentAsset.id })
+    ]);
   });
 
   it("reports a missing provider without writing generated assets", async () => {
@@ -1378,6 +2947,7 @@ describe("fake local execution", () => {
       targetNodeIds: ["generation"],
       providerId: "google-nano-banana-pro"
     } as any);
+    const providerRuns = await listProviderRuns(project.path);
 
     expect(result.results).toEqual([
       expect.objectContaining({
@@ -1389,6 +2959,24 @@ describe("fake local execution", () => {
     ]);
     expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
+    expect(providerRuns).toEqual([
+      expect.objectContaining({
+        providerId: "google-nano-banana-pro",
+        status: "failed",
+        request: expect.objectContaining({
+          operation: "image.generate",
+          nodeId: "generation",
+          iteration: 1,
+          diagnostic: expect.objectContaining({
+            availability: "unavailable"
+          })
+        }),
+        error: expect.objectContaining({
+          message: expect.stringMatching(/google-nano-banana-pro.*clean local CLI\/MCP route/i)
+        }),
+        response: null
+      })
+    ]);
   });
 
   it("runs a branch with exactly the requested fake generation count", async () => {
@@ -1412,6 +3000,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "branch",
       targetNodeIds: ["prompt"],
       runCountCap: 3,
@@ -1456,6 +3045,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "branch",
       targetNodeIds: ["prompt"],
       runCountCap: 3,
@@ -1555,6 +3145,7 @@ describe("fake local execution", () => {
     );
 
     const result = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "refresh-upstream",
       targetNodeIds: ["generation"],
       now: () => new Date("2026-06-17T13:00:00.000Z")
@@ -1567,13 +3158,13 @@ describe("fake local execution", () => {
     expect(promptNode?.data).toMatchObject({
       status: "complete",
       rerunState: "complete",
-      assembledPrompt: "glass bottle under crisp studio light"
+      assembledPrompt: "General: glass bottle under crisp studio light"
     });
     expect(generationNode?.data).toMatchObject({
       status: "complete",
       rerunState: "complete",
-      assembledPrompt: "glass bottle under crisp studio light",
-      assembledNegativePrompt: "no warped labels",
+      assembledPrompt: "General: glass bottle under crisp studio light",
+      assembledNegativePrompt: "Negative: no warped labels",
       assetKind: "generated"
     });
     expect(generatedAsset?.metadata).toMatchObject({
@@ -1583,13 +3174,109 @@ describe("fake local execution", () => {
         provider: {
           id: "ether-fake-local"
         },
-        prompt: "glass bottle under crisp studio light",
-        negativePrompt: "no warped labels"
+        prompt: "General: glass bottle under crisp studio light",
+        negativePrompt: "Negative: no warped labels"
       }
     });
     await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain(
       "glass bottle under crisp studio light"
     );
+  });
+
+  it("sends channel and role payload envelopes to image generation providers", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Generation Payload Envelopes" });
+    const referencePath = path.join(project.path, "style-reference.png");
+    await writeFile(referencePath, "style-reference-bytes");
+    const canvas = graph(
+      [
+        node("subject", {
+          definitionId: "prompt-prompt",
+          kind: "Prompt",
+          subtype: "Prompt",
+          instruction: "chrome bottle portrait"
+        }),
+        node("negative", {
+          definitionId: "prompt-prompt",
+          kind: "Prompt",
+          subtype: "Prompt",
+          instruction: "warped logo"
+        }),
+        node("reference", {
+          definitionId: "reference-image",
+          kind: "Reference",
+          subtype: "Image",
+          title: "Style plate",
+          assetId: "style-reference-asset",
+          assetKind: "reference",
+          assetPath: referencePath,
+          assetMetadata: { mimeType: "image/png" }
+        }),
+        node("generation", {
+          definitionId: "generation-image",
+          kind: "Generation",
+          subtype: "Image"
+        })
+      ],
+      [
+        {
+          id: "edge-subject-generation",
+          source: "subject",
+          target: "generation",
+          label: "subject",
+          data: { graphVersion: "2.5", sourceChannel: "text", targetChannel: "text", role: "subject" }
+        },
+        {
+          id: "edge-negative-generation",
+          source: "negative",
+          target: "generation",
+          label: "negative",
+          data: { graphVersion: "2.5", sourceChannel: "text", targetChannel: "text", role: "negative" }
+        },
+        {
+          id: "edge-reference-generation",
+          source: "reference",
+          target: "generation",
+          label: "style",
+          data: { graphVersion: "2.5", sourceChannel: "image", targetChannel: "image", role: "style" }
+        }
+      ]
+    );
+
+    await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
+      policy: "selected",
+      targetNodeIds: ["generation"],
+      now: () => new Date("2026-06-17T13:30:00.000Z")
+    });
+
+    const [providerRun] = await listProviderRuns(project.path);
+    const providerInput = providerRun?.request.providerInput as { inputs?: Array<Record<string, unknown>> } | undefined;
+
+    expect(providerInput?.inputs).toEqual([
+      expect.objectContaining({
+        channel: "text",
+        role: "subject",
+        text: "chrome bottle portrait",
+        sourceNodeId: "subject",
+        sourceEdgeId: "edge-subject-generation"
+      }),
+      expect.objectContaining({
+        channel: "text",
+        role: "negative",
+        text: "warped logo",
+        sourceNodeId: "negative",
+        sourceEdgeId: "edge-negative-generation"
+      }),
+      expect.objectContaining({
+        channel: "image",
+        role: "style",
+        assetId: "style-reference-asset",
+        assetPath: referencePath,
+        sourceNodeId: "reference",
+        sourceEdgeId: "edge-reference-generation"
+      })
+    ]);
   });
 
   it("skips locked nodes without mutating their data", async () => {
@@ -1650,6 +3337,7 @@ describe("fake local execution", () => {
       [edge("edge-prompt-generation", "prompt", "generation")]
     );
     const firstRun = await executeGraphRun(project.path, canvas, {
+      ...simulationProvider,
       policy: "refresh-upstream",
       targetNodeIds: ["generation"],
       now: () => new Date("2026-06-17T15:00:00.000Z")
@@ -1678,6 +3366,7 @@ describe("fake local execution", () => {
     });
 
     const secondRun = await executeGraphRun(project.path, staleGraph, {
+      ...simulationProvider,
       policy: "cached-inputs",
       targetNodeIds: ["generation"],
       now: () => new Date("2026-06-17T15:10:00.000Z")
@@ -1686,7 +3375,7 @@ describe("fake local execution", () => {
 
     expect(rerunGeneration?.data).toMatchObject({
       rerunState: "complete",
-      assembledPrompt: "revised prompt"
+      assembledPrompt: "General: revised prompt"
     });
     expect(rerunGeneration?.data?.staleSince).toBeUndefined();
   });

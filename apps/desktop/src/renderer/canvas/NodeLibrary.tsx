@@ -1,37 +1,52 @@
-import { NODE_CATEGORIES, type EtherNodeDefinition } from "@ether/engine/graph/nodeCatalog";
+import { useEffect, useRef, useState } from "react";
+import type { CanvasTemplateId } from "@ether/engine/graph/reviewRouterTemplate";
+import type { EtherNodeDefinition } from "@ether/engine/graph/nodeCatalog";
+import { AddNodePalette } from "./library/AddNodePalette";
+import { TemplateGallery } from "./library/TemplateGallery";
 
 type NodeLibraryProps = {
   onAddNode(definition: EtherNodeDefinition): void;
+  onAddTemplate(templateId: CanvasTemplateId): void;
+  templateFocusSignal: number;
 };
 
-export function NodeLibrary({ onAddNode }: NodeLibraryProps) {
+export function NodeLibrary({ onAddNode, onAddTemplate, templateFocusSignal }: NodeLibraryProps) {
+  const [activeSection, setActiveSection] = useState<"nodes" | "templates">("nodes");
+  const templateButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (templateFocusSignal === 0) {
+      return;
+    }
+
+    setActiveSection("templates");
+    window.requestAnimationFrame(() => templateButtonRef.current?.focus());
+  }, [templateFocusSignal]);
+
   return (
-    <div className="node-library-list">
-      {NODE_CATEGORIES.map((category) => (
-        <details key={category.id} open={category.label === "Prompt" || category.label === "Generation"}>
-          <summary>{category.label}</summary>
-          <div className="node-library-items">
-            {category.definitions.map((definition) => (
-              <button
-                key={definition.id}
-                type="button"
-                className="node-library-item"
-                draggable
-                onDragStart={(event) => {
-                  event.dataTransfer.setData("application/ether-node-definition", definition.id);
-                  event.dataTransfer.effectAllowed = "copy";
-                }}
-                onClick={() => onAddNode(definition)}
-                data-testid={`library-node-${definition.id}`}
-              >
-                <span aria-hidden="true" style={{ background: definition.accent }} />
-                <strong>{definition.subtype}</strong>
-                <em>{definition.category}</em>
-              </button>
-            ))}
-          </div>
-        </details>
-      ))}
+    <div className="node-library">
+      <div className="node-library-tabs" aria-label="Node library sections">
+        <button
+          type="button"
+          aria-pressed={activeSection === "nodes"}
+          onClick={() => setActiveSection("nodes")}
+        >
+          Nodes
+        </button>
+        <button
+          ref={templateButtonRef}
+          type="button"
+          aria-pressed={activeSection === "templates"}
+          onClick={() => setActiveSection("templates")}
+        >
+          Templates
+        </button>
+      </div>
+      {activeSection === "nodes" ? (
+        <AddNodePalette onAddNode={onAddNode} />
+      ) : (
+        <TemplateGallery onAddTemplate={onAddTemplate} />
+      )}
     </div>
   );
 }

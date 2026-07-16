@@ -1,11 +1,14 @@
-import { Activity, ListChecks, Route } from "lucide-react";
+import { Activity, ListChecks } from "lucide-react";
+import { RunTimeline } from "./run/RunTimeline";
 
 type RunTracePanelProps = {
   entries: string[];
   queueCount: number;
+  projectId: string | null;
+  onFocusNode(nodeId: string): void;
 };
 
-export function RunTracePanel({ entries, queueCount }: RunTracePanelProps) {
+export function RunTracePanel({ entries, queueCount, projectId, onFocusNode }: RunTracePanelProps) {
   return (
     <div className="run-panel-grid">
       <section>
@@ -27,13 +30,7 @@ export function RunTracePanel({ entries, queueCount }: RunTracePanelProps) {
           {entries.length === 0 ? <li>No canvas actions yet</li> : null}
         </ol>
       </section>
-      <section>
-        <h3>
-          <Route size={15} aria-hidden="true" />
-          Trace
-        </h3>
-        <p>Execution is offline. Edits are tracked here as placeholders.</p>
-      </section>
+      <RunTimeline projectId={projectId} onFocusNode={onFocusNode} />
     </div>
   );
 }

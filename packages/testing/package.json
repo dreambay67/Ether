@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test:unit": "vitest run --config vitest.config.ts",
-    "test:smoke": "playwright test --config playwright.config.ts"
+    "test:smoke": "playwright test --config playwright.config.ts",
+    "test:packaged": "playwright test --config playwright.packaged.config.ts",
+    "test:acceptance": "pnpm run test:smoke && pnpm run test:packaged"
   },
   "dependencies": {
     "@ether/brand": "workspace:*",

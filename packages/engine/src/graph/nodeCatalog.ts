@@ -1,14 +1,16 @@
 export const NODE_CATEGORY_LABELS = [
   "Prompt",
   "Reference",
-  "Edit",
-  "Store",
-  "Assistant",
   "Generation",
+  "Edit",
+  "Review",
+  "Store",
   "Note"
 ] as const;
 
 export type EtherNodeKind = (typeof NODE_CATEGORY_LABELS)[number];
+export type LegacyEtherNodeKind = "Assistant";
+export type CanvasNodeKind = EtherNodeKind | LegacyEtherNodeKind;
 
 export type EtherNodeDefinition = {
   id: string;
@@ -19,9 +21,47 @@ export type EtherNodeDefinition = {
   description: string;
 };
 
+export type EditFrameMode = "source" | "crop" | "outpaint";
+
+export type EditFrameData = {
+  mode: EditFrameMode;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+};
+
+export type ReferenceAssetEntry = {
+  assetId?: string;
+  assetKind?: string;
+  assetPath: string;
+  assetMetadata?: Record<string, unknown>;
+  title?: string;
+  role?: string;
+  addedAt?: string;
+};
+
+export type GenerationAspectRatio = "1:1" | "4:5" | "3:4" | "9:16" | "16:9" | "4:3" | "3:2" | "2:3";
+
+export type GenerationResolution = "1024-long-edge" | "1536-long-edge" | "2048-long-edge";
+
+export type NoteStrokePoint = {
+  x: number;
+  y: number;
+};
+
+export type NoteStroke = {
+  id: string;
+  points: NoteStrokePoint[];
+  color?: string;
+  width?: number;
+};
+
 export type CanvasNodeData = {
   definitionId: string;
-  kind: EtherNodeKind;
+  kind: CanvasNodeKind;
   subtype: string;
   title: string;
   label: string;
@@ -40,6 +80,8 @@ export type CanvasNodeData = {
   assetKind?: string;
   assetPath?: string;
   assetMetadata?: Record<string, unknown>;
+  referenceAssets?: ReferenceAssetEntry[];
+  noteStrokes?: NoteStroke[];
   sourceAssetId?: string;
   sourceAssetKind?: string;
   sourceAssetPath?: string;
@@ -47,8 +89,14 @@ export type CanvasNodeData = {
   maskAssetId?: string;
   maskAssetPath?: string;
   maskMetadata?: Record<string, unknown>;
+  editRecipe?: string;
+  editFrame?: EditFrameData;
   textOutput?: string;
   textOutputArtifact?: unknown;
+  generationAspectRatio?: GenerationAspectRatio;
+  generationResolution?: GenerationResolution;
+  generationWidth?: number;
+  generationHeight?: number;
   mutationArtifact?: unknown;
   mutationEnabled?: boolean;
   mutationPreset?: string;
@@ -61,6 +109,7 @@ export type CanvasNodeData = {
   lockedTerms?: string;
   negativeConstraints?: string;
   mutationInstruction?: string;
+  storeFolderName?: string;
   storeAssetId?: string;
   storePath?: string;
   storeMetadata?: Record<string, unknown>;
@@ -77,6 +126,7 @@ export type CanvasNodeData = {
   evaluationArtifact?: unknown;
   filterAutoApply?: boolean;
   filterDryRun?: boolean;
+  filterRouteMode?: "move" | "copy" | "link";
   filterManualOverride?: string;
   filterRules?: string;
   filterResult?: unknown;
@@ -102,33 +152,20 @@ const legacyNodeData: CanvasNodeData = {
 const categoryAccents: Record<EtherNodeKind, string> = {
   Prompt: "#1470DB",
   Reference: "#37E6EA",
-  Edit: "#8A5CFF",
-  Store: "#7EF4D7",
-  Assistant: "#99A8BA",
   Generation: "#F4F8FF",
+  Edit: "#8A5CFF",
+  Review: "#FFCA7A",
+  Store: "#7EF4D7",
   Note: "#D7E0EA"
 };
 
 const subtypesByCategory: Record<EtherNodeKind, string[]> = {
-  Prompt: [
-    "General",
-    "Subject",
-    "Clothing",
-    "Pose",
-    "Setting",
-    "Composition",
-    "Style",
-    "Lighting",
-    "Colour Palette",
-    "Typography",
-    "Custom",
-    "Negative"
-  ],
-  Reference: ["Image", "Video Reference", "Colour Grid", "Moodboard"],
-  Edit: ["Inpaint", "Expand / Outpaint", "Draw & Note", "Upscale"],
-  Store: ["Directory", "Collection", "Compare", "Evaluate", "Filter"],
-  Assistant: ["Brainstormer", "Mutator", "Expander", "Reinforcer"],
+  Prompt: ["Prompt", "Brainstormer", "Mutator", "Expander", "Reinforcer"],
+  Reference: ["Image", "Video Reference", "Audio Reference", "Colour Grid", "Moodboard"],
   Generation: ["Image", "Grid", "Character Sheet", "Infographic"],
+  Edit: ["Inpaint", "Expand / Outpaint", "Draw & Note", "Upscale"],
+  Review: ["Compare", "Evaluation", "Filter"],
+  Store: ["Collection", "Directory"],
   Note: ["Cloud", "Bubble", "Free Draw"]
 };
 
@@ -141,10 +178,6 @@ function slugify(value: string) {
 }
 
 function titleFor(category: EtherNodeKind, subtype: string) {
-  if (category === "Prompt") {
-    return `${subtype} Prompt`;
-  }
-
   return subtype;
 }
 
@@ -165,8 +198,32 @@ export const NODE_CATEGORIES: EtherNodeCategory[] = NODE_CATEGORY_LABELS.map((la
   definitions: NODE_DEFINITIONS.filter((definition) => definition.category === label)
 }));
 
+const legacyDefinitionAliases = new Map<string, string>([
+  ["assistant-brainstormer", "prompt-brainstormer"],
+  ["assistant-mutator", "prompt-mutator"],
+  ["assistant-expander", "prompt-expander"],
+  ["assistant-reinforcer", "prompt-reinforcer"],
+  ["prompt-general", "prompt-prompt"],
+  ["prompt-subject", "prompt-prompt"],
+  ["prompt-setting", "prompt-prompt"],
+  ["prompt-negative", "prompt-prompt"],
+  ["prompt-custom", "prompt-prompt"]
+]);
+
+const legacyAssistantSubtypeDefinitions = new Map<string, string>([
+  ["Brainstormer", "prompt-brainstormer"],
+  ["Mutator", "prompt-mutator"],
+  ["Expander", "prompt-expander"],
+  ["Reinforcer", "prompt-reinforcer"]
+]);
+
+function resolveDefinitionId(definitionId: string) {
+  return legacyDefinitionAliases.get(definitionId) ?? definitionId;
+}
+
 export function getNodeDefinition(definitionId: string) {
-  const definition = NODE_DEFINITIONS.find((candidate) => candidate.id === definitionId);
+  const resolvedDefinitionId = resolveDefinitionId(definitionId);
+  const definition = NODE_DEFINITIONS.find((candidate) => candidate.id === resolvedDefinitionId);
 
   if (!definition) {
     throw new Error(`Unknown node definition: ${definitionId}`);
@@ -214,19 +271,87 @@ function isEtherNodeKind(value: unknown): value is EtherNodeKind {
   return NODE_CATEGORY_LABELS.includes(value as EtherNodeKind);
 }
 
+function coerceNumberInUnitRange(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : null;
+}
+
+export function coerceNoteStrokes(value: unknown): NoteStroke[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry, index): NoteStroke[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const candidate = entry as Partial<NoteStroke>;
+    const points = Array.isArray(candidate.points)
+      ? candidate.points.flatMap((point): NoteStrokePoint[] => {
+          if (!point || typeof point !== "object" || Array.isArray(point)) {
+            return [];
+          }
+
+          const pointCandidate = point as Partial<NoteStrokePoint>;
+          const x = coerceNumberInUnitRange(pointCandidate.x);
+          const y = coerceNumberInUnitRange(pointCandidate.y);
+
+          return x === null || y === null ? [] : [{ x, y }];
+        })
+      : [];
+
+    if (points.length === 0) {
+      return [];
+    }
+
+    return [
+      {
+        id: typeof candidate.id === "string" && candidate.id.trim()
+          ? candidate.id
+          : `stroke-${index + 1}`,
+        points,
+        ...(typeof candidate.color === "string" && candidate.color.trim()
+          ? { color: candidate.color }
+          : {}),
+        ...(typeof candidate.width === "number" && Number.isFinite(candidate.width)
+          ? { width: Math.max(1, Math.min(20, candidate.width)) }
+          : {})
+      }
+    ];
+  });
+}
+
+function legacyAssistantDefinitionId(data: Partial<CanvasNodeData>) {
+  if (typeof data.definitionId === "string" && legacyDefinitionAliases.has(data.definitionId)) {
+    return legacyDefinitionAliases.get(data.definitionId);
+  }
+
+  if (data.kind !== "Assistant" || typeof data.subtype !== "string") {
+    return undefined;
+  }
+
+  return legacyAssistantSubtypeDefinitions.get(data.subtype);
+}
+
 export function coerceCanvasNodeData(value: unknown): CanvasNodeData {
   if (!value || typeof value !== "object") {
     return { ...legacyNodeData };
   }
 
   const data = value as Partial<CanvasNodeData>;
+  const migratedDefinitionId = legacyAssistantDefinitionId(data);
+  const migratedDefinition = migratedDefinitionId
+    ? NODE_DEFINITIONS.find((definition) => definition.id === migratedDefinitionId)
+    : undefined;
   const title = typeof data.title === "string" && data.title.trim() ? data.title : legacyNodeData.title;
   const label = typeof data.label === "string" && data.label.trim() ? data.label : title;
   const coerced: CanvasNodeData = {
     ...data,
-    definitionId: typeof data.definitionId === "string" ? data.definitionId : legacyNodeData.definitionId,
-    kind: isEtherNodeKind(data.kind) ? data.kind : legacyNodeData.kind,
-    subtype: typeof data.subtype === "string" && data.subtype.trim() ? data.subtype : legacyNodeData.subtype,
+    definitionId: migratedDefinition?.id ?? (typeof data.definitionId === "string" ? data.definitionId : legacyNodeData.definitionId),
+    kind: migratedDefinition?.category ?? (isEtherNodeKind(data.kind) ? data.kind : legacyNodeData.kind),
+    subtype: migratedDefinition?.subtype ?? (typeof data.subtype === "string" && data.subtype.trim() ? data.subtype : legacyNodeData.subtype),
     title,
     label,
     notes: typeof data.notes === "string" ? data.notes : legacyNodeData.notes,
@@ -252,5 +377,38 @@ export function coerceCanvasNodeData(value: unknown): CanvasNodeData {
     delete coerced.staleSince;
   }
 
+  if (data.kind === "Note" || migratedDefinition?.category === "Note") {
+    coerced.noteStrokes = coerceNoteStrokes(data.noteStrokes);
+  } else {
+    delete coerced.noteStrokes;
+  }
+
   return coerced;
+}
+
+export function referenceAssetsFromNodeData(
+  data: Partial<CanvasNodeData> | undefined
+): ReferenceAssetEntry[] {
+  const entries = Array.isArray(data?.referenceAssets)
+    ? data.referenceAssets.filter((entry): entry is ReferenceAssetEntry =>
+        Boolean(entry && typeof entry === "object" && typeof entry.assetPath === "string" && entry.assetPath.trim())
+      )
+    : [];
+
+  if (entries.length > 0) {
+    return entries.map((entry) => ({ ...entry }));
+  }
+
+  if (typeof data?.assetPath === "string" && data.assetPath.trim()) {
+    return [
+      {
+        assetId: data.assetId,
+        assetKind: data.assetKind,
+        assetPath: data.assetPath,
+        assetMetadata: data.assetMetadata
+      }
+    ];
+  }
+
+  return [];
 }

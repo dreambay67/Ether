@@ -2,13 +2,21 @@ import { randomUUID } from "node:crypto";
 import { constants, renameSync, unlinkSync } from "node:fs";
 import { access, mkdir, open, realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { createArtifactInDatabase } from "../artifacts/artifactStore.js";
 import { initializeDatabase } from "./database.js";
 import { projectPaths } from "./paths.js";
 import { LinkedIndexSchema } from "./schema.js";
 import { readJson, writeJson } from "./projectStore.js";
-import { openDatabase, runInTransaction } from "./sqlite.js";
+import { openDatabase, runInTransaction, type SqliteDatabase } from "./sqlite.js";
 
 export type AssetKind = "reference" | "generated" | "collection" | "directory" | "mask";
+
+export const PROJECT_ASSET_FILE_DIRECTORIES = [
+  "assets/references",
+  "assets/generated",
+  "assets/masks",
+  "assets/previews"
+] as const;
 
 export type AssetRecord = {
   id: string;
@@ -63,6 +71,7 @@ export type SaveMaskAssetOptions = {
 export type EnsureFolderOptions = {
   name: string;
   nodeId?: string;
+  path?: string;
   now?: Date;
 };
 
@@ -121,27 +130,51 @@ export async function linkExternalReference(
 
   return withLinkedIndexLock(paths.linkedIndex, async () => {
     const now = toTimestamp(options.now);
-    const asset = insertAsset(paths.database, {
-      id: randomUUID(),
-      kind: "reference",
-      path: referencePath,
-      metadata: {
-        ...options.metadata,
-        role: options.role ?? "reference",
-        linkMode: options.linkMode ?? "linked",
-        originalName: path.basename(referencePath),
-        mimeType: options.mimeType ?? inferMimeType(referencePath)
-      },
-      now
-    });
+    const db = openDatabase(paths.database);
+    let assetWithArtifact: AssetRecord;
+
+    try {
+      runInTransaction(db, () => {
+        const asset = insertAssetInDatabase(db, {
+          id: randomUUID(),
+          kind: "reference",
+          path: referencePath,
+          metadata: {
+            ...options.metadata,
+            role: options.role ?? "reference",
+            linkMode: options.linkMode ?? "linked",
+            originalName: path.basename(referencePath),
+            mimeType: options.mimeType ?? inferMimeType(referencePath)
+          },
+          now
+        });
+        const artifact = createArtifactInDatabase(db, {
+          kind: "reference",
+          path: asset.path,
+          metadata: {
+            ...asset.metadata,
+            assetId: asset.id
+          },
+          now: options.now
+        });
+        assetWithArtifact = updateAssetMetadataInDatabase(
+          db,
+          asset,
+          { artifactId: artifact.id },
+          now
+        );
+      });
+    } finally {
+      db.close();
+    }
 
     await appendLinkedReference(paths.linkedIndex, {
-      id: asset.id,
+      id: assetWithArtifact!.id,
       path: referencePath,
       linkedAt: now
     });
 
-    return asset;
+    return assetWithArtifact!;
   });
 }
 
@@ -173,20 +206,58 @@ export async function saveGeneratedAsset(
     options.content
   );
 
-  return insertAsset(paths.database, {
-    id: randomUUID(),
-    kind: "generated",
-    path: outputPath,
-    metadata: {
-      ...options.metadata,
-      generationNodeId: options.generationNodeId,
-      safeGenerationNodeId,
-      originalName: path.basename(options.fileName),
-      mimeType: options.mimeType ?? inferMimeType(safeFileName),
-      lineage: options.lineage ?? {}
-    },
-    now
-  });
+  const metadata = {
+    ...options.metadata,
+    generationNodeId: options.generationNodeId,
+    safeGenerationNodeId,
+    originalName: path.basename(options.fileName),
+    mimeType: options.mimeType ?? inferMimeType(safeFileName),
+    lineage: options.lineage ?? {}
+  };
+  const db = openDatabase(paths.database);
+  let assetWithArtifact: AssetRecord;
+
+  try {
+    runInTransaction(db, () => {
+      const asset = insertAssetInDatabase(db, {
+        id: randomUUID(),
+        kind: "generated",
+        path: outputPath,
+        metadata,
+        now
+      });
+      const artifact = createArtifactInDatabase(db, {
+        kind: "image",
+        nodeId: options.generationNodeId,
+        path: asset.path,
+        metadata: {
+          ...asset.metadata,
+          assetId: asset.id
+        },
+        parentArtifactIds: extractArtifactIds(options.metadata, options.lineage),
+        now: nowDate
+      });
+
+      assetWithArtifact = updateAssetMetadataInDatabase(
+        db,
+        asset,
+        { artifactId: artifact.id },
+        now
+      );
+    });
+  } catch (error) {
+    try {
+      unlinkSync(outputPath);
+    } catch {
+      // Best-effort cleanup for a file whose database rows rolled back.
+    }
+
+    throw error;
+  } finally {
+    db.close();
+  }
+
+  return assetWithArtifact!;
 }
 
 export async function saveMaskAsset(
@@ -215,30 +286,60 @@ export async function saveMaskAsset(
   );
   assertPathInsideDirectory(outputPath, masksDirectory, "Mask asset path");
 
-  return insertAsset(paths.database, {
-    id: randomUUID(),
-    kind: "mask",
-    path: outputPath,
-    metadata: {
-      ...options.metadata,
+  const metadata = {
+    ...options.metadata,
+    editNodeId: options.editNodeId,
+    safeEditNodeId,
+    sourceAssetId: options.sourceAssetId,
+    sourceAssetPath: options.sourceAssetPath,
+    instruction: options.instruction,
+    notes: options.notes,
+    originalName: path.basename(safeFileName),
+    mimeType: options.mimeType ?? inferMimeType(safeFileName),
+    role: "mask",
+    lineage: {
+      kind: "mask",
       editNodeId: options.editNodeId,
-      safeEditNodeId,
       sourceAssetId: options.sourceAssetId,
-      sourceAssetPath: options.sourceAssetPath,
-      instruction: options.instruction,
-      notes: options.notes,
-      originalName: path.basename(safeFileName),
-      mimeType: options.mimeType ?? inferMimeType(safeFileName),
-      role: "mask",
-      lineage: {
+      sourceAssetPath: options.sourceAssetPath
+    }
+  };
+  const db = openDatabase(paths.database);
+  let assetWithArtifact: AssetRecord;
+
+  try {
+    runInTransaction(db, () => {
+      const asset = insertAssetInDatabase(db, {
+        id: randomUUID(),
         kind: "mask",
-        editNodeId: options.editNodeId,
-        sourceAssetId: options.sourceAssetId,
-        sourceAssetPath: options.sourceAssetPath
-      }
-    },
-    now
-  });
+        path: outputPath,
+        metadata,
+        now
+      });
+      const artifact = createArtifactInDatabase(db, {
+        kind: "mask",
+        nodeId: options.editNodeId,
+        path: asset.path,
+        metadata: {
+          ...asset.metadata,
+          assetId: asset.id
+        },
+        parentArtifactIds: extractArtifactIds(options.metadata, metadata.lineage),
+        now: nowDate
+      });
+
+      assetWithArtifact = updateAssetMetadataInDatabase(
+        db,
+        asset,
+        { artifactId: artifact.id },
+        now
+      );
+    });
+  } finally {
+    db.close();
+  }
+
+  return assetWithArtifact!;
 }
 
 export async function ensureCollectionFolder(
@@ -351,6 +452,16 @@ export async function moveAssetToCollection(
         reason: options.reason ?? null,
         movedAt: now
       });
+
+      syncArtifactForAssetMoveInDatabase(db, {
+        asset,
+        artifactId: artifactIdFromAsset(asset),
+        collection,
+        fromPath: asset.path,
+        toPath,
+        reason: options.reason,
+        now
+      });
     });
   } catch (error) {
     if (physicallyMoved) {
@@ -435,7 +546,10 @@ async function ensureStoreFolder(
   initializeDatabase(paths.database);
 
   const safeName = sanitizePathSegment(options.name, "name");
-  const folderPath = path.join(projectPath, rootDirectory, safeName);
+  const explicitPath = typeof options.path === "string" && options.path.trim()
+    ? path.resolve(options.path)
+    : null;
+  const folderPath = explicitPath ?? path.join(projectPath, rootDirectory, safeName);
   const now = toTimestamp(options.now);
 
   await mkdir(folderPath, { recursive: true });
@@ -444,6 +558,7 @@ async function ensureStoreFolder(
   const metadata = {
     displayName: options.name.trim(),
     safeName,
+    folderMode: explicitPath ? "custom" : "project",
     ...(options.nodeId ? { nodeId: options.nodeId } : {})
   };
 
@@ -473,22 +588,10 @@ function insertAsset(
   const db = openDatabase(databasePath);
 
   try {
-    db.prepare(
-      `INSERT INTO assets (id, kind, path, metadata_json, created_at, updated_at)
-       VALUES (@id, @kind, @path, @metadataJson, @createdAt, @updatedAt)`
-    ).run({
-      id: asset.id,
-      kind: asset.kind,
-      path: asset.path,
-      metadataJson: JSON.stringify(asset.metadata),
-      createdAt: asset.now,
-      updatedAt: asset.now
-    });
+    return insertAssetInDatabase(db, asset);
   } finally {
     db.close();
   }
-
-  return getAssetById(databasePath, asset.id);
 }
 
 function updateAssetMetadataRecord(
@@ -498,23 +601,193 @@ function updateAssetMetadataRecord(
   now: string
 ) {
   const db = openDatabase(databasePath);
-  const mergedMetadata = { ...asset.metadata, ...metadata };
 
   try {
-    db.prepare(
-      `UPDATE assets
-       SET metadata_json = @metadataJson, updated_at = @updatedAt
-       WHERE id = @id`
-    ).run({
-      id: asset.id,
-      metadataJson: JSON.stringify(mergedMetadata),
-      updatedAt: now
-    });
+    return updateAssetMetadataInDatabase(db, asset, metadata, now);
   } finally {
     db.close();
   }
+}
 
-  return getAssetById(databasePath, asset.id);
+function insertAssetInDatabase(
+  db: SqliteDatabase,
+  asset: {
+    id: string;
+    kind: AssetKind;
+    path: string;
+    metadata: Record<string, unknown>;
+    now: string;
+  }
+) {
+  db.prepare(
+    `INSERT INTO assets (id, kind, path, metadata_json, created_at, updated_at)
+     VALUES (@id, @kind, @path, @metadataJson, @createdAt, @updatedAt)`
+  ).run({
+    id: asset.id,
+    kind: asset.kind,
+    path: asset.path,
+    metadataJson: JSON.stringify(asset.metadata),
+    createdAt: asset.now,
+    updatedAt: asset.now
+  });
+
+  return getAssetByIdInDatabase(db, asset.id);
+}
+
+function updateAssetMetadataInDatabase(
+  db: SqliteDatabase,
+  asset: AssetRecord,
+  metadata: Record<string, unknown>,
+  now: string
+) {
+  const mergedMetadata = { ...asset.metadata, ...metadata };
+
+  db.prepare(
+    `UPDATE assets
+     SET metadata_json = @metadataJson, updated_at = @updatedAt
+     WHERE id = @id`
+  ).run({
+    id: asset.id,
+    metadataJson: JSON.stringify(mergedMetadata),
+    updatedAt: now
+  });
+
+  return getAssetByIdInDatabase(db, asset.id);
+}
+
+function syncArtifactForAssetMoveInDatabase(
+  db: SqliteDatabase,
+  input: {
+    asset: AssetRecord;
+    artifactId: string | null;
+    collection: AssetRecord;
+    fromPath: string;
+    toPath: string;
+    reason?: string;
+    now: string;
+  }
+) {
+  if (!input.artifactId) {
+    return;
+  }
+
+  const row = db
+    .prepare(
+      `SELECT id, metadata_json, run_id, node_id
+       FROM artifacts
+       WHERE id = ?`
+    )
+    .get(input.artifactId) as { id: string; metadata_json: string; run_id: string | null; node_id: string | null } | undefined;
+
+  if (!row) {
+    throw new Error(`Artifact "${input.artifactId}" was not found for moved asset "${input.asset.id}".`);
+  }
+
+  const collectionName =
+    typeof input.collection.metadata.displayName === "string"
+      ? input.collection.metadata.displayName
+      : path.basename(input.collection.path);
+  const metadata = {
+    ...parseMetadata(row.metadata_json),
+    assetId: input.asset.id,
+    assetPath: input.toPath,
+    collectionId: input.collection.id,
+    collectionName,
+    movedFromPath: input.fromPath,
+    movedReason: input.reason ?? null
+  };
+
+  db.prepare(
+    `UPDATE artifacts
+     SET path = @path, metadata_json = @metadataJson, updated_at = @updatedAt
+     WHERE id = @id`
+  ).run({
+    id: input.artifactId,
+    path: input.toPath,
+    metadataJson: JSON.stringify(metadata),
+    updatedAt: input.now
+  });
+
+  const latestVersion = db
+    .prepare("SELECT MAX(version) AS version FROM artifact_versions WHERE artifact_id = ?")
+    .get(input.artifactId) as { version: number | null } | undefined;
+  const nextVersion = (latestVersion?.version ?? 0) + 1;
+
+  db.prepare(
+    `INSERT INTO artifact_versions (
+      id, artifact_id, version, run_id, node_id, uri, metadata_json, created_at
+    ) VALUES (
+      @id, @artifactId, @version, @runId, @nodeId, @uri, @metadataJson, @createdAt
+    )`
+  ).run({
+    id: randomUUID(),
+    artifactId: input.artifactId,
+    version: nextVersion,
+    runId: row.run_id,
+    nodeId: row.node_id,
+    uri: input.toPath,
+    metadataJson: JSON.stringify({
+      movedFromPath: input.fromPath,
+      collectionId: input.collection.id,
+      assetId: input.asset.id
+    }),
+    createdAt: input.now
+  });
+
+  const existingMembership = db
+    .prepare(
+      `SELECT id
+       FROM collection_memberships
+       WHERE collection_id = ? AND (artifact_id = ? OR asset_id = ?)
+       ORDER BY rowid ASC
+       LIMIT 1`
+    )
+    .get(input.collection.id, input.artifactId, input.asset.id) as { id: string } | undefined;
+  const membershipMetadata = JSON.stringify({
+    reason: input.reason ?? null,
+    movedFromPath: input.fromPath,
+    movedToPath: input.toPath
+  });
+
+  if (existingMembership) {
+    db.prepare(
+      `UPDATE collection_memberships
+       SET artifact_id = @artifactId,
+           asset_id = @assetId,
+           metadata_json = @metadataJson,
+           updated_at = @updatedAt
+       WHERE id = @id`
+    ).run({
+      id: existingMembership.id,
+      artifactId: input.artifactId,
+      assetId: input.asset.id,
+      metadataJson: membershipMetadata,
+      updatedAt: input.now
+    });
+    return;
+  }
+
+  db.prepare(
+    `INSERT INTO collection_memberships (
+      id, collection_id, artifact_id, asset_id, position, metadata_json, created_at, updated_at
+    ) VALUES (
+      @id, @collectionId, @artifactId, @assetId, NULL, @metadataJson, @createdAt, @updatedAt
+    )`
+  ).run({
+    id: randomUUID(),
+    collectionId: input.collection.id,
+    artifactId: input.artifactId,
+    assetId: input.asset.id,
+    metadataJson: membershipMetadata,
+    createdAt: input.now,
+    updatedAt: input.now
+  });
+}
+
+function artifactIdFromAsset(asset: AssetRecord) {
+  return typeof asset.metadata.artifactId === "string" && asset.metadata.artifactId.trim()
+    ? asset.metadata.artifactId
+    : null;
 }
 
 function findAssetByKindAndPath(
@@ -545,22 +818,26 @@ function getAssetById(databasePath: string, assetId: string): AssetRecord {
   const db = openDatabase(databasePath, { readonly: true });
 
   try {
-    const row = db
-      .prepare(
-        `SELECT id, kind, path, metadata_json, created_at, updated_at
-         FROM assets
-         WHERE id = ?`
-      )
-      .get(assetId) as AssetRow | undefined;
-
-    if (!row) {
-      throw new Error(`Asset "${assetId}" was not found.`);
-    }
-
-    return assetFromRow(row);
+    return getAssetByIdInDatabase(db, assetId);
   } finally {
     db.close();
   }
+}
+
+function getAssetByIdInDatabase(db: SqliteDatabase, assetId: string): AssetRecord {
+  const row = db
+    .prepare(
+      `SELECT id, kind, path, metadata_json, created_at, updated_at
+       FROM assets
+       WHERE id = ?`
+    )
+    .get(assetId) as AssetRow | undefined;
+
+  if (!row) {
+    throw new Error(`Asset "${assetId}" was not found.`);
+  }
+
+  return assetFromRow(row);
 }
 
 function assetFromRow(row: AssetRow): AssetRecord {
@@ -839,4 +1116,55 @@ function escapeXml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function extractArtifactIds(...sources: Array<Record<string, unknown> | undefined>) {
+  const ids: string[] = [];
+
+  for (const source of sources) {
+    collectArtifactIdsFromTree(source, ids);
+  }
+
+  return [...new Set(ids)];
+}
+
+function collectArtifactIdsFromTree(value: unknown, ids: string[]) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectArtifactIdsFromTree(item, ids);
+    }
+
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (isSingleArtifactIdKey(key) && typeof child === "string" && child.trim()) {
+      ids.push(child);
+      continue;
+    }
+
+    if (isArtifactIdArrayKey(key) && Array.isArray(child)) {
+      for (const item of child) {
+        if (typeof item === "string" && item.trim()) {
+          ids.push(item);
+        }
+      }
+
+      continue;
+    }
+
+    collectArtifactIdsFromTree(child, ids);
+  }
+}
+
+function isSingleArtifactIdKey(key: string) {
+  return key === "artifactId" || key === "parentArtifactId" || key === "sourceArtifactId";
+}
+
+function isArtifactIdArrayKey(key: string) {
+  return key === "parentArtifactIds" || key === "sourceArtifactIds";
 }

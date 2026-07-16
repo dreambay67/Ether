@@ -6,6 +6,9 @@
   "type": "commonjs",
   "scripts": {
     "build:electron": "tsc -p tsconfig.json",
+    "test:unit": "pnpm --workspace-root test:unit",
+    "test:smoke": "pnpm --workspace-root test:smoke",
+    "acceptance:smoke": "pnpm --workspace-root acceptance:smoke",
     "dev:renderer": "vite --host 127.0.0.1",
     "dev": "pnpm --filter @ether/engine build && pnpm run build:electron && concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env ETHER_RENDERER_URL=http://127.0.0.1:5173 electron .\"",
     "build": "pnpm --filter @ether/engine build && pnpm run build:electron && vite build",

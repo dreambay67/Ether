@@ -1,26 +1,91 @@
 {
   "name": "ether",
   "version": "0.1.0",
-  "description": "Local Ether node canvas workflow control for Codex.",
+  "description": "Local Ether 2.5 node canvas workflow control for Codex with node-role-channel graph, prompt, review, artifact, provider safety, media routing, and recovery guidance.",
   "author": {
     "name": "DreamBay",
     "email": "local@dreambay.invalid"
   },
   "license": "UNLICENSED",
-  "keywords": ["ether", "node-canvas", "image-workflow", "codex"],
+  "keywords": [
+    "ether",
+    "node-canvas",
+    "image-workflow",
+    "codex",
+    "graph-architecture",
+    "node-role-channel-model",
+    "multimodal-media-routing",
+    "prompt-systems",
+    "review-routing",
+    "artifact-organization"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Ether",
     "shortDescription": "Local node canvas workflow control",
-    "longDescription": "Create, inspect, edit, and explicitly run local Ether image workflow graphs through Codex.",
+    "longDescription": "Create, inspect, edit, and explicitly run local Ether 2.5 workflow graphs through Codex, with focused skills for the node role channel model, multimodal media routing, prompt systems, review routing, artifact organization, provider safety, and recovery.",
     "developerName": "DreamBay",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Write",
+      "2.5 Node Role Channel Model",
+      "Multimodal Media Routing",
+      "Advanced Graph Architecture",
+      "Prompt Systems",
+      "Review Routing",
+      "Artifact Organization",
+      "Provider Safety",
+      "Recovery"
+    ],
+    "skillHighlights": [
+      {
+        "skill": "ether-connection-model",
+        "capability": "2.5 Node Role Channel Model",
+        "useWhen": "Apply exact Ether 2.5 channels, roles, Prompt family subnodes, connection role grid, and multimodal media routing rules."
+      },
+      {
+        "skill": "ether-graph-architect",
+        "capability": "Advanced Graph Architecture",
+        "useWhen": "Design graph topology, node roles, channel routing, templates, patch previews, and run previews."
+      },
+      {
+        "skill": "ether-prompt-systems",
+        "capability": "Prompt Systems",
+        "useWhen": "Build Prompt family flows, connection roles, references, controls, presets, and variant strategy."
+      },
+      {
+        "skill": "ether-review-router",
+        "capability": "Review Routing",
+        "useWhen": "Build Compare, Evaluate, Filter, dry-run routing, manual override, and audit loops."
+      },
+      {
+        "skill": "ether-artifact-librarian",
+        "capability": "Artifact Organization",
+        "useWhen": "Organize six-channel asset imports, linked assets, copy and move flows, collections, lineage, and metadata."
+      },
+      {
+        "skill": "ether-provider-safety",
+        "capability": "Provider Safety",
+        "useWhen": "Choose CLI, MCP, API, Simulation, or Experimental provider modes without hidden fallback."
+      },
+      {
+        "skill": "ether-recovery",
+        "capability": "Recovery",
+        "useWhen": "Diagnose health, graph revisions, missing files, orphan artifacts, provider logs, and recovery actions."
+      }
+    ],
     "defaultPrompt": [
       "Use Ether to create a new image workflow branch.",
       "Inspect this Ether project graph before running anything.",
-      "Add a review router to my current Ether workflow."
+      "Use $ether-connection-model to explain Ether 2.5 roles, channels, and media routing.",
+      "Use $ether-graph-architect to preview a graph patch for a new branch.",
+      "Use $ether-prompt-systems to design role-based prompt variants.",
+      "Use $ether-review-router to add a dry-run review funnel.",
+      "Use $ether-artifact-librarian to organize generated assets into collections.",
+      "Use $ether-provider-safety to explain the provider mode for this run.",
+      "Use $ether-recovery to inspect project health and propose recovery actions."
     ],
     "brandColor": "#1470DB"
   }

@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "pnpm --filter @ether/providers build && pnpm --filter @ether/engine build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/desktop build",
     "test": "pnpm --filter @ether/providers build && pnpm --filter @ether/engine build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/codex-plugin validate && pnpm run test:unit && pnpm run test:smoke",
     "test:unit": "pnpm --filter @ether/testing test:unit",
     "test:smoke": "pnpm --filter @ether/testing test:smoke",
+    "acceptance:smoke": "pnpm --filter @ether/testing test:acceptance",
+    "test:acceptance": "pnpm run acceptance:smoke",
     "desktop:dev": "pnpm --filter @ether/desktop dev",
     "desktop:build": "pnpm --filter @ether/desktop build",
     "desktop:package:win": "pnpm desktop:build && node scripts/package-windows.mjs"

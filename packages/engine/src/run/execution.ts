@@ -1,23 +1,45 @@
 import {
+  CodexCliAssistantProvider,
+  CodexCliVisionEvaluationProvider,
+  CODEX_ASSISTANT_PROVIDER_ID,
+  CODEX_PROVIDER_ID,
   FAKE_PROVIDER_ID,
   ProviderUnavailableError,
   createDefaultProviderRegistry,
   diagnoseProviderRegistry,
+  type AssistantProviderInput,
   type GeneratedArtifact,
+  type CodexCliImageProviderOptions,
+  type ImageEditFrameInput,
   type GenerationProviderInput,
   type GenerationReferenceInput,
   type ImageEditMaskInput,
   type ImageEditOperation,
   type ImageEditProviderInput,
+  type ImageEditRecipeInput,
   type ImageEditSourceInput,
-  type ProviderRegistryDiagnostics
+  type ProviderDescriptor,
+  type ProviderDiagnostic,
+  type ProviderProcessRunner,
+  type ProviderRegistryDiagnostics,
+  type ProviderAssistantResult,
+  type ProviderGenerationResult,
+  type PayloadEnvelope,
+  type VisionEvaluationImageInput,
+  type VisionEvaluationItemResult,
+  type VisionEvaluationProviderInput,
+  type VisionEvaluationProviderResult
 } from "@ether/providers";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { copyFile, mkdir, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { addArtifactToCollection, createArtifact } from "../artifacts/artifactStore.js";
+import type { ArtifactKind } from "../artifacts/types.js";
 import {
   ensureCollectionFolder,
   ensureDirectoryRoot,
+  listAssets,
   moveAssetToCollection,
   saveGeneratedAsset,
   updateAssetMetadata,
@@ -25,7 +47,8 @@ import {
 } from "../project/assets.js";
 import { initializeDatabase } from "../project/database.js";
 import { projectPaths } from "../project/paths.js";
-import { openDatabase } from "../project/sqlite.js";
+import { openDatabase, runInTransaction } from "../project/sqlite.js";
+import { completeProviderRun, createProviderRun, failProviderRun } from "../project/providerRuns.js";
 import type { EtherGraph } from "../project/schema.js";
 import {
   assembleGenerationInputs,
@@ -33,12 +56,15 @@ import {
   freezePromptNode,
   resolveReferenceRole
 } from "../graph/promptAssembly.js";
-import type { CanvasNodeData } from "../graph/nodeCatalog.js";
-import type { EdgeRoleArtifact, PromptSectionArtifact } from "../graph/artifacts.js";
+import { blockedIncomingAdapterReason } from "../graph/adapterBlocks.js";
 import {
-  createTextMutationArtifact,
-  textForNode
-} from "../graph/textMutation.js";
+  referenceAssetsFromNodeData,
+  type CanvasNodeData,
+  type ReferenceAssetEntry
+} from "../graph/nodeCatalog.js";
+import { normalizePayloadChannel, type PayloadChannel } from "../graph/channels.js";
+import type { EdgeRoleArtifact, PromptSectionArtifact } from "../graph/artifacts.js";
+import { textForNode } from "../graph/textMutation.js";
 
 export type ExecutionPolicy =
   | "cached-inputs"
@@ -53,6 +79,16 @@ export type ExecutionRequest = {
   runCountCap?: number;
   parallel?: boolean;
   providerId?: string;
+  imageCodexCliPath?: string;
+  imageProviderFileExists?: CodexCliImageProviderOptions["fileExists"];
+  imageProviderRunner?: ProviderProcessRunner;
+  assistantCodexCliPath?: string;
+  assistantProviderFileExists?: CodexCliImageProviderOptions["fileExists"];
+  assistantProviderRunner?: ProviderProcessRunner;
+  evaluationSimulationMode?: boolean;
+  evaluationCodexCliPath?: string;
+  evaluationProviderFileExists?: CodexCliImageProviderOptions["fileExists"];
+  evaluationProviderRunner?: ProviderProcessRunner;
   now?: () => Date;
 };
 
@@ -124,7 +160,26 @@ type RunRecordRow = {
   finished_at: string | null;
 };
 
-type MutableExecutionState = {
+const PROMPT_ASSISTANT_SUBTYPES = new Set(["Brainstormer", "Mutator", "Expander", "Reinforcer"]);
+const DEFAULT_GENERATION_ASPECT_RATIO = "1:1";
+const DEFAULT_GENERATION_RESOLUTION = "1024-long-edge";
+const GENERATION_ASPECT_RATIOS: Record<string, readonly [number, number]> = {
+  "1:1": [1, 1],
+  "4:5": [4, 5],
+  "3:4": [3, 4],
+  "9:16": [9, 16],
+  "16:9": [16, 9],
+  "4:3": [4, 3],
+  "3:2": [3, 2],
+  "2:3": [2, 3]
+};
+const GENERATION_RESOLUTION_LONG_EDGE: Record<string, number> = {
+  "1024-long-edge": 1024,
+  "1536-long-edge": 1536,
+  "2048-long-edge": 2048
+};
+
+export type ExecutionWorkerState = {
   graph: EtherGraph;
 };
 
@@ -288,11 +343,11 @@ export async function executeGraphRun(
   request: ExecutionRequest
 ): Promise<ExecutionRunResult> {
   const plan = planExecution(graph, request);
-  const state: MutableExecutionState = { graph };
+  const state: ExecutionWorkerState = { graph };
   const results = await runExecutionQueue(
     plan.items,
-    (item) => executeQueueItem(projectPath, state, request, item),
-    { parallel: plan.parallel, dependencies: queueDependenciesForPlan(graph, plan.items) }
+    (item) => executePlannedJobItem(projectPath, state, request, item),
+    { parallel: plan.parallel, dependencies: executionDependenciesForPlan(graph, plan.items) }
   );
 
   return {
@@ -418,7 +473,7 @@ function createGenerationJobCounts(
   return counts;
 }
 
-function queueDependenciesForPlan(graph: EtherGraph, items: ExecutionQueueItem[]) {
+export function executionDependenciesForPlan(graph: EtherGraph, items: ExecutionQueueItem[]) {
   const plannedNodeIds = uniqueInOrder(items.map((item) => item.nodeId));
   const planned = new Set(plannedNodeIds);
   const planIndexes = new Map(plannedNodeIds.map((nodeId, index) => [nodeId, index]));
@@ -446,9 +501,9 @@ function queueDependenciesForPlan(graph: EtherGraph, items: ExecutionQueueItem[]
   return dependencies;
 }
 
-async function executeQueueItem(
+export async function executePlannedJobItem(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   request: ExecutionRequest,
   item: ExecutionQueueItem
 ): Promise<ExecutionNodeResult> {
@@ -470,6 +525,14 @@ async function executeQueueItem(
     return result;
   }
 
+  const adapterBlockedReason = blockedIncomingAdapterReason(state.graph, item.nodeId);
+
+  if (adapterBlockedReason) {
+    const result = skipAdapterBlockedNode(state, item, startedAt, adapterBlockedReason);
+    recordExecutionResult(projectPath, request, result);
+    return result;
+  }
+
   if (!canExecuteLocally(node)) {
     const result = skipUnsupportedNode(state, item, startedAt, unsupportedNodeLabel(node));
     recordExecutionResult(projectPath, request, result);
@@ -486,10 +549,12 @@ async function executeQueueItem(
 
     switch (node.data?.kind) {
       case "Prompt":
-        result = executePromptNode(state, item, startedAt);
+        result = isPromptAssistantHelper(node)
+          ? await executeAssistantNode(projectPath, state, request, item, startedDate)
+          : executePromptNode(state, item, startedAt);
         break;
       case "Assistant":
-        result = executeAssistantNode(state, item, startedAt);
+        result = await executeAssistantNode(projectPath, state, request, item, startedDate);
         break;
       case "Generation":
         result = await executeGenerationNode(projectPath, state, request, item, startedDate);
@@ -498,7 +563,10 @@ async function executeQueueItem(
         result = await executeEditNode(projectPath, state, request, item, startedDate);
         break;
       case "Store":
-        result = await executeStoreNode(projectPath, state, item, startedDate);
+        result = await executeStoreNode(projectPath, state, request, item, startedDate);
+        break;
+      case "Review":
+        result = await executeStoreNode(projectPath, state, request, item, startedDate);
         break;
       default:
         result = skipUnsupportedNode(state, item, startedAt, unsupportedNodeLabel(node));
@@ -531,8 +599,12 @@ async function executeQueueItem(
   }
 }
 
+function isPromptAssistantHelper(node: GraphNode) {
+  return node.data?.kind === "Prompt" && PROMPT_ASSISTANT_SUBTYPES.has(cleanText(node.data?.subtype));
+}
+
 function executePromptNode(
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   item: ExecutionQueueItem,
   startedAt: string
 ): ExecutionNodeResult {
@@ -556,23 +628,110 @@ function executePromptNode(
   };
 }
 
-function executeAssistantNode(
-  state: MutableExecutionState,
+async function executeAssistantNode(
+  projectPath: string,
+  state: ExecutionWorkerState,
+  request: ExecutionRequest,
   item: ExecutionQueueItem,
-  startedAt: string
-): ExecutionNodeResult {
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
   const node = findNode(state.graph, item.nodeId);
-  const sourceText = assembleAssistantSourceText(state.graph, item.nodeId) || nodeText(node) || node.data?.title || "Assistant context";
-  const operation = `Assistant ${cleanText(node.data?.subtype) || "Text"}`;
-  const mutationArtifact = createTextMutationArtifact(sourceText, node.data, {
-    kind: "assistant-text",
-    operation
+  const startedAt = startedDate.toISOString();
+  const assembly = assembleAssistantInput(state.graph, item.nodeId);
+  const provider = new CodexCliAssistantProvider({
+    codexCliPath: request.assistantCodexCliPath,
+    fileExists: request.assistantProviderFileExists,
+    runner: request.assistantProviderRunner
   });
-  const resultText = assistantTextForSubtype(cleanText(node.data?.subtype), mutationArtifact.resultText);
+  const providerInput: AssistantProviderInput = {
+    projectPath,
+    runId: randomUUID(),
+    assistantNodeId: item.nodeId,
+    assistantSubtype: cleanText(node.data?.subtype) || "Assistant",
+    prompt: assembly.prompt,
+    instruction: cleanText(node.data?.instruction),
+    notes: cleanText(node.data?.notes),
+    sections: assembly.sections,
+    references: assembly.references,
+    edgeRoles: assembly.edgeRoles,
+    inputs: collectProviderInputPayloads(state.graph, item.nodeId),
+    requestedAt: startedAt
+  };
+  const diagnostic = await provider.diagnose();
+
+  if (diagnostic.availability !== "available") {
+    const error = new ProviderUnavailableError(diagnostic);
+    const providerRun = createProviderRun(projectPath, {
+      runId: providerInput.runId,
+      providerId: provider.descriptor.id,
+      model: provider.descriptor.model,
+      request: providerRunRequest({
+        operation: "assistant.text",
+        nodeId: item.nodeId,
+        iteration: item.iteration,
+        policy: request.policy,
+        provider: provider.descriptor,
+        diagnostic,
+        providerInput
+      }),
+      now: startedDate
+    });
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+
+  const providerRun = createProviderRun(projectPath, {
+    runId: providerInput.runId,
+    providerId: provider.descriptor.id,
+    model: provider.descriptor.model,
+    request: providerRunRequest({
+      operation: "assistant.text",
+      nodeId: item.nodeId,
+      iteration: item.iteration,
+      policy: request.policy,
+      provider: provider.descriptor,
+      diagnostic,
+      providerInput
+    }),
+    now: startedDate
+  });
+  let providerResult: ProviderAssistantResult;
+
+  try {
+    providerResult = await provider.run(providerInput);
+  } catch (error) {
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+  const providerDescriptor = provider.descriptor;
+  const resultText = assistantTextForSubtype(cleanText(node.data?.subtype), providerResult.text);
   const textOutputArtifact = {
-    ...mutationArtifact,
+    kind: "assistant-codex",
+    provider: {
+      id: providerResult.providerId,
+      name: providerResult.providerName,
+      route: providerDescriptor.route,
+      capabilities: providerResult.capabilities
+    },
+    providerJob: providerResult.metadata ?? {},
+    assistant: {
+      nodeId: item.nodeId,
+      subtype: providerInput.assistantSubtype,
+      instruction: providerInput.instruction,
+      notes: providerInput.notes
+    },
+    prompt: providerInput.prompt,
+    sections: providerInput.sections,
+    references: providerInput.references,
+    edgeRoles: providerInput.edgeRoles,
     resultText
   };
+  completeProviderRun(
+    projectPath,
+    providerRun.id,
+    assistantProviderRunResponse(providerResult, providerDescriptor, resultText),
+    request.now?.() ?? new Date()
+  );
 
   state.graph = setNodeData(state.graph, item.nodeId, {
     status: "complete",
@@ -587,65 +746,201 @@ function executeAssistantNode(
     nodeId: item.nodeId,
     iteration: item.iteration,
     status: "complete",
-    action: "assistant-text",
+    action: "assistant-codex",
     metadata: {
       text: textOutputArtifact
     },
     startedAt,
-    finishedAt: startedAt
+    finishedAt: (request.now?.() ?? new Date()).toISOString()
   };
 }
 
-function assembleAssistantSourceText(graph: EtherGraph, assistantNodeId: string) {
-  const sections: string[] = [];
+function assembleAssistantInput(graph: EtherGraph, assistantNodeId: string) {
+  const sections: PromptSectionArtifact[] = [];
+  const references: GenerationReferenceInput[] = [];
+  const edgeRoles: EdgeRoleArtifact[] = [];
 
   for (const edge of incomingEdges(graph, assistantNodeId)) {
     const source = findNode(graph, edge.source);
 
     if (source.data?.kind === "Prompt" || source.data?.kind === "Assistant") {
       const assembly = assemblePromptForNode(graph, source.id, edge);
-      sections.push(assembly.prompt, assembly.negativePrompt);
+      for (const section of assembly.sections) {
+        if (!sections.some((candidate) => candidate.nodeId === section.nodeId)) {
+          sections.push(section);
+        }
+      }
       continue;
     }
 
-    sections.push(nodeText(source));
+    if (source.data?.kind === "Reference" || source.data?.kind === "Note") {
+      const role = resolveReferenceRole(edge, source);
+      const sourceReferences = assistantReferencesForNode(source, role);
+      edgeRoles.push({ edgeId: edge.id, role });
+
+      if (sourceReferences.length > 0) {
+        references.push(...sourceReferences);
+      }
+
+      const textSection = assistantTextSectionForNode(source, edge);
+      if (textSection && !sections.some((candidate) => candidate.nodeId === textSection.nodeId)) {
+        sections.push(textSection);
+      }
+    }
   }
 
-  return sections.map(cleanText).filter(Boolean).join("\n\n");
+  const self = findNode(graph, assistantNodeId);
+  const selfText = assistantTextSectionForNode(self);
+  if (selfText) {
+    sections.push(selfText);
+  }
+
+  return {
+    nodeId: assistantNodeId,
+    prompt: joinSections(sections, "prompt"),
+    negativePrompt: joinSections(sections, "negativePrompt"),
+    sections,
+    references,
+    edgeRoles
+  };
+}
+
+function assistantReferenceForAsset(
+  source: GraphNode,
+  role: string,
+  steeringText: string,
+  asset: ReferenceAssetEntry | null,
+  index: number,
+  total: number
+): GenerationReferenceInput {
+  const baseTitle = cleanText(source.data?.title) || cleanText(source.data?.subtype) || "Reference";
+  const reference: GenerationReferenceInput = {
+    nodeId: source.id,
+    role,
+    title: asset?.title || (total > 1 ? `${baseTitle} ${index + 1}` : baseTitle),
+    sourceKind: cleanText(source.data?.subtype) || cleanText(source.data?.kind) || "Reference"
+  };
+
+  if (steeringText) {
+    reference.steeringText = steeringText;
+  }
+
+  if (asset?.assetId) {
+    reference.assetId = asset.assetId;
+  }
+
+  if (asset?.assetKind) {
+    reference.assetKind = asset.assetKind;
+  }
+
+  if (asset?.assetPath) {
+    reference.assetPath = asset.assetPath;
+  }
+
+  if (asset?.assetMetadata) {
+    reference.assetMetadata = asset.assetMetadata;
+  }
+
+  return reference;
+}
+
+function assistantReferencesForNode(source: GraphNode, role: string): GenerationReferenceInput[] {
+  if (source.data?.kind !== "Reference" && source.data?.kind !== "Note") {
+    return [];
+  }
+
+  const steeringText = nodeText(source);
+  const assets = referenceAssetsFromNodeData(source.data);
+
+  if (assets.length === 0) {
+    return [assistantReferenceForAsset(source, role, steeringText, null, 0, 1)];
+  }
+
+  return assets.map((asset, index) =>
+    assistantReferenceForAsset(source, role, steeringText, asset, index, assets.length)
+  );
+}
+
+function assistantTextSectionForNode(node: GraphNode, incomingEdge?: GraphEdge): PromptSectionArtifact | null {
+  const text = nodeText(node);
+
+  if (!text) {
+    return null;
+  }
+
+  return {
+    nodeId: node.id,
+    kind: resolveReferenceRole(incomingEdge ?? { id: "", source: node.id, target: node.id, label: "" }, node) === "negative"
+      ? "negativePrompt"
+      : "prompt",
+    section: cleanText(node.data?.subtype) || cleanText(node.data?.kind) || "Context",
+    title: cleanText(node.data?.title) || cleanText(node.data?.subtype) || cleanText(node.data?.kind) || "Context",
+    text
+  };
 }
 
 function assistantTextForSubtype(subtype: string, resultText: string) {
+  const normalizedText = normalizeAssistantRewriteText(resultText);
+
   switch (subtype) {
     case "Brainstormer":
-      return `Brainstorm routes\n${resultText}`;
     case "Expander":
-      return `Expanded prompt\n${resultText}`;
     case "Reinforcer":
-      return `Reinforced direction\n${resultText}`;
     case "Mutator":
     default:
-      return resultText;
+      return normalizedText;
   }
+}
+
+function normalizeAssistantRewriteText(resultText: string) {
+  return cleanText(resultText)
+    .replace(/\s+(?:instead of|rather than)\s+[^.;\n]+/gi, "")
+    .replace(/\s+changed\s+from\s+[^.;\n]+/gi, "")
+    .replace(/\s+replaced\s+[^.;\n]+\s+with\s+/gi, " ")
+    .replace(/[ \t]+([.,;:])/g, "$1")
+    .replace(/\s+\n/g, "\n")
+    .trim();
+}
+
+function generationOutputForNode(data: Partial<CanvasNodeData> | undefined): NonNullable<GenerationProviderInput["output"]> {
+  const aspectRatio = typeof data?.generationAspectRatio === "string" && GENERATION_ASPECT_RATIOS[data.generationAspectRatio]
+    ? data.generationAspectRatio
+    : DEFAULT_GENERATION_ASPECT_RATIO;
+  const resolution = typeof data?.generationResolution === "string" && GENERATION_RESOLUTION_LONG_EDGE[data.generationResolution]
+    ? data.generationResolution
+    : DEFAULT_GENERATION_RESOLUTION;
+  const [ratioWidth, ratioHeight] = GENERATION_ASPECT_RATIOS[aspectRatio] ?? GENERATION_ASPECT_RATIOS[DEFAULT_GENERATION_ASPECT_RATIO]!;
+  const longEdge = GENERATION_RESOLUTION_LONG_EDGE[resolution] ?? GENERATION_RESOLUTION_LONG_EDGE[DEFAULT_GENERATION_RESOLUTION]!;
+  const isLandscapeOrSquare = ratioWidth >= ratioHeight;
+  const width = isLandscapeOrSquare ? longEdge : Math.round((longEdge * ratioWidth) / ratioHeight);
+  const height = isLandscapeOrSquare ? Math.round((longEdge * ratioHeight) / ratioWidth) : longEdge;
+
+  return {
+    aspectRatio,
+    resolution,
+    width,
+    height
+  };
 }
 
 async function executeGenerationNode(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   request: ExecutionRequest,
   item: ExecutionQueueItem,
   startedDate: Date
 ): Promise<ExecutionNodeResult> {
+  const node = findNode(state.graph, item.nodeId);
   const assembly = assembleGenerationInputs(state.graph, item.nodeId);
   const startedAt = startedDate.toISOString();
-  const registry = createDefaultProviderRegistry();
-  const providerId = request.providerId ?? FAKE_PROVIDER_ID;
+  const output = generationOutputForNode(node.data);
+  const registry = createDefaultProviderRegistry({
+    codexCliPath: request.imageCodexCliPath,
+    fileExists: request.imageProviderFileExists,
+    runner: request.imageProviderRunner
+  });
+  const providerId = request.providerId ?? CODEX_PROVIDER_ID;
   const provider = registry.require(providerId);
-  const diagnostic = await provider.diagnose();
-
-  if (diagnostic.availability !== "available") {
-    throw new ProviderUnavailableError(diagnostic);
-  }
-
   const providerInput: GenerationProviderInput = {
     projectPath,
     runId: randomUUID(),
@@ -656,56 +951,118 @@ async function executeGenerationNode(
     sections: assembly.sections,
     references: assembly.references,
     edgeRoles: assembly.edgeRoles,
+    inputs: collectProviderInputPayloads(state.graph, item.nodeId),
+    output,
     requestedAt: startedAt
   };
-  const providerResult = await provider.generate(providerInput);
+  const diagnostic = await provider.diagnose();
+
+  if (diagnostic.availability !== "available") {
+    const error = new ProviderUnavailableError(diagnostic);
+    const unavailableRun = createProviderRun(projectPath, {
+      runId: providerInput.runId,
+      providerId: provider.descriptor.id,
+      model: provider.descriptor.model,
+      request: providerRunRequest({
+        operation: "image.generate",
+        nodeId: item.nodeId,
+        iteration: item.iteration,
+        policy: request.policy,
+        provider: provider.descriptor,
+        diagnostic,
+        providerInput
+      }),
+      now: startedDate
+    });
+    failProviderRun(projectPath, unavailableRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+
+  const providerRun = createProviderRun(projectPath, {
+    runId: providerInput.runId,
+    providerId: provider.descriptor.id,
+    model: provider.descriptor.model,
+    request: providerRunRequest({
+      operation: "image.generate",
+      nodeId: item.nodeId,
+      iteration: item.iteration,
+      policy: request.policy,
+      provider: provider.descriptor,
+      diagnostic,
+      providerInput
+    }),
+    now: startedDate
+  });
+  let providerResult: ProviderGenerationResult;
+
+  try {
+    providerResult = await provider.generate(providerInput);
+  } catch (error) {
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
   const providerDescriptor = provider.descriptor;
 
   if (providerResult.artifacts.length === 0) {
-    throw new Error(`Generation provider "${providerId}" returned no image artifacts.`);
+    const error = new Error(`Generation provider "${providerId}" returned no image artifacts.`);
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
   }
 
   const assets: AssetRecord[] = [];
 
-  for (const [artifactIndex, artifact] of providerResult.artifacts.entries()) {
-    assets.push(
-      await saveGeneratedAsset(projectPath, {
-        generationNodeId: item.nodeId,
-        fileName: artifact.fileName,
-        content: await generatedArtifactContent(artifact),
-        mimeType: artifact.mimeType,
-        lineage: {
-          provider: {
-            id: providerResult.providerId,
-            name: providerResult.providerName,
-            route: providerDescriptor.route,
-            capabilities: providerResult.capabilities
+  try {
+    for (const [artifactIndex, artifact] of providerResult.artifacts.entries()) {
+      assets.push(
+        await saveGeneratedAsset(projectPath, {
+          generationNodeId: item.nodeId,
+          fileName: artifact.fileName,
+          content: await generatedArtifactContent(artifact),
+          mimeType: artifact.mimeType,
+          lineage: {
+            provider: {
+              id: providerResult.providerId,
+              name: providerResult.providerName,
+              route: providerDescriptor.route,
+              capabilities: providerResult.capabilities
+            },
+            providerJob: providerResult.metadata ?? {},
+            artifact: artifact.metadata ?? {},
+            artifactIndex,
+            policy: request.policy,
+            iteration: item.iteration,
+            prompt: assembly.prompt,
+            negativePrompt: assembly.negativePrompt,
+            sections: assembly.sections,
+            references: assembly.references,
+            edgeRoles: assembly.edgeRoles,
+            output
           },
-          providerJob: providerResult.metadata ?? {},
-          artifact: artifact.metadata ?? {},
-          artifactIndex,
-          policy: request.policy,
-          iteration: item.iteration,
-          prompt: assembly.prompt,
-          negativePrompt: assembly.negativePrompt,
-          sections: assembly.sections,
-          references: assembly.references,
-          edgeRoles: assembly.edgeRoles
-        },
-        metadata: {
-          provider: providerResult.providerId,
-          providerName: providerResult.providerName,
-          providerRoute: providerDescriptor.route,
-          providerCapabilities: providerResult.capabilities,
-          providerJob: providerResult.metadata ?? {},
-          artifact: artifact.metadata ?? {},
-          policy: request.policy,
-          iteration: item.iteration
-        },
-        now: startedDate
-      })
-    );
+          metadata: {
+            provider: providerResult.providerId,
+            providerName: providerResult.providerName,
+            providerRoute: providerDescriptor.route,
+            providerCapabilities: providerResult.capabilities,
+            providerJob: providerResult.metadata ?? {},
+            artifact: artifact.metadata ?? {},
+            policy: request.policy,
+            iteration: item.iteration
+          },
+          now: startedDate
+        })
+      );
+    }
+  } catch (error) {
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
   }
+
+  completeProviderRun(
+    projectPath,
+    providerRun.id,
+    generationProviderRunResponse(providerResult, providerDescriptor, assets),
+    request.now?.() ?? new Date()
+  );
 
   const asset = assets.at(-1)!;
   const finishedAt = (request.now?.() ?? new Date()).toISOString();
@@ -750,7 +1107,7 @@ async function executeGenerationNode(
 
 async function executeEditNode(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   request: ExecutionRequest,
   item: ExecutionQueueItem,
   startedDate: Date
@@ -758,19 +1115,13 @@ async function executeEditNode(
   const node = findNode(state.graph, item.nodeId);
   const assembly = assembleEditInputs(state.graph, item.nodeId);
   const startedAt = startedDate.toISOString();
-  const registry = createDefaultProviderRegistry();
-  const providerId = request.providerId ?? FAKE_PROVIDER_ID;
+  const registry = createDefaultProviderRegistry({
+    codexCliPath: request.imageCodexCliPath,
+    fileExists: request.imageProviderFileExists,
+    runner: request.imageProviderRunner
+  });
+  const providerId = request.providerId ?? CODEX_PROVIDER_ID;
   const provider = registry.require(providerId);
-  const diagnostic = await provider.diagnose();
-
-  if (diagnostic.availability !== "available") {
-    throw new ProviderUnavailableError(diagnostic);
-  }
-
-  if (!diagnostic.capabilities.includes("image.edit")) {
-    throw new Error(`Provider "${providerId}" does not support image.edit.`);
-  }
-
   const providerInput: ImageEditProviderInput = {
     projectPath,
     runId: randomUUID(),
@@ -787,91 +1138,178 @@ async function executeEditNode(
     edgeRoles: assembly.edgeRoles,
     sourceImage: assembly.sourceImage,
     mask: assembly.mask,
+    recipe: assembly.recipe,
+    frame: assembly.frame,
+    inputs: collectProviderInputPayloads(state.graph, item.nodeId),
     requestedAt: startedAt
   };
-  const providerResult = await provider.edit(providerInput);
+  const diagnostic = await provider.diagnose();
+
+  if (diagnostic.availability !== "available") {
+    const error = new ProviderUnavailableError(diagnostic);
+    const unavailableRun = createProviderRun(projectPath, {
+      runId: providerInput.runId,
+      providerId: provider.descriptor.id,
+      model: provider.descriptor.model,
+      request: providerRunRequest({
+        operation: "image.edit",
+        nodeId: item.nodeId,
+        iteration: item.iteration,
+        policy: request.policy,
+        provider: provider.descriptor,
+        diagnostic,
+        providerInput
+      }),
+      now: startedDate
+    });
+    failProviderRun(projectPath, unavailableRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+
+  if (!diagnostic.capabilities.includes("image.edit")) {
+    const error = new Error(`Provider "${providerId}" does not support image.edit.`);
+    const unsupportedRun = createProviderRun(projectPath, {
+      runId: providerInput.runId,
+      providerId: provider.descriptor.id,
+      model: provider.descriptor.model,
+      request: providerRunRequest({
+        operation: "image.edit",
+        nodeId: item.nodeId,
+        iteration: item.iteration,
+        policy: request.policy,
+        provider: provider.descriptor,
+        diagnostic,
+        providerInput
+      }),
+      now: startedDate
+    });
+    failProviderRun(projectPath, unsupportedRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+
+  const providerRun = createProviderRun(projectPath, {
+    runId: providerInput.runId,
+    providerId: provider.descriptor.id,
+    model: provider.descriptor.model,
+    request: providerRunRequest({
+      operation: "image.edit",
+      nodeId: item.nodeId,
+      iteration: item.iteration,
+      policy: request.policy,
+      provider: provider.descriptor,
+      diagnostic,
+      providerInput
+    }),
+    now: startedDate
+  });
+  let providerResult: ProviderGenerationResult;
+
+  try {
+    providerResult = await provider.edit(providerInput);
+  } catch (error) {
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
   const providerDescriptor = provider.descriptor;
 
   if (providerResult.artifacts.length === 0) {
-    throw new Error(`Edit provider "${providerId}" returned no image artifacts.`);
+    const error = new Error(`Edit provider "${providerId}" returned no image artifacts.`);
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
   }
 
   const assets: AssetRecord[] = [];
 
-  for (const [artifactIndex, artifact] of providerResult.artifacts.entries()) {
-    const localTool = localToolFromMetadata(providerResult.metadata, artifact.metadata);
+  try {
+    for (const [artifactIndex, artifact] of providerResult.artifacts.entries()) {
+      const localTool = localToolFromMetadata(providerResult.metadata, artifact.metadata);
 
-    assets.push(
-      await saveGeneratedAsset(projectPath, {
-        generationNodeId: item.nodeId,
-        fileName: artifact.fileName,
-        content: await generatedArtifactContent(artifact),
-        mimeType: artifact.mimeType,
-        lineage: {
-          provider: {
-            id: providerResult.providerId,
-            name: providerResult.providerName,
-            route: providerDescriptor.route,
-            capabilities: providerResult.capabilities
+      assets.push(
+        await saveGeneratedAsset(projectPath, {
+          generationNodeId: item.nodeId,
+          fileName: artifact.fileName,
+          content: await generatedArtifactContent(artifact),
+          mimeType: artifact.mimeType,
+          lineage: {
+            provider: {
+              id: providerResult.providerId,
+              name: providerResult.providerName,
+              route: providerDescriptor.route,
+              capabilities: providerResult.capabilities
+            },
+            providerJob: providerResult.metadata ?? {},
+            artifact: artifact.metadata ?? {},
+            artifactIndex,
+            policy: request.policy,
+            iteration: item.iteration,
+            prompt: assembly.prompt,
+            negativePrompt: assembly.negativePrompt,
+            sections: assembly.sections,
+            references: assembly.references,
+            edgeRoles: assembly.edgeRoles,
+            edit: {
+              nodeId: item.nodeId,
+              subtype: node.data?.subtype ?? "Edit",
+              operation: providerInput.operation,
+              recipe: providerInput.recipe,
+              frame: providerInput.frame,
+              instruction: cleanText(node.data?.instruction),
+              notes: cleanText(node.data?.notes)
+            },
+            parent: {
+              assetId: assembly.sourceImage.assetId,
+              assetKind: assembly.sourceImage.assetKind,
+              assetPath: assembly.sourceImage.assetPath,
+              assetMetadata: assembly.sourceImage.assetMetadata
+            },
+            mask: assembly.mask
+              ? {
+                  assetId: assembly.mask.assetId,
+                  assetPath: assembly.mask.assetPath,
+                  assetMetadata: assembly.mask.assetMetadata
+                }
+              : null,
+            upstreamReferences: assembly.references,
+            ...(localTool ? { localTool } : {})
           },
-          providerJob: providerResult.metadata ?? {},
-          artifact: artifact.metadata ?? {},
-          artifactIndex,
-          policy: request.policy,
-          iteration: item.iteration,
-          prompt: assembly.prompt,
-          negativePrompt: assembly.negativePrompt,
-          sections: assembly.sections,
-          references: assembly.references,
-          edgeRoles: assembly.edgeRoles,
-          edit: {
-            nodeId: item.nodeId,
-            subtype: node.data?.subtype ?? "Edit",
+          metadata: {
+            provider: providerResult.providerId,
+            providerName: providerResult.providerName,
+            providerRoute: providerDescriptor.route,
+            providerCapabilities: providerResult.capabilities,
+            providerJob: providerResult.metadata ?? {},
+            artifact: artifact.metadata ?? {},
+            policy: request.policy,
+            iteration: item.iteration,
+            editNodeId: item.nodeId,
+            editSubtype: node.data?.subtype ?? "Edit",
             operation: providerInput.operation,
-            instruction: cleanText(node.data?.instruction),
-            notes: cleanText(node.data?.notes)
+            sourceAssetId: assembly.sourceImage.assetId,
+            sourceAssetKind: assembly.sourceImage.assetKind,
+            sourceAssetPath: assembly.sourceImage.assetPath,
+            sourceAssetMetadata: assembly.sourceImage.assetMetadata,
+            maskAssetId: assembly.mask?.assetId,
+            maskAssetPath: assembly.mask?.assetPath,
+            maskMetadata: assembly.mask?.assetMetadata,
+            editRecipe: providerInput.recipe,
+            editFrame: providerInput.frame,
+            ...(localTool ? { localTool } : {})
           },
-          parent: {
-            assetId: assembly.sourceImage.assetId,
-            assetKind: assembly.sourceImage.assetKind,
-            assetPath: assembly.sourceImage.assetPath,
-            assetMetadata: assembly.sourceImage.assetMetadata
-          },
-          mask: assembly.mask
-            ? {
-                assetId: assembly.mask.assetId,
-                assetPath: assembly.mask.assetPath,
-                assetMetadata: assembly.mask.assetMetadata
-              }
-            : null,
-          upstreamReferences: assembly.references,
-          ...(localTool ? { localTool } : {})
-        },
-        metadata: {
-          provider: providerResult.providerId,
-          providerName: providerResult.providerName,
-          providerRoute: providerDescriptor.route,
-          providerCapabilities: providerResult.capabilities,
-          providerJob: providerResult.metadata ?? {},
-          artifact: artifact.metadata ?? {},
-          policy: request.policy,
-          iteration: item.iteration,
-          editNodeId: item.nodeId,
-          editSubtype: node.data?.subtype ?? "Edit",
-          operation: providerInput.operation,
-          sourceAssetId: assembly.sourceImage.assetId,
-          sourceAssetKind: assembly.sourceImage.assetKind,
-          sourceAssetPath: assembly.sourceImage.assetPath,
-          sourceAssetMetadata: assembly.sourceImage.assetMetadata,
-          maskAssetId: assembly.mask?.assetId,
-          maskAssetPath: assembly.mask?.assetPath,
-          maskMetadata: assembly.mask?.assetMetadata,
-          ...(localTool ? { localTool } : {})
-        },
-        now: startedDate
-      })
-    );
+          now: startedDate
+        })
+      );
+    }
+  } catch (error) {
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
   }
+
+  completeProviderRun(
+    projectPath,
+    providerRun.id,
+    generationProviderRunResponse(providerResult, providerDescriptor, assets),
+    request.now?.() ?? new Date()
+  );
 
   const asset = assets.at(-1)!;
   const finishedAt = (request.now?.() ?? new Date()).toISOString();
@@ -892,7 +1330,9 @@ async function executeEditNode(
     sourceAssetMetadata: assembly.sourceImage.assetMetadata,
     maskAssetId: assembly.mask?.assetId,
     maskAssetPath: assembly.mask?.assetPath,
-    maskMetadata: assembly.mask?.assetMetadata
+    maskMetadata: assembly.mask?.assetMetadata,
+    editRecipe: providerInput.recipe?.id,
+    editFrame: providerInput.frame
   });
 
   const action = providerInput.operation === "upscale" ? "upscale" : "edit";
@@ -928,6 +1368,8 @@ async function executeEditNode(
             assetMetadata: assembly.mask.assetMetadata
           }
         : null,
+      recipe: providerInput.recipe,
+      frame: providerInput.frame,
       prompt: assembly.prompt,
       negativePrompt: assembly.negativePrompt,
       references: assembly.references,
@@ -940,7 +1382,8 @@ async function executeEditNode(
 
 async function executeStoreNode(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
+  request: ExecutionRequest,
   item: ExecutionQueueItem,
   startedDate: Date
 ): Promise<ExecutionNodeResult> {
@@ -969,7 +1412,8 @@ async function executeStoreNode(
     case "Compare":
       return executeCompareNode(projectPath, state, item, startedDate);
     case "Evaluate":
-      return executeEvaluateNode(projectPath, state, item, startedDate);
+    case "Evaluation":
+      return executeEvaluateNode(projectPath, state, request, item, startedDate);
     case "Filter":
       return executeFilterNode(projectPath, state, item, startedDate);
     default:
@@ -999,7 +1443,7 @@ async function executeStoreNode(
 
 async function executeCompareNode(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   item: ExecutionQueueItem,
   startedDate: Date
 ): Promise<ExecutionNodeResult> {
@@ -1018,13 +1462,27 @@ async function executeCompareNode(
     decision,
     notes
   }));
+  const winnerAssetId = selectedReviewWinnerAssetId(items);
   const artifact = {
     kind: "compare",
     compareNodeId: item.nodeId,
     layout,
     reviewedAt: finishedAt,
+    membership: items,
+    winnerAssetId,
+    rating,
+    tags,
+    decision,
+    notes,
     items
   };
+  const persistedArtifact = await createArtifact(projectPath, {
+    kind: "compare",
+    nodeId: item.nodeId,
+    metadata: artifact,
+    parentArtifactIds: artifactIdsFromReviewInputs(items),
+    now: startedDate
+  });
 
   for (const input of items) {
     if (!input.assetId) {
@@ -1041,6 +1499,7 @@ async function executeCompareNode(
           decision,
           notes,
           compareNodeId: item.nodeId,
+          compareArtifactId: persistedArtifact.id,
           reviewedAt: finishedAt,
           layout
         }
@@ -1053,7 +1512,10 @@ async function executeCompareNode(
     rerunState: "complete",
     lastRunAt: finishedAt,
     compareLayout: layout,
-    compareArtifact: artifact
+    compareArtifact: {
+      ...artifact,
+      artifactId: persistedArtifact.id
+    }
   });
 
   return {
@@ -1066,7 +1528,9 @@ async function executeCompareNode(
       layout,
       tags,
       decision,
-      rating
+      rating,
+      winnerAssetId,
+      artifactId: persistedArtifact.id
     },
     startedAt: finishedAt,
     finishedAt
@@ -1075,7 +1539,21 @@ async function executeCompareNode(
 
 async function executeEvaluateNode(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
+  request: ExecutionRequest,
+  item: ExecutionQueueItem,
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
+  if (shouldUseVisionEvaluationProvider(request)) {
+    return executeProviderEvaluateNode(projectPath, state, request, item, startedDate);
+  }
+
+  return executeSimulationEvaluateNode(projectPath, state, item, startedDate);
+}
+
+async function executeSimulationEvaluateNode(
+  projectPath: string,
+  state: ExecutionWorkerState,
   item: ExecutionQueueItem,
   startedDate: Date
 ): Promise<ExecutionNodeResult> {
@@ -1098,6 +1576,13 @@ async function executeEvaluateNode(
     evaluatedAt: finishedAt,
     items
   };
+  const persistedArtifact = await createArtifact(projectPath, {
+    kind: "evaluation",
+    nodeId: item.nodeId,
+    metadata: artifact,
+    parentArtifactIds: artifactIdsFromReviewInputs(items),
+    now: startedDate
+  });
 
   for (const evaluated of items) {
     if (!evaluated.assetId) {
@@ -1115,6 +1600,8 @@ async function executeEvaluateNode(
           tags: evaluated.tags,
           confidence: evaluated.confidence,
           explanation: evaluated.explanation,
+          detectedIssues: evaluated.detectedIssues,
+          evaluationArtifactId: persistedArtifact.id,
           evaluatedAt: finishedAt,
           threshold
         }
@@ -1127,7 +1614,10 @@ async function executeEvaluateNode(
     rerunState: "complete",
     lastRunAt: finishedAt,
     evaluationThreshold: threshold,
-    evaluationArtifact: artifact
+    evaluationArtifact: {
+      ...artifact,
+      artifactId: persistedArtifact.id
+    }
   });
 
   return {
@@ -1140,16 +1630,204 @@ async function executeEvaluateNode(
       threshold,
       passCount: items.filter((entry) => entry.decision === "pass").length,
       needsEditCount: items.filter((entry) => entry.decision === "needs-edit").length,
-      failCount: items.filter((entry) => entry.decision === "fail").length
+      failCount: items.filter((entry) => entry.decision === "fail").length,
+      artifactId: persistedArtifact.id
     },
     startedAt: finishedAt,
     finishedAt
   };
 }
 
+async function executeProviderEvaluateNode(
+  projectPath: string,
+  state: ExecutionWorkerState,
+  request: ExecutionRequest,
+  item: ExecutionQueueItem,
+  startedDate: Date
+): Promise<ExecutionNodeResult> {
+  const node = findNode(state.graph, item.nodeId);
+  const startedAt = startedDate.toISOString();
+  const threshold = normalizeThreshold(node.data?.evaluationThreshold);
+  const instruction = cleanText(node.data?.instruction);
+  const reviewInputs = collectReviewInputs(state.graph, item.nodeId);
+  const images = visionEvaluationImagesFromInputs(reviewInputs);
+
+  if (images.length === 0) {
+    return executeSimulationEvaluateNode(projectPath, state, item, startedDate);
+  }
+
+  const provider = new CodexCliVisionEvaluationProvider({
+    codexCliPath: request.evaluationCodexCliPath,
+    fileExists: request.evaluationProviderFileExists,
+    runner: request.evaluationProviderRunner
+  });
+  const providerInput: VisionEvaluationProviderInput = {
+    projectPath,
+    runId: randomUUID(),
+    evaluationNodeId: item.nodeId,
+    instruction,
+    criteria: evaluationCriteriaForNode(node, threshold),
+    threshold,
+    images,
+    inputs: collectProviderInputPayloads(state.graph, item.nodeId),
+    requestedAt: startedAt
+  };
+  const diagnostic = await provider.diagnose();
+
+  if (diagnostic.availability !== "available") {
+    const error = new ProviderUnavailableError(diagnostic);
+    const unavailableRun = createProviderRun(projectPath, {
+      runId: providerInput.runId,
+      providerId: provider.descriptor.id,
+      model: provider.descriptor.model,
+      request: providerRunRequest({
+        operation: "evaluation.vision",
+        nodeId: item.nodeId,
+        iteration: item.iteration,
+        policy: request.policy,
+        provider: provider.descriptor,
+        diagnostic,
+        providerInput
+      }),
+      now: startedDate
+    });
+    failProviderRun(projectPath, unavailableRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+
+  const providerRun = createProviderRun(projectPath, {
+    runId: providerInput.runId,
+    providerId: provider.descriptor.id,
+    model: provider.descriptor.model,
+    request: providerRunRequest({
+      operation: "evaluation.vision",
+      nodeId: item.nodeId,
+      iteration: item.iteration,
+      policy: request.policy,
+      provider: provider.descriptor,
+      diagnostic,
+      providerInput
+    }),
+    now: startedDate
+  });
+  let providerResult: VisionEvaluationProviderResult;
+
+  try {
+    providerResult = await provider.evaluate(providerInput);
+  } catch (error) {
+    failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    throw error;
+  }
+  const providerDescriptor = provider.descriptor;
+  const evaluatedAt = (request.now?.() ?? new Date()).toISOString();
+  const items = mergeProviderEvaluationResults(reviewInputs, providerInput.images, providerResult.items, {
+    evaluateNodeId: item.nodeId,
+    threshold,
+    instruction,
+    evaluatedAt
+  });
+  const artifact = {
+    kind: "evaluation",
+    evaluateNodeId: item.nodeId,
+    threshold,
+    instruction,
+    evaluatedAt,
+    provider: {
+      id: providerResult.providerId,
+      name: providerResult.providerName,
+      route: providerDescriptor.route,
+      capabilities: providerResult.capabilities
+    },
+    providerJob: providerResult.metadata ?? {},
+    summary: providerResult.summary,
+    items
+  };
+  let persistedArtifact: Awaited<ReturnType<typeof createArtifact>>;
+
+  try {
+    persistedArtifact = await createArtifact(projectPath, {
+      kind: "evaluation",
+      nodeId: item.nodeId,
+      metadata: artifact,
+      parentArtifactIds: artifactIdsFromReviewInputs(items),
+      now: startedDate,
+    });
+
+    for (const evaluated of items) {
+      if (!evaluated.assetId) {
+        continue;
+      }
+
+      await updateAssetMetadata(projectPath, {
+        assetId: evaluated.assetId,
+        now: startedDate,
+        metadata: {
+          evaluation: {
+            evaluateNodeId: item.nodeId,
+            decision: evaluated.decision,
+            score: evaluated.score,
+            tags: evaluated.tags,
+            confidence: evaluated.confidence,
+            explanation: evaluated.explanation,
+            detectedIssues: evaluated.detectedIssues,
+            evaluationArtifactId: persistedArtifact.id,
+            evaluatedAt,
+            threshold,
+            provider: providerResult.providerId
+          }
+        }
+      });
+    }
+
+    completeProviderRun(
+      projectPath,
+      providerRun.id,
+      evaluationProviderRunResponse(providerResult, providerDescriptor, persistedArtifact.id),
+      request.now?.() ?? new Date()
+    );
+  } catch (error) {
+    try {
+      failProviderRun(projectPath, providerRun.id, providerRunError(error, diagnostic), request.now?.() ?? new Date());
+    } catch {
+      // Preserve the local persistence error that caused the execution failure.
+    }
+    throw error;
+  }
+
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    status: "complete",
+    rerunState: "complete",
+    lastRunAt: evaluatedAt,
+    evaluationThreshold: threshold,
+    evaluationArtifact: {
+      ...artifact,
+      artifactId: persistedArtifact.id
+    }
+  });
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "complete",
+    action: "evaluate-codex",
+    metadata: {
+      itemCount: items.length,
+      threshold,
+      provider: artifact.provider,
+      providerJob: providerResult.metadata ?? {},
+      passCount: items.filter((entry) => entry.decision === "pass").length,
+      needsEditCount: items.filter((entry) => entry.decision === "needs-edit").length,
+      failCount: items.filter((entry) => entry.decision === "fail").length,
+      artifactId: persistedArtifact.id
+    },
+    startedAt,
+    finishedAt: evaluatedAt
+  };
+}
+
 async function executeFilterNode(
   projectPath: string,
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   item: ExecutionQueueItem,
   startedDate: Date
 ): Promise<ExecutionNodeResult> {
@@ -1159,9 +1837,11 @@ async function executeFilterNode(
   const rules = parseFilterRules(node.data?.filterRules);
   const dryRun = node.data?.filterDryRun === true;
   const autoApply = node.data?.filterAutoApply !== false;
+  const mode = normalizeFilterRouteMode(node.data?.filterRouteMode);
   const manualOverride = cleanText(node.data?.filterManualOverride);
   const routes = collectFilterRoutes(state.graph, item.nodeId);
   const routed = [];
+  const candidateRoutes = [];
   const collectionUpdates = new Map<string, Partial<CanvasNodeData>>();
 
   for (const input of inputs) {
@@ -1173,10 +1853,53 @@ async function executeFilterNode(
       routes
     });
     let moved = false;
+    let copied = false;
+    let linked = false;
+    let metadataUpdated = false;
     let movedAsset: AssetRecord | null = null;
+    let copiedPath: string | null = null;
+    let collectionAsset: AssetRecord | null = null;
+    const previewMetadataChanges = filterMetadataChanges({
+      filterNodeId: item.nodeId,
+      decision,
+      route,
+      mode,
+      dryRun,
+      autoApply,
+      moved: false,
+      copied: false,
+      linked: false,
+      routedAt: finishedAt
+    });
+    const inputArtifactId = artifactIdFromReviewInput(input);
+    if (autoApply && !dryRun && mode === "move" && !input.assetId) {
+      throw new Error(`Artifact-only route "${inputArtifactId || input.assetPath || "unknown"}" cannot be moved without an asset id. Use copy or link mode for artifact-only inputs.`);
+    }
 
-    if (input.assetId && autoApply && !dryRun) {
-      const collectionAsset = route.node
+    const canApplyRoute =
+      Boolean(input.assetId) ||
+      (mode === "copy" && Boolean(input.assetPath)) ||
+      (mode === "link" && Boolean(inputArtifactId));
+    const candidateRoute = {
+      assetId: input.assetId,
+      artifactId: inputArtifactId,
+      assetPath: input.assetPath,
+      decision,
+      score: input.score,
+      destinationCollectionName: route.collectionName,
+      destinationCollectionNodeId: route.node?.id,
+      destinationCollectionId: stringFrom(route.node?.data?.storeAssetId),
+      rule: route.rule,
+      dryRun,
+      autoApply,
+      mode,
+      metadataChanges: previewMetadataChanges
+    };
+
+    candidateRoutes.push(candidateRoute);
+
+    if (canApplyRoute && autoApply && !dryRun) {
+      collectionAsset = route.node
         ? await ensureCollectionFolder(projectPath, {
             name: route.collectionName,
             nodeId: route.node.id,
@@ -1195,43 +1918,121 @@ async function executeFilterNode(
         });
       }
 
-      movedAsset = await moveAssetToCollection(projectPath, {
-        assetId: input.assetId,
-        collectionId: collectionAsset?.id,
-        collectionName: collectionAsset ? undefined : route.collectionName,
-        reason: `Filter ${item.nodeId} routed ${decision} to ${route.collectionName}`,
-        now: startedDate
-      });
-      moved = true;
+      if (mode === "move") {
+        if (!input.assetId) {
+          throw new Error(`Asset-only route "${input.artifactId ?? input.assetPath ?? "unknown"}" cannot be moved without an asset id.`);
+        }
 
-      await updateAssetMetadata(projectPath, {
-        assetId: input.assetId,
-        now: startedDate,
-        metadata: {
-          filter: {
+        movedAsset = await moveAssetToCollection(projectPath, {
+          assetId: input.assetId,
+          collectionId: collectionAsset?.id,
+          collectionName: collectionAsset ? undefined : route.collectionName,
+          reason: `Filter ${item.nodeId} routed ${decision} to ${route.collectionName}`,
+          now: startedDate
+        });
+        moved = true;
+      } else if (mode === "copy") {
+        const copyResult = await applyCopyRoute(projectPath, {
+          input,
+          collectionAsset,
+          collectionName: route.collectionName,
+          filterNodeId: item.nodeId,
+          decision,
+          route,
+          mode,
+          dryRun,
+          autoApply,
+          routedAt: finishedAt,
+          now: startedDate
+        });
+        collectionAsset = copyResult.collectionAsset;
+        copiedPath = copyResult.copiedPath;
+        copied = true;
+        metadataUpdated = true;
+      } else {
+        const artifactId = await resolveArtifactIdForReviewInput(projectPath, input);
+
+        if (!artifactId) {
+          throw new Error(`Asset "${input.assetId}" cannot be linked because it has no artifact id.`);
+        }
+
+        if (!collectionAsset) {
+          collectionAsset = await ensureCollectionFolder(projectPath, {
+            name: route.collectionName,
+            now: startedDate
+          });
+        }
+
+        await addArtifactToCollection(projectPath, {
+          artifactId,
+          collectionId: collectionAsset.id,
+          metadata: {
             filterNodeId: item.nodeId,
             decision,
-            targetCollectionName: route.collectionName,
-            rule: route.rule,
+            mode,
+            reason: `Filter ${item.nodeId} linked ${decision} to ${route.collectionName}`
+          },
+          now: startedDate
+        });
+        linked = true;
+      }
+
+      if (!metadataUpdated && input.assetId) {
+        await updateAssetMetadata(projectPath, {
+          assetId: input.assetId,
+          now: startedDate,
+          metadata: filterMetadataChanges({
+            filterNodeId: item.nodeId,
+            decision,
+            route,
+            mode,
             dryRun,
             autoApply,
             moved,
-            routedAt: finishedAt
-          }
-        }
-      });
+            copied,
+            linked,
+            routedAt: finishedAt,
+            copiedPath,
+            collectionId: collectionAsset?.id
+          })
+        });
+      }
     }
+
+    const finalMetadataChanges = filterMetadataChanges({
+      filterNodeId: item.nodeId,
+      decision,
+      route,
+      mode,
+      dryRun,
+      autoApply,
+      moved,
+      copied,
+      linked,
+      routedAt: finishedAt,
+      copiedPath,
+      collectionId: collectionAsset?.id ?? candidateRoute.destinationCollectionId
+    });
 
     routed.push({
       assetId: input.assetId,
+      artifactId: inputArtifactId,
       assetPath: movedAsset?.path ?? input.assetPath,
       decision,
       score: input.score,
       targetCollectionName: route.collectionName,
+      destinationCollectionName: route.collectionName,
+      destinationCollectionId: collectionAsset?.id ?? candidateRoute.destinationCollectionId,
       rule: route.rule,
       dryRun,
       autoApply,
-      moved
+      mode,
+      preview: dryRun || !autoApply,
+      moved,
+      copied,
+      linked,
+      copiedPath,
+      metadataChanges: dryRun || !autoApply ? previewMetadataChanges : finalMetadataChanges
     });
   }
 
@@ -1244,16 +2045,29 @@ async function executeFilterNode(
     filterNodeId: item.nodeId,
     dryRun,
     autoApply,
+    mode,
     manualOverride: manualOverride || null,
     routedAt: finishedAt,
+    candidateRoutes,
     routed
   };
+  const persistedArtifact = await createArtifact(projectPath, {
+    kind: "route",
+    nodeId: item.nodeId,
+    metadata: resultArtifact,
+    parentArtifactIds: artifactIdsFromReviewInputs(inputs),
+    now: startedDate
+  });
 
   state.graph = setNodeData(state.graph, item.nodeId, {
     status: "complete",
     rerunState: "complete",
     lastRunAt: finishedAt,
-    filterResult: resultArtifact
+    filterRouteMode: mode,
+    filterResult: {
+      ...resultArtifact,
+      artifactId: persistedArtifact.id
+    }
   });
 
   return {
@@ -1265,8 +2079,13 @@ async function executeFilterNode(
       itemCount: routed.length,
       dryRun,
       autoApply,
+      mode,
       manualOverride: manualOverride || null,
       movedCount: routed.filter((entry) => entry.moved).length,
+      copiedCount: routed.filter((entry) => entry.copied).length,
+      linkedCount: routed.filter((entry) => entry.linked).length,
+      artifactId: persistedArtifact.id,
+      candidateRoutes,
       routes: routed
     },
     startedAt: finishedAt,
@@ -1276,6 +2095,7 @@ async function executeFilterNode(
 
 type ReviewInput = {
   assetId?: string;
+  artifactId?: string;
   assetKind?: string;
   assetPath?: string;
   assetMetadata?: Record<string, unknown>;
@@ -1288,6 +2108,7 @@ type ReviewInput = {
   score?: number;
   confidence?: number;
   explanation?: string;
+  detectedIssues?: string[];
 };
 
 type EvaluatedReviewInput = ReviewInput & {
@@ -1295,6 +2116,7 @@ type EvaluatedReviewInput = ReviewInput & {
   confidence: number;
   decision: "pass" | "needs-edit" | "fail";
   explanation: string;
+  detectedIssues: string[];
 };
 
 type FilterRoute = {
@@ -1302,6 +2124,267 @@ type FilterRoute = {
   rule: string;
   node?: GraphNode;
 };
+
+type FilterRouteMode = "move" | "copy" | "link";
+
+function selectedReviewWinnerAssetId(items: ReviewInput[]) {
+  return (
+    items.find((input) => input.decision === "select" || input.decision === "favorite")?.assetId ||
+    items
+      .filter((input) => input.assetId && typeof input.rating === "number")
+      .sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0))[0]?.assetId ||
+    items.find((input) => input.assetId)?.assetId ||
+    null
+  );
+}
+
+function artifactIdsFromReviewInputs(inputs: ReviewInput[]) {
+  return uniqueText(inputs.map(artifactIdFromReviewInput).filter((artifactId): artifactId is string => Boolean(artifactId)));
+}
+
+function artifactIdFromReviewInput(input: ReviewInput) {
+  if (input.artifactId) {
+    return input.artifactId;
+  }
+
+  const metadata = recordFrom(input.assetMetadata);
+  return stringFrom(metadata.artifactId) || stringFrom(metadata.sourceArtifactId);
+}
+
+async function resolveArtifactIdForReviewInput(projectPath: string, input: ReviewInput) {
+  const directArtifactId = artifactIdFromReviewInput(input);
+
+  if (directArtifactId || !input.assetId) {
+    return directArtifactId;
+  }
+
+  const asset = (await listAssets(projectPath)).find((candidate) => candidate.id === input.assetId);
+
+  return asset ? stringFrom(asset.metadata.artifactId) : "";
+}
+
+function normalizeFilterRouteMode(value: unknown): FilterRouteMode {
+  const mode = cleanText(value).toLowerCase();
+
+  return mode === "copy" || mode === "link" ? mode : "move";
+}
+
+function filterMetadataChanges(input: {
+  filterNodeId: string;
+  decision: string;
+  route: FilterRoute;
+  mode: FilterRouteMode;
+  dryRun: boolean;
+  autoApply: boolean;
+  moved: boolean;
+  copied: boolean;
+  linked: boolean;
+  routedAt: string;
+  copiedPath?: string | null;
+  collectionId?: string | null;
+}) {
+  return {
+    filter: withoutUndefined({
+      filterNodeId: input.filterNodeId,
+      decision: input.decision,
+      targetCollectionName: input.route.collectionName,
+      destinationCollectionName: input.route.collectionName,
+      destinationCollectionId: input.collectionId || undefined,
+      rule: input.route.rule,
+      mode: input.mode,
+      dryRun: input.dryRun,
+      autoApply: input.autoApply,
+      moved: input.moved,
+      copied: input.copied,
+      linked: input.linked,
+      copiedPath: input.copiedPath || undefined,
+      routedAt: input.routedAt
+    })
+  };
+}
+
+async function copyReviewAssetToCollection(
+  projectPath: string,
+  options: {
+    input: ReviewInput;
+    collectionAsset: AssetRecord | null;
+    collectionName: string;
+    now: Date;
+  }
+) {
+  if (!options.input.assetPath) {
+    throw new Error(`Asset "${options.input.assetId ?? "unknown"}" cannot be copied because it has no file path.`);
+  }
+
+  const collectionAsset =
+    options.collectionAsset ??
+    (await ensureCollectionFolder(projectPath, {
+      name: options.collectionName,
+      now: options.now
+    }));
+
+  await mkdir(collectionAsset.path, { recursive: true });
+  const copiedPath = await copyFileToAvailablePath(
+    options.input.assetPath,
+    path.join(collectionAsset.path, path.basename(options.input.assetPath))
+  );
+
+  return { copiedPath, collectionAsset };
+}
+
+async function applyCopyRoute(
+  projectPath: string,
+  options: {
+    input: ReviewInput;
+    collectionAsset: AssetRecord | null;
+    collectionName: string;
+    filterNodeId: string;
+    decision: string;
+    route: FilterRoute;
+    mode: FilterRouteMode;
+    dryRun: boolean;
+    autoApply: boolean;
+    routedAt: string;
+    now: Date;
+  }
+) {
+  let copiedPath: string | null = null;
+  let copiedArtifactId: string | null = null;
+
+  try {
+    const copyResult = await copyReviewAssetToCollection(projectPath, {
+      input: options.input,
+      collectionAsset: options.collectionAsset,
+      collectionName: options.collectionName,
+      now: options.now
+    });
+    copiedPath = copyResult.copiedPath;
+    const copiedMetadata = recordFrom(options.input.assetMetadata);
+    delete copiedMetadata.assetId;
+    delete copiedMetadata.assetPath;
+
+    const copiedArtifact = await createArtifact(projectPath, {
+      kind: artifactKindForAssetKind(options.input.assetKind),
+      nodeId: options.filterNodeId,
+      path: copiedPath,
+      metadata: {
+        ...copiedMetadata,
+        assetPath: copiedPath,
+        copiedFromAssetId: options.input.assetId,
+        copiedFromPath: options.input.assetPath,
+        collectionId: copyResult.collectionAsset.id,
+        collectionName: options.collectionName,
+        filterNodeId: options.filterNodeId,
+        routeDecision: options.decision,
+        routeMode: options.mode
+      },
+      parentArtifactIds: artifactIdsFromReviewInputs([options.input]),
+      now: options.now
+    });
+    copiedArtifactId = copiedArtifact.id;
+
+    await addArtifactToCollection(projectPath, {
+      artifactId: copiedArtifact.id,
+      collectionId: copyResult.collectionAsset.id,
+      metadata: {
+        filterNodeId: options.filterNodeId,
+        decision: options.decision,
+        mode: options.mode,
+        reason: `Filter ${options.filterNodeId} copied ${options.decision} to ${options.collectionName}`
+      },
+      now: options.now
+    });
+
+    if (options.input.assetId) {
+      await updateAssetMetadata(projectPath, {
+        assetId: options.input.assetId,
+        now: options.now,
+        metadata: filterMetadataChanges({
+          filterNodeId: options.filterNodeId,
+          decision: options.decision,
+          route: options.route,
+          mode: options.mode,
+          dryRun: options.dryRun,
+          autoApply: options.autoApply,
+          moved: false,
+          copied: true,
+          linked: false,
+          routedAt: options.routedAt,
+          copiedPath,
+          collectionId: copyResult.collectionAsset.id
+        })
+      });
+    }
+
+    return copyResult;
+  } catch (error) {
+    if (copiedArtifactId) {
+      await deleteArtifactRecord(projectPath, copiedArtifactId).catch(() => undefined);
+    }
+
+    if (copiedPath) {
+      await unlink(copiedPath).catch(() => undefined);
+    }
+
+    throw error;
+  }
+}
+
+async function copyFileToAvailablePath(sourcePath: string, basePath: string) {
+  const directory = path.dirname(basePath);
+  const extension = path.extname(basePath);
+  const name = path.basename(basePath, extension);
+
+  for (let index = 1; index < 10000; index += 1) {
+    const candidate = index === 1 ? basePath : path.join(directory, `${name}-${index}${extension}`);
+
+    try {
+      await copyFile(sourcePath, candidate, fsConstants.COPYFILE_EXCL);
+      return candidate;
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "EEXIST")) {
+        continue;
+      }
+
+      await unlink(candidate).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  throw new Error(`Could not copy to an available file path for ${basePath}`);
+}
+
+async function deleteArtifactRecord(projectPath: string, artifactId: string) {
+  const paths = projectPaths(projectPath);
+  initializeDatabase(paths.database);
+  const db = openDatabase(paths.database);
+
+  try {
+    runInTransaction(db, () => {
+      db.prepare("DELETE FROM collection_memberships WHERE artifact_id = ?").run(artifactId);
+      db.prepare("DELETE FROM lineage_edges WHERE parent_artifact_id = ? OR child_artifact_id = ?").run(artifactId, artifactId);
+      db.prepare("DELETE FROM artifact_versions WHERE artifact_id = ?").run(artifactId);
+      db.prepare("DELETE FROM artifacts WHERE id = ?").run(artifactId);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function artifactKindForAssetKind(assetKind: string | undefined): ArtifactKind {
+  switch (assetKind) {
+    case "reference":
+      return "reference";
+    case "mask":
+      return "mask";
+    default:
+      return "image";
+  }
+}
+
+function isNodeErrorWithCode(error: unknown, code: string) {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
+}
 
 function collectReviewInputs(graph: EtherGraph, nodeId: string): ReviewInput[] {
   const inputs: ReviewInput[] = [];
@@ -1333,9 +2416,11 @@ function reviewInputFromAssetNode(node: GraphNode): ReviewInput {
   const metadata = node.data?.assetMetadata ?? {};
   const review = recordFrom(metadata.review);
   const evaluation = recordFrom(metadata.evaluation);
+  const artifactId = stringFrom(metadata.artifactId) || stringFrom(metadata.sourceArtifactId);
 
   return {
     assetId: node.data?.assetId,
+    artifactId: artifactId || undefined,
     assetKind: node.data?.assetKind,
     assetPath: node.data?.assetPath,
     assetMetadata: metadata,
@@ -1350,7 +2435,8 @@ function reviewInputFromAssetNode(node: GraphNode): ReviewInput {
     notes: stringFrom(review.notes),
     score: numberFrom(evaluation.score),
     confidence: numberFrom(evaluation.confidence),
-    explanation: stringFrom(evaluation.explanation)
+    explanation: stringFrom(evaluation.explanation),
+    detectedIssues: tagsFromUnknown(evaluation.detectedIssues)
   };
 }
 
@@ -1365,18 +2451,24 @@ function reviewInputsFromArtifact(node: GraphNode, artifact: unknown): ReviewInp
   return items.flatMap((item) => {
     const itemRecord = recordFrom(item);
     const assetId = stringFrom(itemRecord.assetId);
+    const assetMetadata = recordFrom(itemRecord.assetMetadata);
+    const artifactId =
+      stringFrom(itemRecord.artifactId) ||
+      stringFrom(assetMetadata.artifactId) ||
+      stringFrom(assetMetadata.sourceArtifactId);
     const assetPath = stringFrom(itemRecord.assetPath);
 
-    if (!assetId && !assetPath) {
+    if (!assetId && !assetPath && !artifactId) {
       return [];
     }
 
     return [
       {
         assetId,
+        artifactId: artifactId || undefined,
         assetKind: stringFrom(itemRecord.assetKind),
         assetPath,
-        assetMetadata: recordFrom(itemRecord.assetMetadata),
+        assetMetadata,
         sourceNodeId: node.id,
         sourceNodeTitle: sectionTitle(node),
         rating: numberFrom(itemRecord.rating),
@@ -1385,7 +2477,8 @@ function reviewInputsFromArtifact(node: GraphNode, artifact: unknown): ReviewInp
         notes: stringFrom(itemRecord.notes),
         score: numberFrom(itemRecord.score),
         confidence: numberFrom(itemRecord.confidence),
-        explanation: stringFrom(itemRecord.explanation)
+        explanation: stringFrom(itemRecord.explanation),
+        detectedIssues: tagsFromUnknown(itemRecord.detectedIssues)
       }
     ];
   });
@@ -1415,7 +2508,7 @@ function appendReviewInputs(target: ReviewInput[], additions: ReviewInput[]) {
 }
 
 function reviewInputKey(input: ReviewInput) {
-  return input.assetId || input.assetPath || `${input.sourceNodeId}:${input.sourceNodeTitle}`;
+  return input.assetId || artifactIdFromReviewInput(input) || input.assetPath || `${input.sourceNodeId}:${input.sourceNodeTitle}`;
 }
 
 function evaluateReviewInput(
@@ -1456,8 +2549,98 @@ function evaluateReviewInput(
     score,
     confidence: Number(confidence.toFixed(2)),
     decision,
-    explanation
+    explanation,
+    detectedIssues: input.detectedIssues ?? []
   };
+}
+
+function shouldUseVisionEvaluationProvider(request: ExecutionRequest) {
+  if (request.evaluationSimulationMode === true || request.providerId === FAKE_PROVIDER_ID) {
+    return false;
+  }
+
+  return true;
+}
+
+function evaluationCriteriaForNode(node: GraphNode, threshold: number) {
+  return [
+    `Use a ${threshold}/100 pass threshold.`,
+    cleanText(node.data?.notes),
+    "Return score, tags, pass/needs-edit/fail decision, confidence, explanation, and detected visual issues for each image."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function visionEvaluationImagesFromInputs(inputs: ReviewInput[]): VisionEvaluationImageInput[] {
+  return inputs
+    .filter((input) => input.assetPath)
+    .map((input, index) => ({
+      id: input.assetId || input.assetPath || `image-${index + 1}`,
+      nodeId: input.sourceNodeId,
+      title: input.sourceNodeTitle,
+      ...(input.assetId ? { assetId: input.assetId } : {}),
+      ...(input.assetKind ? { assetKind: input.assetKind } : {}),
+      assetPath: input.assetPath!,
+      ...(input.assetMetadata ? { assetMetadata: input.assetMetadata } : {}),
+      tags: input.tags,
+      ...(input.decision ? { decision: input.decision } : {}),
+      ...(input.notes ? { notes: input.notes } : {})
+    }));
+}
+
+function mergeProviderEvaluationResults(
+  inputs: ReviewInput[],
+  images: VisionEvaluationImageInput[],
+  providerItems: VisionEvaluationItemResult[],
+  context: {
+    evaluateNodeId: string;
+    threshold: number;
+    instruction: string;
+    evaluatedAt: string;
+  }
+): EvaluatedReviewInput[] {
+  const providerItemsByKey = new Map<string, VisionEvaluationItemResult>();
+
+  for (const item of providerItems) {
+    for (const key of providerResultKeys(item)) {
+      if (!providerItemsByKey.has(key)) {
+        providerItemsByKey.set(key, item);
+      }
+    }
+  }
+
+  return inputs.map((input) => {
+    const image = images.find((candidate) => candidate.assetId === input.assetId || candidate.assetPath === input.assetPath);
+    const providerItem = [
+      input.assetId,
+      input.assetPath,
+      image?.id
+    ]
+      .filter((key): key is string => Boolean(key))
+      .map((key) => providerItemsByKey.get(key))
+      .find(Boolean);
+
+    if (!providerItem) {
+      return evaluateReviewInput(input, context);
+    }
+
+    return {
+      ...input,
+      assetId: input.assetId || providerItem.assetId,
+      assetPath: input.assetPath || providerItem.assetPath,
+      tags: uniqueText([...input.tags, ...providerItem.tags]),
+      score: clampInt(providerItem.score, 0, 100),
+      confidence: clampNumber(providerItem.confidence, 0, 1),
+      decision: providerItem.decision,
+      explanation: providerItem.explanation,
+      detectedIssues: providerItem.detectedIssues
+    };
+  });
+}
+
+function providerResultKeys(item: VisionEvaluationItemResult) {
+  return [item.id, item.assetId, item.assetPath].filter((key): key is string => Boolean(key));
 }
 
 function collectFilterRoutes(graph: EtherGraph, filterNodeId: string): FilterRoute[] {
@@ -1666,7 +2849,7 @@ function withoutUndefined<T extends Record<string, unknown>>(value: T): Partial<
 }
 
 function skipUnsupportedNode(
-  state: MutableExecutionState,
+  state: ExecutionWorkerState,
   item: ExecutionQueueItem,
   now: string,
   kind: string
@@ -1688,6 +2871,29 @@ function skipUnsupportedNode(
   };
 }
 
+function skipAdapterBlockedNode(
+  state: ExecutionWorkerState,
+  item: ExecutionQueueItem,
+  now: string,
+  reason: string
+): ExecutionNodeResult {
+  const node = findNode(state.graph, item.nodeId);
+  const nextRerunState = node.data?.rerunState === "stale" ? "stale" : "ready";
+  state.graph = setNodeData(state.graph, item.nodeId, {
+    rerunState: nextRerunState
+  });
+
+  return {
+    nodeId: item.nodeId,
+    iteration: item.iteration,
+    status: "skipped",
+    action: "adapter-blocked",
+    reason,
+    startedAt: now,
+    finishedAt: now
+  };
+}
+
 function canExecuteLocally(node: GraphNode) {
   switch (node.data?.kind) {
     case "Prompt":
@@ -1695,8 +2901,10 @@ function canExecuteLocally(node: GraphNode) {
     case "Generation":
     case "Edit":
       return true;
+    case "Review":
+      return ["Compare", "Evaluate", "Evaluation", "Filter"].includes(node.data.subtype ?? "");
     case "Store":
-      return ["Collection", "Directory", "Compare", "Evaluate", "Filter"].includes(
+      return ["Collection", "Directory", "Compare", "Evaluate", "Evaluation", "Filter"].includes(
         node.data.subtype ?? ""
       );
     default:
@@ -1705,6 +2913,10 @@ function canExecuteLocally(node: GraphNode) {
 }
 
 function unsupportedNodeLabel(node: GraphNode) {
+  if (node.data?.kind === "Review") {
+    return `Review ${node.data.subtype ?? ""}`.trim();
+  }
+
   if (node.data?.kind === "Store") {
     return `Store ${node.data.subtype ?? ""}`.trim();
   }
@@ -1765,6 +2977,151 @@ function insertRunRecord(
   }
 }
 
+function providerRunRequest(input: {
+  operation: string;
+  nodeId: string;
+  iteration: number;
+  policy: ExecutionPolicy;
+  provider: ProviderDescriptor;
+  diagnostic?: ProviderDiagnostic;
+  providerInput: unknown;
+}) {
+  return {
+    operation: input.operation,
+    nodeId: input.nodeId,
+    iteration: input.iteration,
+    policy: input.policy,
+    provider: providerDescriptorSummary(input.provider),
+    ...(input.diagnostic ? { diagnostic: providerDiagnosticSummary(input.diagnostic) } : {}),
+    providerInput: input.providerInput
+  };
+}
+
+function providerRunError(error: unknown, diagnostic?: ProviderDiagnostic) {
+  const base =
+    error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        }
+      : {
+          name: "Error",
+          message: String(error)
+        };
+
+  return {
+    ...base,
+    ...(diagnostic ? { diagnostic: providerDiagnosticSummary(diagnostic) } : {})
+  };
+}
+
+function generationProviderRunResponse(
+  result: ProviderGenerationResult,
+  provider: ProviderDescriptor,
+  assets: AssetRecord[]
+) {
+  return {
+    providerId: result.providerId,
+    providerName: result.providerName,
+    provider: providerDescriptorSummary(provider),
+    capabilities: result.capabilities,
+    metadata: result.metadata ?? {},
+    artifactCount: result.artifacts.length,
+    artifactIds: assets.map((asset) => asset.id),
+    artifacts: result.artifacts.map(generatedArtifactSummary),
+    outputCount: result.outputs?.length ?? 0,
+    outputs: providerOutputsSummary(result.outputs)
+  };
+}
+
+function assistantProviderRunResponse(
+  result: ProviderAssistantResult,
+  provider: ProviderDescriptor,
+  resultText: string
+) {
+  return {
+    providerId: result.providerId,
+    providerName: result.providerName,
+    provider: providerDescriptorSummary(provider),
+    capabilities: result.capabilities,
+    metadata: result.metadata ?? {},
+    textLength: result.text.length,
+    resultTextLength: resultText.length,
+    outputCount: result.outputs?.length ?? 0,
+    outputs: providerOutputsSummary(result.outputs)
+  };
+}
+
+function evaluationProviderRunResponse(
+  result: VisionEvaluationProviderResult,
+  provider: ProviderDescriptor,
+  artifactId: string
+) {
+  return {
+    providerId: result.providerId,
+    providerName: result.providerName,
+    provider: providerDescriptorSummary(provider),
+    capabilities: result.capabilities,
+    metadata: result.metadata ?? {},
+    itemCount: result.items.length,
+    summary: result.summary,
+    artifactCount: 1,
+    artifactIds: [artifactId],
+    outputCount: result.outputs?.length ?? 0,
+    outputs: providerOutputsSummary(result.outputs)
+  };
+}
+
+function providerDescriptorSummary(provider: ProviderDescriptor) {
+  return {
+    id: provider.id,
+    name: provider.name,
+    route: provider.route,
+    capabilities: [...provider.capabilities],
+    ...(provider.model ? { model: provider.model } : {}),
+    ...(provider.notes ? { notes: [...provider.notes] } : {})
+  };
+}
+
+function providerDiagnosticSummary(diagnostic: ProviderDiagnostic) {
+  return {
+    ...providerDescriptorSummary(diagnostic),
+    availability: diagnostic.availability,
+    messages: [...diagnostic.messages],
+    ...(diagnostic.details ? { details: diagnostic.details } : {}),
+    ...(diagnostic.readiness ? { readiness: diagnostic.readiness } : {}),
+    ...(diagnostic.credentialStatus ? { credentialStatus: diagnostic.credentialStatus } : {}),
+    ...(diagnostic.requestPolicy ? { requestPolicy: diagnostic.requestPolicy } : {}),
+    ...(diagnostic.dataDisclosure ? { dataDisclosure: diagnostic.dataDisclosure } : {}),
+    ...(diagnostic.noHiddenFallback ? { noHiddenFallback: diagnostic.noHiddenFallback } : {})
+  };
+}
+
+function generatedArtifactSummary(artifact: GeneratedArtifact) {
+  return {
+    fileName: artifact.fileName,
+    mimeType: artifact.mimeType,
+    metadata: artifact.metadata ?? {},
+    hasContent: artifact.content !== undefined,
+    hasSourcePath: Boolean(artifact.sourcePath)
+  };
+}
+
+function providerOutputsSummary(outputs: Array<Record<string, unknown>> | undefined) {
+  return (outputs ?? []).map((output) => ({
+    id: output.id,
+    channel: output.channel,
+    role: output.role,
+    uri: output.uri,
+    assetId: output.assetId,
+    mimeType: output.mimeType,
+    sourceNodeId: output.sourceNodeId,
+    sourceEdgeId: output.sourceEdgeId,
+    metadata: output.metadata
+  }));
+}
+
 async function generatedArtifactContent(artifact: GeneratedArtifact) {
   if (artifact.content !== undefined) {
     return artifact.content;
@@ -1785,6 +3142,8 @@ type EditInputAssembly = {
   edgeRoles: EdgeRoleArtifact[];
   sourceImage: ImageEditSourceInput;
   mask: ImageEditMaskInput;
+  recipe?: ImageEditRecipeInput;
+  frame?: ImageEditFrameInput;
 };
 
 function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAssembly {
@@ -1798,6 +3157,7 @@ function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAss
   for (const edge of incomingEdges(graph, editNodeId)) {
     const source = findNode(graph, edge.source);
     const label = normalizeRoleKey(edgeLabel(edge));
+    const isMaskSource = label === "mask" || source.data?.assetKind === "mask";
 
     if (source.data?.kind === "Prompt") {
       const assembly = assemblePromptForNode(graph, source.id, edge);
@@ -1807,18 +3167,20 @@ function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAss
       }
     }
 
-    if (!mask && (label === "mask" || source.data?.assetKind === "mask")) {
+    if (!mask && isMaskSource) {
       mask = maskFromAssetNode(source);
     }
 
-    if (!sourceImage && label !== "mask" && isImageAssetSource(source)) {
+    if (!sourceImage && !isMaskSource && isImageAssetSource(source)) {
       sourceImage = sourceImageFromAssetNode(source);
     }
 
-    const reference = referenceForEditSource(edge, source);
-    if (reference) {
-      references.push(reference);
-      edgeRoles.push({ edgeId: edge.id, role: reference.role });
+    if (!isMaskSource) {
+      const sourceReferences = referencesForEditSource(edge, source);
+      if (sourceReferences.length > 0) {
+        references.push(...sourceReferences);
+        edgeRoles.push({ edgeId: edge.id, role: sourceReferences[0]!.role });
+      }
     }
   }
 
@@ -1829,6 +3191,9 @@ function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAss
   if (!mask) {
     mask = maskFromNodeData(editNode.data);
   }
+
+  const recipe = editRecipeFromNodeData(editNode.data, mask?.assetMetadata);
+  const frame = editFrameFromNodeData(editNode.data, mask?.assetMetadata);
 
   if (!sourceImage) {
     throw new Error("Edit node requires an upstream image asset or sourceAssetPath.");
@@ -1841,7 +3206,9 @@ function assembleEditInputs(graph: EtherGraph, editNodeId: string): EditInputAss
     references,
     edgeRoles,
     sourceImage,
-    mask
+    mask,
+    recipe,
+    frame
   };
 }
 
@@ -1859,15 +3226,18 @@ function sourceImageFromNodeData(data: Partial<CanvasNodeData> | undefined): Ima
 }
 
 function sourceImageFromAssetNode(node: GraphNode): ImageEditSourceInput | null {
-  if (!node.data?.assetPath) {
+  const referenceAsset = referenceAssetsFromNodeData(node.data).at(0);
+  const assetPath = referenceAsset?.assetPath ?? node.data?.assetPath;
+
+  if (!assetPath) {
     return null;
   }
 
   return {
-    assetId: node.data.assetId,
-    assetKind: node.data.assetKind,
-    assetPath: node.data.assetPath,
-    assetMetadata: node.data.assetMetadata
+    assetId: referenceAsset?.assetId ?? node.data?.assetId,
+    assetKind: referenceAsset?.assetKind ?? node.data?.assetKind,
+    assetPath,
+    assetMetadata: referenceAsset?.assetMetadata ?? node.data?.assetMetadata
   };
 }
 
@@ -1895,6 +3265,54 @@ function maskFromAssetNode(node: GraphNode): ImageEditMaskInput {
   };
 }
 
+function editRecipeFromNodeData(
+  data: Partial<CanvasNodeData> | undefined,
+  maskMetadata?: Record<string, unknown>
+): ImageEditRecipeInput | undefined {
+  const metadataRecipe = recordFrom(maskMetadata?.recipe);
+  const id = cleanText(data?.editRecipe) || stringFrom(metadataRecipe.id);
+
+  if (!id) {
+    return undefined;
+  }
+
+  return {
+    id,
+    ...(stringFrom(metadataRecipe.label) ? { label: stringFrom(metadataRecipe.label) } : {}),
+    ...(Object.keys(metadataRecipe).length > 0 ? { metadata: metadataRecipe } : {})
+  };
+}
+
+function editFrameFromNodeData(
+  data: Partial<CanvasNodeData> | undefined,
+  maskMetadata?: Record<string, unknown>
+): ImageEditFrameInput | undefined {
+  return editFrameFromUnknown(data?.editFrame) ?? editFrameFromUnknown(recordFrom(maskMetadata?.frame));
+}
+
+function editFrameFromUnknown(value: unknown): ImageEditFrameInput | undefined {
+  const frame = recordFrom(value);
+  const mode = frame.mode;
+  const x = numberFrom(frame.x);
+  const y = numberFrom(frame.y);
+  const width = numberFrom(frame.width);
+  const height = numberFrom(frame.height);
+
+  if ((mode !== "source" && mode !== "crop" && mode !== "outpaint") || x === undefined || y === undefined || width === undefined || height === undefined) {
+    return undefined;
+  }
+
+  return withoutUndefined({
+    mode,
+    x,
+    y,
+    width,
+    height,
+    canvasWidth: numberFrom(frame.canvasWidth),
+    canvasHeight: numberFrom(frame.canvasHeight)
+  }) as ImageEditFrameInput;
+}
+
 function isImageAssetSource(node: GraphNode) {
   if (!node.data?.assetPath) {
     return false;
@@ -1907,38 +3325,59 @@ function isImageAssetSource(node: GraphNode) {
   return node.data.kind === "Generation" || node.data.kind === "Edit" || node.data.kind === "Reference";
 }
 
-function referenceForEditSource(edge: GraphEdge, source: GraphNode): GenerationReferenceInput | null {
-  if (source.data?.kind !== "Reference" && source.data?.kind !== "Note") {
-    return null;
-  }
-
-  const role = resolveReferenceRole(edge, source);
-  const steeringText = nodeText(source);
+function referenceForEditAsset(
+  edge: GraphEdge,
+  source: GraphNode,
+  role: string,
+  steeringText: string,
+  asset: ReferenceAssetEntry | null,
+  index: number,
+  total: number
+): GenerationReferenceInput {
+  const baseTitle = sectionTitle(source);
   const reference: GenerationReferenceInput = {
     nodeId: source.id,
     role,
-    title: sectionTitle(source),
+    title: asset?.title || (total > 1 ? `${baseTitle} ${index + 1}` : baseTitle),
     sourceKind: cleanText(source.data?.subtype) || cleanText(source.data?.kind) || "Reference",
     ...(steeringText ? { steeringText } : {})
   };
 
-  if (source.data?.assetId) {
-    reference.assetId = source.data.assetId;
+  if (asset?.assetId) {
+    reference.assetId = asset.assetId;
   }
 
-  if (source.data?.assetKind) {
-    reference.assetKind = source.data.assetKind;
+  if (asset?.assetKind) {
+    reference.assetKind = asset.assetKind;
   }
 
-  if (source.data?.assetPath) {
-    reference.assetPath = source.data.assetPath;
+  if (asset?.assetPath) {
+    reference.assetPath = asset.assetPath;
   }
 
-  if (source.data?.assetMetadata) {
-    reference.assetMetadata = source.data.assetMetadata;
+  if (asset?.assetMetadata) {
+    reference.assetMetadata = asset.assetMetadata;
   }
 
   return reference;
+}
+
+function referencesForEditSource(edge: GraphEdge, source: GraphNode): GenerationReferenceInput[] {
+  if (source.data?.kind !== "Reference" && source.data?.kind !== "Note") {
+    return [];
+  }
+
+  const role = resolveReferenceRole(edge, source);
+  const steeringText = nodeText(source);
+  const assets = referenceAssetsFromNodeData(source.data);
+
+  if (assets.length === 0) {
+    return [referenceForEditAsset(edge, source, role, steeringText, null, 0, 1)];
+  }
+
+  return assets.map((asset, index) =>
+    referenceForEditAsset(edge, source, role, steeringText, asset, index, assets.length)
+  );
 }
 
 function editOperationForSubtype(subtype: unknown): ImageEditOperation {
@@ -1965,6 +3404,207 @@ function localToolFromMetadata(...metadataEntries: Array<Record<string, unknown>
   }
 
   return undefined;
+}
+
+function collectProviderInputPayloads(graph: EtherGraph, nodeId: string): PayloadEnvelope[] {
+  return incomingEdges(graph, nodeId).flatMap((edge) => providerPayloadsForEdge(graph, edge));
+}
+
+function providerPayloadsForEdge(graph: EtherGraph, edge: GraphEdge): PayloadEnvelope[] {
+  const source = findNode(graph, edge.source);
+  const channel = payloadChannelForEdge(edge, source);
+
+  if (!channel) {
+    return [];
+  }
+
+  const role = resolveReferenceRole(edge, source) as PayloadEnvelope["role"];
+
+  if (channel === "text") {
+    const text = nodeText(source);
+
+    if (!text) {
+      return [];
+    }
+
+    return [
+      {
+        ...payloadEnvelopeBase(edge, source, channel, role),
+        text
+      }
+    ];
+  }
+
+  if (channel === "data") {
+    return [
+      {
+        ...payloadEnvelopeBase(edge, source, channel, role),
+        data: providerDataForNode(source)
+      }
+    ];
+  }
+
+  return assetPayloadsForSource(edge, source, channel, role);
+}
+
+function payloadChannelForEdge(edge: GraphEdge, source: GraphNode): PayloadEnvelope["channel"] | undefined {
+  const data = recordFrom(edge.data);
+  return (
+    providerChannelFromUnknown(data.sourceChannel) ??
+    providerChannelFromUnknown((edge as Record<string, unknown>).sourceHandle) ??
+    providerChannelFromUnknown(data.channel) ??
+    providerChannelFromUnknown(edgeLabel(edge)) ??
+    fallbackPayloadChannelForNode(source)
+  );
+}
+
+function providerChannelFromUnknown(value: unknown): PayloadEnvelope["channel"] | undefined {
+  const direct = normalizePayloadChannel(value);
+
+  if (direct) {
+    return direct as PayloadEnvelope["channel"];
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  for (const token of normalized.split(/[^a-z0-9]+/)) {
+    const channel = normalizePayloadChannel(token);
+
+    if (channel) {
+      return channel as PayloadEnvelope["channel"];
+    }
+  }
+
+  for (const channel of ["text", "image", "mask", "data", "video", "audio"] satisfies PayloadChannel[]) {
+    if (normalized.includes(channel)) {
+      return channel as PayloadEnvelope["channel"];
+    }
+  }
+
+  return undefined;
+}
+
+function fallbackPayloadChannelForNode(node: GraphNode): PayloadEnvelope["channel"] | undefined {
+  const assetKind = cleanText(node.data?.assetKind).toLowerCase();
+  const subtype = cleanText(node.data?.subtype).toLowerCase();
+
+  if (assetKind === "mask" || subtype.includes("mask")) {
+    return "mask";
+  }
+
+  if (assetKind === "video" || subtype.includes("video")) {
+    return "video";
+  }
+
+  if (assetKind === "audio" || subtype.includes("audio")) {
+    return "audio";
+  }
+
+  if (node.data?.assetPath || referenceAssetsFromNodeData(node.data).length > 0) {
+    return "image";
+  }
+
+  if (
+    node.data?.kind === "Review" ||
+    node.data?.kind === "Store" ||
+    node.data?.compareArtifact ||
+    node.data?.evaluationArtifact ||
+    node.data?.filterResult ||
+    node.data?.storeMetadata
+  ) {
+    return "data";
+  }
+
+  if (nodeText(node)) {
+    return "text";
+  }
+
+  return undefined;
+}
+
+function assetPayloadsForSource(
+  edge: GraphEdge,
+  source: GraphNode,
+  channel: PayloadEnvelope["channel"],
+  role: PayloadEnvelope["role"]
+): PayloadEnvelope[] {
+  const assets = referenceAssetsFromNodeData(source.data);
+
+  return assets.map((asset, index) => {
+    const base = payloadEnvelopeBase(edge, source, channel, role, assets.length > 1 ? index : undefined);
+    const steeringText = nodeText(source);
+
+    return withoutUndefined({
+      ...base,
+      assetId: asset.assetId,
+      assetPath: asset.assetPath,
+      uri: asset.assetPath,
+      mimeType: stringFrom(asset.assetMetadata?.mimeType),
+      text: steeringText || undefined,
+      metadata: {
+        ...recordFrom(base.metadata),
+        ...(asset.title ? { assetTitle: asset.title } : {}),
+        ...(asset.assetKind ? { assetKind: asset.assetKind } : {}),
+        ...(asset.assetMetadata ? { assetMetadata: asset.assetMetadata } : {})
+      }
+    }) as PayloadEnvelope;
+  });
+}
+
+function payloadEnvelopeBase(
+  edge: GraphEdge,
+  source: GraphNode,
+  channel: PayloadEnvelope["channel"],
+  role: PayloadEnvelope["role"],
+  index?: number
+): PayloadEnvelope {
+  const data = recordFrom(edge.data);
+  const targetChannel = providerChannelFromUnknown(data.targetChannel) ??
+    providerChannelFromUnknown((edge as Record<string, unknown>).targetHandle);
+
+  return withoutUndefined({
+    id: index === undefined ? edge.id : `${edge.id}:${index + 1}`,
+    channel,
+    role,
+    sourceNodeId: source.id,
+    sourceEdgeId: edge.id,
+    metadata: withoutUndefined({
+      sourceTitle: sectionTitle(source),
+      sourceKind: source.data?.kind,
+      sourceSubtype: source.data?.subtype,
+      edgeLabel: edgeLabel(edge),
+      targetChannel
+    })
+  }) as PayloadEnvelope;
+}
+
+function providerDataForNode(node: GraphNode): unknown {
+  return withoutUndefined({
+    kind: node.data?.kind,
+    subtype: node.data?.subtype,
+    title: sectionTitle(node),
+    instruction: cleanText(node.data?.instruction) || undefined,
+    notes: cleanText(node.data?.notes) || undefined,
+    assetId: node.data?.assetId,
+    assetKind: node.data?.assetKind,
+    assetPath: node.data?.assetPath,
+    assetMetadata: node.data?.assetMetadata,
+    assembledPromptArtifact: node.data?.assembledPromptArtifact,
+    textOutputArtifact: node.data?.textOutputArtifact,
+    mutationArtifact: node.data?.mutationArtifact,
+    compareArtifact: node.data?.compareArtifact,
+    evaluationArtifact: node.data?.evaluationArtifact,
+    filterResult: node.data?.filterResult,
+    storeMetadata: node.data?.storeMetadata
+  });
 }
 
 function incomingEdges(graph: EtherGraph, nodeId: string) {
@@ -2014,7 +3654,7 @@ function appendUniqueSection(sections: PromptSectionArtifact[], section: PromptS
 function joinSections(sections: PromptSectionArtifact[], kind: PromptSectionArtifact["kind"]) {
   return sections
     .filter((section) => section.kind === kind)
-    .map((section) => section.text)
+    .map((section) => `${section.section}: ${section.text}`)
     .filter(Boolean)
     .join("\n\n");
 }

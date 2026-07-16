@@ -84,8 +84,12 @@ function buildFakeSvg(input: GenerationProviderInput) {
   const prompt = escapeXml(input.prompt || "No prompt supplied");
   const negativePrompt = escapeXml(input.negativePrompt || "None");
   const references = escapeXml(String(input.references.length));
+  const width = Math.max(256, Math.round(input.output?.width ?? 1024));
+  const height = Math.max(256, Math.round(input.output?.height ?? 1024));
+  const aspectRatio = escapeXml(input.output?.aspectRatio ?? "1:1");
+  const resolution = escapeXml(input.output?.resolution ?? `${width}x${height}`);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="ETHER fake generated image">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 1024 1024" role="img" aria-label="ETHER fake generated image">
   <title>ETHER_FAKE_GENERATED_IMAGE</title>
   <rect width="1024" height="1024" fill="#f7f2e8"/>
   <rect x="96" y="124" width="832" height="776" rx="36" fill="#0e1824"/>
@@ -96,7 +100,8 @@ function buildFakeSvg(input: GenerationProviderInput) {
   <text x="160" y="386" font-size="24" font-family="Arial, sans-serif" fill="#fff8e8">node=${escapeXml(
     input.generationNodeId
   )} iteration=${input.iteration}</text>
-  <foreignObject x="160" y="430" width="704" height="256">
+  <text x="160" y="420" font-size="20" font-family="Arial, sans-serif" fill="#7ef4d7">output: ${aspectRatio} ${resolution} ${width}x${height}</text>
+  <foreignObject x="160" y="454" width="704" height="222">
     <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; color: #fff8e8; font-size: 30px; line-height: 1.25;">${prompt}</div>
   </foreignObject>
   <text x="160" y="740" font-size="24" font-family="Arial, sans-serif" fill="#a8f0ea">negative: ${negativePrompt}</text>
@@ -111,6 +116,8 @@ function buildFakeEditSvg(input: ImageEditProviderInput) {
   const maskAssetId = escapeXml(input.mask?.assetId ?? "no-mask");
   const operation = escapeXml(input.operation);
   const subtype = escapeXml(input.editSubtype);
+  const recipe = escapeXml(input.recipe?.id ?? "freeform");
+  const frame = escapeXml(input.frame ? `${input.frame.mode} ${input.frame.x},${input.frame.y} ${input.frame.width}x${input.frame.height}` : "source");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="ETHER fake edited image">
   <title>ETHER_FAKE_EDITED_IMAGE</title>
@@ -123,8 +130,9 @@ function buildFakeEditSvg(input: ImageEditProviderInput) {
   <text x="132" y="728" font-size="38" font-family="Arial, sans-serif" fill="#0e1824">ETHER fake edited image</text>
   <text x="132" y="784" font-size="26" font-family="Arial, sans-serif" fill="#1470db">operation=${operation} subtype=${subtype}</text>
   <text x="132" y="832" font-size="24" font-family="Arial, sans-serif" fill="#0e1824">source=${sourceAssetId}</text>
-  <text x="132" y="874" font-size="20" font-family="Arial, sans-serif" fill="#526173">mask=${maskAssetId}</text>
-  <foreignObject x="132" y="902" width="760" height="86">
+  <text x="132" y="874" font-size="20" font-family="Arial, sans-serif" fill="#526173">mask=${maskAssetId} recipe=${recipe}</text>
+  <text x="132" y="900" font-size="18" font-family="Arial, sans-serif" fill="#526173">frame=${frame}</text>
+  <foreignObject x="132" y="924" width="760" height="64">
     <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; color: #0e1824; font-size: 20px; line-height: 1.25;">${prompt}<br/>${sourceAssetPath}</div>
   </foreignObject>
 </svg>`;

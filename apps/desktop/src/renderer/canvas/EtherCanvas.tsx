@@ -1,6 +1,10 @@
 import {
   forwardRef,
   useCallback,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -8,65 +12,63 @@ import {
   useState
 } from "react";
 import {
-  addEdge,
-  applyEdgeChanges,
-  applyNodeChanges,
   Background,
   Controls,
   MiniMap,
   ReactFlow,
-  ReactFlowProvider,
-  type Connection,
-  type Edge,
-  type EdgeChange,
-  type Node,
-  type NodeChange,
-  type OnSelectionChangeParams,
-  type ReactFlowInstance,
-  type Viewport
+  ReactFlowProvider
 } from "@xyflow/react";
-import { Eye, EyeOff, GitBranch, ImagePlus, Link2, Redo2, Undo2 } from "lucide-react";
 import {
-  type CanvasNodeData,
-  type EtherNodeDefinition
-} from "@ether/engine/graph/nodeCatalog";
-import { canConnectNodeKinds } from "@ether/engine/graph/connectionRules";
-import { findEdgeInsertionTarget } from "@ether/engine/graph/canvasGeometry";
+  Eye,
+  EyeOff,
+  GitBranch,
+  ImagePlus,
+  Link2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Redo2,
+  Undo2
+} from "lucide-react";
+import { getNodeDefinition, type CanvasNodeData } from "@ether/engine/graph/nodeCatalog";
+import type { EtherGraph } from "@ether/engine";
+import { CommandPalette } from "../commands/CommandPalette";
 import {
-  coerceCanvasNodeData,
-  createGraphNodeData,
-  getNodeDefinition
-} from "@ether/engine/graph/nodeCatalog";
-import { freezePromptNode } from "@ether/engine/graph/promptAssembly";
-import { markDownstreamStale } from "@ether/engine/run/rerunState";
-import type { AssetRecord, EtherGraph, ExecutionPolicy } from "@ether/engine";
-import { EtherNode, EtherNodeDeleteContext } from "./EtherNode";
-import { linkDroppedReferenceFilesSequentially } from "./assetDrop";
+  EtherNode,
+  EtherNodeChannelActivityContext,
+  EtherNodeDataUpdateContext,
+  EtherNodeDeleteContext,
+  EtherNodeRunStatusContext,
+  EtherNodeReferenceUploadContext,
+  type EtherNodeChannelActivity
+} from "./EtherNode";
+import { ConnectionHint } from "./edges/ConnectionHint";
+import { EtherEdge, EtherEdgeCommandContext } from "./edges/EtherEdge";
 import { InspectorPanel } from "./InspectorPanel";
 import { NodeLibrary } from "./NodeLibrary";
-import {
-  type CanvasSnapshot,
-  createCanvasHistory,
-  deleteCanvasElements,
-  pushCanvasHistory,
-  pushCanvasHistoryFromBaseline,
-  pushCanvasHistoryIfChanged,
-  redoCanvasHistory,
-  replaceCanvasHistoryWithDurableCommit,
-  shouldPushNodeChangesToHistory,
-  updateCanvasHistoryPresent,
-  undoCanvasHistory
-} from "./canvasHistory";
+import { useCanvasCommands } from "./hooks/useCanvasCommands";
+import { useCanvasGraph } from "./hooks/useCanvasGraph";
+import { useCanvasSelection } from "./hooks/useCanvasSelection";
+import { useRunController } from "./hooks/useRunController";
+import { RunPlanPreview } from "./run/RunPlanPreview";
+import type { CanvasGraphPersistenceResult } from "./hooks/useCanvasGraph";
+import { normalizePayloadChannel, type PayloadChannel } from "./ports/channelRegistry";
 
 type EtherCanvasProps = {
   graph: EtherGraph | null;
   projectId: string | null;
+  isCommandPaletteOpen?: boolean;
   onStatus(message: string): void;
   onTrace(message: string): void;
+  onCloseCommandPalette?(): void;
 };
 
 export type EtherCanvasHandle = {
   serialize(): EtherGraph;
+  saveProjectGraph(): Promise<CanvasGraphPersistenceResult>;
+  loadProjectGraph(): Promise<CanvasGraphPersistenceResult>;
+  focusNode(nodeId: string): void;
 };
 
 type ContextMenuState = {
@@ -75,1529 +77,803 @@ type ContextMenuState = {
   position: { x: number; y: number };
 } | null;
 
-type ImageAssetDragPayload = {
-  nodeId: string;
-  assetId?: string;
-  assetKind?: string;
-  assetPath: string;
-  assetMetadata?: Record<string, unknown>;
-  title?: string;
-};
+type MarqueeSelectionState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+} | null;
+
+type SelectionRunPromptState = {
+  count: number;
+  x: number;
+  y: number;
+} | null;
 
 const nodeTypes = { etherNode: EtherNode };
-
-const defaultViewport: Viewport = { x: 0, y: 0, zoom: 1 };
-const imageFileExtensionPattern = /\.(avif|bmp|gif|jpe?g|png|tiff?|webp)$/i;
+const edgeTypes = { etherEdge: EtherEdge };
 const relationshipLockMessage = "Unlock connected nodes before changing relationships";
+const MIN_LIBRARY_WIDTH = 220;
+const MAX_LIBRARY_WIDTH = 560;
+const MIN_INSPECTOR_WIDTH = 280;
+const MAX_INSPECTOR_WIDTH = 680;
+const OVERLAY_PANEL_GUTTER = 72;
+const PANEL_KEYBOARD_RESIZE_STEP = 10;
 
-function normalizeNodes(nodes: EtherGraph["nodes"]): Node<CanvasNodeData>[] {
-  return nodes.map((node) => {
-    const candidate = node as Node<CanvasNodeData>;
-    return {
-      ...candidate,
-      type: "etherNode",
-      data: coerceCanvasNodeData(candidate.data)
-    };
-  });
-}
-
-function normalizeEdges(edges: EtherGraph["edges"]): Edge[] {
-  return edges.map((edge) => {
-    const candidate = edge as Edge;
-    const label = String(candidate.label ?? candidate.data?.label ?? "context");
-
-    return {
-      ...candidate,
-      label,
-      data: { ...candidate.data, label },
-      type: "default",
-      labelBgPadding: [8, 4],
-      labelBgBorderRadius: 4,
-      labelBgStyle: { fill: "rgba(7, 11, 18, 0.92)", stroke: "rgba(55, 230, 234, 0.34)" },
-      style: { stroke: "#37E6EA", strokeWidth: 2 }
-    };
-  });
-}
-
-function getBasename(filePath: string) {
-  return filePath.split(/[\\/]/).filter(Boolean).at(-1) ?? filePath;
-}
-
-function isSupportedImageFile(file: File) {
-  return file.type.startsWith("image/") || imageFileExtensionPattern.test(file.name);
-}
-
-function edgeTouchesLockedNode(edge: Edge | null | undefined, nodes: Node<CanvasNodeData>[]) {
-  if (!edge) {
-    return false;
-  }
-
-  return nodes.some((node) => (node.id === edge.source || node.id === edge.target) && node.data.locked);
-}
-
-function connectionTouchesLockedNode(
-  source: Node<CanvasNodeData> | undefined,
-  target: Node<CanvasNodeData> | undefined
-) {
-  return source?.data.locked === true || target?.data.locked === true;
-}
-
-function nodeDeletionWouldRemoveLockedRelationship(
-  deletedNodeIds: string[],
-  nodes: Node<CanvasNodeData>[],
-  edges: Edge[]
-) {
-  const deleted = new Set(deletedNodeIds);
-
-  return edges.some((edge) => {
-    if (!deleted.has(edge.source) && !deleted.has(edge.target)) {
-      return false;
-    }
-
-    const otherNodeId = deleted.has(edge.source) ? edge.target : edge.source;
-    const otherNode = nodes.find((node) => node.id === otherNodeId);
-
-    return otherNode?.data.locked === true;
-  });
-}
-
-function createReferenceNodeData(asset: AssetRecord): CanvasNodeData {
-  const baseData = createGraphNodeData("reference-image");
-  const originalName =
-    typeof asset.metadata.originalName === "string" && asset.metadata.originalName.trim()
-      ? asset.metadata.originalName
-      : getBasename(asset.path);
-  const role =
-    typeof asset.metadata.role === "string" && asset.metadata.role.trim()
-      ? asset.metadata.role
-      : "reference";
-
-  return {
-    ...baseData,
-    title: originalName,
-    label: "Linked reference",
-    instruction: `Linked ${role} image reference`,
-    notes: asset.path,
-    status: "complete",
-    assetId: asset.id,
-    assetKind: asset.kind,
-    assetPath: asset.path,
-    assetMetadata: asset.metadata
-  };
-}
-
-function createReviewRouterCanvasFragment(idPrefix: string, origin: { x: number; y: number }) {
-  const node = (
-    id: string,
-    definitionId: string,
-    x: number,
-    y: number,
-    data: Partial<CanvasNodeData>
-  ): Node<CanvasNodeData> => ({
-    id,
-    type: "etherNode",
-    position: { x, y },
-    width: 236,
-    height: 150,
-    data: {
-      ...createGraphNodeData(definitionId),
-      ...data
-    }
-  });
-  const edge = (id: string, source: string, target: string, label: string): Edge => ({
-    id,
-    source,
-    target,
-    label,
-    data: { label }
-  });
-
-  return {
-    nodes: [
-      node(`${idPrefix}-compare`, "store-compare", origin.x, origin.y, {
-        title: "Compare",
-        label: "Compare",
-        compareLayout: 4,
-        reviewDecision: "select"
-      }),
-      node(`${idPrefix}-evaluate`, "store-evaluate", origin.x + 280, origin.y, {
-        title: "Evaluate",
-        label: "Evaluate",
-        instruction: "Score each image against the campaign direction and route pass, needs-edit, or fail.",
-        evaluationThreshold: 70
-      }),
-      node(`${idPrefix}-filter`, "store-filter", origin.x + 560, origin.y, {
-        title: "Filter",
-        label: "Filter",
-        filterAutoApply: true,
-        filterDryRun: false,
-        filterRules: "pass -> Selected; needs-edit -> Needs Edit; fail -> Rejected"
-      }),
-      node(`${idPrefix}-selected`, "store-collection", origin.x + 840, origin.y - 120, {
-        title: "Selected",
-        label: "Selected"
-      }),
-      node(`${idPrefix}-needs-edit`, "store-collection", origin.x + 840, origin.y, {
-        title: "Needs Edit",
-        label: "Needs Edit"
-      }),
-      node(`${idPrefix}-rejected`, "store-collection", origin.x + 840, origin.y + 120, {
-        title: "Rejected",
-        label: "Rejected"
-      })
-    ],
-    edges: [
-      edge(`${idPrefix}-edge-compare-evaluate`, `${idPrefix}-compare`, `${idPrefix}-evaluate`, "review"),
-      edge(`${idPrefix}-edge-evaluate-filter`, `${idPrefix}-evaluate`, `${idPrefix}-filter`, "evaluation"),
-      edge(`${idPrefix}-edge-filter-selected`, `${idPrefix}-filter`, `${idPrefix}-selected`, "pass"),
-      edge(`${idPrefix}-edge-filter-needs-edit`, `${idPrefix}-filter`, `${idPrefix}-needs-edit`, "needs-edit"),
-      edge(`${idPrefix}-edge-filter-rejected`, `${idPrefix}-filter`, `${idPrefix}-rejected`, "fail")
-    ]
-  };
-}
-
-function parseImageAssetDragPayload(value: string): ImageAssetDragPayload | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-
-    const candidate = parsed as Partial<ImageAssetDragPayload>;
-
-    if (typeof candidate.nodeId !== "string" || typeof candidate.assetPath !== "string") {
-      return null;
-    }
-
-    return {
-      nodeId: candidate.nodeId,
-      assetId: typeof candidate.assetId === "string" ? candidate.assetId : undefined,
-      assetKind: typeof candidate.assetKind === "string" ? candidate.assetKind : undefined,
-      assetPath: candidate.assetPath,
-      assetMetadata:
-        candidate.assetMetadata && typeof candidate.assetMetadata === "object" && !Array.isArray(candidate.assetMetadata)
-          ? candidate.assetMetadata
-          : undefined,
-      title: typeof candidate.title === "string" ? candidate.title : undefined
-    };
-  } catch {
-    return null;
-  }
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function InnerEtherCanvas(
-  { graph, projectId, onStatus, onTrace }: EtherCanvasProps,
+  { graph, projectId, isCommandPaletteOpen = false, onStatus, onTrace, onCloseCommandPalette }: EtherCanvasProps,
   ref: React.ForwardedRef<EtherCanvasHandle>
 ) {
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const flowRef = useRef<ReactFlowInstance<Node<CanvasNodeData>, Edge> | null>(null);
-  const nodeCounterRef = useRef(0);
-  const resizeBaselineRef = useRef<CanvasSnapshot | null>(null);
-  const dragBaselineRef = useRef<CanvasSnapshot | null>(null);
-  const textEditBaselineRef = useRef<CanvasSnapshot | null>(null);
-  const [viewport, setViewport] = useState<Viewport>(graph?.viewport ?? defaultViewport);
-  const [history, setHistory] = useState(() =>
-    createCanvasHistory({
-      nodes: normalizeNodes(graph?.nodes ?? []),
-      edges: normalizeEdges(graph?.edges ?? [])
-    })
-  );
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [showMiniMap, setShowMiniMap] = useState(true);
+  const [showNodeLibrary, setShowNodeLibrary] = useState(true);
+  const [showInspector, setShowInspector] = useState(true);
+  const [nodeLibraryWidth, setNodeLibraryWidth] = useState(274);
+  const [inspectorWidth, setInspectorWidth] = useState(320);
+  const [flowShellWidth, setFlowShellWidth] = useState(0);
+  const overlayResizeCleanupRef = useRef<(() => void) | null>(null);
   const [localRunStatus, setLocalRunStatus] = useState<string | null>(null);
-  const [pendingGeneratedAssetId, setPendingGeneratedAssetId] = useState<string | null>(null);
-  const [executionPolicy, setExecutionPolicy] = useState<ExecutionPolicy>("cached-inputs");
-  const [runCountCap, setRunCountCap] = useState(1);
-  const [parallelExecution, setParallelExecution] = useState(false);
-
-  const nodes = history.present.nodes as Node<CanvasNodeData>[];
-  const edges = history.present.edges;
-  const selectedNode = nodes.find((node) => node.selected) ?? null;
-  const selectedNodeIds = nodes.filter((node) => node.selected).map((node) => node.id);
-  const selectedEdge = edges.find((edge) => edge.selected) ?? null;
-  const assemblyGraph = useMemo<EtherGraph>(
-    () => ({
-      nodes,
-      edges,
-      viewport,
-      selectedSnapshotId: graph?.selectedSnapshotId ?? null,
-      updatedAt: graph?.updatedAt ?? new Date().toISOString()
-    }),
-    [edges, graph?.selectedSnapshotId, graph?.updatedAt, nodes, viewport]
-  );
-
-  useEffect(() => {
-    if (!graph) {
-      return;
-    }
-
-    resizeBaselineRef.current = null;
-    dragBaselineRef.current = null;
-    textEditBaselineRef.current = null;
-    setPendingGeneratedAssetId(null);
-    setViewport(graph.viewport);
-    flowRef.current?.setViewport(graph.viewport);
-    setHistory(
-      createCanvasHistory({
-        nodes: normalizeNodes(graph.nodes),
-        edges: normalizeEdges(graph.edges)
-      })
-    );
-  }, [graph]);
-
-  useEffect(() => {
-    if (projectId) {
-      setLocalRunStatus(null);
-    }
-  }, [projectId]);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      serialize() {
-        const currentViewport = flowRef.current?.getViewport() ?? viewport;
-
-        return {
-          nodes,
-          edges,
-          viewport: currentViewport,
-          selectedSnapshotId: graph?.selectedSnapshotId ?? null,
-          updatedAt: new Date().toISOString()
-        };
-      }
-    }),
-    [edges, graph?.selectedSnapshotId, nodes, viewport]
-  );
-
-  const commitSnapshot = useCallback(
-    (nextNodes: Node<CanvasNodeData>[], nextEdges: Edge[], traceMessage?: string) => {
-      setHistory((current) => pushCanvasHistory(current, { nodes: nextNodes, edges: nextEdges }));
-      if (traceMessage) {
-        onTrace(traceMessage);
-      }
-    },
-    [onTrace]
-  );
-
-  const commitDurableSnapshot = useCallback(
-    (nextNodes: Node<CanvasNodeData>[], nextEdges: Edge[], traceMessage?: string) => {
-      resizeBaselineRef.current = null;
-      dragBaselineRef.current = null;
-      textEditBaselineRef.current = null;
-      setHistory((current) =>
-        replaceCanvasHistoryWithDurableCommit(current, { nodes: nextNodes, edges: nextEdges })
-      );
-      if (traceMessage) {
-        setLocalRunStatus(traceMessage);
-        onTrace(traceMessage);
-      }
-    },
-    [onTrace]
-  );
+  const [connectionHint, setConnectionHint] = useState<string | null>(null);
+  const [templateFocusSignal, setTemplateFocusSignal] = useState(0);
+  const [marqueeSelection, setMarqueeSelection] = useState<MarqueeSelectionState>(null);
+  const [selectionRunPrompt, setSelectionRunPrompt] = useState<SelectionRunPromptState>(null);
+  const documentMarqueeSelectionRef = useRef<MarqueeSelectionState>(null);
 
   const reportRelationshipLocked = useCallback(() => {
     setLocalRunStatus(relationshipLockMessage);
     onStatus(relationshipLockMessage);
   }, [onStatus]);
 
-  const replaceSelection = useCallback((selection: OnSelectionChangeParams<Node<CanvasNodeData>, Edge>) => {
-    setHistory((current) => ({
-      ...current,
-      present: {
-        nodes: current.present.nodes.map((node) => ({
-          ...node,
-          selected: selection.nodes.some((selected) => selected.id === node.id)
-        })),
-        edges: current.present.edges.map((edge) => ({
-          ...edge,
-          selected: selection.edges.some((selected) => selected.id === edge.id)
-        }))
-      }
-    }));
-  }, []);
+  const canvasGraph = useCanvasGraph({
+    graph,
+    projectId,
+    onTrace,
+    onDurableStatus: setLocalRunStatus,
+    onRelationshipLocked: reportRelationshipLocked
+  });
+  const {
+    wrapperRef,
+    flowRef,
+    nodeCounterRef,
+    dragBaselineRef,
+    textEditBaselineRef,
+    viewport,
+    setViewport,
+    history,
+    setHistory,
+    nodes,
+    edges,
+    assemblyGraph,
+    serialize,
+    serializeCurrentGraph,
+    graphContentFingerprint,
+    isCurrentGraphContent,
+    saveProjectGraph,
+    loadProjectGraph,
+    commitSnapshot,
+    commitDurableSnapshot,
+    commitDurableGraphIfCurrent,
+    onNodesChange,
+    onEdgesChange,
+    undo,
+    redo
+  } = canvasGraph;
 
-  const onNodesChange = useCallback((changes: NodeChange<Node<CanvasNodeData>>[]) => {
-    setHistory((current) => {
-      const lockedNodeIds = new Set(
-        (current.present.nodes as Node<CanvasNodeData>[])
-          .filter((node) => node.data.locked)
-          .map((node) => node.id)
-      );
-      const editableChanges = changes.filter(
-        (change) => change.type === "select" || !("id" in change) || !lockedNodeIds.has(change.id)
-      );
+  const {
+    selectedNode,
+    selectedNodeIds,
+    selectedEdge,
+    replaceSelection
+  } = useCanvasSelection({ nodes, edges, setHistory });
 
-      if (editableChanges.length === 0) {
+  const clearCanvasSelection = useCallback(() => {
+    setContextMenu(null);
+    setSelectionRunPrompt(null);
+    setLocalRunStatus(null);
+    const applyClear = () => setHistory((current) => {
+      const hasSelection =
+        current.present.nodes.some((node) => node.selected) ||
+        current.present.edges.some((edge) => edge.selected);
+
+      if (!hasSelection) {
         return current;
       }
 
-      const nextNodes = applyNodeChanges(editableChanges, current.present.nodes);
-      const hasActiveResize = editableChanges.some(
-        (change) => change.type === "dimensions" && change.resizing === true
-      );
-      const hasCompletedResize = editableChanges.some(
-        (change) => change.type === "dimensions" && change.resizing === false
-      );
-      const hasDragPosition = editableChanges.some(
-        (change) => change.type === "position" && typeof change.dragging === "boolean"
-      );
-      const editsGraph = shouldPushNodeChangesToHistory(editableChanges);
-      const next = { nodes: nextNodes, edges: current.present.edges };
-
-      if (hasDragPosition) {
-        dragBaselineRef.current ??= current.present;
-        return updateCanvasHistoryPresent(current, next);
-      }
-
-      if (hasActiveResize) {
-        resizeBaselineRef.current ??= current.present;
-        return updateCanvasHistoryPresent(current, next);
-      }
-
-      if (hasCompletedResize && resizeBaselineRef.current) {
-        const baseline = resizeBaselineRef.current;
-        resizeBaselineRef.current = null;
-        return pushCanvasHistoryFromBaseline(current, baseline, next);
-      }
-
-      return editsGraph ? pushCanvasHistory(current, next) : updateCanvasHistoryPresent(current, next);
+      return {
+        ...current,
+        present: {
+          nodes: current.present.nodes.map((node) => ({ ...node, selected: false })),
+          edges: current.present.edges.map((edge) => ({ ...edge, selected: false }))
+        }
+      };
     });
-  }, []);
+    applyClear();
+    window.requestAnimationFrame(applyClear);
+  }, [setHistory]);
 
-  const onEdgesChange = useCallback(
-    (changes: EdgeChange<Edge>[]) => {
-      const blockedRelationshipChange = changes.some((change) => {
-        if (change.type === "select" || !("id" in change)) {
-          return false;
-        }
-
-        return edgeTouchesLockedNode(edges.find((edge) => edge.id === change.id), nodes);
-      });
-
-      if (blockedRelationshipChange) {
-        reportRelationshipLocked();
+  const clearCanvasSelectionOnClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
         return;
       }
 
-      setHistory((current) => {
-        const nextEdges = applyEdgeChanges(changes, current.present.edges);
-        const editsGraph = changes.some((change) => change.type !== "select");
-        const next = { nodes: current.present.nodes, edges: nextEdges };
-
-        return editsGraph ? pushCanvasHistory(current, next) : { ...current, present: next };
-      });
-    },
-    [edges, nodes, reportRelationshipLocked]
-  );
-
-  const createNode = useCallback(
-    (definition: EtherNodeDefinition, position: { x: number; y: number }) => {
-      nodeCounterRef.current += 1;
-      const node: Node<CanvasNodeData> = {
-        id: `node-${definition.id}-${Date.now()}-${nodeCounterRef.current}`,
-        type: "etherNode",
-        position,
-        width: 224,
-        height: 138,
-        selected: true,
-        data: createGraphNodeData(definition.id)
-      };
-      const nextNodes = nodes.map((candidate) => ({ ...candidate, selected: false })).concat(node);
-      const nextEdges = edges.map((edge) => ({ ...edge, selected: false }));
-
-      commitSnapshot(nextNodes, nextEdges, `Added ${definition.title}`);
-      onStatus(`Added ${definition.title}`);
-      setContextMenu(null);
-    },
-    [commitSnapshot, edges, nodes, onStatus]
-  );
-
-  const addNodeFromLibrary = useCallback(
-    (definition: EtherNodeDefinition) => {
-      const offset = nodes.length * 28;
-      createNode(definition, { x: 320 + offset, y: 160 + offset });
-    },
-    [createNode, nodes.length]
-  );
-
-  const getCanvasCenterPosition = useCallback(() => {
-    const bounds = wrapperRef.current?.getBoundingClientRect();
-
-    if (!bounds || !flowRef.current) {
-      return { x: 320 + nodes.length * 28, y: 160 + nodes.length * 28 };
-    }
-
-    return flowRef.current.screenToFlowPosition({
-      x: bounds.left + bounds.width / 2,
-      y: bounds.top + bounds.height / 2
-    });
-  }, [nodes.length]);
-
-  const addReviewRouterTemplate = useCallback(() => {
-    nodeCounterRef.current += 1;
-    const prefix = `review-${Date.now()}-${nodeCounterRef.current}`;
-    const fragment = createReviewRouterCanvasFragment(prefix, getCanvasCenterPosition());
-    const styledEdges = normalizeEdges(fragment.edges);
-    const compareNodeId = `${prefix}-compare`;
-    const nextNodes = nodes
-      .map((candidate) => ({ ...candidate, selected: false }))
-      .concat(
-        fragment.nodes.map((node) => ({
-          ...node,
-          type: "etherNode",
-          selected: node.id === compareNodeId
-        }))
-      );
-    const nextEdges = edges.map((edge) => ({ ...edge, selected: false })).concat(styledEdges);
-    const message = "Added Review Router";
-
-    commitSnapshot(nextNodes, nextEdges, message);
-    onStatus(message);
-    setContextMenu(null);
-  }, [commitSnapshot, edges, getCanvasCenterPosition, nodes, onStatus]);
-
-  const createReferenceNodes = useCallback(
-    (assets: AssetRecord[], position: { x: number; y: number }) => {
-      if (assets.length === 0) {
-        return;
-      }
-
-      const definition = getNodeDefinition("reference-image");
-      const referenceNodes: Node<CanvasNodeData>[] = assets.map((asset, index) => {
-        nodeCounterRef.current += 1;
-
-        return {
-          id: `node-${definition.id}-${Date.now()}-${nodeCounterRef.current}`,
-          type: "etherNode",
-          position: {
-            x: position.x + index * 32,
-            y: position.y + index * 32
-          },
-          width: 224,
-          height: 138,
-          selected: true,
-          data: createReferenceNodeData(asset)
-        };
-      });
-      const nextNodes = nodes.map((candidate) => ({ ...candidate, selected: false })).concat(referenceNodes);
-      const nextEdges = edges.map((edge) => ({ ...edge, selected: false }));
-      const message =
-        assets.length === 1
-          ? `Linked ${referenceNodes[0]?.data.title ?? "reference"}`
-          : `Linked ${assets.length} references as separate nodes`;
-
-      commitDurableSnapshot(nextNodes, nextEdges, message);
-      onStatus(message);
-      setContextMenu(null);
-    },
-    [commitDurableSnapshot, edges, nodes, onStatus]
-  );
-
-  const createEditNodeFromImage = useCallback(
-    (payload: ImageAssetDragPayload, position: { x: number; y: number }) => {
-      const sourceNode = nodes.find((node) => node.id === payload.nodeId);
-
-      if (!sourceNode) {
-        onStatus("Source image node was not found.");
-        return;
-      }
-
-      if (sourceNode.data.locked) {
-        reportRelationshipLocked();
-        return;
-      }
-
-      const definition = getNodeDefinition("edit-inpaint");
-      const connection = canConnectNodeKinds(sourceNode.data.kind, definition.category, {
-        sourceId: sourceNode.id
-      });
-
-      if (!connection.allowed) {
-        onStatus(connection.reason ?? "Image source cannot connect to an Edit node.");
-        return;
-      }
-
-      nodeCounterRef.current += 1;
-      const editNodeId = `node-${definition.id}-${Date.now()}-${nodeCounterRef.current}`;
-      const editNode: Node<CanvasNodeData> = {
-        id: editNodeId,
-        type: "etherNode",
-        position,
-        width: 260,
-        height: 220,
-        selected: true,
-        data: {
-          ...createGraphNodeData(definition.id),
-          instruction: `Edit ${payload.title ?? sourceNode.data.title}`,
-          sourceAssetId: payload.assetId,
-          sourceAssetKind: payload.assetKind,
-          sourceAssetPath: payload.assetPath,
-          sourceAssetMetadata: payload.assetMetadata
-        }
-      };
-      const edge = normalizeEdges([
-        {
-          id: `edge-${sourceNode.id}-${editNodeId}-${Date.now()}`,
-          source: sourceNode.id,
-          target: editNodeId,
-          label: "image",
-          data: { label: "image" }
-        }
-      ])[0]!;
-      const nextNodes = nodes.map((node) => ({ ...node, selected: false })).concat(editNode);
-      const nextEdges = edges.map((candidate) => ({ ...candidate, selected: false })).concat(edge);
-      const message = "Created Inpaint edit from image";
-
-      commitSnapshot(nextNodes, nextEdges, message);
-      setLocalRunStatus(message);
-      onStatus(message);
-      setContextMenu(null);
-    },
-    [commitSnapshot, edges, nodes, onStatus, reportRelationshipLocked]
-  );
-
-  const linkReferenceImage = useCallback(async () => {
-    if (!projectId) {
-      const message = "Open a project to link references";
-      setLocalRunStatus(message);
-      onStatus(message);
-      return;
-    }
-
-    try {
-      const asset = await window.ether.asset.selectReferenceImage(projectId);
-
-      if (!asset) {
-        onStatus("Reference selection cancelled");
-        return;
-      }
-
-      createReferenceNodes([asset], getCanvasCenterPosition());
-    } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Reference link failed");
-    }
-  }, [createReferenceNodes, getCanvasCenterPosition, onStatus, projectId]);
-
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      if (!connection.source || !connection.target) {
-        return;
-      }
-
-      const source = nodes.find((node) => node.id === connection.source);
-      const target = nodes.find((node) => node.id === connection.target);
-      const duplicate = edges.some(
-        (edge) => edge.source === connection.source && edge.target === connection.target
-      );
-
-      if (connectionTouchesLockedNode(source, target)) {
-        reportRelationshipLocked();
-        return;
-      }
-
-      const result = canConnectNodeKinds(source?.data.kind ?? "", target?.data.kind ?? "", {
-        sourceId: connection.source,
-        targetId: connection.target,
-        duplicate
-      });
-
-      if (!result.allowed) {
-        onStatus(result.reason ?? "Connection rejected");
-        return;
-      }
-
-      const label = result.defaultLabel ?? "context";
-      const edge: Edge = {
-        ...connection,
-        id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
-        label,
-        data: { label },
-        type: "default",
-        labelBgPadding: [8, 4],
-        labelBgBorderRadius: 4,
-        labelBgStyle: { fill: "rgba(7, 11, 18, 0.92)", stroke: "rgba(55, 230, 234, 0.34)" },
-        style: { stroke: "#37E6EA", strokeWidth: 2 }
-      };
-
-      commitSnapshot(nodes, addEdge(edge, edges), `Connected ${source?.data.title} to ${target?.data.title}`);
-      onStatus(`Connected with ${label} edge`);
-    },
-    [commitSnapshot, edges, nodes, onStatus, reportRelationshipLocked]
-  );
-
-  const connectFirstValidPair = useCallback(() => {
-    let skippedLockedEndpoint = false;
-
-    for (const source of nodes) {
-      for (const target of nodes) {
-        if (source.id === target.id) {
-          continue;
-        }
-
-        if (connectionTouchesLockedNode(source, target)) {
-          skippedLockedEndpoint = true;
-          continue;
-        }
-
-        const duplicate = edges.some((edge) => edge.source === source.id && edge.target === target.id);
-        const result = canConnectNodeKinds(source.data.kind, target.data.kind, {
-          sourceId: source.id,
-          targetId: target.id,
-          duplicate
-        });
-
-        if (!result.allowed) {
-          continue;
-        }
-
-        const label = result.defaultLabel ?? "context";
-        const edge: Edge = {
-          id: `edge-${source.id}-${target.id}-${Date.now()}`,
-          source: source.id,
-          target: target.id,
-          label,
-          selected: true,
-          data: { label },
-          type: "default",
-          labelBgPadding: [8, 4],
-          labelBgBorderRadius: 4,
-          labelBgStyle: { fill: "rgba(7, 11, 18, 0.92)", stroke: "rgba(55, 230, 234, 0.34)" },
-          style: { stroke: "#37E6EA", strokeWidth: 2 }
-        };
-        const nextNodes = nodes.map((node) => ({ ...node, selected: false }));
-        const nextEdges = edges.map((candidate) => ({ ...candidate, selected: false })).concat(edge);
-
-        commitSnapshot(nextNodes, nextEdges, `Connected ${source.data.title} to ${target.data.title}`);
-        onStatus(`Connected with ${label} edge`);
-        return;
-      }
-    }
-
-    if (skippedLockedEndpoint) {
-      reportRelationshipLocked();
-      return;
-    }
-
-    onStatus("Add a valid source and target node before connecting.");
-  }, [commitSnapshot, edges, nodes, onStatus, reportRelationshipLocked]);
-
-  const previewNode = useCallback(
-    (id: string, updates: Partial<CanvasNodeData>) => {
-      setHistory((current) => {
-        const target = (current.present.nodes as Node<CanvasNodeData>[]).find((node) => node.id === id);
-        const updateKeys = Object.keys(updates);
-        const updatesOnlyLock = updateKeys.length === 1 && updateKeys[0] === "locked";
-
-        if (target?.data.locked && !updatesOnlyLock) {
-          return current;
-        }
-
-        textEditBaselineRef.current ??= current.present;
-        const editedNodes = (current.present.nodes as Node<CanvasNodeData>[]).map((node) =>
-          node.id === id ? { ...node, data: { ...node.data, ...updates } } : node
-        );
-
-        if (updatesOnlyLock) {
-          return updateCanvasHistoryPresent(current, {
-            nodes: editedNodes,
-            edges: current.present.edges
-          });
-        }
-
-        const staleGraph = markDownstreamStale(
-          {
-            nodes: editedNodes,
-            edges: current.present.edges,
-            viewport,
-            selectedSnapshotId: graph?.selectedSnapshotId ?? null,
-            updatedAt: new Date().toISOString()
-          },
-          [id]
-        );
-
-        return updateCanvasHistoryPresent(current, {
-          nodes: normalizeNodes(staleGraph.nodes),
-          edges: current.present.edges
-        });
-      });
-    },
-    [graph?.selectedSnapshotId, viewport]
-  );
-
-  const previewEdge = useCallback(
-    (id: string, label: string) => {
-      if (edgeTouchesLockedNode(edges.find((edge) => edge.id === id), nodes)) {
-        reportRelationshipLocked();
-        return;
-      }
-
-      setHistory((current) => {
-        textEditBaselineRef.current ??= current.present;
-        const nextEdges = current.present.edges.map((edge) =>
-          edge.id === id ? { ...edge, label, data: { ...edge.data, label } } : edge
-        );
-        const changedEdge = current.present.edges.find((edge) => edge.id === id);
-        const staleGraph = changedEdge
-          ? markDownstreamStale(
-              {
-                nodes: current.present.nodes,
-                edges: nextEdges,
-                viewport,
-                selectedSnapshotId: graph?.selectedSnapshotId ?? null,
-                updatedAt: new Date().toISOString()
-              },
-              [changedEdge.source],
-              { includeChanged: false }
-            )
-          : null;
-
-        return updateCanvasHistoryPresent(current, {
-          nodes: staleGraph ? normalizeNodes(staleGraph.nodes) : current.present.nodes,
-          edges: nextEdges
-        });
-      });
-    },
-    [edges, graph?.selectedSnapshotId, nodes, reportRelationshipLocked, viewport]
-  );
-
-  const commitTextEdit = useCallback(() => {
-    const baseline = textEditBaselineRef.current;
-
-    if (!baseline) {
-      return;
-    }
-
-    textEditBaselineRef.current = null;
-    setHistory((current) => pushCanvasHistoryFromBaseline(current, baseline, current.present));
-    onTrace("Updated inspector text");
-  }, [onTrace]);
-
-  const toggleNodeLock = useCallback(
-    (id: string, locked: boolean) => {
-      const target = nodes.find((node) => node.id === id);
-
-      if (!target) {
-        return;
-      }
-
-      const nextNodes = nodes.map((node) =>
-        node.id === id ? { ...node, data: { ...node.data, locked } } : node
-      );
-      const message = locked ? "Node locked" : "Node unlocked";
-
-      commitSnapshot(nextNodes, edges, message);
-      setLocalRunStatus(message);
-      onStatus(message);
-    },
-    [commitSnapshot, edges, nodes, onStatus]
-  );
-
-  const deleteElements = useCallback(
-    (selection?: { nodeIds?: string[]; edgeIds?: string[] }) => {
-      const requestedNodeIds =
-        selection?.nodeIds ?? nodes.filter((node) => node.selected).map((node) => node.id);
-      const hasLockedNode = nodes.some(
-        (node) => requestedNodeIds.includes(node.id) && node.data.locked
-      );
-      const requestedEdgeIds =
-        selection?.edgeIds ?? edges.filter((edge) => edge.selected).map((edge) => edge.id);
-      const hasLockedRelationship = requestedEdgeIds.some((edgeId) =>
-        edgeTouchesLockedNode(edges.find((edge) => edge.id === edgeId), nodes)
-      ) || nodeDeletionWouldRemoveLockedRelationship(requestedNodeIds, nodes, edges);
-
-      if (hasLockedNode) {
-        const message = "Unlock the node before changing it.";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (hasLockedRelationship) {
-        reportRelationshipLocked();
-        return;
-      }
-
-      const next = deleteCanvasElements({ nodes, edges }, selection);
-
-      if (!next) {
-        return;
-      }
-
-      setHistory((current) => pushCanvasHistoryIfChanged(current, next));
-      onTrace("Deleted selection");
-      onStatus("Selection deleted");
-    },
-    [edges, nodes, onStatus, onTrace, reportRelationshipLocked]
-  );
-
-  const deleteSelection = useCallback(() => {
-    deleteElements();
-  }, [deleteElements]);
-
-  const runNode = useCallback(
-    (id: string) => {
-      const target = nodes.find((node) => node.id === id);
-
-      if (!target || target.data.kind !== "Prompt") {
-        onStatus("Only prompt nodes can be assembled locally in this phase.");
-        return;
-      }
-
-      if (target.data.locked) {
-        const message = "Node is locked";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      const nextGraph = freezePromptNode(assemblyGraph, id);
-      const nextNodes = normalizeNodes(nextGraph.nodes).map((node) => ({
-        ...node,
-        data:
-          node.id === id
-            ? { ...node.data, rerunState: "complete" as const, staleSince: undefined }
-            : node.data,
-        selected: node.id === id
-      }));
-      const nextEdges = normalizeEdges(nextGraph.edges);
-      const nextTarget = nextNodes.find((node) => node.id === id);
-      const mutationArtifact =
-        nextTarget?.data.mutationArtifact && typeof nextTarget.data.mutationArtifact === "object"
-          ? (nextTarget.data.mutationArtifact as Record<string, unknown>)
-          : null;
-      const message = mutationArtifact
-        ? `Mutation ${target.data.title} (${String(mutationArtifact.seed ?? "seeded")})`
-        : `Assembled ${target.data.title}`;
-
-      commitSnapshot(nextNodes, nextEdges, message);
-      setLocalRunStatus(message);
-      onStatus(message);
-    },
-    [assemblyGraph, commitSnapshot, nodes, onStatus]
-  );
-
-  const ensureStoreFolderForNode = useCallback(
-    async (id: string) => {
-      const target = nodes.find((node) => node.id === id);
-
-      if (!target || target.data.kind !== "Store") {
-        onStatus("Select a Collection or Directory node first.");
-        return;
-      }
-
-      if (target.data.subtype !== "Collection" && target.data.subtype !== "Directory") {
-        onStatus("Only Collection and Directory nodes mirror folders in this phase.");
-        return;
-      }
-
-      if (target.data.locked) {
-        const message = "Node is locked";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (!projectId) {
-        const message = "Open a project to mirror folders";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      try {
-        const name = target.data.label.trim() || target.data.title;
-        const asset =
-          target.data.subtype === "Collection"
-            ? await window.ether.asset.ensureCollection(projectId, { name, nodeId: target.id })
-            : await window.ether.asset.ensureDirectory(projectId, { name, nodeId: target.id });
-        const nextNodes = nodes.map((node) =>
-          node.id === target.id
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  status: "complete" as const,
-                  rerunState: "complete" as const,
-                  staleSince: undefined,
-                  storeAssetId: asset.id,
-                  storePath: asset.path,
-                  storeMetadata: asset.metadata
-                }
-              }
-            : { ...node, selected: false }
-        );
-        const message = `${target.data.subtype} folder ready`;
-
-        commitDurableSnapshot(nextNodes, edges, message);
-        onStatus(message);
-      } catch (error) {
-        onStatus(error instanceof Error ? error.message : "Folder mirror failed");
-      }
-    },
-    [commitDurableSnapshot, edges, nodes, onStatus, projectId]
-  );
-
-  const saveFakeGeneratedAssetForNode = useCallback(
-    async (id: string) => {
-      const target = nodes.find((node) => node.id === id);
-
-      if (!target || target.data.kind !== "Generation") {
-        onStatus("Select a Generation node first.");
-        return;
-      }
-
-      if (target.data.locked) {
-        const message = "Node is locked";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (!projectId) {
-        const message = "Open a project to save fake generated output";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      try {
-        const asset = await window.ether.asset.saveFakeGenerated(projectId, {
-          generationNodeId: target.id,
-          fileName: `fake-output-${target.id}-${Date.now()}.png`,
-          content: `fake generated output for ${target.data.title}\n`,
-          mimeType: "image/png"
-        });
-        const nextNodes = nodes.map((node) =>
-          node.id === target.id
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  status: "complete" as const,
-                  rerunState: "complete" as const,
-                  staleSince: undefined,
-                  assetId: asset.id,
-                  assetKind: asset.kind,
-                  assetPath: asset.path,
-                  assetMetadata: asset.metadata
-                }
-              }
-            : { ...node, selected: false }
-        );
-        const message = "Saved fake generated output";
-
-        setPendingGeneratedAssetId(asset.id);
-        commitDurableSnapshot(nextNodes, edges, message);
-        onStatus(message);
-      } catch (error) {
-        onStatus(error instanceof Error ? error.message : "Fake generated output save failed");
-      }
-    },
-    [commitDurableSnapshot, edges, nodes, onStatus, projectId]
-  );
-
-  const createMaskAssetForNode = useCallback(
-    async (id: string) => {
-      const target = nodes.find((node) => node.id === id);
-
-      if (!target || target.data.kind !== "Edit") {
-        onStatus("Select an Edit node first.");
-        return;
-      }
-
-      if (target.data.locked) {
-        const message = "Node is locked";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (!projectId) {
-        const message = "Open a project to save mask overlays";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      const sourceAssetPath = target.data.sourceAssetPath ?? target.data.assetPath;
-
-      if (!sourceAssetPath) {
-        const message = "Add a source image before creating a mask.";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      try {
-        const asset = await window.ether.asset.saveMask(projectId, {
-          editNodeId: target.id,
-          sourceAssetId: target.data.sourceAssetId ?? target.data.assetId,
-          sourceAssetPath,
-          fileName: `mask-${target.id}-${Date.now()}.svg`,
-          mimeType: "image/svg+xml",
-          instruction: target.data.instruction,
-          notes: target.data.notes,
-          metadata: {
-            sourceAssetKind: target.data.sourceAssetKind ?? target.data.assetKind,
-            sourceAssetMetadata: target.data.sourceAssetMetadata ?? target.data.assetMetadata ?? {}
-          }
-        });
-        const now = new Date().toISOString();
-        const nextNodes = nodes.map((node) =>
-          node.id === target.id
-            ? {
-                ...node,
-                selected: true,
-                data: {
-                  ...node.data,
-                  maskAssetId: asset.id,
-                  maskAssetPath: asset.path,
-                  maskMetadata: asset.metadata,
-                  rerunState: node.data.assetId ? ("stale" as const) : (node.data.rerunState ?? "ready"),
-                  staleSince: node.data.assetId ? now : node.data.staleSince
-                }
-              }
-            : { ...node, selected: false }
-        );
-        const message = "Mask overlay saved";
-
-        commitDurableSnapshot(nextNodes, edges, message);
-        setLocalRunStatus(message);
-        onStatus(message);
-      } catch (error) {
-        onStatus(error instanceof Error ? error.message : "Mask overlay save failed");
-      }
-    },
-    [commitDurableSnapshot, edges, nodes, onStatus, projectId]
-  );
-
-  const moveLatestGeneratedAssetToCollection = useCallback(
-    async (collectionNodeId: string) => {
-      const collectionNode = nodes.find((node) => node.id === collectionNodeId);
+      const target = event.target instanceof Element ? event.target : null;
 
       if (
-        !collectionNode ||
-        collectionNode.data.kind !== "Store" ||
-        collectionNode.data.subtype !== "Collection"
+        target?.closest(
+          ".react-flow__node, .react-flow__edge, .ether-edge-label, .ether-edge-role-grid, .ether-edge-channel-picker, .artifact-browser, [draggable=\"true\"], .canvas-overlay-panel, .canvas-toolbar, .canvas-status, .canvas-selection-run-prompt, button, input, textarea, select"
+        )
       ) {
-        onStatus("Select a Collection node first.");
         return;
       }
 
-      if (collectionNode.data.locked) {
-        const message = "Node is locked";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (!projectId) {
-        const message = "Open a project to move generated assets";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (!pendingGeneratedAssetId) {
-        const message = "No pending generated output to move.";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      const sourceNode = nodes.find(
-        (node) =>
-          node.data.kind === "Generation" &&
-          node.data.assetKind === "generated" &&
-          node.data.assetId === pendingGeneratedAssetId
-      );
-
-      if (!sourceNode?.data.assetId) {
-        const message = "No pending generated output to move.";
-        setPendingGeneratedAssetId(null);
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      if (sourceNode.data.locked) {
-        const message = "Unlock the generated output before moving it.";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      try {
-        const collectionName = collectionNode.data.label.trim() || collectionNode.data.title;
-        const collectionAsset =
-          collectionNode.data.storeAssetId && collectionNode.data.storePath
-            ? {
-                id: collectionNode.data.storeAssetId,
-                path: collectionNode.data.storePath,
-                metadata: collectionNode.data.storeMetadata ?? {}
-              }
-            : await window.ether.asset.ensureCollection(projectId, {
-                name: collectionName,
-                nodeId: collectionNode.id
-              });
-        const movedAsset = await window.ether.asset.moveToCollection(projectId, {
-          assetId: sourceNode.data.assetId,
-          collectionId: collectionAsset.id,
-          reason: "manual-inspector-validation"
-        });
-        const nextNodes = nodes.map((node) => {
-          if (node.id === sourceNode.id) {
-            return {
-              ...node,
-              selected: false,
-              data: {
-                ...node.data,
-                assetPath: movedAsset.path,
-                assetMetadata: movedAsset.metadata
-              }
-            };
-          }
-
-          if (node.id === collectionNode.id) {
-            return {
-              ...node,
-              selected: true,
-              data: {
-                ...node.data,
-                status: "complete" as const,
-                rerunState: "complete" as const,
-                staleSince: undefined,
-                storeAssetId: collectionAsset.id,
-                storePath: collectionAsset.path,
-                storeMetadata: collectionAsset.metadata,
-                lastMovedAssetId: movedAsset.id,
-                lastMovedAssetPath: movedAsset.path,
-                lastMovedAt: movedAsset.updatedAt
-              }
-            };
-          }
-
-          return { ...node, selected: false };
-        });
-        const message = "Moved pending generated output to Collection";
-
-        setPendingGeneratedAssetId(null);
-        commitDurableSnapshot(nextNodes, edges, message);
-        onStatus(message);
-      } catch (error) {
-        onStatus(error instanceof Error ? error.message : "Generated asset move failed");
-      }
+      clearCanvasSelection();
     },
-    [commitDurableSnapshot, edges, nodes, onStatus, pendingGeneratedAssetId, projectId]
+    [clearCanvasSelection]
   );
-
-  const executeRun = useCallback(
-    async (policy: ExecutionPolicy) => {
-      const targetNodeIds =
-        policy === "selected" ? selectedNodeIds : selectedNode ? [selectedNode.id] : selectedNodeIds;
-
-      if (targetNodeIds.length === 0) {
-        onStatus("Select a node before running.");
-        return;
-      }
-
-      if (!projectId) {
-        const message = "Open a project to run the execution engine";
-        setLocalRunStatus(message);
-        onStatus(message);
-        return;
-      }
-
-      const cappedRunCount = Math.max(0, Math.min(100, Math.floor(runCountCap)));
-      const queueMessage = `Queued ${policy} run for ${targetNodeIds.length} node${
-        targetNodeIds.length === 1 ? "" : "s"
-      }`;
-
-      setLocalRunStatus(queueMessage);
-      onTrace(queueMessage);
-
-      try {
-        const result = await window.ether.execution.run(projectId, assemblyGraph, {
-          policy,
-          targetNodeIds,
-          runCountCap: cappedRunCount,
-          parallel: parallelExecution
-        });
-        const completed = result.results.filter((entry) => entry.status === "complete").length;
-        const skipped = result.results.filter((entry) => entry.status === "skipped").length;
-        const failed = result.results.filter((entry) => entry.status === "error").length;
-        const lastGeneratedAsset = [...result.results]
-          .reverse()
-          .find((entry) => entry.action === "generate");
-        const summary = failed > 0
-          ? `Run finished with ${failed} error${failed === 1 ? "" : "s"}`
-          : `Run complete: ${completed} complete, ${skipped} skipped`;
-
-        if (lastGeneratedAsset?.assetId) {
-          setPendingGeneratedAssetId(lastGeneratedAsset.assetId);
-        }
-
-        commitDurableSnapshot(normalizeNodes(result.graph.nodes), normalizeEdges(result.graph.edges), summary);
-        for (const entry of result.results) {
-          onTrace(`${entry.status} ${entry.nodeId} (${entry.action})`);
-        }
-        onStatus(summary);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Execution run failed";
-        setLocalRunStatus(message);
-        onStatus(message);
-      }
-    },
-    [
-      assemblyGraph,
-      commitDurableSnapshot,
-      parallelExecution,
-      projectId,
-      runCountCap,
-      selectedNode,
-      selectedNodeIds,
-      onStatus,
-      onTrace
-    ]
-  );
-
-  const deleteNodeById = useCallback(
-    (id: string) => {
-      deleteElements({ nodeIds: [id] });
-    },
-    [deleteElements]
-  );
-
-  const undo = useCallback(() => {
-    setHistory((current) => undoCanvasHistory(current));
-    onTrace("Undo");
-  }, [onTrace]);
-
-  const redo = useCallback(() => {
-    setHistory((current) => redoCanvasHistory(current));
-    onTrace("Redo");
-  }, [onTrace]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      const target = event.target as HTMLElement | null;
+    if (selectedNodeIds.length < 2) {
+      setSelectionRunPrompt(null);
+    }
+  }, [selectedNodeIds.length]);
 
-      if (target?.matches("input, textarea")) {
-        return;
-      }
+  const runController = useRunController({
+    graph,
+    projectId,
+    localRunStatus,
+    setLocalRunStatus,
+    nodes,
+    edges,
+    assemblyGraph,
+    selectedNode,
+    selectedNodeIds,
+    commitSnapshot,
+    commitDurableSnapshot,
+    commitDurableGraphIfCurrent,
+    graphContentFingerprint,
+    isCurrentGraphContent,
+    serializeCurrentGraph,
+    onStatus,
+    onTrace
+  });
 
-      if ((event.ctrlKey || event.metaKey) && key === "z") {
-        event.preventDefault();
-        undo();
-      }
+  const commands = useCanvasCommands({
+    graph,
+    projectId,
+    wrapperRef,
+    flowRef,
+    nodeCounterRef,
+    dragBaselineRef,
+    textEditBaselineRef,
+    viewport,
+    nodes,
+    edges,
+    serializeCurrentGraph,
+    setHistory,
+    commitSnapshot,
+    commitDurableSnapshot,
+    setContextMenu,
+    setLocalRunStatus,
+    setConnectionHint,
+    onStatus,
+    onTrace,
+    reportRelationshipLocked,
+    undo,
+    redo
+  });
 
-      if ((event.ctrlKey || event.metaKey) && (key === "y" || (event.shiftKey && key === "z"))) {
-        event.preventDefault();
-        redo();
-      }
+  const channelActivityByNodeId = useMemo(() => {
+    const activity: Record<string, EtherNodeChannelActivity> = {};
 
-      if (key === "delete" || key === "backspace") {
-        event.preventDefault();
-        deleteSelection();
+    const ensure = (nodeId: string) => {
+      activity[nodeId] ??= { input: [], output: [] };
+      return activity[nodeId];
+    };
+
+    const addChannel = (channels: PayloadChannel[], channel: PayloadChannel) => {
+      if (!channels.includes(channel)) {
+        channels.push(channel);
       }
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [deleteSelection, redo, undo]);
+    for (const edge of edges) {
+      const edgeData = edge.data && typeof edge.data === "object"
+        ? edge.data as { sourceChannel?: unknown; targetChannel?: unknown }
+        : {};
+      const sourceChannel = normalizePayloadChannel(edgeData.sourceChannel ?? edge.sourceHandle) ?? "text";
+      const targetChannel = normalizePayloadChannel(edgeData.targetChannel ?? edge.targetHandle) ?? "text";
 
-  const onDrop = useCallback(
-    async (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const imagePayload = parseImageAssetDragPayload(
-        event.dataTransfer.getData("application/ether-image-asset")
-      );
+      addChannel(ensure(edge.source).output, sourceChannel);
+      addChannel(ensure(edge.target).input, targetChannel);
+    }
 
-      if (event.shiftKey && imagePayload && flowRef.current) {
-        createEditNodeFromImage(
-          imagePayload,
-          flowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-        );
+    return activity;
+  }, [edges]);
+
+  const focusNode = useCallback(
+    (nodeId: string) => {
+      const target = nodes.find((node) => node.id === nodeId);
+
+      if (!target) {
+        const message = `Timeline node ${nodeId} is not on the canvas`;
+        setLocalRunStatus(message);
+        onStatus(message);
         return;
       }
 
-      const definitionId = event.dataTransfer.getData("application/ether-node-definition");
-      const definition = definitionId ? getNodeDefinition(definitionId) : null;
-
-      if (!definition || !flowRef.current) {
-        const droppedFiles = Array.from(event.dataTransfer.files);
-        const imageFiles = droppedFiles.filter(isSupportedImageFile);
-
-        if (droppedFiles.length === 0) {
-          return;
+      setHistory((current) => ({
+        ...current,
+        present: {
+          nodes: current.present.nodes.map((node) => ({
+            ...node,
+            selected: node.id === nodeId
+          })),
+          edges: current.present.edges.map((edge) => ({ ...edge, selected: false }))
         }
-
-        if (imageFiles.length === 0) {
-          onStatus("Drop image files to create Reference nodes.");
-          return;
-        }
-
-        if (!projectId) {
-          const message = "Open a project to link references";
-          setLocalRunStatus(message);
-          onStatus(message);
-          return;
-        }
-
-        const filePaths = imageFiles
-          .map((file) => window.ether.file.getDroppedFilePath(file))
-          .filter((filePath): filePath is string => Boolean(filePath));
-
-        if (filePaths.length !== imageFiles.length) {
-          onStatus("Dropped images need Electron file paths before they can be linked.");
-          return;
-        }
-
-        try {
-          const assets = await linkDroppedReferenceFilesSequentially(
-            projectId,
-            filePaths,
-            window.ether.asset.linkDroppedReference
-          );
-          const position = flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) ?? {
-            x: 320,
-            y: 160
-          };
-
-          createReferenceNodes(assets, position);
-
-          if (imageFiles.length > 1 && !event.ctrlKey && !event.metaKey) {
-            onTrace("Multiple dropped images linked as separate Reference nodes");
-          }
-        } catch (error) {
-          onStatus(error instanceof Error ? error.message : "Dropped reference link failed");
-        }
-
-        return;
-      }
-
-      createNode(
-        definition,
-        flowRef.current.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      }));
+      flowRef.current?.setCenter(
+        target.position.x + (target.width ?? 260) / 2,
+        target.position.y + (target.height ?? 180) / 2,
+        { duration: 320, zoom: Math.max(viewport.zoom, 0.9) }
       );
+      setLocalRunStatus(`Selected ${target.data.title}`);
+      onStatus(`Selected ${target.data.title}`);
     },
-    [createEditNodeFromImage, createNode, createReferenceNodes, onStatus, onTrace, projectId]
+    [flowRef, nodes, onStatus, setHistory, viewport.zoom]
   );
 
-  const onNodeDragStop = useCallback(
-    (_event: React.MouseEvent, draggedNode: Node<CanvasNodeData>) => {
-      const latestNodes = nodes.map((node) => (node.id === draggedNode.id ? draggedNode : node));
-      const commitDragOnly = () => {
-        const baseline = dragBaselineRef.current;
-        dragBaselineRef.current = null;
+  useImperativeHandle(
+    ref,
+    () => ({
+      serialize,
+      saveProjectGraph,
+      loadProjectGraph,
+      focusNode
+    }),
+    [focusNode, loadProjectGraph, saveProjectGraph, serialize]
+  );
 
-        if (baseline) {
-          setHistory((current) =>
-            pushCanvasHistoryFromBaseline(current, baseline, {
-              nodes: latestNodes,
-              edges: current.present.edges
-            })
-          );
-        }
+  const dropStarterPrompt = useCallback(() => {
+    commands.addNodeFromLibrary(getNodeDefinition("prompt-general"));
+  }, [commands]);
+
+  const chooseTemplate = useCallback(() => {
+    setShowNodeLibrary(true);
+    setTemplateFocusSignal((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    const shell = wrapperRef.current;
+
+    if (!shell) {
+      return;
+    }
+
+    const measureShell = () => setFlowShellWidth(shell.clientWidth);
+    const resizeObserver = new ResizeObserver(measureShell);
+
+    measureShell();
+    resizeObserver.observe(shell);
+
+    return () => resizeObserver.disconnect();
+  }, [wrapperRef]);
+
+  useEffect(() => {
+    return () => overlayResizeCleanupRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    const isExcludedTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      Boolean(target.closest(".react-flow__controls, .react-flow__node, .react-flow__edge, .ether-edge-label, .ether-edge-role-grid, .ether-edge-channel-picker, .artifact-browser, [draggable=\"true\"], .canvas-overlay-panel, .canvas-toolbar, .canvas-status, .canvas-selection-run-prompt, button, input, textarea, select"));
+
+    const promptPositionForSelection = (selection: NonNullable<MarqueeSelectionState>, count: number) => {
+      const shellBox = wrapperRef.current?.getBoundingClientRect();
+
+      if (!shellBox) {
+        return { count, x: 16, y: 16 };
+      }
+
+      const left = Math.min(selection.startX, selection.currentX);
+      const bottom = Math.max(selection.startY, selection.currentY);
+
+      return {
+        count,
+        x: clamp(left - shellBox.left, 16, Math.max(16, shellBox.width - 280)),
+        y: clamp(bottom - shellBox.top + 12, 16, Math.max(16, shellBox.height - 126))
       };
-      const targetEdge = findEdgeInsertionTarget({
-        draggedNodeId: draggedNode.id,
-        nodes: latestNodes,
-        edges
+    };
+
+    const applySelection = (selection: MarqueeSelectionState) => {
+      if (!selection) {
+        return;
+      }
+
+      const left = Math.min(selection.startX, selection.currentX);
+      const right = Math.max(selection.startX, selection.currentX);
+      const top = Math.min(selection.startY, selection.currentY);
+      const bottom = Math.max(selection.startY, selection.currentY);
+      const selectedIds = new Set<string>();
+
+      wrapperRef.current?.querySelectorAll<HTMLElement>(".react-flow__node[data-id]").forEach((element) => {
+        const box = element.getBoundingClientRect();
+        const intersects = box.left <= right && box.right >= left && box.top <= bottom && box.bottom >= top;
+
+        if (intersects) {
+          const nodeId = element.dataset.id;
+
+          if (nodeId) {
+            selectedIds.add(nodeId);
+          }
+        }
       });
 
-      if (!targetEdge) {
-        commitDragOnly();
+      if (selectedIds.size === 0) {
+        clearCanvasSelection();
         return;
       }
 
-      const sourceNode = latestNodes.find((node) => node.id === targetEdge.source);
-      const dragged = latestNodes.find((node) => node.id === draggedNode.id);
-      const targetNode = latestNodes.find((node) => node.id === targetEdge.target);
-
-      if (!sourceNode || !dragged || !targetNode) {
-        commitDragOnly();
-        return;
-      }
-
-      if (dragged.data.locked || edgeTouchesLockedNode(targetEdge, latestNodes)) {
-        commitDragOnly();
-        reportRelationshipLocked();
-        return;
-      }
-
-      const firstRule = canConnectNodeKinds(sourceNode.data.kind, dragged.data.kind, {
-        sourceId: sourceNode.id,
-        targetId: dragged.id
-      });
-      const secondRule = canConnectNodeKinds(dragged.data.kind, targetNode.data.kind, {
-        sourceId: dragged.id,
-        targetId: targetNode.id
-      });
-
-      if (!firstRule.allowed || !secondRule.allowed) {
-        commitDragOnly();
-        onStatus("Dropped node is near an edge, but that insertion would create an invalid route.");
-        return;
-      }
-
-      const originalLabel = String(targetEdge.label ?? targetEdge.data?.label ?? "route");
-      const nextEdges = edges
-        .filter((edge) => edge.id !== targetEdge.id)
-        .concat(
-          normalizeEdges([
-            {
-              id: `edge-${sourceNode.id}-${dragged.id}-${Date.now()}`,
-              source: sourceNode.id,
-              target: dragged.id,
-              label: originalLabel,
-              data: { label: originalLabel }
-            },
-            {
-              id: `edge-${dragged.id}-${targetNode.id}-${Date.now()}`,
-              source: dragged.id,
-              target: targetNode.id,
-              label: secondRule.defaultLabel ?? "route",
-              data: { label: secondRule.defaultLabel ?? "route" }
-            }
-          ])
+      window.requestAnimationFrame(() => {
+        setHistory((current) => ({
+          ...current,
+          present: {
+            nodes: current.present.nodes.map((node) => ({
+              ...node,
+              selected: selectedIds.has(node.id)
+            })),
+            edges: current.present.edges.map((edge) => ({ ...edge, selected: false }))
+          }
+        }));
+        setSelectionRunPrompt(
+          selectedIds.size > 1 ? promptPositionForSelection(selection, selectedIds.size) : null
         );
+        setLocalRunStatus(`Selected ${selectedIds.size} nodes`);
+        onStatus(`Selected ${selectedIds.size} nodes`);
+      });
+    };
 
-      const baseline = dragBaselineRef.current;
-      dragBaselineRef.current = null;
-      setHistory((current) =>
-        baseline
-          ? pushCanvasHistoryFromBaseline(current, baseline, { nodes: latestNodes, edges: nextEdges })
-          : pushCanvasHistory(current, { nodes: latestNodes, edges: nextEdges })
-      );
-      onTrace("Inserted node onto edge");
-      onStatus("Node inserted between connected nodes");
-    },
-    [edges, nodes, onStatus, onTrace, reportRelationshipLocked]
+    const startDocumentMarquee = (event: MouseEvent) => {
+      if (
+        event.button !== 0 ||
+        isExcludedTarget(event.target)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const selection: MarqueeSelectionState = {
+        pointerId: -2,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY
+      };
+
+      documentMarqueeSelectionRef.current = selection;
+      setContextMenu(null);
+      setLocalRunStatus("Marquee selecting");
+      setMarqueeSelection(selection);
+    };
+
+    const moveDocumentMarquee = (event: MouseEvent) => {
+      const selection = documentMarqueeSelectionRef.current;
+
+      if (!selection) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const nextSelection = {
+        ...selection,
+        currentX: event.clientX,
+        currentY: event.clientY
+      };
+
+      documentMarqueeSelectionRef.current = nextSelection;
+      setMarqueeSelection(nextSelection);
+    };
+
+    const finishDocumentMarquee = (event: MouseEvent) => {
+      const selection = documentMarqueeSelectionRef.current;
+
+      if (!selection) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      documentMarqueeSelectionRef.current = null;
+      setMarqueeSelection(null);
+      applySelection(selection);
+    };
+
+    document.addEventListener("mousedown", startDocumentMarquee, true);
+    document.addEventListener("mousemove", moveDocumentMarquee, true);
+    document.addEventListener("mouseup", finishDocumentMarquee, true);
+    return () => {
+      document.removeEventListener("mousedown", startDocumentMarquee, true);
+      document.removeEventListener("mousemove", moveDocumentMarquee, true);
+      document.removeEventListener("mouseup", finishDocumentMarquee, true);
+    };
+  }, [clearCanvasSelection, onStatus, setHistory, wrapperRef]);
+
+  const maxOverlayWidth = flowShellWidth > 0
+    ? Math.max(MIN_INSPECTOR_WIDTH, flowShellWidth - OVERLAY_PANEL_GUTTER)
+    : MAX_INSPECTOR_WIDTH;
+  const maxLibraryWidth = Math.min(MAX_LIBRARY_WIDTH, maxOverlayWidth);
+  const maxInspectorWidth = Math.min(MAX_INSPECTOR_WIDTH, maxOverlayWidth);
+  const renderedNodeLibraryWidth = showNodeLibrary
+    ? clamp(nodeLibraryWidth, MIN_LIBRARY_WIDTH, maxLibraryWidth)
+    : 0;
+  const renderedInspectorWidth = showInspector
+    ? clamp(inspectorWidth, MIN_INSPECTOR_WIDTH, maxInspectorWidth)
+    : 0;
+
+  useEffect(() => {
+    setNodeLibraryWidth((width) => clamp(width, MIN_LIBRARY_WIDTH, maxLibraryWidth));
+    setInspectorWidth((width) => clamp(width, MIN_INSPECTOR_WIDTH, maxInspectorWidth));
+  }, [maxInspectorWidth, maxLibraryWidth]);
+
+  const resizeNodeLibraryTo = useCallback(
+    (width: number) => setNodeLibraryWidth(clamp(width, MIN_LIBRARY_WIDTH, maxLibraryWidth)),
+    [maxLibraryWidth]
   );
 
-  const onNodeDragStart = useCallback(() => {
-    dragBaselineRef.current = { nodes, edges };
-  }, [edges, nodes]);
+  const resizeInspectorTo = useCallback(
+    (width: number) => setInspectorWidth(clamp(width, MIN_INSPECTOR_WIDTH, maxInspectorWidth)),
+    [maxInspectorWidth]
+  );
 
-  const actionDefinitions = useMemo(
-    () => [
-      getNodeDefinition("prompt-general"),
-      getNodeDefinition("reference-image"),
-      getNodeDefinition("generation-image"),
-      getNodeDefinition("note-cloud")
-    ],
+  const startOverlayPanelResize = useCallback(
+    (panel: "library" | "inspector", event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      overlayResizeCleanupRef.current?.();
+      const activePointerId = event.pointerId;
+      const handle = event.currentTarget;
+      const startX = event.clientX;
+      const startLibraryWidth = nodeLibraryWidth;
+      const startInspectorWidth = inspectorWidth;
+
+      handle.setPointerCapture(activePointerId);
+
+      const resizePanel = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== activePointerId) {
+          return;
+        }
+
+        if (panel === "library") {
+          resizeNodeLibraryTo(startLibraryWidth + moveEvent.clientX - startX);
+          return;
+        }
+
+        resizeInspectorTo(startInspectorWidth - (moveEvent.clientX - startX));
+      };
+
+      const cleanupResize = () => {
+        window.removeEventListener("pointermove", resizePanel);
+        window.removeEventListener("pointerup", stopResize);
+        window.removeEventListener("pointercancel", stopResize);
+        handle.removeEventListener("lostpointercapture", stopResize);
+        if (handle.hasPointerCapture(activePointerId)) {
+          handle.releasePointerCapture(activePointerId);
+        }
+        overlayResizeCleanupRef.current = null;
+      };
+
+      const stopResize = (stopEvent: PointerEvent) => {
+        if (stopEvent.pointerId !== activePointerId) {
+          return;
+        }
+
+        cleanupResize();
+      };
+
+      overlayResizeCleanupRef.current = cleanupResize;
+      window.addEventListener("pointermove", resizePanel);
+      window.addEventListener("pointerup", stopResize);
+      window.addEventListener("pointercancel", stopResize);
+      handle.addEventListener("lostpointercapture", stopResize);
+    },
+    [inspectorWidth, nodeLibraryWidth, resizeInspectorTo, resizeNodeLibraryTo]
+  );
+
+  const startMarqueeSelection = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement | null;
+
+      if (
+        event.button !== 0 ||
+        target.closest(".react-flow__controls, .react-flow__node, .react-flow__edge, .ether-edge-label, .ether-edge-role-grid, .ether-edge-channel-picker, .artifact-browser, [draggable=\"true\"], .canvas-overlay-panel, .canvas-toolbar, .canvas-status, .canvas-selection-run-prompt, button, input, textarea, select")
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setContextMenu(null);
+      setLocalRunStatus("Marquee selecting");
+      setMarqueeSelection({
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY
+      });
+    },
     []
   );
 
+  const moveMarqueeSelection = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    setMarqueeSelection((current) => {
+      if (!current || current.pointerId !== event.pointerId) {
+        return current;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      return {
+        ...current,
+        currentX: event.clientX,
+        currentY: event.clientY
+      };
+    });
+  }, []);
+
+  const startMouseMarqueeSelection = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement | null;
+
+      if (
+        event.button !== 0 ||
+        target.closest(".react-flow__controls, .react-flow__node, .react-flow__edge, .ether-edge-label, .ether-edge-role-grid, .ether-edge-channel-picker, .artifact-browser, [draggable=\"true\"], .canvas-overlay-panel, .canvas-toolbar, .canvas-status, .canvas-selection-run-prompt, button, input, textarea, select")
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu(null);
+      setLocalRunStatus("Marquee selecting");
+      setMarqueeSelection({
+        pointerId: -1,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY
+      });
+    },
+    []
+  );
+
+  const moveMouseMarqueeSelection = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    setMarqueeSelection((current) => {
+      if (!current || current.pointerId !== -1) {
+        return current;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      return {
+        ...current,
+        currentX: event.clientX,
+        currentY: event.clientY
+      };
+    });
+  }, []);
+
+  const finishMarqueeSelection = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const selection = marqueeSelection;
+
+      if (!selection || selection.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+
+      const left = Math.min(selection.startX, selection.currentX);
+      const right = Math.max(selection.startX, selection.currentX);
+      const top = Math.min(selection.startY, selection.currentY);
+      const bottom = Math.max(selection.startY, selection.currentY);
+      const selectedIds = new Set<string>();
+
+      wrapperRef.current?.querySelectorAll<HTMLElement>(".react-flow__node[data-id]").forEach((element) => {
+        const box = element.getBoundingClientRect();
+        const intersects = box.left <= right && box.right >= left && box.top <= bottom && box.bottom >= top;
+
+        if (intersects) {
+          const nodeId = element.dataset.id;
+
+          if (nodeId) {
+            selectedIds.add(nodeId);
+          }
+        }
+      });
+
+      setMarqueeSelection(null);
+
+      if (selectedIds.size === 0) {
+        clearCanvasSelection();
+        return;
+      }
+
+      window.requestAnimationFrame(() => {
+        setHistory((current) => ({
+          ...current,
+          present: {
+            nodes: current.present.nodes.map((node) => ({
+              ...node,
+              selected: selectedIds.has(node.id)
+            })),
+            edges: current.present.edges.map((edge) => ({ ...edge, selected: false }))
+          }
+        }));
+        const shellBox = wrapperRef.current?.getBoundingClientRect();
+        const promptX = shellBox
+          ? clamp(left - shellBox.left, 16, Math.max(16, shellBox.width - 280))
+          : 16;
+        const promptY = shellBox
+          ? clamp(bottom - shellBox.top + 12, 16, Math.max(16, shellBox.height - 126))
+          : 16;
+
+        setSelectionRunPrompt(selectedIds.size > 1 ? { count: selectedIds.size, x: promptX, y: promptY } : null);
+        setLocalRunStatus(`Selected ${selectedIds.size} nodes`);
+        onStatus(`Selected ${selectedIds.size} nodes`);
+      });
+    },
+    [clearCanvasSelection, marqueeSelection, onStatus, setHistory, wrapperRef]
+  );
+
+  const finishMouseMarqueeSelection = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      const selection = marqueeSelection;
+
+      if (!selection || selection.pointerId !== -1) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const left = Math.min(selection.startX, selection.currentX);
+      const right = Math.max(selection.startX, selection.currentX);
+      const top = Math.min(selection.startY, selection.currentY);
+      const bottom = Math.max(selection.startY, selection.currentY);
+      const selectedIds = new Set<string>();
+
+      wrapperRef.current?.querySelectorAll<HTMLElement>(".react-flow__node[data-id]").forEach((element) => {
+        const box = element.getBoundingClientRect();
+        const intersects = box.left <= right && box.right >= left && box.top <= bottom && box.bottom >= top;
+
+        if (intersects) {
+          const nodeId = element.dataset.id;
+
+          if (nodeId) {
+            selectedIds.add(nodeId);
+          }
+        }
+      });
+
+      setMarqueeSelection(null);
+
+      if (selectedIds.size === 0) {
+        clearCanvasSelection();
+        return;
+      }
+
+      window.requestAnimationFrame(() => {
+        setHistory((current) => ({
+          ...current,
+          present: {
+            nodes: current.present.nodes.map((node) => ({
+              ...node,
+              selected: selectedIds.has(node.id)
+            })),
+            edges: current.present.edges.map((edge) => ({ ...edge, selected: false }))
+          }
+        }));
+        const shellBox = wrapperRef.current?.getBoundingClientRect();
+        const promptX = shellBox
+          ? clamp(left - shellBox.left, 16, Math.max(16, shellBox.width - 280))
+          : 16;
+        const promptY = shellBox
+          ? clamp(bottom - shellBox.top + 12, 16, Math.max(16, shellBox.height - 126))
+          : 16;
+
+        setSelectionRunPrompt(selectedIds.size > 1 ? { count: selectedIds.size, x: promptX, y: promptY } : null);
+        setLocalRunStatus(`Selected ${selectedIds.size} nodes`);
+        onStatus(`Selected ${selectedIds.size} nodes`);
+      });
+    },
+    [clearCanvasSelection, marqueeSelection, onStatus, setHistory, wrapperRef]
+  );
+
+  const handleNodeLibraryResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        resizeNodeLibraryTo(nodeLibraryWidth + PANEL_KEYBOARD_RESIZE_STEP);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        resizeNodeLibraryTo(nodeLibraryWidth - PANEL_KEYBOARD_RESIZE_STEP);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        resizeNodeLibraryTo(MIN_LIBRARY_WIDTH);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        resizeNodeLibraryTo(maxLibraryWidth);
+      }
+    },
+    [maxLibraryWidth, nodeLibraryWidth, resizeNodeLibraryTo]
+  );
+
+  const handleInspectorResizeKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        resizeInspectorTo(inspectorWidth + PANEL_KEYBOARD_RESIZE_STEP);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        resizeInspectorTo(inspectorWidth - PANEL_KEYBOARD_RESIZE_STEP);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        resizeInspectorTo(MIN_INSPECTOR_WIDTH);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        resizeInspectorTo(maxInspectorWidth);
+      }
+    },
+    [inspectorWidth, maxInspectorWidth, resizeInspectorTo]
+  );
+
+  const flowShellStyle = {
+    "--ether-inspector-width": `${renderedInspectorWidth}px`
+  } as CSSProperties;
+  const flowShellRect = wrapperRef.current?.getBoundingClientRect();
+  const marqueeStyle = marqueeSelection
+    ? {
+        left: Math.min(marqueeSelection.startX, marqueeSelection.currentX) - (flowShellRect?.left ?? 0),
+        top: Math.min(marqueeSelection.startY, marqueeSelection.currentY) - (flowShellRect?.top ?? 0),
+        width: Math.abs(marqueeSelection.currentX - marqueeSelection.startX),
+        height: Math.abs(marqueeSelection.currentY - marqueeSelection.startY)
+      } as CSSProperties
+    : null;
+
   return (
-    <div className="flow-shell" ref={wrapperRef}>
+    <div
+      className="flow-shell"
+      ref={wrapperRef}
+      style={flowShellStyle}
+      onPointerDownCapture={startMarqueeSelection}
+      onPointerMoveCapture={moveMarqueeSelection}
+      onPointerUpCapture={finishMarqueeSelection}
+      onPointerCancelCapture={finishMarqueeSelection}
+      onMouseDownCapture={startMouseMarqueeSelection}
+      onMouseMoveCapture={moveMouseMarqueeSelection}
+      onMouseUpCapture={finishMouseMarqueeSelection}
+      onClickCapture={clearCanvasSelectionOnClick}
+    >
       <div className="canvas-toolbar" aria-label="Canvas history controls">
         <button
           type="button"
@@ -1626,70 +902,207 @@ function InnerEtherCanvas(
         </button>
         <button
           type="button"
+          aria-label={showNodeLibrary ? "Hide node library" : "Show node library"}
+          onClick={() => setShowNodeLibrary((current) => !current)}
+          title={showNodeLibrary ? "Hide node library" : "Show node library"}
+        >
+          {showNodeLibrary ? <PanelLeftClose size={16} aria-hidden="true" /> : <PanelLeftOpen size={16} aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
+          aria-label={showInspector ? "Hide inspector" : "Show inspector"}
+          onClick={() => setShowInspector((current) => !current)}
+          title={showInspector ? "Hide inspector" : "Show inspector"}
+        >
+          {showInspector ? <PanelRightClose size={16} aria-hidden="true" /> : <PanelRightOpen size={16} aria-hidden="true" />}
+        </button>
+        <button
+          type="button"
           aria-label="Link reference image"
           data-testid="canvas-link-reference"
-          onClick={linkReferenceImage}
+          onClick={commands.linkReferenceImage}
           disabled={!projectId}
           title={projectId ? "Link reference image" : "Open a project to link references"}
         >
           <ImagePlus size={16} aria-hidden="true" />
         </button>
-        <button type="button" aria-label="Connect first valid pair" onClick={connectFirstValidPair}>
+        <button type="button" aria-label="Connect first valid pair" onClick={commands.connectFirstValidPair}>
           <Link2 size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
           aria-label="Add review router"
           data-testid="canvas-add-review-router"
-          onClick={addReviewRouterTemplate}
+          onClick={commands.addReviewRouterTemplate}
         >
           <GitBranch size={16} aria-hidden="true" />
         </button>
       </div>
-      <aside className="canvas-overlay-panel canvas-node-library" aria-label="Node Library" data-testid="panel-node-library">
+      {showNodeLibrary ? (
+      <aside
+        className="canvas-overlay-panel canvas-node-library"
+        aria-label="Node Library"
+        data-testid="panel-node-library"
+        style={{ width: renderedNodeLibraryWidth }}
+      >
         <div className="overlay-panel-title">
-          <p>Input</p>
-          <h2>Node Library</h2>
+          <div>
+            <p>Input</p>
+            <h2>Node Library</h2>
+          </div>
+          <button
+            type="button"
+            className="overlay-panel-toggle"
+            aria-label="Hide node library"
+            data-testid="panel-node-library-toggle"
+            title="Hide node library"
+            onClick={() => setShowNodeLibrary(false)}
+          >
+            <PanelLeftClose size={15} aria-hidden="true" />
+          </button>
         </div>
-        <NodeLibrary onAddNode={addNodeFromLibrary} />
+        <NodeLibrary
+          onAddNode={commands.addNodeFromLibrary}
+          onAddTemplate={commands.addCanvasTemplate}
+          templateFocusSignal={templateFocusSignal}
+        />
+        <div
+          className="overlay-panel-resize overlay-panel-resize-right"
+          role="separator"
+          aria-label="Resize node library"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_LIBRARY_WIDTH}
+          aria-valuemax={Math.round(maxLibraryWidth)}
+          aria-valuenow={Math.round(renderedNodeLibraryWidth)}
+          data-testid="panel-node-library-resize"
+          tabIndex={0}
+          title="Drag to resize node library"
+          onPointerDown={(event) => startOverlayPanelResize("library", event)}
+          onKeyDown={handleNodeLibraryResizeKeyDown}
+        />
       </aside>
-      <aside className="canvas-overlay-panel canvas-inspector" aria-label="Inspector" data-testid="panel-inspector">
+      ) : null}
+      {nodes.length === 0 ? (
+        <div className="canvas-empty-actions" data-testid="canvas-empty-actions">
+          <button type="button" onClick={dropStarterPrompt}>
+            Drop Prompt
+          </button>
+          <button
+            type="button"
+            onClick={commands.linkReferenceImage}
+            title={projectId ? "Link reference image" : "Open a project to link references"}
+          >
+            Drop Image
+          </button>
+          <button type="button" onClick={chooseTemplate}>
+            Choose Template
+          </button>
+        </div>
+      ) : null}
+      {showInspector ? (
+      <aside
+        className="canvas-overlay-panel canvas-inspector"
+        aria-label="Inspector"
+        data-testid="panel-inspector"
+        style={{ width: renderedInspectorWidth }}
+      >
         <div className="overlay-panel-title">
-          <p>State</p>
-          <h2>Inspector</h2>
+          <div>
+            <p>State</p>
+            <h2>Inspector</h2>
+          </div>
+          <button
+            type="button"
+            className="overlay-panel-toggle"
+            aria-label="Hide inspector"
+            data-testid="panel-inspector-toggle"
+            title="Hide inspector"
+            onClick={() => setShowInspector(false)}
+          >
+            <PanelRightClose size={15} aria-hidden="true" />
+          </button>
         </div>
         <InspectorPanel
           selectedNode={selectedNode}
           selectedEdge={selectedEdge}
           graph={assemblyGraph}
-          onPreviewNode={previewNode}
-          onPreviewEdge={previewEdge}
-          onCommitTextEdit={commitTextEdit}
-          onRunNode={runNode}
-          onToggleNodeLock={toggleNodeLock}
-          onExecuteRun={executeRun}
-          onEnsureStoreFolder={ensureStoreFolderForNode}
-          onSaveFakeGeneratedAsset={saveFakeGeneratedAssetForNode}
-          onCreateMaskAsset={createMaskAssetForNode}
-          onMoveLatestGeneratedAssetToCollection={moveLatestGeneratedAssetToCollection}
-          onDeleteSelection={deleteSelection}
-          executionPolicy={executionPolicy}
-          runCountCap={runCountCap}
-          parallelExecution={parallelExecution}
+          onPreviewNode={commands.previewNode}
+          onPreviewEdge={commands.previewEdge}
+          onCommitTextEdit={commands.commitTextEdit}
+          onRunNode={runController.runNode}
+          onToggleNodeLock={commands.toggleNodeLock}
+          onPreviewRun={runController.previewRun}
+          onEnsureStoreFolder={runController.ensureStoreFolderForNode}
+          onSaveFakeGeneratedAsset={runController.saveFakeGeneratedAssetForNode}
+          onCreateMaskAsset={runController.createMaskAssetForNode}
+          onUploadReferenceForNode={commands.uploadReferenceForNode}
+          onMoveLatestGeneratedAssetToCollection={runController.moveLatestGeneratedAssetToCollection}
+          onDeleteSelection={commands.deleteSelection}
+          executionPolicy={runController.executionPolicy}
+          runCountCap={runController.runCountCap}
+          parallelExecution={runController.parallelExecution}
+          runProviderMode={runController.runProviderMode}
           selectedNodeCount={selectedNodeIds.length}
-          onExecutionPolicyChange={setExecutionPolicy}
-          onRunCountCapChange={(cap) =>
-            setRunCountCap(Number.isFinite(cap) ? Math.max(0, Math.min(100, Math.floor(cap))) : 0)
-          }
-          onParallelExecutionChange={setParallelExecution}
+          onExecutionPolicyChange={runController.setExecutionPolicy}
+          onRunCountCapChange={runController.setRunCountCap}
+          onParallelExecutionChange={runController.setParallelExecution}
+          onRunProviderModeChange={runController.setRunProviderMode}
           hasOpenProject={Boolean(projectId)}
         />
+        <div
+          className="overlay-panel-resize overlay-panel-resize-left"
+          role="separator"
+          aria-label="Resize inspector"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_INSPECTOR_WIDTH}
+          aria-valuemax={Math.round(maxInspectorWidth)}
+          aria-valuenow={Math.round(renderedInspectorWidth)}
+          data-testid="panel-inspector-resize"
+          tabIndex={0}
+          title="Drag to resize inspector"
+          onPointerDown={(event) => startOverlayPanelResize("inspector", event)}
+          onKeyDown={handleInspectorResizeKeyDown}
+        />
       </aside>
-      <EtherNodeDeleteContext.Provider value={deleteNodeById}>
+      ) : null}
+      {runController.runPreview ? (
+        <RunPlanPreview
+          graph={runController.runPreview.graph}
+          preview={runController.runPreview.preview}
+          request={runController.runPreview.request}
+          isStarting={runController.isStartingPreviewRun}
+          onStart={runController.startPreviewRun}
+          onCancel={runController.closeRunPreview}
+        />
+      ) : null}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        previewPatch={commands.previewGraphPatchForCanvas}
+        applyPatch={commands.applyGraphPatchToCanvas}
+        onClose={onCloseCommandPalette ?? (() => undefined)}
+      />
+      <EtherNodeDeleteContext.Provider value={commands.deleteNodeById}>
+      <EtherEdgeCommandContext.Provider
+        value={{
+          deleteEdgeById: commands.deleteEdgeById,
+          setEdgeRole: commands.setEdgeRole,
+          setEdgeChannel: commands.setEdgeChannel
+        }}
+      >
+      <EtherNodeReferenceUploadContext.Provider
+        value={{
+          add: (nodeId) => void commands.uploadReferenceForNode(nodeId, "add"),
+          replace: (nodeId) => void commands.uploadReferenceForNode(nodeId, "replace")
+        }}
+      >
+      <EtherNodeDataUpdateContext.Provider value={commands.updateNodeDataDurable}>
+      <EtherNodeChannelActivityContext.Provider value={channelActivityByNodeId}>
+      <EtherNodeRunStatusContext.Provider value={runController.nodeRunVisualStatus}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={(instance) => {
           flowRef.current = instance;
           instance.setViewport(viewport);
@@ -1697,11 +1110,11 @@ function InnerEtherCanvas(
         onMoveEnd={(_event, nextViewport) => setViewport(nextViewport)}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
+        onConnect={commands.onConnect}
         onSelectionChange={replaceSelection}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDragStop={onNodeDragStop}
-        onDrop={onDrop}
+        onNodeDragStart={commands.onNodeDragStart}
+        onNodeDragStop={commands.onNodeDragStop}
+        onDrop={commands.onDrop}
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
@@ -1714,8 +1127,10 @@ function InnerEtherCanvas(
           };
           setContextMenu({ x: event.clientX, y: event.clientY, position });
         }}
-        onPaneClick={() => setContextMenu(null)}
+        onPaneClick={clearCanvasSelection}
         deleteKeyCode={null}
+        multiSelectionKeyCode="Shift"
+        panOnDrag={[1, 2]}
       >
         <Background color="rgba(153, 168, 186, 0.16)" gap={36} />
         <Controls position="bottom-right" />
@@ -1728,7 +1143,44 @@ function InnerEtherCanvas(
           />
         ) : null}
       </ReactFlow>
+      </EtherNodeRunStatusContext.Provider>
+      </EtherNodeChannelActivityContext.Provider>
+      </EtherNodeDataUpdateContext.Provider>
+      </EtherNodeReferenceUploadContext.Provider>
+      </EtherEdgeCommandContext.Provider>
       </EtherNodeDeleteContext.Provider>
+      <ConnectionHint message={connectionHint} />
+      {marqueeStyle ? <div className="canvas-marquee-selection" style={marqueeStyle} data-testid="canvas-marquee-selection" /> : null}
+      {selectionRunPrompt && selectedNodeIds.length > 1 ? (
+        <div
+          className="canvas-selection-run-prompt"
+          data-testid="selection-run-prompt"
+          style={{ left: selectionRunPrompt.x, top: selectionRunPrompt.y }}
+          role="dialog"
+          aria-label="Run selected nodes"
+        >
+          <strong>{selectionRunPrompt.count} nodes selected</strong>
+          <p>Run only selected nodes?</p>
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectionRunPrompt(null);
+                void runController.previewRun("selected");
+              }}
+            >
+              Run selected nodes
+            </button>
+            <button
+              type="button"
+              aria-label="Dismiss selected run prompt"
+              onClick={() => setSelectionRunPrompt(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
       {contextMenu ? (
         <div
           className="canvas-context-menu"
@@ -1736,12 +1188,12 @@ function InnerEtherCanvas(
           role="menu"
           aria-label="Canvas actions"
         >
-          {actionDefinitions.map((definition) => (
+          {commands.actionDefinitions.map((definition) => (
             <button
               key={definition.id}
               type="button"
               role="menuitem"
-              onClick={() => createNode(definition, contextMenu.position)}
+              onClick={() => commands.createNode(definition, contextMenu.position)}
             >
               Add {definition.category}
             </button>

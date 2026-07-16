@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const SNAPSHOT_SLOTS = ["A", "B", "C", "D"] as const;
+export const LATEST_GRAPH_VERSION = "2.5" as const;
 
 export type SnapshotSlot = (typeof SNAPSHOT_SLOTS)[number];
 
@@ -19,7 +20,8 @@ export const ProjectMetadataSchema = z.object({
   activeSnapshotId: z.string().nullable()
 });
 
-export const EtherGraphSchema = z.object({
+const EtherGraphBaseSchema = z.object({
+  graphVersion: z.string().optional(),
   nodes: z.array(z.record(z.unknown())),
   edges: z.array(z.record(z.unknown())),
   viewport: z
@@ -32,6 +34,39 @@ export const EtherGraphSchema = z.object({
   selectedSnapshotId: z.string().nullable(),
   updatedAt: z.string().datetime()
 });
+
+export const EtherGraphSchema = EtherGraphBaseSchema.transform((graph, context) => {
+  if (graph.graphVersion === undefined || graph.graphVersion === LATEST_GRAPH_VERSION) {
+    return {
+      ...graph,
+      graphVersion: LATEST_GRAPH_VERSION
+    };
+  }
+
+  context.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: `Unsupported graph version "${graph.graphVersion}". This Ether build supports graph version ${LATEST_GRAPH_VERSION}; legacy files without graphVersion are still accepted.`
+  });
+
+  return z.NEVER;
+});
+
+export function normalizeEtherGraph(value: unknown): EtherGraph {
+  const graphVersion =
+    typeof value === "object" && value !== null && "graphVersion" in value
+      ? value.graphVersion
+      : undefined;
+
+  if (graphVersion !== undefined && graphVersion !== LATEST_GRAPH_VERSION) {
+    throw new Error(unsupportedGraphVersionMessage(graphVersion));
+  }
+
+  return EtherGraphSchema.parse(value);
+}
+
+function unsupportedGraphVersionMessage(graphVersion: unknown) {
+  return `Unsupported graph version "${String(graphVersion)}". This Ether build supports graph version ${LATEST_GRAPH_VERSION}; legacy files without graphVersion are still accepted.`;
+}
 
 export const LinkedReferenceSchema = z.object({
   id: z.string().min(1),
@@ -54,6 +89,8 @@ export const HealthIssueSchema = z.object({
 
 export type ProjectMetadata = z.infer<typeof ProjectMetadataSchema>;
 export type EtherGraph = z.infer<typeof EtherGraphSchema>;
+export type NormalizedEtherGraph = EtherGraph;
+export type EtherGraphInput = z.input<typeof EtherGraphSchema>;
 export type LinkedReferenceIndex = z.infer<typeof LinkedIndexSchema>;
 export type HealthIssue = z.infer<typeof HealthIssueSchema>;
 

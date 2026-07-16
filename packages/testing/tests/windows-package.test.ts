@@ -1,15 +1,13 @@
-import { execFile } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
   packageWindowsApp,
   requiredPackageInputs
 } from "../../../scripts/package-windows.mjs";
 
-const execFileAsync = promisify(execFile);
+const repoRoot = path.resolve(__dirname, "../../..");
 
 async function createFile(filePath: string, content = "") {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -52,6 +50,38 @@ async function createFakePackageRoot() {
 }
 
 describe("Windows desktop package", () => {
+  it("exposes root and desktop scripts for the public Windows acceptance path", async () => {
+    const rootPackage = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
+    const desktopPackage = JSON.parse(
+      await readFile(path.join(repoRoot, "apps/desktop/package.json"), "utf8")
+    );
+    const testingPackage = JSON.parse(
+      await readFile(path.join(repoRoot, "packages/testing/package.json"), "utf8")
+    );
+
+    expect(rootPackage.scripts).toMatchObject({
+      build: expect.stringContaining("@ether/desktop"),
+      "test:unit": "pnpm --filter @ether/testing test:unit",
+      "test:smoke": "pnpm --filter @ether/testing test:smoke",
+      "acceptance:smoke": "pnpm --filter @ether/testing test:acceptance",
+      "test:acceptance": "pnpm run acceptance:smoke",
+      "desktop:build": "pnpm --filter @ether/desktop build",
+      "desktop:package:win": "pnpm desktop:build && node scripts/package-windows.mjs"
+    });
+    expect(desktopPackage.scripts).toMatchObject({
+      "test:unit": "pnpm --workspace-root test:unit",
+      "test:smoke": "pnpm --workspace-root test:smoke",
+      "acceptance:smoke": "pnpm --workspace-root acceptance:smoke",
+      build: expect.stringContaining("vite build"),
+      "package:win": "pnpm --workspace-root desktop:package:win"
+    });
+    expect(testingPackage.scripts).toMatchObject({
+      "test:smoke": "playwright test --config playwright.config.ts",
+      "test:packaged": "playwright test --config playwright.packaged.config.ts",
+      "test:acceptance": "pnpm run test:smoke && pnpm run test:packaged"
+    });
+  });
+
   it("declares the build artifacts required for a runnable unpacked app", async () => {
     const root = await createFakePackageRoot();
 
@@ -87,48 +117,4 @@ describe("Windows desktop package", () => {
       (await lstat(path.join(result.outputDir, "resources/app/node_modules/zod"))).isSymbolicLink()
     ).toBe(false);
   });
-
-  it.skipIf(process.platform !== "win32")(
-    "creates a project through the packaged Electron runtime",
-    async () => {
-      const root = await mkdtemp(path.join(os.tmpdir(), "ether-package-runtime-"));
-
-      try {
-        const result = await packageWindowsApp({
-          outputDir: path.join(root, "release", "ether-windows-unpacked")
-        });
-        const appRoot = path.join(result.outputDir, "resources", "app");
-        const projectParent = path.join(root, "Documents", "Ether Projects");
-        const script = `
-          const { createProject } = require(${JSON.stringify(path.join(appRoot, "node_modules", "@ether", "engine"))});
-          createProject({ parentDirectory: ${JSON.stringify(projectParent)}, name: "Packaged Runtime" })
-            .then((project) => {
-              console.log("PACKAGED_PROJECT_CREATED");
-              console.log(project.path);
-              console.log(project.database.tables.join(","));
-            })
-            .catch((error) => {
-              console.error(error && error.stack ? error.stack : error);
-              process.exit(1);
-            });
-        `;
-
-        const { stdout, stderr } = await execFileAsync(result.executablePath, ["-e", script], {
-          env: {
-            ...process.env,
-            ELECTRON_RUN_AS_NODE: "1"
-          },
-          timeout: 30000,
-          windowsHide: true
-        });
-
-        expect(stderr).not.toContain("NODE_MODULE_VERSION");
-        expect(stdout).toContain("PACKAGED_PROJECT_CREATED");
-        expect(stdout).toContain("asset_moves,assets,health_issues,runs,snapshots");
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-    60000
-  );
 });

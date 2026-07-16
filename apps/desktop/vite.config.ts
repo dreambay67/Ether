@@ -23,9 +23,21 @@ export default defineConfig({
         __dirname,
         "../../packages/engine/src/graph/contracts.ts"
       ),
+      "@ether/engine/graph/edgeDecoration": path.resolve(
+        __dirname,
+        "../../packages/engine/src/graph/edgeDecoration.ts"
+      ),
       "@ether/engine/graph/promptAssembly": path.resolve(
         __dirname,
         "../../packages/engine/src/graph/promptAssembly.ts"
+      ),
+      "@ether/engine/graph/referenceRoles": path.resolve(
+        __dirname,
+        "../../packages/engine/src/graph/referenceRoles.ts"
+      ),
+      "@ether/engine/graph/reviewRouterTemplate": path.resolve(
+        __dirname,
+        "../../packages/engine/src/graph/reviewRouterTemplate.ts"
       ),
       "@ether/engine/run/rerunState": path.resolve(
         __dirname,

@@ -4,14 +4,17 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createProject,
+  getLatestGraphRevision,
   createSnapshot,
   loadGraph,
   openProject,
   restoreSnapshot,
   runHealthCheck,
   saveGraph,
+  saveGraphRevision,
   REQUIRED_DATABASE_TABLES,
   type EtherGraph,
+  type EtherGraphInput,
   type SnapshotRecord
 } from "@ether/engine";
 import { insertSnapshot } from "../../engine/src/project/database";
@@ -50,6 +53,9 @@ describe("project store", () => {
     await expect(readFile(path.join(project.path, "graph.json"), "utf8")).resolves.toContain(
       "\"nodes\": []"
     );
+    await expect(readFile(path.join(project.path, "graph.json"), "utf8")).resolves.toContain(
+      "\"graphVersion\": \"2.5\""
+    );
     await expect(
       readFile(path.join(project.path, "assets", "references", "linked-index.json"), "utf8")
     ).resolves.toContain("\"references\": []");
@@ -58,6 +64,16 @@ describe("project store", () => {
     const reopened = await openProject(project.path);
     expect(reopened.path).toBe(project.path);
     expect(reopened.database.tables.sort()).toEqual([...REQUIRED_DATABASE_TABLES].sort());
+  });
+
+  it("creates project graphs with the latest graph version", async () => {
+    const parentDirectory = await createTempRoot();
+
+    const project = await createProject({ parentDirectory, name: "Versioned Graph" });
+    const graphJson = JSON.parse(await readFile(path.join(project.path, "graph.json"), "utf8")) as EtherGraph;
+
+    expect(project.graph.graphVersion).toBe("2.5");
+    expect(graphJson.graphVersion).toBe("2.5");
   });
 
   it("creates missing parent directories during first-run project creation", async () => {
@@ -90,7 +106,7 @@ describe("project store", () => {
   it("round-trips graph JSON through saveGraph and loadGraph", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Graph Roundtrip" });
-    const graph: EtherGraph = {
+    const graph: EtherGraphInput = {
       nodes: [{ id: "prompt-1", type: "prompt", position: { x: 12, y: 34 }, data: { text: "sky" } }],
       edges: [{ id: "edge-1", source: "prompt-1", target: "generation-1" }],
       viewport: { x: 5, y: 6, zoom: 0.75 },
@@ -100,20 +116,110 @@ describe("project store", () => {
 
     await saveGraph(project.path, graph);
     const loaded = await loadGraph(project.path);
+    const graphJson = JSON.parse(await readFile(path.join(project.path, "graph.json"), "utf8")) as EtherGraph;
 
     expect(loaded.nodes).toEqual(graph.nodes);
     expect(loaded.edges).toEqual(graph.edges);
     expect(loaded.viewport).toEqual(graph.viewport);
+    expect(loaded.graphVersion).toBe("2.5");
+    expect(graphJson.graphVersion).toBe("2.5");
     expect(new Date(loaded.updatedAt).toString()).not.toBe("Invalid Date");
 
     const rootEntries = await readdir(project.path);
     expect(rootEntries.filter((entry) => entry.includes(".tmp-"))).toEqual([]);
   });
 
+  it("normalizes legacy graph JSON without graphVersion while preserving graph state", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Legacy Graph Version" });
+    const legacyGraph = {
+      nodes: [{ id: "legacy-node", type: "prompt", position: { x: 12, y: 34 } }],
+      edges: [{ id: "legacy-edge", source: "legacy-node", target: "target-node" }],
+      viewport: { x: 9, y: 8, zoom: 0.5 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-30T10:00:00.000Z"
+    };
+
+    await writeFile(path.join(project.path, "graph.json"), JSON.stringify(legacyGraph, null, 2), "utf8");
+
+    const loaded = await loadGraph(project.path);
+
+    expect(loaded.graphVersion).toBe("2.5");
+    expect(loaded.nodes).toEqual(legacyGraph.nodes);
+    expect(loaded.edges).toEqual(legacyGraph.edges);
+    expect(loaded.viewport).toEqual(legacyGraph.viewport);
+  });
+
+  it("rejects future graph versions before a revision exists", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Future Graph Version" });
+
+    await writeFile(
+      path.join(project.path, "graph.json"),
+      JSON.stringify(
+        {
+          graphVersion: "9.9",
+          nodes: [],
+          edges: [],
+          viewport: { x: 0, y: 0, zoom: 1 },
+          selectedSnapshotId: null,
+          updatedAt: "2026-06-30T10:00:00.000Z"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    await expect(loadGraph(project.path)).rejects.toThrow(/unsupported|newer|future graph version/i);
+    await expect(openProject(project.path)).rejects.toThrow(/unsupported|newer|future graph version/i);
+  });
+
+  it("rejects future graph versions passed to saveGraph", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Future Save Graph Version" });
+
+    await expect(
+      saveGraph(project.path, {
+        graphVersion: "9.9",
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        selectedSnapshotId: null,
+        updatedAt: "2026-06-30T10:00:00.000Z"
+      })
+    ).rejects.toThrow(
+      'Unsupported graph version "9.9". This Ether build supports graph version 2.5; legacy files without graphVersion are still accepted.'
+    );
+  });
+
+  it("normalizes graphVersion when saving and loading revisions", async () => {
+    const parentDirectory = await createTempRoot();
+    const project = await createProject({ parentDirectory, name: "Revision Graph Version" });
+    const legacyGraph = {
+      nodes: [{ id: "revision-node", position: { x: 1, y: 2 } }],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+      selectedSnapshotId: null,
+      updatedAt: "2026-06-30T10:00:00.000Z"
+    };
+
+    const saved = await saveGraphRevision(project.path, {
+      graph: legacyGraph,
+      reason: "legacy-import",
+      actor: "test"
+    });
+    const loaded = await getLatestGraphRevision(project.path);
+
+    expect(saved.graph.graphVersion).toBe("2.5");
+    expect(loaded?.graph.graphVersion).toBe("2.5");
+    expect(loaded?.graph.nodes).toEqual(legacyGraph.nodes);
+  });
+
   it("round-trips representative React Flow canvas graph state", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Canvas Roundtrip" });
-    const graph: EtherGraph = {
+    const graph: EtherGraphInput = {
       nodes: [
         {
           id: "ether-node-1",

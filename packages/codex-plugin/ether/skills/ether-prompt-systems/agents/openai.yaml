@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ether Prompt Systems"
+  short_description: "Design Ether 2.5 Prompt family flows"
+  brand_color: "#1470DB"
+  default_prompt: "Use $ether-prompt-systems to design Ether 2.5 Prompt family variants with connection roles."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ether Provider Safety"
+  short_description: "Check Ether 2.5 provider capabilities"
+  brand_color: "#1470DB"
+  default_prompt: "Use $ether-provider-safety to check Ether 2.5 provider modes, fallback rules, and channel capabilities."
+
+policy:
+  allow_implicit_invocation: true

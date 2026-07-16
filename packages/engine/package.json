@@ -26,6 +26,14 @@
       "types": "./dist/graph/contracts.d.ts",
       "default": "./dist/graph/contracts.js"
     },
+    "./graph/edgeDecoration": {
+      "types": "./dist/graph/edgeDecoration.d.ts",
+      "default": "./dist/graph/edgeDecoration.js"
+    },
+    "./graph/graphPatch": {
+      "types": "./dist/graph/graphPatch.d.ts",
+      "default": "./dist/graph/graphPatch.js"
+    },
     "./graph/nodeCatalog": {
       "types": "./dist/graph/nodeCatalog.d.ts",
       "default": "./dist/graph/nodeCatalog.js"
@@ -34,6 +42,10 @@
       "types": "./dist/graph/promptAssembly.d.ts",
       "default": "./dist/graph/promptAssembly.js"
     },
+    "./graph/referenceRoles": {
+      "types": "./dist/graph/referenceRoles.d.ts",
+      "default": "./dist/graph/referenceRoles.js"
+    },
     "./graph/reviewRouterTemplate": {
       "types": "./dist/graph/reviewRouterTemplate.d.ts",
       "default": "./dist/graph/reviewRouterTemplate.js"
@@ -41,6 +53,38 @@
     "./graph/textMutation": {
       "types": "./dist/graph/textMutation.d.ts",
       "default": "./dist/graph/textMutation.js"
+    },
+    "./artifacts/artifactStore": {
+      "types": "./dist/artifacts/artifactStore.d.ts",
+      "default": "./dist/artifacts/artifactStore.js"
+    },
+    "./artifacts/lineage": {
+      "types": "./dist/artifacts/lineage.d.ts",
+      "default": "./dist/artifacts/lineage.js"
+    },
+    "./artifacts/types": {
+      "types": "./dist/artifacts/types.d.ts",
+      "default": "./dist/artifacts/types.js"
+    },
+    "./jobs/jobStore": {
+      "types": "./dist/jobs/jobStore.d.ts",
+      "default": "./dist/jobs/jobStore.js"
+    },
+    "./jobs/runCoordinator": {
+      "types": "./dist/jobs/runCoordinator.d.ts",
+      "default": "./dist/jobs/runCoordinator.js"
+    },
+    "./jobs/types": {
+      "types": "./dist/jobs/types.d.ts",
+      "default": "./dist/jobs/types.js"
+    },
+    "./revisions/revisionStore": {
+      "types": "./dist/revisions/revisionStore.d.ts",
+      "default": "./dist/revisions/revisionStore.js"
+    },
+    "./revisions/types": {
+      "types": "./dist/revisions/types.d.ts",
+      "default": "./dist/revisions/types.js"
     },
     "./run/execution": {
       "types": "./dist/run/execution.d.ts",

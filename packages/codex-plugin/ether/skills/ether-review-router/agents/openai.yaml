@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ether Review Router"
+  short_description: "Build Ether 2.5 Data review funnels"
+  brand_color: "#1470DB"
+  default_prompt: "Use $ether-review-router to build Ether 2.5 Compare, Evaluation, Filter, and Collection flows."
+
+policy:
+  allow_implicit_invocation: true

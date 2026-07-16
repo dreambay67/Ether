@@ -1,8 +1,8 @@
 interface:
   display_name: "Ether Workflow"
-  short_description: "Inspect and edit Ether node workflows"
+  short_description: "Inspect and edit Ether 2.5 node workflows"
   brand_color: "#1470DB"
-  default_prompt: "Use $ether-workflow to inspect my Ether project before changing or running it."
+  default_prompt: "Use $ether-workflow for Ether 2.5 graph inspection, patch preview, and explicit execution."
 
 policy:
   allow_implicit_invocation: true

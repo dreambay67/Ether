@@ -3,8 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CodexCliAssistantProvider,
   CodexCliImageProvider,
   FakeImageProvider,
+  PROVIDER_CONNECTION_ROLES,
+  PROVIDER_PAYLOAD_CHANNELS,
   classifyCodexCliFailure,
   createDefaultProviderRegistry,
   diagnoseProviderRegistry,
@@ -92,6 +95,27 @@ const noIdatPngBytes = Buffer.from(
 );
 
 describe("generation provider registry", () => {
+  it("exports the provider payload channel and connection role vocabularies", () => {
+    expect(PROVIDER_PAYLOAD_CHANNELS).toEqual(["text", "image", "mask", "data", "video", "audio"]);
+    expect(PROVIDER_CONNECTION_ROLES).toEqual([
+      "general",
+      "negative",
+      "subject",
+      "product",
+      "face",
+      "clothing",
+      "pose",
+      "setting",
+      "composition",
+      "style",
+      "lighting",
+      "colourPalette",
+      "typography",
+      "motion",
+      "timing"
+    ]);
+  });
+
   it("lists provider capabilities and diagnostics without enabling OpenAI API fallback", async () => {
     const registry = createDefaultProviderRegistry({
       codexCliPath: "C:\\Tools\\codex.exe",
@@ -127,6 +151,317 @@ describe("generation provider registry", () => {
       availability: "unavailable",
       route: "unconfigured-clean-cli-or-mcp"
     });
+  });
+
+  it("reports a provider capability matrix with real, simulation, and experimental slots", async () => {
+    const userProfile = await createTempRoot();
+    const registry = createDefaultProviderRegistry({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      env: {
+        USERPROFILE: userProfile,
+        CODEX_CLI_PATH: "C:\\Tools\\codex.exe",
+        OPENAI_API_KEY: "sk-should-stay-blocked"
+      },
+      fileExists: async (filePath) => filePath === "C:\\Tools\\codex.exe"
+    });
+
+    const diagnostics = await diagnoseProviderRegistry(registry, {
+      env: {
+        USERPROFILE: userProfile,
+        CODEX_CLI_PATH: "C:\\Tools\\codex.exe",
+        OPENAI_API_KEY: "sk-should-stay-blocked"
+      },
+      fileExists: async (filePath) => filePath === "C:\\Tools\\codex.exe"
+    });
+
+    expect(diagnostics.matrix.map((provider) => provider.id)).toEqual([
+      "codex-chatgpt-image-2",
+      "codex-vision-assistant",
+      "codex-vision-evaluation",
+      "ether-fake-local",
+      "api-image-generation",
+      "api-assistant",
+      "google-nano-banana-pro",
+      "google-nano-banana-2",
+      "adapter-audio-to-text",
+      "adapter-video-to-text",
+      "adapter-image-to-text",
+      "adapter-video-to-image",
+      "adapter-data-to-mask",
+      "adapter-text-to-audio"
+    ]);
+    expect(diagnostics.matrix).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "codex-chatgpt-image-2",
+          displayName: "ChatGPT Image 2 / Codex image",
+          availability: "available",
+          status: "ready",
+          mode: "real",
+          capabilities: expect.arrayContaining(["image.generate", "image.edit", "image.reference-input"]),
+          profiles: expect.arrayContaining([
+            expect.objectContaining({
+              operation: "image.generate",
+              inputChannels: expect.arrayContaining(["text", "image"]),
+              outputChannels: ["image"],
+              availability: "available"
+            }),
+            expect.objectContaining({
+              operation: "image.edit",
+              inputChannels: expect.arrayContaining(["text", "image", "mask"]),
+              outputChannels: ["image"],
+              availability: "available"
+            })
+          ])
+        }),
+        expect.objectContaining({
+          id: "codex-vision-assistant",
+          displayName: "Codex assistant",
+          availability: "available",
+          status: "ready",
+          mode: "real",
+          capabilities: expect.arrayContaining(["assistant.text", "assistant.vision"]),
+          profiles: expect.arrayContaining([
+            expect.objectContaining({
+              operation: "assistant.text",
+              inputChannels: expect.arrayContaining(["text"]),
+              outputChannels: ["text"]
+            }),
+            expect.objectContaining({
+              operation: "assistant.vision",
+              inputChannels: expect.arrayContaining(["text", "image"]),
+              outputChannels: ["text"]
+            })
+          ])
+        }),
+        expect.objectContaining({
+          id: "codex-vision-evaluation",
+          displayName: "Codex evaluation",
+          availability: "available",
+          status: "ready",
+          mode: "real",
+          capabilities: expect.arrayContaining(["evaluation.vision"]),
+          profiles: expect.arrayContaining([
+            expect.objectContaining({
+              operation: "evaluation.vision",
+              inputChannels: expect.arrayContaining(["text", "image"]),
+              outputChannels: ["data"]
+            })
+          ])
+        }),
+        expect.objectContaining({
+          id: "ether-fake-local",
+          displayName: "Simulation Mode fake provider",
+          availability: "available",
+          status: "ready",
+          mode: "simulation",
+          profiles: expect.arrayContaining([
+            expect.objectContaining({
+              operation: "image.generate",
+              capabilitySource: "simulation",
+              outputChannels: ["image"]
+            }),
+            expect.objectContaining({
+              operation: "image.edit",
+              capabilitySource: "simulation",
+              outputChannels: ["image"]
+            })
+          ])
+        }),
+        expect.objectContaining({
+          id: "api-image-generation",
+          displayName: "Optional API generation slot",
+          availability: "unavailable",
+          status: "experimental",
+          mode: "experimental",
+          readiness: "disabled",
+          noHiddenFallback: true,
+          profiles: expect.arrayContaining([
+            expect.objectContaining({
+              operation: "image.generate",
+              availability: "unavailable",
+              requiresExplicitSelection: true,
+              noHiddenFallback: true
+            }),
+            expect.objectContaining({
+              operation: "image.edit",
+              availability: "unavailable",
+              requiresExplicitSelection: true,
+              noHiddenFallback: true
+            })
+          ])
+        }),
+        expect.objectContaining({
+          id: "api-assistant",
+          displayName: "Optional API assistant slot",
+          availability: "unavailable",
+          status: "experimental",
+          mode: "experimental",
+          readiness: "disabled",
+          noHiddenFallback: true,
+          profiles: expect.arrayContaining([
+            expect.objectContaining({
+              operation: "assistant.text",
+              availability: "unavailable",
+              requiresExplicitSelection: true,
+              noHiddenFallback: true
+            }),
+            expect.objectContaining({
+              operation: "assistant.vision",
+              availability: "unavailable",
+              requiresExplicitSelection: true,
+              noHiddenFallback: true
+            })
+          ])
+        }),
+        expect.objectContaining({
+          id: "google-nano-banana-pro",
+          displayName: "Nano Banana Pro",
+          availability: "unavailable",
+          status: "experimental",
+          mode: "experimental",
+          unavailableReason: expect.stringMatching(/clean local CLI\/MCP route/i)
+        }),
+        expect.objectContaining({
+          id: "google-nano-banana-2",
+          displayName: "Nano Banana 2",
+          availability: "unavailable",
+          status: "experimental",
+          mode: "experimental",
+          unavailableReason: expect.stringMatching(/clean local CLI\/MCP route/i)
+        }),
+        expect.objectContaining({
+          id: "adapter-audio-to-text",
+          profiles: [
+            expect.objectContaining({
+              operation: "adapter.transcribe",
+              inputChannels: ["audio"],
+              outputChannels: ["text"],
+              availability: "unavailable",
+              unavailableReason: expect.stringMatching(/not configured/i),
+              noHiddenFallback: true
+            })
+          ]
+        }),
+        expect.objectContaining({
+          id: "adapter-video-to-text",
+          profiles: [
+            expect.objectContaining({
+              operation: "adapter.caption",
+              inputChannels: ["video"],
+              outputChannels: ["text"],
+              noHiddenFallback: true
+            })
+          ]
+        }),
+        expect.objectContaining({
+          id: "adapter-image-to-text",
+          profiles: [
+            expect.objectContaining({
+              operation: "adapter.caption",
+              inputChannels: ["image"],
+              outputChannels: ["text"],
+              unavailableReason: expect.stringMatching(/conservative/i),
+              noHiddenFallback: true
+            })
+          ]
+        }),
+        expect.objectContaining({
+          id: "adapter-video-to-image",
+          profiles: [
+            expect.objectContaining({
+              operation: "adapter.extract",
+              inputChannels: ["video"],
+              outputChannels: ["image"],
+              noHiddenFallback: true
+            })
+          ]
+        }),
+        expect.objectContaining({
+          id: "adapter-data-to-mask",
+          profiles: [
+            expect.objectContaining({
+              operation: "adapter.transform",
+              inputChannels: ["data"],
+              outputChannels: ["mask"],
+              noHiddenFallback: true
+            })
+          ]
+        }),
+        expect.objectContaining({
+          id: "adapter-text-to-audio",
+          profiles: [
+            expect.objectContaining({
+              operation: "adapter.transform",
+              inputChannels: ["text"],
+              outputChannels: ["audio"],
+              noHiddenFallback: true
+            })
+          ]
+        })
+      ])
+    );
+    expect(diagnostics.policy.openAiPlatformApi).toMatchObject({
+      status: "blocked",
+      envKeyDetected: true
+    });
+    expect(
+      diagnostics.matrix.filter((provider) => provider.id.startsWith("api-")).every((provider) => provider.noHiddenFallback)
+    ).toBe(true);
+    expect(
+      diagnostics.matrix
+        .filter((provider) => provider.id.startsWith("adapter-"))
+        .every((provider) =>
+          provider.availability === "unavailable" &&
+          provider.unavailableReason &&
+          provider.noHiddenFallback &&
+          provider.profiles.every((profile) => profile.noHiddenFallback && Boolean(profile.unavailableReason))
+        )
+    ).toBe(true);
+  });
+
+  it("reuses the resolved Codex image route for assistant and evaluation matrix diagnostics", async () => {
+    const userProfile = await createTempRoot();
+    const codexCliPath = "C:\\Tools\\codex.exe";
+    const fileExists = async (filePath: string) => filePath === codexCliPath;
+    const registry = createDefaultProviderRegistry({
+      codexCliPath,
+      env: {
+        USERPROFILE: userProfile
+      },
+      fileExists
+    });
+
+    const diagnostics = await diagnoseProviderRegistry(registry, {
+      env: {
+        USERPROFILE: userProfile
+      },
+      fileExists
+    });
+
+    expect(
+      diagnostics.matrix.filter((provider) =>
+        ["codex-chatgpt-image-2", "codex-vision-assistant", "codex-vision-evaluation"].includes(
+          provider.id
+        )
+      )
+    ).toEqual([
+      expect.objectContaining({
+        id: "codex-chatgpt-image-2",
+        availability: "available",
+        status: "ready"
+      }),
+      expect.objectContaining({
+        id: "codex-vision-assistant",
+        availability: "available",
+        status: "ready"
+      }),
+      expect.objectContaining({
+        id: "codex-vision-evaluation",
+        availability: "available",
+        status: "ready"
+      })
+    ]);
   });
 
   it("detects and strips blocked OpenAI env keys case-insensitively", () => {
@@ -225,10 +560,10 @@ describe("generation provider registry", () => {
       fileExists: async () => true,
       runner: async (call) => {
         calls.push(call);
-        const prompt = call.args.at(-1) ?? "";
+        const prompt = (call as ProviderProcessCall & { stdin?: string }).stdin ?? "";
         const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(prompt)?.[1]?.trim();
         if (!outputDir) {
-          throw new Error("Output directory was not included in the Codex prompt.");
+          throw new Error("Output directory was not included in the Codex stdin prompt.");
         }
         const imagePath = path.join(outputDir, "image.png");
         await writeFile(imagePath, validPngBytes);
@@ -272,12 +607,98 @@ describe("generation provider registry", () => {
     expect(calls[0]?.env.openai_api_key).toBeUndefined();
     expect(calls[0]?.env.Azure_OpenAI_Endpoint).toBeUndefined();
     expect(calls[0]?.args.join(" ")).not.toContain("sk-must-not-leak");
-    expect(calls[0]?.args.at(-1)).toContain("Do not use OPENAI_API_KEY");
+    expect(calls[0]?.args.at(-1)).toBe("-");
+    expect((calls[0] as ProviderProcessCall & { stdin?: string }).stdin).toContain("Do not use OPENAI_API_KEY");
     expect(result.artifacts[0]).toMatchObject({
       fileName: "image.png",
       mimeType: "image/png"
     });
     await expect(readFile(result.artifacts[0]!.sourcePath!)).resolves.toEqual(validPngBytes);
+  });
+
+  it("builds a Codex CLI vision assistant invocation with reference images and no API keys", async () => {
+    const projectPath = await createTempRoot();
+    const referencePath = path.join(projectPath, "reference.png");
+    await writeFile(referencePath, "reference");
+    const calls: ProviderProcessCall[] = [];
+    const provider = new CodexCliAssistantProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      env: {
+        OPENAI_API_KEY: "sk-must-not-leak",
+        PATH: "C:\\Windows\\System32"
+      },
+      fileExists: async () => true,
+      runner: async (call) => {
+        calls.push(call);
+        const prompt = (call as ProviderProcessCall & { stdin?: string }).stdin ?? "";
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(prompt)?.[1]?.trim();
+        if (!outputDir) {
+          throw new Error("Output directory was not included in the Codex assistant stdin prompt.");
+        }
+        await writeFile(
+          path.join(outputDir, "result.json"),
+          JSON.stringify({
+            id: "run-assistant-assistant",
+            status: "complete",
+            text: "The reference image suggests a glossy red campaign texture.",
+            error: null,
+            caveats: ""
+          }),
+          "utf8"
+        );
+        return { stdout: "{\"ok\":true}", stderr: "", exitCode: 0 };
+      }
+    });
+
+    const result = await provider.run({
+      projectPath,
+      runId: "run-assistant",
+      assistantNodeId: "assistant",
+      assistantSubtype: "Brainstormer",
+      prompt: "Use the product reference to shape a launch concept.",
+      instruction: "Describe visual directions.",
+      notes: "Keep it concise.",
+      sections: [
+        {
+          nodeId: "prompt",
+          kind: "prompt",
+          section: "General",
+          title: "General Prompt",
+          text: "premium glossy product campaign"
+        }
+      ],
+      references: [
+        {
+          nodeId: "reference",
+          role: "style",
+          title: "Uploaded reference",
+          sourceKind: "Image",
+          assetPath: referencePath
+        }
+      ],
+      edgeRoles: [{ edgeId: "edge-reference-assistant", role: "style" }],
+      requestedAt: "2026-06-26T08:00:00.000Z"
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual(
+      expect.arrayContaining([
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "--image",
+        referencePath
+      ])
+    );
+    expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
+    expect(calls[0]?.args.join(" ")).not.toContain("sk-must-not-leak");
+    expect(calls[0]?.args.at(-1)).toBe("-");
+    expect((calls[0] as ProviderProcessCall & { stdin?: string }).stdin).toContain("Inspect any supplied images directly");
+    expect(result).toMatchObject({
+      providerId: "codex-vision-assistant",
+      text: "The reference image suggests a glossy red campaign texture."
+    });
   });
 
   it("prefers the user Codex config binary over an env alias path", async () => {
@@ -337,7 +758,7 @@ describe("generation provider registry", () => {
       codexCliPath: "C:\\Tools\\codex.exe",
       fileExists: async () => true,
       runner: async (call) => {
-        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec((call as ProviderProcessCall & { stdin?: string }).stdin ?? "")?.[1]?.trim();
         if (!outputDir) {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
@@ -349,7 +770,8 @@ describe("generation provider registry", () => {
             id: "run-1-generation-2",
             status: "failed",
             image_path: null,
-            error: "native image generation unavailable"
+            error: "native image generation unavailable",
+            caveats: ""
           }),
           "utf8"
         );
@@ -368,7 +790,7 @@ describe("generation provider registry", () => {
       codexCliPath: "C:\\Tools\\codex.exe",
       fileExists: async () => true,
       runner: async (call) => {
-        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec((call as ProviderProcessCall & { stdin?: string }).stdin ?? "")?.[1]?.trim();
         if (!outputDir) {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
@@ -380,7 +802,8 @@ describe("generation provider registry", () => {
             id: "run-1-generation-2",
             status: "complete",
             image_path: imagePath,
-            error: null
+            error: null,
+            caveats: ""
           }),
           "utf8"
         );
@@ -397,7 +820,7 @@ describe("generation provider registry", () => {
       codexCliPath: "C:\\Tools\\codex.exe",
       fileExists: async () => true,
       runner: async (call) => {
-        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec((call as ProviderProcessCall & { stdin?: string }).stdin ?? "")?.[1]?.trim();
         if (!outputDir) {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
@@ -409,7 +832,8 @@ describe("generation provider registry", () => {
             id: "run-1-generation-2",
             status: "complete",
             image_path: imagePath,
-            error: null
+            error: null,
+            caveats: ""
           }),
           "utf8"
         );
@@ -426,7 +850,7 @@ describe("generation provider registry", () => {
       codexCliPath: "C:\\Tools\\codex.exe",
       fileExists: async () => true,
       runner: async (call) => {
-        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec((call as ProviderProcessCall & { stdin?: string }).stdin ?? "")?.[1]?.trim();
         if (!outputDir) {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
@@ -438,7 +862,8 @@ describe("generation provider registry", () => {
             id: "run-1-generation-2",
             status: "complete",
             image_path: imagePath,
-            error: null
+            error: null,
+            caveats: ""
           }),
           "utf8"
         );
@@ -455,7 +880,7 @@ describe("generation provider registry", () => {
       codexCliPath: "C:\\Tools\\codex.exe",
       fileExists: async () => true,
       runner: async (call) => {
-        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec(call.args.at(-1) ?? "")?.[1]?.trim();
+        const outputDir = /Output directory:\s*([\s\S]+?)\n\n/.exec((call as ProviderProcessCall & { stdin?: string }).stdin ?? "")?.[1]?.trim();
         if (!outputDir) {
           throw new Error("Output directory was not included in the Codex prompt.");
         }
@@ -465,7 +890,8 @@ describe("generation provider registry", () => {
             id: "run-1-generation-2",
             status: "complete",
             image_path: path.join(outputDir, "image.png"),
-            error: null
+            error: null,
+            caveats: ""
           }),
           "utf8"
         );

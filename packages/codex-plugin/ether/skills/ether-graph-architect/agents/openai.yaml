@@ -1,0 +1,8 @@
+interface:
+  display_name: "Ether Graph Architect"
+  short_description: "Design Ether 2.5 graph topology"
+  brand_color: "#1470DB"
+  default_prompt: "Use $ether-graph-architect to design Ether 2.5 topology with channels, roles, and patch previews."
+
+policy:
+  allow_implicit_invocation: true
