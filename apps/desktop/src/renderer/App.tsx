@@ -2,7 +2,6 @@ import "@xyflow/react/dist/style.css";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -20,11 +19,6 @@ import { ProjectHeader } from "./project/ProjectHeader";
 import { ProviderStatusPanel } from "./project/ProviderStatusPanel";
 import { StartScreen } from "./project/StartScreen";
 
-type PanelPosition = {
-  x: number;
-  y: number;
-};
-
 const PROJECT_HEADER_DEFAULT_HEIGHT = 76;
 const PROJECT_HEADER_MIN_HEIGHT = 58;
 const PROJECT_HEADER_MAX_HEIGHT = 220;
@@ -41,158 +35,6 @@ function clampPanelHeight(value: number, min: number, max: number) {
 
 function panelMaxHeight(limit: number, viewportRatio: number) {
   return Math.min(limit, Math.max(0, window.innerHeight * viewportRatio));
-}
-
-type FloatingPanelProps = {
-  id: string;
-  title: string;
-  kicker: string;
-  className: string;
-  initialPlacement: PanelPosition;
-  children: ReactNode;
-};
-
-function FloatingPanel({
-  id,
-  title,
-  kicker,
-  className,
-  initialPlacement,
-  children
-}: FloatingPanelProps) {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const panelRef = useRef<HTMLElement>(null);
-  const cleanupDragRef = useRef<(() => void) | null>(null);
-
-  const clampPosition = useCallback((nextPosition: PanelPosition) => {
-    const panel = panelRef.current;
-    const surface = panel?.parentElement;
-
-    if (!panel || !surface) {
-      return nextPosition;
-    }
-
-    const maxX = Math.max(0, surface.clientWidth - panel.offsetWidth);
-    const maxY = Math.max(0, surface.clientHeight - panel.offsetHeight);
-
-    return {
-      x: Math.min(Math.max(0, nextPosition.x), maxX),
-      y: Math.min(Math.max(0, nextPosition.y), maxY)
-    };
-  }, []);
-
-  useEffect(() => {
-    const panel = panelRef.current;
-    const surface = panel?.parentElement;
-
-    if (!panel || !surface) {
-      return;
-    }
-
-    setPosition(
-      clampPosition({
-        x: surface.clientWidth * initialPlacement.x - panel.offsetWidth * initialPlacement.x,
-        y: surface.clientHeight * initialPlacement.y - panel.offsetHeight * initialPlacement.y
-      })
-    );
-  }, [clampPosition, initialPlacement.x, initialPlacement.y]);
-
-  useEffect(() => {
-    const panel = panelRef.current;
-    const surface = panel?.parentElement;
-
-    if (!panel || !surface) {
-      return;
-    }
-
-    const reclamp = () => setPosition((current) => clampPosition(current));
-    const resizeObserver = new ResizeObserver(reclamp);
-    resizeObserver.observe(surface);
-    resizeObserver.observe(panel);
-    window.addEventListener("resize", reclamp);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", reclamp);
-    };
-  }, [clampPosition]);
-
-  useEffect(() => {
-    return () => cleanupDragRef.current?.();
-  }, []);
-
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !panelRef.current?.parentElement) {
-      return;
-    }
-
-    cleanupDragRef.current?.();
-    event.currentTarget.setPointerCapture(event.pointerId);
-
-    const panel = panelRef.current;
-    const surface = panel.parentElement;
-    const panelBounds = panel.getBoundingClientRect();
-    const surfaceBounds = surface.getBoundingClientRect();
-    const offsetX = event.clientX - panelBounds.left;
-    const offsetY = event.clientY - panelBounds.top;
-
-    const movePanel = (moveEvent: PointerEvent) => {
-      setPosition(
-        clampPosition({
-          x: moveEvent.clientX - surfaceBounds.left - offsetX,
-          y: moveEvent.clientY - surfaceBounds.top - offsetY
-        })
-      );
-    };
-
-    const stopDrag = () => {
-      window.removeEventListener("pointermove", movePanel);
-      window.removeEventListener("pointerup", stopDrag);
-      window.removeEventListener("pointercancel", stopDrag);
-      cleanupDragRef.current = null;
-    };
-
-    cleanupDragRef.current = stopDrag;
-    window.addEventListener("pointermove", movePanel);
-    window.addEventListener("pointerup", stopDrag);
-    window.addEventListener("pointercancel", stopDrag);
-  };
-
-  return (
-    <aside
-      ref={panelRef}
-      className={`floating-panel shell-panel ${className}${isCollapsed ? " is-collapsed" : ""}`}
-      aria-label={title}
-      data-testid={`panel-${id}`}
-      style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
-    >
-      <div
-        className="panel-titlebar"
-        data-testid={`panel-${id}-drag`}
-        onPointerDown={startDrag}
-        aria-label={`Move ${title}`}
-      >
-        <div className="panel-handle" aria-hidden="true" />
-        <div className="panel-title">
-          <p className="panel-kicker">{kicker}</p>
-          <h2>{title}</h2>
-        </div>
-      </div>
-      <button
-        className="panel-collapse"
-        type="button"
-        aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${title}`}
-        aria-expanded={!isCollapsed}
-        onClick={() => setIsCollapsed((current) => !current)}
-      >
-        {isCollapsed ? "+" : "-"}
-      </button>
-      <div className="panel-body" aria-hidden={isCollapsed}>
-        {children}
-      </div>
-    </aside>
-  );
 }
 
 export function App() {

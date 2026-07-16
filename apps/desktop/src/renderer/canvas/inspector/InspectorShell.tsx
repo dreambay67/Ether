@@ -316,16 +316,23 @@ function NodeConnectionRoles({
 }) {
   const outgoingRoles = graph.edges
     .filter((edge) => edge.source === selectedNode.id)
-    .map((edge) => {
+    .flatMap((edge) => {
+      if (typeof edge.id !== "string" || typeof edge.target !== "string") {
+        return [];
+      }
+
       const data = edge.data && typeof edge.data === "object" ? edge.data as { role?: unknown; label?: unknown } : {};
       const role = normalizeConnectionRole(data.role ?? data.label ?? edge.label);
       const targetNode = graph.nodes.find((node) => node.id === edge.target);
+      const targetData = targetNode?.data && typeof targetNode.data === "object"
+        ? targetNode.data as { title?: unknown }
+        : {};
 
-      return {
+      return [{
         edgeId: edge.id,
         role,
-        targetTitle: targetNode?.data?.title ?? edge.target
-      };
+        targetTitle: typeof targetData.title === "string" ? targetData.title : edge.target
+      }];
     })
     .filter((entry) => entry.role !== DEFAULT_CONNECTION_ROLE);
 
@@ -528,10 +535,6 @@ function NodeInspector({
 }: InspectorShellProps & { selectedNode: Node<CanvasNodeData> }) {
   const [nodeDraft, setNodeDraft] = useState<Partial<CanvasNodeData>>(selectedNode.data ?? {});
 
-  useEffect(() => {
-    setNodeDraft(selectedNode.data ?? {});
-  }, [selectedNode.id]);
-
   const nodeData = coerceCanvasNodeData(selectedNode.data);
   const isLocked = nodeData.locked === true;
   const promptAssembly = nodeData.kind === "Prompt" ? assemblePromptForNode(graph, selectedNode.id) : null;
@@ -709,7 +712,7 @@ function EdgeInspector({
 
 export function InspectorShell(props: InspectorShellProps) {
   if (props.selectedNode) {
-    return <NodeInspector {...props} selectedNode={props.selectedNode} />;
+    return <NodeInspector key={props.selectedNode.id} {...props} selectedNode={props.selectedNode} />;
   }
 
   if (props.selectedEdge) {

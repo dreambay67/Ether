@@ -5,7 +5,7 @@ import {
   PAYLOAD_CHANNELS,
   channelLabel,
   roleLabel
-} from "../../apps/desktop/src/renderer/canvas/ports/channelRegistry";
+} from "../../../apps/desktop/src/renderer/canvas/ports/channelRegistry";
 
 describe("renderer channel registry", () => {
   it("keeps the Ether 2.5 channel and role lists exact", () => {

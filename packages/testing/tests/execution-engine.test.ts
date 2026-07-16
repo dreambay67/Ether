@@ -97,6 +97,7 @@ function unavailableAdapterEdge(
 
 function graph(nodes: EtherGraph["nodes"], edges: EtherGraph["edges"]): EtherGraph {
   return {
+    graphVersion: "2.5",
     nodes,
     edges,
     viewport: { x: 0, y: 0, zoom: 1 },
@@ -111,6 +112,18 @@ function executionIds(items: ExecutionQueueItem[]) {
 
 function providerStdin(call: ProviderProcessCall) {
   return (call as ProviderProcessCall & { stdin?: string }).stdin ?? "";
+}
+
+function recordValue(value: unknown, label = "value"): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`Expected ${label} to be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function nodeData(node: EtherGraph["nodes"][number] | undefined): Record<string, unknown> {
+  return recordValue(node?.data, "node data");
 }
 
 const simulationProvider = {
@@ -507,7 +520,7 @@ describe("execution planning", () => {
     const assets = await listAssets(project.path, { kind: "generated" });
 
     expect(result.results.map((entry) => entry.action)).toEqual(["compare", "evaluate"]);
-    expect(evaluateNode?.data?.evaluationArtifact).toMatchObject({
+    expect(nodeData(evaluateNode).evaluationArtifact).toMatchObject({
       items: [
         expect.objectContaining({
           assetId: generated.id,
@@ -633,7 +646,7 @@ describe("execution planning", () => {
     });
 
     const [providerRun] = await listProviderRuns(project.path);
-    const providerInput = providerRun?.request.providerInput as
+    const providerInput = recordValue(providerRun?.request, "provider request").providerInput as
       | { inputs?: Array<Record<string, unknown>> }
       | undefined;
     expect(providerInput?.inputs).toEqual([
@@ -734,7 +747,7 @@ describe("execution planning", () => {
       assetId: generated.id,
       reason: "Filter filter routed pass to Selected"
     });
-    expect(filterNode?.data?.filterResult).toMatchObject({
+    expect(nodeData(filterNode).filterResult).toMatchObject({
       dryRun: false,
       autoApply: true,
       routed: [
@@ -819,7 +832,7 @@ describe("execution planning", () => {
     expect(result.results[0]).toMatchObject({ action: "filter-dry-run", status: "complete" });
     expect(assetAfterDryRun?.path).toBe(generated.path);
     expect(moves).toEqual([]);
-    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "filter")).filterResult).toMatchObject({
       dryRun: true,
       routed: [
         expect.objectContaining({
@@ -832,7 +845,7 @@ describe("execution planning", () => {
         })
       ]
     });
-    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "filter")).filterResult).toMatchObject({
       candidateRoutes: [
         expect.objectContaining({
           assetId: generated.id,
@@ -972,7 +985,9 @@ describe("execution planning", () => {
     });
     const [assetAfterRoute] = await listAssets(project.path, { kind: "generated" });
     const moves = await listAssetMoves(project.path, { assetId: generated.id });
-    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+    const selectedCollectionId = nodeData(
+      result.graph.nodes.find((candidate) => candidate.id === "selected")
+    ).storeAssetId;
 
     expect(assetAfterRoute?.path).toBe(generated.path);
     expect(moves).toEqual([]);
@@ -983,7 +998,7 @@ describe("execution planning", () => {
         path: generated.path
       })
     ]);
-    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "filter")).filterResult).toMatchObject({
       routed: [
         expect.objectContaining({
           assetId: generated.id,
@@ -1058,7 +1073,9 @@ describe("execution planning", () => {
       targetNodeIds: ["filter"],
       now: () => new Date("2026-06-17T17:47:00.000Z")
     });
-    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+    const selectedCollectionId = nodeData(
+      result.graph.nodes.find((candidate) => candidate.id === "selected")
+    ).storeAssetId;
     const [assetAfterRoute] = await listAssets(project.path, { kind: "generated" });
     const moves = await listAssetMoves(project.path, { assetId: generated.id });
 
@@ -1077,7 +1094,7 @@ describe("execution planning", () => {
       })
     ]);
     expect(collectionArtifacts[0]?.metadata.assetId).toBeUndefined();
-    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "filter")).filterResult).toMatchObject({
       routed: [
         expect.objectContaining({
           assetId: generated.id,
@@ -1155,7 +1172,9 @@ describe("execution planning", () => {
       targetNodeIds: ["filter"],
       now: () => new Date("2026-06-17T17:49:00.000Z")
     });
-    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+    const selectedCollectionId = nodeData(
+      result.graph.nodes.find((candidate) => candidate.id === "selected")
+    ).storeAssetId;
 
     expect(result.results).toEqual([
       expect.objectContaining({
@@ -1242,7 +1261,7 @@ describe("execution planning", () => {
     expect(result.results[0]).toMatchObject({ status: "complete" });
     await expect(readFile(existingPath, "utf8")).resolves.toBe("existing image bytes");
     await expect(readFile(copiedPath, "utf8")).resolves.toBe("new image bytes");
-    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toMatchObject({
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "filter")).filterResult).toMatchObject({
       routed: [
         expect.objectContaining({
           copiedPath
@@ -1327,10 +1346,12 @@ describe("execution planning", () => {
       targetNodeIds: ["compare", "evaluate", "filter"],
       now: () => new Date("2026-06-17T17:49:40.000Z")
     });
-    const selectedCollectionId = result.graph.nodes.find((candidate) => candidate.id === "selected")?.data?.storeAssetId;
+    const selectedCollectionId = nodeData(
+      result.graph.nodes.find((candidate) => candidate.id === "selected")
+    ).storeAssetId;
 
     expect(result.results.map((entry) => entry.status)).toEqual(["complete", "complete", "complete"]);
-    expect(result.graph.nodes.find((candidate) => candidate.id === "compare")?.data?.compareArtifact).toMatchObject({
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "compare")).compareArtifact).toMatchObject({
       items: [
         expect.objectContaining({
           artifactId: copiedArtifact.id,
@@ -1416,7 +1437,7 @@ describe("execution planning", () => {
       status: "error",
       reason: expect.stringContaining("cannot be moved without an asset id")
     });
-    expect(result.graph.nodes.find((candidate) => candidate.id === "filter")?.data?.filterResult).toBeUndefined();
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "filter")).filterResult).toBeUndefined();
     await expect(listAssetMoves(project.path)).resolves.toEqual([]);
     await expect(listArtifactsByCollection(project.path, selectedCollection.id)).resolves.toEqual([]);
   });
@@ -1639,7 +1660,7 @@ describe("execution planning", () => {
       { nodeId: "second", iteration: 1 }
     ];
     const sequentialStarts: string[] = [];
-    let releaseFirst = () => undefined;
+    let releaseFirst: () => void = () => undefined;
     const sequentialRun = runExecutionQueue(items, async (item) => {
       sequentialStarts.push(item.nodeId);
 
@@ -1658,7 +1679,7 @@ describe("execution planning", () => {
     await expect(sequentialRun).resolves.toEqual(["first", "second"]);
 
     const parallelStarts: string[] = [];
-    let releaseParallel = () => undefined;
+    let releaseParallel: () => void = () => undefined;
     const parallelGate = new Promise<void>((resolve) => {
       releaseParallel = resolve;
     });
@@ -1680,9 +1701,9 @@ describe("execution planning", () => {
 
   it("serializes parallel queue work per node while allowing independent nodes to start", async () => {
     const starts: string[] = [];
-    let releaseSameFirst = () => undefined;
-    let releaseSameSecond = () => undefined;
-    let releaseOther = () => undefined;
+    let releaseSameFirst: () => void = () => undefined;
+    let releaseSameSecond: () => void = () => undefined;
+    let releaseOther: () => void = () => undefined;
 
     const waitForSameFirst = new Promise<void>((resolve) => {
       releaseSameFirst = resolve;
@@ -1733,9 +1754,9 @@ describe("execution planning", () => {
 
   it("runs parallel queue groups by dependency layer", async () => {
     const starts: string[] = [];
-    let releaseFirst = () => undefined;
-    let releaseSecond = () => undefined;
-    let releaseDownstream = () => undefined;
+    let releaseFirst: () => void = () => undefined;
+    let releaseSecond: () => void = () => undefined;
+    let releaseDownstream: () => void = () => undefined;
     const waitForFirst = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
@@ -1893,7 +1914,10 @@ describe("fake local execution", () => {
     expect(providerStdin(calls[0]!)).toContain("General: chrome bottle in a quiet campaign set");
 
     const [assistantProviderRun] = await listProviderRuns(project.path);
-    const assistantProviderInput = assistantProviderRun?.request.providerInput as
+    const assistantProviderInput = recordValue(
+      assistantProviderRun?.request,
+      "assistant provider request"
+    ).providerInput as
       | { inputs?: Array<Record<string, unknown>> }
       | undefined;
     expect(assistantProviderInput?.inputs).toEqual([
@@ -1931,7 +1955,10 @@ describe("fake local execution", () => {
         ]
       })
     });
-    expect((assistantNode?.data?.textOutputArtifact as Record<string, unknown> | undefined)?.populatedPromptNodeIds).toBeUndefined();
+    expect(
+      recordValue(nodeData(assistantNode).textOutputArtifact, "text output artifact")
+        .populatedPromptNodeIds
+    ).toBeUndefined();
     expect(downstreamPromptNode?.data).toMatchObject({
       instruction: "Waiting for assistant.",
       status: "idle"
@@ -2013,7 +2040,10 @@ describe("fake local execution", () => {
     expect(providerStdin(calls[0]!)).toContain("Describe the subject from the image");
 
     const [assistantProviderRun] = await listProviderRuns(project.path);
-    const assistantProviderInput = assistantProviderRun?.request.providerInput as
+    const assistantProviderInput = recordValue(
+      assistantProviderRun?.request,
+      "assistant provider request"
+    ).providerInput as
       | { inputs?: Array<Record<string, unknown>>; references?: Array<Record<string, unknown>> }
       | undefined;
     expect(assistantProviderInput?.inputs).toEqual([
@@ -2094,8 +2124,8 @@ describe("fake local execution", () => {
     const mutatorNode = result.graph.nodes.find((candidate) => candidate.id === "mutator");
     const expanderNode = result.graph.nodes.find((candidate) => candidate.id === "expander");
 
-    expect(mutatorNode?.data?.textOutput).toBe("Holding a ripe pineapple.");
-    expect(expanderNode?.data?.instruction).toBe("Make the subject more detailed.");
+    expect(nodeData(mutatorNode).textOutput).toBe("Holding a ripe pineapple.");
+    expect(nodeData(expanderNode).instruction).toBe("Make the subject more detailed.");
   });
 
   it("applies seed-stable prompt mutation while preserving locked terms", async () => {
@@ -2138,7 +2168,7 @@ describe("fake local execution", () => {
           {
             ...canvas.nodes[0]!,
             data: {
-              ...canvas.nodes[0]!.data,
+              ...nodeData(canvas.nodes[0]),
               mutationSeed: "different-seed"
             }
           }
@@ -2148,15 +2178,15 @@ describe("fake local execution", () => {
       request
     );
 
-    const firstPrompt = first.graph.nodes[0]?.data.assembledPrompt;
-    const secondPrompt = second.graph.nodes[0]?.data.assembledPrompt;
-    const changedPrompt = changedSeed.graph.nodes[0]?.data.assembledPrompt;
+    const firstPrompt = nodeData(first.graph.nodes[0]).assembledPrompt;
+    const secondPrompt = nodeData(second.graph.nodes[0]).assembledPrompt;
+    const changedPrompt = nodeData(changedSeed.graph.nodes[0]).assembledPrompt;
 
     expect(firstPrompt).toBe(secondPrompt);
     expect(changedPrompt).not.toBe(firstPrompt);
     expect(firstPrompt).toContain("ETHER mark");
     expect(firstPrompt).toContain("chrome bottle");
-    expect(first.graph.nodes[0]?.data.textOutputArtifact).toMatchObject({
+    expect(nodeData(first.graph.nodes[0]).textOutputArtifact).toMatchObject({
       kind: "prompt-mutation",
       sourceText: "a reflective launch portrait",
       resultText: expect.stringContaining("a reflective launch portrait"),
@@ -2207,15 +2237,17 @@ describe("fake local execution", () => {
     });
     const promptNode = result.graph.nodes.find((candidate) => candidate.id === "prompt");
     const generationNode = result.graph.nodes.find((candidate) => candidate.id === "generation");
+    const promptData = nodeData(promptNode);
+    const generationData = nodeData(generationNode);
     const generatedAssets = await listAssets(project.path, { kind: "generated" });
-    const generatedAsset = generatedAssets.find((asset) => asset.id === generationNode?.data.assetId);
+    const generatedAsset = generatedAssets.find((asset) => asset.id === generationData.assetId);
 
-    expect(promptNode?.data.assembledPrompt).toContain("DreamBay bottle");
-    expect(promptNode?.data.assembledPrompt).not.toBe("minimal studio product image");
-    expect(generationNode?.data.assembledPrompt).toBe(promptNode?.data.assembledPrompt);
+    expect(promptData.assembledPrompt).toContain("DreamBay bottle");
+    expect(promptData.assembledPrompt).not.toBe("minimal studio product image");
+    expect(generationData.assembledPrompt).toBe(promptData.assembledPrompt);
     expect(generatedAsset?.metadata.lineage).toMatchObject({
-      prompt: promptNode?.data.assembledPrompt,
-      sections: [expect.objectContaining({ nodeId: "prompt", text: promptNode?.data.textOutput })]
+      prompt: promptData.assembledPrompt,
+      sections: [expect.objectContaining({ nodeId: "prompt", text: promptData.textOutput })]
     });
   });
 
@@ -2244,12 +2276,12 @@ describe("fake local execution", () => {
       now: () => new Date("2026-06-17T15:30:00.000Z")
     });
     const [providerRun] = await listProviderRuns(project.path);
-    const providerInput = providerRun?.request.providerInput as
+    const providerInput = recordValue(providerRun?.request, "provider request").providerInput as
       | { output?: Record<string, unknown> }
       | undefined;
     const generationNode = result.graph.nodes.find((candidate) => candidate.id === "generation");
     const generatedAssets = await listAssets(project.path, { kind: "generated" });
-    const generatedAsset = generatedAssets.find((asset) => asset.id === generationNode?.data.assetId);
+    const generatedAsset = generatedAssets.find((asset) => asset.id === nodeData(generationNode).assetId);
 
     expect(providerInput?.output).toMatchObject({
       aspectRatio: "9:16",
@@ -2377,7 +2409,7 @@ describe("fake local execution", () => {
       }
     });
     const [providerRun] = await listProviderRuns(project.path);
-    const providerInput = providerRun?.request.providerInput as
+    const providerInput = recordValue(providerRun?.request, "provider request").providerInput as
       | { inputs?: Array<Record<string, unknown>> }
       | undefined;
     expect(providerInput?.inputs).toEqual([
@@ -2575,7 +2607,7 @@ describe("fake local execution", () => {
         }
       }
     });
-    expect(editResult?.metadata.references).toEqual([]);
+    expect(recordValue(editResult?.metadata, "edit result metadata").references).toEqual([]);
     expect(editNode?.data).toMatchObject({
       sourceAssetId: freshParentAsset?.id,
       sourceAssetPath: freshParentAsset?.path,
@@ -2598,8 +2630,9 @@ describe("fake local execution", () => {
         }
       }
     });
-    expect(editedAsset?.metadata.lineage.references).toEqual([]);
-    expect(editedAsset?.metadata.lineage.edgeRoles).toEqual([]);
+    const editedLineage = recordValue(editedAsset?.metadata.lineage, "edited asset lineage");
+    expect(editedLineage.references).toEqual([]);
+    expect(editedLineage.edgeRoles).toEqual([]);
     await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain(freshParentAsset!.id);
     await expect(readFile(editedAsset!.path, "utf8")).resolves.not.toContain(staleParentAsset.id);
   });
@@ -2648,7 +2681,7 @@ describe("fake local execution", () => {
         reason: expect.stringMatching(/missing-provider.*not registered/i)
       })
     ]);
-    expect(result.graph.nodes.find((candidate) => candidate.id === "edit")?.data?.assetId).toBeUndefined();
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "edit")).assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
       expect.objectContaining({ id: parentAsset.id })
     ]);
@@ -2841,7 +2874,7 @@ describe("fake local execution", () => {
         reason: expect.stringMatching(/missing-codex\.exe|codex cli/i)
       })
     ]);
-    expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
+    expect(nodeData(result.graph.nodes[0]).assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
   });
 
@@ -2890,7 +2923,7 @@ describe("fake local execution", () => {
         reason: expect.stringMatching(/missing-codex\.exe|codex cli/i)
       })
     ]);
-    expect(result.graph.nodes.find((candidate) => candidate.id === "edit")?.data?.assetId).toBeUndefined();
+    expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "edit")).assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([
       expect.objectContaining({ id: parentAsset.id })
     ]);
@@ -2924,7 +2957,7 @@ describe("fake local execution", () => {
         reason: expect.stringMatching(/missing-provider.*not registered/i)
       })
     ]);
-    expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
+    expect(nodeData(result.graph.nodes[0]).assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
   });
 
@@ -2957,7 +2990,7 @@ describe("fake local execution", () => {
         reason: expect.stringMatching(/google-nano-banana-pro.*clean local CLI\/MCP route/i)
       })
     ]);
-    expect(result.graph.nodes[0]?.data?.assetId).toBeUndefined();
+    expect(nodeData(result.graph.nodes[0]).assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
     expect(providerRuns).toEqual([
       expect.objectContaining({
@@ -3063,9 +3096,9 @@ describe("fake local execution", () => {
       iteration: 3,
       status: "complete"
     });
-    expect(finalGenerationNode?.data?.assetId).toBe(finalGenerationResult?.assetId);
-    expect(finalGenerationNode?.data?.assetPath).toBe(finalGenerationResult?.assetPath);
-    expect(finalGenerationNode?.data?.assetMetadata).toMatchObject({
+    expect(nodeData(finalGenerationNode).assetId).toBe(finalGenerationResult?.assetId);
+    expect(nodeData(finalGenerationNode).assetPath).toBe(finalGenerationResult?.assetPath);
+    expect(nodeData(finalGenerationNode).assetMetadata).toMatchObject({
       generationNodeId: "generation",
       lineage: {
         iteration: 3
@@ -3251,7 +3284,9 @@ describe("fake local execution", () => {
     });
 
     const [providerRun] = await listProviderRuns(project.path);
-    const providerInput = providerRun?.request.providerInput as { inputs?: Array<Record<string, unknown>> } | undefined;
+    const providerInput = recordValue(providerRun?.request, "provider request").providerInput as
+      | { inputs?: Array<Record<string, unknown>> }
+      | undefined;
 
     expect(providerInput?.inputs).toEqual([
       expect.objectContaining({
@@ -3350,7 +3385,7 @@ describe("fake local execution", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 instruction: "revised prompt"
               }
             }
@@ -3377,7 +3412,7 @@ describe("fake local execution", () => {
       rerunState: "complete",
       assembledPrompt: "General: revised prompt"
     });
-    expect(rerunGeneration?.data?.staleSince).toBeUndefined();
+    expect(nodeData(rerunGeneration).staleSince).toBeUndefined();
   });
 
   it("preserves linked Reference assets when marking an edited reference stale", () => {
@@ -3451,8 +3486,8 @@ describe("fake local execution", () => {
         action: "unsupported"
       })
     ]);
-    expect(referenceAfterRun?.data?.status).toBe("idle");
-    expect(referenceAfterRun?.data?.rerunState).toBe("stale");
+    expect(nodeData(referenceAfterRun).status).toBe("idle");
+    expect(nodeData(referenceAfterRun).rerunState).toBe("stale");
     expect(runRecords).toHaveLength(1);
     expect(runRecords[0]?.status).toBe("skipped");
     expect(runRecords[0]?.metadata).toMatchObject({

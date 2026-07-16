@@ -96,7 +96,10 @@
     }
   },
   "scripts": {
-    "build": "pnpm --filter @ether/providers build && tsc -p tsconfig.json"
+    "build": "pnpm --filter @ether/providers build && tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ether/providers build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@ether/providers": "workspace:*",

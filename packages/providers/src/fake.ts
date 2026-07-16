@@ -5,6 +5,7 @@ import type {
   ProviderDiagnostic,
   ProviderGenerationResult
 } from "./types.js";
+import { removeInvalidPathCharacters } from "./pathSanitization.js";
 
 export const FAKE_PROVIDER_ID = "ether-fake-local";
 
@@ -151,9 +152,7 @@ function fakeLocalToolForOperation(operation: ImageEditProviderInput["operation"
 }
 
 function sanitizeFileNamePart(value: string) {
-  const safe = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "")
+  const safe = removeInvalidPathCharacters(value.trim())
     .replace(/\s+/g, "-")
     .replace(/[. ]+$/g, "");
 

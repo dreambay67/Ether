@@ -1,11 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { testSuites } from "./testSuites.js";
+
 const port = Number(process.env.ETHER_PLAYWRIGHT_PORT ?? 5174);
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "**/*.spec.ts",
+  testMatch: testSuites.smoke.map((target) => target.replace(/^tests\//, "")),
   outputDir: "../../test-results",
   timeout: 30_000,
   use: {

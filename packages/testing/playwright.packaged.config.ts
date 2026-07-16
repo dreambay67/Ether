@@ -1,8 +1,10 @@
 import { defineConfig } from "@playwright/test";
 
+import { testSuites } from "./testSuites.js";
+
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "**/*.packaged.ts",
+  testMatch: testSuites.packaged.map((target) => target.replace(/^tests\//, "")),
   outputDir: "../../test-results/packaged",
   timeout: 60_000,
   workers: 1,

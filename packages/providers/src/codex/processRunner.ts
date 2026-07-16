@@ -185,7 +185,6 @@ export function runProviderProcess(
     const stderr = new BoundedTextCapture(outputLimitBytes);
     let timedOut = false;
     let settled = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
     const child = spawn(call.command, call.args, {
       cwd: call.cwd,
       env: call.env,
@@ -194,6 +193,10 @@ export function runProviderProcess(
       stdio: [typeof call.stdin === "string" ? "pipe" : "ignore", "pipe", "pipe"],
       windowsHide: true
     });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      terminateProviderProcessTree(child);
+    }, timeoutMs);
     const childStdout = child.stdout;
     const childStderr = child.stderr;
     const childStdin = child.stdin;
@@ -259,10 +262,6 @@ export function runProviderProcess(
       });
     });
 
-    timeout = setTimeout(() => {
-      timedOut = true;
-      terminateProviderProcessTree(child);
-    }, timeoutMs);
   });
 }
 

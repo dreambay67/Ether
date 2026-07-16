@@ -126,13 +126,14 @@ export async function readRequiredPngOutput(filePath: string) {
     content = await readFile(filePath);
   } catch (error) {
     if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Codex image worker required PNG output was not found: ${filePath}`);
+      throw new Error(`Codex image worker required PNG output was not found: ${filePath}`, { cause: error });
     }
 
     throw new Error(
       `Codex image worker required PNG output could not be read: ${
         error instanceof Error ? error.message : String(error)
-      }`
+      }`,
+      { cause: error }
     );
   }
 
@@ -150,11 +151,12 @@ async function readWorkerJson(resultPath: string, workerLabel: string) {
     return JSON.parse(await readFile(resultPath, "utf8")) as unknown;
   } catch (error) {
     if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`${workerLabel} did not write required result file: ${resultPath}`);
+      throw new Error(`${workerLabel} did not write required result file: ${resultPath}`, { cause: error });
     }
 
     throw new Error(
-      `${workerLabel} result file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+      `${workerLabel} result file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 }

@@ -44,8 +44,6 @@ function channelFromDataOrHandle(value: unknown, handle?: string | null): Payloa
 
 export function EtherEdge({
   id,
-  source,
-  target,
   sourceX,
   sourceY,
   targetX,

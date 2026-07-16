@@ -1,13 +1,7 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "Node",
-    "noEmit": false,
-    "outDir": "dist-electron",
-    "rootDir": "src",
-    "types": ["node"],
-    "jsx": "react-jsx"
-  },
-  "include": ["src/main/**/*.ts", "src/preload/**/*.ts"]
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.electron.json" },
+    { "path": "./tsconfig.renderer.json" }
+  ]
 }

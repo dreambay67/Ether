@@ -6,13 +6,23 @@ import {
   createGraphNodeData,
   getLatestGraphRevision,
   listRunRecords,
+  normalizeEtherGraph,
   openProject,
-  saveGraph
+  saveGraph,
+  type EtherGraph
 } from "@ether/engine";
 import { applyGraphPatch, previewGraphPatch, type GraphPatch } from "../../engine/src/graph/graphPatch";
 import { callEtherTool, listEtherMcpTools } from "../../mcp-server/src/index";
 
 const tempRoots: string[] = [];
+
+function recordValue(value: unknown, label = "value"): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`Expected ${label} to be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
 
 async function createTempRoot() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ether-mcp-2-"));
@@ -80,8 +90,9 @@ function starterPatch(): GraphPatch {
   };
 }
 
-function graphWithPromptAndGeneration() {
+function graphWithPromptAndGeneration(): EtherGraph {
   return {
+    graphVersion: "2.5",
     nodes: [
       {
         id: "prompt",
@@ -109,8 +120,9 @@ function graphWithPromptAndGeneration() {
   };
 }
 
-function graphWithTypedPatchNodes() {
+function graphWithTypedPatchNodes(): EtherGraph {
   return {
+    graphVersion: "2.5",
     nodes: [
       {
         id: "prompt-a",
@@ -154,6 +166,7 @@ describe("Ether 2.0 Codex co-pilot graph patch lane", () => {
   it("previews added, changed, and removed graph patch entities without mutating the graph", () => {
     const now = "2026-06-17T12:00:00.000Z";
     const graph = {
+      graphVersion: "2.5" as const,
       nodes: [
         {
           id: "prompt",
@@ -290,7 +303,7 @@ describe("Ether 2.0 Codex co-pilot graph patch lane", () => {
     const graph = graphWithPromptAndGeneration();
     graph.nodes[0] = {
       ...graph.nodes[0],
-      data: { ...graph.nodes[0].data, locked: true }
+      data: { ...recordValue(graph.nodes[0].data, "node data"), locked: true }
     };
     graph.edges = [
       {
@@ -701,7 +714,8 @@ describe("Ether 2.0 Codex co-pilot graph patch lane", () => {
         parentRevisionId: baseRevision?.id
       })
     });
-    expect(applied.graph.nodes.map((node: { id: string }) => node.id)).toEqual(["prompt", "generation"]);
+    const appliedGraph = normalizeEtherGraph(recordValue(applied, "patch result").graph);
+    expect(appliedGraph.nodes.map((node) => node.id)).toEqual(["prompt", "generation"]);
     expect(await listRunRecords(project.path)).toHaveLength(0);
 
     await expect(
@@ -756,10 +770,16 @@ describe("Ether 2.0 Codex co-pilot graph patch lane", () => {
       }
     });
 
-    expect(applied.preview.summary.addedNodes).toBeGreaterThan(2);
-    expect(applied.graph.edges.length).toBeGreaterThan(0);
+    const appliedResult = recordValue(applied, "template patch result");
+    const appliedGraph = normalizeEtherGraph(appliedResult.graph);
+    const previewSummary = recordValue(
+      recordValue(appliedResult.preview, "patch preview").summary,
+      "patch summary"
+    );
+    expect(previewSummary.addedNodes).toBeGreaterThan(2);
+    expect(appliedGraph.edges.length).toBeGreaterThan(0);
 
-    await saveGraph(project.path, applied.graph);
+    await saveGraph(project.path, appliedGraph);
     expect(await listRunRecords(project.path)).toHaveLength(0);
   });
 });

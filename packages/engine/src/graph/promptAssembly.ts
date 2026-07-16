@@ -127,10 +127,6 @@ function incomingEdges(graph: EtherGraph, nodeId: string) {
   return edgesOf(graph).filter((edge) => edge.target === nodeId);
 }
 
-function edgeLabel(edge: GraphEdge) {
-  return String(edge.label ?? edge.data?.label ?? "").trim();
-}
-
 function normalizeRoleKey(value: string) {
   return value.trim().replace(/\s+/g, "-").toLowerCase();
 }

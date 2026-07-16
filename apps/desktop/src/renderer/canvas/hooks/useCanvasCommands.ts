@@ -4,7 +4,6 @@ import {
   useMemo,
   type Dispatch,
   type DragEvent,
-  type MouseEvent,
   type RefObject,
   type SetStateAction
 } from "react";
@@ -13,10 +12,11 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type OnNodeDrag,
   type ReactFlowInstance,
   type Viewport
 } from "@xyflow/react";
-import type { AssetRecord, EtherGraph } from "@ether/engine";
+import { LATEST_GRAPH_VERSION, type AssetRecord, type EtherGraph } from "@ether/engine";
 import {
   applyGraphPatch,
   previewGraphPatch,
@@ -89,7 +89,7 @@ const DEFAULT_NODE_HEIGHT = 188;
 const DEFAULT_EDIT_NODE_WIDTH = 276;
 const DEFAULT_EDIT_NODE_HEIGHT = 220;
 
-function channelFromHandle(handle: string | null | undefined): PayloadChannel | undefined {
+function channelFromHandle(handle: unknown): PayloadChannel | undefined {
   return normalizePayloadChannel(handle);
 }
 
@@ -402,7 +402,7 @@ export function useCanvasCommands({
         selected: true,
         data: createGraphNodeData(definition.id)
       };
-      const nextNodes = nodes.map((candidate) => ({ ...candidate, selected: false })).concat(node);
+      const nextNodes = [...nodes.map((candidate) => ({ ...candidate, selected: false })), node];
       const nextEdges = edges.map((edge) => ({ ...edge, selected: false }));
 
       commitSnapshot(nextNodes, nextEdges, `Added ${definition.title}`);
@@ -441,14 +441,14 @@ export function useCanvasCommands({
       origin: getCanvasCenterPosition()
     });
     const firstNodeId = fragment.nodes[0]?.id;
-    const templateNodes = fragment.nodes.map((node) => ({
+    const templateNodes = normalizeNodes(fragment.nodes).map((node) => ({
       ...node,
       type: "etherNode",
       selected: node.id === firstNodeId
     }));
-    const nextNodes = nodes.map((candidate) => ({ ...candidate, selected: false })).concat(templateNodes);
-    const styledEdges = decorateAndNormalizeEdges(fragment.edges as Edge[], nextNodes);
-    const nextEdges = edges.map((edge) => ({ ...edge, selected: false })).concat(styledEdges);
+    const nextNodes = [...nodes.map((candidate) => ({ ...candidate, selected: false })), ...templateNodes];
+    const styledEdges = decorateAndNormalizeEdges(normalizeEdges(fragment.edges), nextNodes);
+    const nextEdges = [...edges.map((edge) => ({ ...edge, selected: false })), ...styledEdges];
     const message = `Added ${fragment.title}`;
 
     commitSnapshot(nextNodes, nextEdges, message);
@@ -486,7 +486,7 @@ export function useCanvasCommands({
           data: createReferenceNodeData(asset)
         };
       });
-      const nextNodes = currentNodes.map((candidate) => ({ ...candidate, selected: false })).concat(referenceNodes);
+      const nextNodes = [...currentNodes.map((candidate) => ({ ...candidate, selected: false })), ...referenceNodes];
       const nextEdges = currentEdges.map((edge) => ({ ...edge, selected: false }));
       const message =
         assets.length === 1
@@ -551,10 +551,12 @@ export function useCanvasCommands({
             data: edgeDataForChannels("image", "image", "image")
           }
         ])[0]!;
-        const nextNodes = currentNodes
-          .map((node) => ({ ...node, selected: false }))
-          .concat(referenceNode, editNode);
-        const nextEdges = currentEdges.map((candidate) => ({ ...candidate, selected: false })).concat(edge);
+        const nextNodes = [
+          ...currentNodes.map((node) => ({ ...node, selected: false })),
+          referenceNode,
+          editNode
+        ];
+        const nextEdges = [...currentEdges.map((candidate) => ({ ...candidate, selected: false })), edge];
         const message = "Created Inpaint edit from image";
 
         commitSnapshot(nextNodes, nextEdges, message);
@@ -613,8 +615,8 @@ export function useCanvasCommands({
         data: edgeDataForChannels("image", "image", "image")
       }
     ])[0]!;
-      const nextNodes = nodes.map((node) => ({ ...node, selected: false })).concat(editNode);
-      const nextEdges = edges.map((candidate) => ({ ...candidate, selected: false })).concat(edge);
+      const nextNodes = [...nodes.map((node) => ({ ...node, selected: false })), editNode];
+      const nextEdges = [...edges.map((candidate) => ({ ...candidate, selected: false })), edge];
       const message = "Created Inpaint edit from image";
 
       commitSnapshot(nextNodes, nextEdges, message);
@@ -724,6 +726,7 @@ export function useCanvasCommands({
         );
         const staleGraph = markDownstreamStale(
           {
+            graphVersion: currentGraph.graphVersion,
             nodes: nextNodes,
             edges: currentEdges,
             viewport: currentGraph.viewport,
@@ -901,7 +904,7 @@ export function useCanvasCommands({
           style: { stroke: "#37E6EA", strokeWidth: 2 }
         };
         const nextNodes = nodes.map((node) => ({ ...node, selected: false }));
-        const nextEdges = edges.map((candidate) => ({ ...candidate, selected: false })).concat(edge);
+        const nextEdges = [...edges.map((candidate) => ({ ...candidate, selected: false })), edge];
 
         commitSnapshot(nextNodes, nextEdges, `Connected ${source.data.title} to ${target.data.title}`);
         setConnectionHint(null);
@@ -949,6 +952,7 @@ export function useCanvasCommands({
 
         const staleGraph = markDownstreamStale(
           {
+            graphVersion: graph?.graphVersion ?? LATEST_GRAPH_VERSION,
             nodes: editedNodes,
             edges: current.present.edges,
             viewport,
@@ -966,7 +970,7 @@ export function useCanvasCommands({
         });
       });
     },
-    [graph?.selectedSnapshotId, setHistory, textEditBaselineRef, viewport]
+    [graph?.graphVersion, graph?.selectedSnapshotId, setHistory, textEditBaselineRef, viewport]
   );
 
   const previewEdge = useCallback(
@@ -995,6 +999,7 @@ export function useCanvasCommands({
         const staleGraph = changedEdge
           ? markDownstreamStale(
               {
+                graphVersion: graph?.graphVersion ?? LATEST_GRAPH_VERSION,
                 nodes: current.present.nodes,
                 edges: nextEdges,
                 viewport,
@@ -1002,6 +1007,7 @@ export function useCanvasCommands({
                 updatedAt: new Date().toISOString()
               },
               [changedEdge.source],
+              undefined,
               { includeChanged: false }
             )
           : null;
@@ -1012,7 +1018,7 @@ export function useCanvasCommands({
         });
       });
     },
-    [edges, graph?.selectedSnapshotId, nodes, reportRelationshipLocked, setHistory, textEditBaselineRef, viewport]
+    [edges, graph?.graphVersion, graph?.selectedSnapshotId, nodes, reportRelationshipLocked, setHistory, textEditBaselineRef, viewport]
   );
 
   const commitTextEdit = useCallback(() => {
@@ -1078,6 +1084,7 @@ export function useCanvasCommands({
       );
       const staleGraph = markDownstreamStale(
         {
+          graphVersion: currentGraph.graphVersion,
           nodes: nextNodes,
           edges: currentEdges,
           viewport: currentGraph.viewport,
@@ -1467,8 +1474,8 @@ export function useCanvasCommands({
     ]
   );
 
-  const onNodeDragStop = useCallback(
-    (_event: MouseEvent, draggedNode: Node<CanvasNodeData>) => {
+  const onNodeDragStop: OnNodeDrag<Node<CanvasNodeData>> = useCallback(
+    (_event, draggedNode) => {
       const baseline = dragBaselineRef.current;
       const originalDraggedNode = nodes.find((node) => node.id === draggedNode.id);
 
@@ -1590,9 +1597,10 @@ export function useCanvasCommands({
         return;
       }
 
-      const nextEdges = edges
-        .filter((edge) => edge.id !== targetEdge.id)
-        .concat(decorateAndNormalizeEdges(insertedEdges, latestNodes));
+      const nextEdges = [
+        ...edges.filter((edge) => edge.id !== targetEdge.id),
+        ...decorateAndNormalizeEdges(insertedEdges, latestNodes)
+      ];
 
       dragBaselineRef.current = null;
       setHistory((current) =>

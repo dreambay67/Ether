@@ -60,12 +60,25 @@ function edge(id: string, source: string, target: string, label = "prompt") {
 
 function graph(nodes: EtherGraph["nodes"], edges: EtherGraph["edges"]): EtherGraph {
   return {
+    graphVersion: "2.5",
     nodes,
     edges,
     viewport: { x: 0, y: 0, zoom: 1 },
     selectedSnapshotId: null,
     updatedAt: "2026-06-28T00:00:00.000Z"
   };
+}
+
+function recordValue(value: unknown, label = "value"): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`Expected ${label} to be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function nodeData(node: EtherGraph["nodes"][number] | undefined): Record<string, unknown> {
+  return recordValue(node?.data, "node data");
 }
 
 function evaluationInput(projectPath: string, imagePaths: string[]): VisionEvaluationProviderInput {
@@ -299,7 +312,7 @@ describe("vision evaluation execution", () => {
         action: "evaluate"
       })
     ]);
-    expect(evaluateNode?.data?.evaluationArtifact).toMatchObject({
+    expect(nodeData(evaluateNode).evaluationArtifact).toMatchObject({
       kind: "evaluation",
       items: [
         expect.objectContaining({
@@ -309,7 +322,7 @@ describe("vision evaluation execution", () => {
         })
       ]
     });
-    expect(evaluateNode?.data?.evaluationArtifact).not.toHaveProperty("provider");
+    expect(nodeData(evaluateNode).evaluationArtifact).not.toHaveProperty("provider");
   });
 
   it("creates an evaluation artifact from provider output and Filter uses the evaluation decision", async () => {
@@ -435,7 +448,7 @@ describe("vision evaluation execution", () => {
         error: null
       })
     ]);
-    expect(evaluateNode?.data?.evaluationArtifact).toMatchObject({
+    expect(nodeData(evaluateNode).evaluationArtifact).toMatchObject({
       provider: {
         id: "codex-vision-evaluation"
       },
@@ -470,7 +483,7 @@ describe("vision evaluation execution", () => {
         })
       })
     ]);
-    expect(filterNode?.data?.filterResult).toMatchObject({
+    expect(nodeData(filterNode).filterResult).toMatchObject({
       routed: [
         expect.objectContaining({
           assetId: generated.id,
@@ -603,7 +616,7 @@ describe("vision evaluation execution", () => {
     const moves = await listAssetMoves(project.path, { assetId: generated.id });
 
     expect(calls).toHaveLength(1);
-    expect(evaluateNode?.data?.evaluationArtifact).toMatchObject({
+    expect(nodeData(evaluateNode).evaluationArtifact).toMatchObject({
       provider: {
         id: "codex-vision-evaluation"
       },
@@ -616,7 +629,7 @@ describe("vision evaluation execution", () => {
         })
       ]
     });
-    expect(evaluateNode?.data?.evaluationArtifact).not.toMatchObject({
+    expect(nodeData(evaluateNode).evaluationArtifact).not.toMatchObject({
       items: [
         expect.objectContaining({
           tags: expect.arrayContaining(["mismatched-failure"]),
@@ -624,7 +637,7 @@ describe("vision evaluation execution", () => {
         })
       ]
     });
-    expect(filterNode?.data?.filterResult).toMatchObject({
+    expect(nodeData(filterNode).filterResult).toMatchObject({
       routed: [
         expect.objectContaining({
           assetId: generated.id,

@@ -15,7 +15,6 @@ type UseRunControllerArgs = {
   localRunStatus: string | null;
   setLocalRunStatus(message: string | null): void;
   nodes: Node<CanvasNodeData>[];
-  edges: Edge[];
   assemblyGraph: EtherGraph;
   selectedNode: Node<CanvasNodeData> | null;
   selectedNodeIds: string[];
@@ -50,7 +49,6 @@ export function useRunController({
   localRunStatus,
   setLocalRunStatus,
   nodes,
-  edges,
   assemblyGraph,
   selectedNode,
   selectedNodeIds,
@@ -95,7 +93,7 @@ export function useRunController({
     if (projectId) {
       setLocalRunStatus(null);
     }
-  }, [projectId]);
+  }, [projectId, setLocalRunStatus]);
 
   const setSafeRunCountCap = useCallback((cap: number) => {
     setRunCountCap(Number.isFinite(cap) ? Math.max(0, Math.min(100, Math.floor(cap))) : 0);
@@ -181,7 +179,7 @@ export function useRunController({
       setLocalRunStatus(message);
       onStatus(message);
     },
-    [assemblyGraph, commitSnapshot, nodes, onStatus]
+    [assemblyGraph, commitSnapshot, nodes, onStatus, setLocalRunStatus]
   );
 
   const ensureStoreFolderForNode = useCallback(
@@ -271,6 +269,7 @@ export function useRunController({
       onStatus,
       onTrace,
       projectId,
+      setLocalRunStatus,
       serializeCurrentGraph
     ]
   );
@@ -353,6 +352,7 @@ export function useRunController({
       onStatus,
       onTrace,
       projectId,
+      setLocalRunStatus,
       serializeCurrentGraph
     ]
   );
@@ -462,6 +462,7 @@ export function useRunController({
       onStatus,
       onTrace,
       projectId,
+      setLocalRunStatus,
       serializeCurrentGraph
     ]
   );
@@ -605,6 +606,7 @@ export function useRunController({
       onTrace,
       pendingGeneratedAssetId,
       projectId,
+      setLocalRunStatus,
       serializeCurrentGraph
     ]
   );
@@ -667,29 +669,25 @@ export function useRunController({
           parallel: request.parallel,
           providerId: request.providerId
         };
-        const result = durableJobs
+        const queuedResult = durableJobs
           ? await durableJobs.execute(
               projectId,
               (await durableJobs.enqueue(projectId, submittedGraph, requestPayload)).job.id
-            ).then((queuedResult) => ({
-              graph: queuedResult.execution.graph,
-              plan: queuedResult.execution.plan,
-              results: queuedResult.execution.results,
-              job: queuedResult.job,
-              items: queuedResult.items
-            }))
-          : await window.ether.execution.run(projectId, submittedGraph, requestPayload);
+            )
+          : null;
+        const result = queuedResult?.execution ??
+          await window.ether.execution.run(projectId, submittedGraph, requestPayload);
         const completed = result.results.filter((entry) => entry.status === "complete").length;
         const skipped = result.results.filter((entry) => entry.status === "skipped").length;
-        const failed = "items" in result
-          ? result.items.filter((item) => item.status === "failed").length
+        const failed = queuedResult
+          ? queuedResult.items.filter((item) => item.status === "failed").length
           : result.results.filter((entry) => entry.status === "error").length;
         const lastGeneratedAsset = [...result.results]
           .reverse()
           .find((entry) => entry.action === "generate");
         const summary = failed > 0
           ? `Run finished with ${failed} error${failed === 1 ? "" : "s"}`
-          : "job" in result && result.job.status === "canceled"
+          : queuedResult?.job.status === "canceled"
             ? "Run canceled"
             : `Run complete: ${completed} complete, ${skipped} skipped`;
 
@@ -721,8 +719,8 @@ export function useRunController({
         for (const entry of result.results) {
           onTrace(`${entry.status} ${entry.nodeId} (${entry.action})`);
         }
-        if ("items" in result) {
-          for (const item of result.items) {
+        if (queuedResult) {
+          for (const item of queuedResult.items) {
             if (item.status === "completed" || item.status === "skipped") {
               continue;
             }
@@ -740,13 +738,12 @@ export function useRunController({
       }
     },
     [
-      assemblyGraph,
       commitDurableGraphIfCurrent,
-      commitDurableSnapshot,
       createExecutionRequest,
       graphContentFingerprint,
       isCurrentGraphContent,
       projectId,
+      setLocalRunStatus,
       setRunVisualStatus,
       serializeCurrentGraph,
       onStatus,
@@ -817,6 +814,7 @@ export function useRunController({
       graphContentFingerprint,
       isCurrentGraphContent,
       projectId,
+      setLocalRunStatus,
       serializeCurrentGraph,
       onStatus,
       onTrace
@@ -855,19 +853,19 @@ export function useRunController({
       previewStartInFlightRef.current = false;
       setIsStartingPreviewRun(false);
     });
-  }, [executeRun, isCurrentGraphContent, onStatus, onTrace, runPreview]);
+  }, [executeRun, isCurrentGraphContent, onStatus, onTrace, runPreview, setLocalRunStatus]);
 
   const cancelRun = useCallback(() => {
     const message = "Run cancellation placeholder; execution jobs are currently immediate.";
     setLocalRunStatus(message);
     onStatus(message);
-  }, [onStatus]);
+  }, [onStatus, setLocalRunStatus]);
 
   const refreshTimeline = useCallback(() => {
     const message = "Timeline refreshed";
     setLocalRunStatus(message);
     onTrace(message);
-  }, [onTrace]);
+  }, [onTrace, setLocalRunStatus]);
 
   return {
     localRunStatus,

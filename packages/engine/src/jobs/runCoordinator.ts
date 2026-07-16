@@ -23,7 +23,6 @@ import {
   getJobById,
   getJobItemById,
   listJobEvents,
-  listJobDependencies,
   listJobItems,
   listReadyJobItems,
   recordJobItemFailure,

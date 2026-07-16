@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "validate": "node scripts/validate-plugin.mjs"
+    "validate": "node scripts/validate-plugin.mjs",
+    "typecheck": "node --check scripts/validate-plugin.mjs",
+    "lint": "eslint . --max-warnings=0"
   }
 }

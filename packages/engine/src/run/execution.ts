@@ -1,7 +1,6 @@
 import {
   CodexCliAssistantProvider,
   CodexCliVisionEvaluationProvider,
-  CODEX_ASSISTANT_PROVIDER_ID,
   CODEX_PROVIDER_ID,
   FAKE_PROVIDER_ID,
   ProviderUnavailableError,
@@ -1389,8 +1388,8 @@ async function executeStoreNode(
 ): Promise<ExecutionNodeResult> {
   const node = findNode(state.graph, item.nodeId);
   const finishedAt = startedDate.toISOString();
-  let asset: AssetRecord | null = null;
-  let action = "skip-store";
+  let asset: AssetRecord;
+  let action: string;
 
   switch (node.data?.subtype) {
     case "Collection":

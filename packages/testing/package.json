@@ -4,7 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "pretypecheck": "pnpm --filter @ether/mcp-server build",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint . --max-warnings=0",
     "test:unit": "vitest run --config vitest.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:performance": "vitest run --config vitest.performance.config.ts",
+    "test:contracts": "cross-env ETHER_TEST_SUITE=contracts vitest run --config vitest.integration.config.ts",
+    "test:conformance:codex": "cross-env ETHER_TEST_SUITE=conformance:codex vitest run --config vitest.integration.config.ts",
+    "test:conformance:antigravity": "cross-env ETHER_TEST_SUITE=conformance:antigravity vitest run --config vitest.integration.config.ts",
     "test:smoke": "playwright test --config playwright.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
     "test:acceptance": "pnpm run test:smoke && pnpm run test:packaged"

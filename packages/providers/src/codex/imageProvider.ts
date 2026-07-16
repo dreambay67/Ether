@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ProviderUnavailableError } from "../errors.js";
 import { inferMimeType } from "../mime.js";
+import { removeInvalidPathCharacters } from "../pathSanitization.js";
 import type {
   GeneratedArtifact,
   GenerationProvider,
@@ -455,9 +456,7 @@ async function collectOutputArtifacts(outputDir: string, jobId: string): Promise
 }
 
 function sanitizePathSegment(value: string) {
-  const safe = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "")
+  const safe = removeInvalidPathCharacters(value.trim())
     .replace(/\s+/g, "-")
     .replace(/[. ]+$/g, "");
 

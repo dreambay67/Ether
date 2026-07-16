@@ -229,7 +229,6 @@ function InnerEtherCanvas(
     localRunStatus,
     setLocalRunStatus,
     nodes,
-    edges,
     assemblyGraph,
     selectedNode,
     selectedNodeIds,
@@ -592,10 +591,11 @@ function InnerEtherCanvas(
 
   const startMarqueeSelection = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target;
 
       if (
         event.button !== 0 ||
+        !(target instanceof Element) ||
         target.closest(".react-flow__controls, .react-flow__node, .react-flow__edge, .ether-edge-label, .ether-edge-role-grid, .ether-edge-channel-picker, .artifact-browser, [draggable=\"true\"], .canvas-overlay-panel, .canvas-toolbar, .canvas-status, .canvas-selection-run-prompt, button, input, textarea, select")
       ) {
         return;
@@ -636,10 +636,11 @@ function InnerEtherCanvas(
 
   const startMouseMarqueeSelection = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target;
 
       if (
         event.button !== 0 ||
+        !(target instanceof Element) ||
         target.closest(".react-flow__controls, .react-flow__node, .react-flow__edge, .ether-edge-label, .ether-edge-role-grid, .ether-edge-channel-picker, .artifact-browser, [draggable=\"true\"], .canvas-overlay-panel, .canvas-toolbar, .canvas-status, .canvas-selection-run-prompt, button, input, textarea, select")
       ) {
         return;

@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { normalizeEtherGraph } from "@ether/engine";
 import {
   callEtherTool,
   handleMcpJsonRpcMessage,
@@ -9,6 +10,22 @@ import {
 } from "../../mcp-server/src/index";
 
 const tempRoots: string[] = [];
+
+function recordValue(value: unknown, label = "value"): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`Expected ${label} to be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function arrayValue(value: unknown, label = "value"): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`Expected ${label} to be an array.`);
+  }
+
+  return value;
+}
 
 async function createTempRoot() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ether-mcp-"));
@@ -167,7 +184,7 @@ describe("Ether MCP tool registry", () => {
       }
     });
 
-    const graph = await callEtherTool("ether_graph_get", { projectPath });
+    const graph = normalizeEtherGraph(await callEtherTool("ether_graph_get", { projectPath }));
     expect(graph.nodes).toHaveLength(2);
     expect(graph.edges[0]).toMatchObject({ label: "prompt" });
 
@@ -181,12 +198,15 @@ describe("Ether MCP tool registry", () => {
       ])
     );
 
-    const run = await callEtherTool("ether_run_selected", {
+    const run = recordValue(await callEtherTool("ether_run_selected", {
       projectPath,
       nodeIds: ["prompt"],
       policy: "selected"
+    }), "selected run result");
+    expect(arrayValue(run.results, "run results")[0]).toMatchObject({
+      action: "assemble-prompt",
+      status: "complete"
     });
-    expect(run.results[0]).toMatchObject({ action: "assemble-prompt", status: "complete" });
 
     const imported = await callEtherTool("ether_asset_import", {
       projectPath,
@@ -223,18 +243,21 @@ describe("Ether MCP tool registry", () => {
       })
     ]);
 
-    const status = await callEtherTool("ether_run_status", { projectPath });
-    expect(status.map((record: { metadata: { action?: string } }) => record.metadata.action)).toEqual(
+    const status = arrayValue(
+      await callEtherTool("ether_run_status", { projectPath }),
+      "run status"
+    );
+    expect(status.map((entry) => recordValue(recordValue(entry).metadata).action)).toEqual(
       expect.arrayContaining(["assemble-prompt", "ensure-collection"])
     );
     await expect(callEtherTool("ether_health_check", { projectPath })).resolves.toMatchObject({
       issues: []
     });
 
-    const saved = await callEtherTool("ether_graph_save", {
+    const saved = normalizeEtherGraph(await callEtherTool("ether_graph_save", {
       projectPath,
       graph
-    });
+    }));
     expect((await readFile(path.join(projectPath, "graph.json"), "utf8"))).toContain("edge-prompt-generation");
     expect(typeof saved.updatedAt).toBe("string");
     expect(saved.updatedAt).not.toEqual(graph.updatedAt);

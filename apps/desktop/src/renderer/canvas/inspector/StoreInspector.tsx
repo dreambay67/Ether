@@ -1,10 +1,11 @@
 import { FolderInput, FolderPlus } from "lucide-react";
+import type { CanvasNodeData } from "@ether/engine/graph/nodeCatalog";
 import { ReviewInspector } from "./ReviewInspector";
 import type { InspectorNodeContext } from "./types";
 
 type StoreInspectorProps = {
   context: InspectorNodeContext;
-  onEnsureStoreFolder(id: string): void;
+  onEnsureStoreFolder(id: string, updates?: Partial<CanvasNodeData>): void;
   onMoveLatestGeneratedAssetToCollection(id: string): void;
 };
 

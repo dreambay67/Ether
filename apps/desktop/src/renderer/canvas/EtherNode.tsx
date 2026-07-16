@@ -60,7 +60,6 @@ export const EtherNode = memo(function EtherNode({
   const previewAssetId = data.assetPath ? data.assetId : data.sourceAssetId;
   const previewAssetKind = data.assetPath ? data.assetKind : data.sourceAssetKind;
   const previewAssetMetadata = data.assetPath ? data.assetMetadata : data.sourceAssetMetadata;
-  const imageSrc = previewAssetPath ? localImageSource(previewAssetPath) : null;
   const maskSrc = data.maskAssetPath ? localImageSource(data.maskAssetPath) : null;
   const referenceAssets = data.kind === "Reference" ? referenceAssetsFromNodeData(data) : [];
   const previewAssets: PreviewAsset[] =
@@ -230,7 +229,7 @@ export const EtherNode = memo(function EtherNode({
             </button>
           </div>
         </div>
-      ) : imageSrc ? (
+      ) : previewAssetPath ? (
         <div
           className="ether-node-image-frame"
           data-testid="node-image-preview"
@@ -245,7 +244,7 @@ export const EtherNode = memo(function EtherNode({
             })
           }
         >
-          <img src={imageSrc} alt={`${data.title} asset preview`} draggable={false} />
+          <img src={localImageSource(previewAssetPath)} alt={`${data.title} asset preview`} draggable={false} />
           {maskSrc ? (
             <img
               className="ether-node-mask-overlay"

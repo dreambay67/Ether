@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   NODE_CATEGORIES,
-  NODE_CATEGORY_LABELS,
   NODE_CONTRACTS,
   NODE_DEFINITIONS,
   canConnectNodeKinds,
@@ -118,6 +117,7 @@ describe("graph node catalog", () => {
 
   it("assembles every image from a bundled Reference node as generation references", () => {
     const graph = {
+      graphVersion: "2.5" as const,
       nodes: [
         {
           id: "reference",

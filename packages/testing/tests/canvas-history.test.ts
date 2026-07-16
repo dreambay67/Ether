@@ -33,15 +33,15 @@ describe("canvas node change history", () => {
 
   it("treats a resize gesture as one undoable edit from original to final dimensions", () => {
     const original = {
-      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, width: 224, height: 138 }],
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: {}, width: 224, height: 138 }],
       edges: []
     };
     const intermediate = {
-      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, width: 260, height: 160 }],
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: {}, width: 260, height: 160 }],
       edges: []
     };
     const final = {
-      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, width: 300, height: 190 }],
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: {}, width: 300, height: 190 }],
       edges: []
     };
     const baselineHistory = createCanvasHistory(original);
@@ -62,8 +62,8 @@ describe("canvas node change history", () => {
   it("deletes a connected node and incident edges in one undoable edit", () => {
     const original = {
       nodes: [
-        { id: "node-a", position: { x: 0, y: 0 } },
-        { id: "node-b", position: { x: 240, y: 0 } }
+        { id: "node-a", position: { x: 0, y: 0 }, data: {} },
+        { id: "node-b", position: { x: 240, y: 0 }, data: {} }
       ],
       edges: [{ id: "edge-a-b", source: "node-a", target: "node-b" }]
     };
@@ -85,15 +85,15 @@ describe("canvas node change history", () => {
 
   it("treats a drag gesture as one undoable edit from original to final position", () => {
     const original = {
-      nodes: [{ id: "node-1", position: { x: 0, y: 0 } }],
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: {} }],
       edges: []
     };
     const intermediate = {
-      nodes: [{ id: "node-1", position: { x: 48, y: 16 } }],
+      nodes: [{ id: "node-1", position: { x: 48, y: 16 }, data: {} }],
       edges: []
     };
     const final = {
-      nodes: [{ id: "node-1", position: { x: 120, y: 80 } }],
+      nodes: [{ id: "node-1", position: { x: 120, y: 80 }, data: {} }],
       edges: []
     };
     const baselineHistory = createCanvasHistory(original);
@@ -111,7 +111,7 @@ describe("canvas node change history", () => {
 
   it("does not create a history entry when a grouped edit returns to its baseline", () => {
     const original = {
-      nodes: [{ id: "node-1", position: { x: 0, y: 0 } }],
+      nodes: [{ id: "node-1", position: { x: 0, y: 0 }, data: {} }],
       edges: []
     };
     const history = createCanvasHistory(original);

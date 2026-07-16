@@ -1,0 +1,45 @@
+export const testSuites = {
+  unit: [
+    "tests/acceptance-docs.test.ts",
+    "tests/asset-drop.test.ts",
+    "tests/brand-tokens.test.ts",
+    "tests/canvas-history.test.ts",
+    "tests/desktop-vite-config.test.ts",
+    "tests/desktop-window-options.test.ts",
+    "tests/graph-assembly.test.ts",
+    "tests/graph-catalog.test.ts",
+    "tests/graph-channels.test.ts",
+    "tests/graph-edge-semantics.test.ts",
+    "tests/graph-taxonomy-25.test.ts",
+    "tests/renderer-channel-registry.test.ts",
+    "tests/renderer-url.test.ts"
+  ],
+  integration: [
+    "tests/artifact-store.test.ts",
+    "tests/assets.test.ts",
+    "tests/desktop-settings-store.test.ts",
+    "tests/execution-engine.test.ts",
+    "tests/job-coordinator.test.ts",
+    "tests/migration.test.ts",
+    "tests/project-store.test.ts",
+    "tests/provider-registry.test.ts",
+    "tests/revision-store.test.ts",
+    "tests/vision-evaluation.test.ts",
+    "tests/windows-package.test.ts"
+  ],
+  contracts: [
+    "tests/api-provider-infrastructure.test.ts",
+    "tests/asset-ipc-validation.test.ts",
+    "tests/codex-plugin.test.ts",
+    "tests/mcp-2.0.test.ts",
+    "tests/mcp-server.test.ts",
+    "tests/preload-file-path.test.ts",
+    "tests/provider-contract.test.ts",
+    "tests/workspace-command-surface.test.ts"
+  ],
+  performance: ["tests/prompt-assembly.performance.test.ts"],
+  "conformance:codex": ["tests/codex.conformance.test.ts"],
+  "conformance:antigravity": ["tests/antigravity.conformance.test.ts"],
+  smoke: ["tests/smoke.spec.ts"],
+  packaged: ["tests/packaged-electron.packaged.ts"]
+} as const;

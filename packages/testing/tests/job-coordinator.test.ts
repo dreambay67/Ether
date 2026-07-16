@@ -120,12 +120,25 @@ function unavailableAdapterEdge(
 
 function graph(nodes: EtherGraph["nodes"], edges: EtherGraph["edges"]): EtherGraph {
   return {
+    graphVersion: "2.5",
     nodes,
     edges,
     viewport: { x: 0, y: 0, zoom: 1 },
     selectedSnapshotId: null,
     updatedAt: "2026-06-28T00:00:00.000Z"
   };
+}
+
+function recordValue(value: unknown, label = "value"): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`Expected ${label} to be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function nodeData(node: EtherGraph["nodes"][number] | undefined): Record<string, unknown> {
+  return recordValue(node?.data, "node data");
 }
 
 function coordinatorGraph() {
@@ -178,7 +191,7 @@ function setTestNodeData(state: ExecutionWorkerState, nodeId: string, data: Reco
         ? {
             ...candidate,
             data: {
-              ...candidate.data,
+              ...nodeData(candidate),
               ...data
             }
           }
@@ -531,7 +544,7 @@ describe("run coordinator", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 rerunState: "stale",
                 staleSince: "2026-06-28T09:55:00.000Z"
               }
@@ -995,7 +1008,7 @@ describe("run coordinator", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 instruction: "fresh saved edit"
               }
             }
@@ -1036,7 +1049,7 @@ describe("run coordinator", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 instruction: "competing edit"
               }
             }
@@ -1144,11 +1157,11 @@ describe("run coordinator", () => {
     });
 
     const starts: string[] = [];
-    let releaseGeneration = () => undefined;
+    let releaseGeneration: () => void = () => undefined;
     const generationGate = new Promise<void>((resolve) => {
       releaseGeneration = resolve;
     });
-    let resolveBothStarted = () => undefined;
+    let resolveBothStarted: () => void = () => undefined;
     const bothStarted = new Promise<void>((resolve) => {
       resolveBothStarted = resolve;
     });
@@ -1402,7 +1415,7 @@ describe("run coordinator", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 notes: "edited after enqueue"
               }
             }
@@ -1460,7 +1473,7 @@ describe("run coordinator", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 instruction: "edited after enqueue"
               }
             }
@@ -1513,7 +1526,7 @@ describe("run coordinator", () => {
           ? {
               ...candidate,
               data: {
-                ...candidate.data,
+                ...nodeData(candidate),
                 instruction: "edited after enqueue"
               }
             }
@@ -1702,7 +1715,7 @@ describe("run coordinator", () => {
       runner: async (_projectPath, state, _request, item) => {
         const promptNode = state.graph.nodes.find((candidate) => candidate.id === "prompt");
         setTestNodeData(state, item.nodeId, {
-          observedPromptText: promptNode?.data?.textOutput
+          observedPromptText: nodeData(promptNode).textOutput
         });
         return completeResult(item, "generate");
       }
@@ -1714,8 +1727,8 @@ describe("run coordinator", () => {
       (item) => item.nodeId === "prompt"
     );
 
-    expect(promptNode?.data?.textOutput).toBe(longValue);
-    expect(generationNode?.data?.observedPromptText).toBe(longValue);
+    expect(nodeData(promptNode).textOutput).toBe(longValue);
+    expect(nodeData(generationNode).observedPromptText).toBe(longValue);
     expect(JSON.stringify(promptItem?.output)).not.toContain("[omitted:");
     expect(JSON.stringify(resumed.execution.graph)).not.toContain("[omitted:");
   });
@@ -1740,7 +1753,7 @@ describe("run coordinator", () => {
     const promptNode = completedAgain.execution.graph.nodes.find((candidate) => candidate.id === "prompt");
 
     expect(completedAgain.job.status).toBe("completed");
-    expect(promptNode?.data?.textOutput).toBe(outputText);
+    expect(nodeData(promptNode).textOutput).toBe(outputText);
     expect(JSON.stringify(completedAgain.execution.graph)).not.toContain("[omitted:");
   });
 

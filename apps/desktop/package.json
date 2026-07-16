@@ -5,7 +5,10 @@
   "main": "dist-electron/main/main.js",
   "type": "commonjs",
   "scripts": {
-    "build:electron": "tsc -p tsconfig.json",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "pretypecheck": "pnpm --filter @ether/engine build",
+    "typecheck": "tsc -p tsconfig.electron.json && tsc -p tsconfig.renderer.json",
+    "lint": "eslint . --max-warnings=0",
     "test:unit": "pnpm --workspace-root test:unit",
     "test:smoke": "pnpm --workspace-root test:smoke",
     "acceptance:smoke": "pnpm --workspace-root acceptance:smoke",

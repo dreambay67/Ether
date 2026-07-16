@@ -33,12 +33,21 @@ function node(
 
 function graph(nodes: EtherGraph["nodes"], edges: EtherGraph["edges"]): EtherGraph {
   return {
+    graphVersion: "2.5",
     nodes,
     edges,
     viewport: { x: 0, y: 0, zoom: 1 },
     selectedSnapshotId: null,
     updatedAt: "2026-06-17T00:00:00.000Z"
   };
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Expected node data to be an object.");
+  }
+
+  return value as Record<string, unknown>;
 }
 
 describe("node contracts", () => {
@@ -767,6 +776,6 @@ describe("prompt assembly", () => {
       lastRunAt: "2026-06-17T08:00:00.000Z",
       status: "complete"
     });
-    expect(promptNode?.data.instruction).toBe("on reflective acrylic");
+    expect(recordValue(promptNode?.data).instruction).toBe("on reflective acrylic");
   });
 });

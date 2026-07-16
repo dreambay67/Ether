@@ -910,26 +910,6 @@ async function assertReadableFile(filePath: string, label: string) {
   }
 }
 
-async function nextAvailablePath(basePath: string) {
-  if (!(await exists(basePath))) {
-    return basePath;
-  }
-
-  const directory = path.dirname(basePath);
-  const extension = path.extname(basePath);
-  const name = path.basename(basePath, extension);
-
-  for (let index = 2; index < 10000; index += 1) {
-    const candidate = path.join(directory, `${name}-${index}${extension}`);
-
-    if (!(await exists(candidate))) {
-      return candidate;
-    }
-  }
-
-  throw new Error(`Could not find an available file path for ${basePath}`);
-}
-
 async function writeFileToAvailablePath(basePath: string, content: string | Uint8Array) {
   const directory = path.dirname(basePath);
   const extension = path.extname(basePath);
@@ -983,23 +963,14 @@ async function reserveAvailablePath(basePath: string) {
   throw new Error(`Could not reserve an available file path for ${basePath}`);
 }
 
-async function exists(filePath: string) {
-  try {
-    await access(filePath, constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function sanitizeFileName(fileName: string) {
   return sanitizePathSegment(path.basename(fileName), "fileName");
 }
 
 function sanitizePathSegment(value: string, label: string) {
-  const safeValue = value
-    .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "")
+  const safeValue = [...value.trim()]
+    .filter((character) => !isInvalidPathCharacter(character))
+    .join("")
     .replace(/\s+/g, " ")
     .replace(/[. ]+$/g, "");
 
@@ -1008,6 +979,10 @@ function sanitizePathSegment(value: string, label: string) {
   }
 
   return safeValue;
+}
+
+function isInvalidPathCharacter(character: string) {
+  return character.charCodeAt(0) <= 0x1f || '<>:"/\\|?*'.includes(character);
 }
 
 function inferMimeType(filePath: string) {

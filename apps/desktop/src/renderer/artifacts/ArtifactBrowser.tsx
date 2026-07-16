@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from "react";
 import { ChevronDown, ChevronUp, GalleryHorizontal, GitBranch, Grid2X2, PackagePlus, RefreshCcw } from "lucide-react";
 import type { ArtifactKind, ArtifactRecord } from "@ether/engine";
 import { ArtifactFilmstrip } from "./ArtifactFilmstrip";
@@ -347,7 +347,7 @@ function TabButton({
     lineage: "Lineage",
     collections: "Collections"
   };
-  const icons: Record<BrowserTab, JSX.Element> = {
+  const icons: Record<BrowserTab, ReactElement> = {
     filmstrip: <GalleryHorizontal size={14} aria-hidden="true" />,
     grid: <Grid2X2 size={14} aria-hidden="true" />,
     lineage: <GitBranch size={14} aria-hidden="true" />,

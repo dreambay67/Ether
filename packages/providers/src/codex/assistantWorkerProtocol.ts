@@ -119,11 +119,12 @@ async function readWorkerJson(resultPath: string, workerLabel: string) {
     return JSON.parse(await readFile(resultPath, "utf8")) as unknown;
   } catch (error) {
     if (error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`${workerLabel} did not write required result file: ${resultPath}`);
+      throw new Error(`${workerLabel} did not write required result file: ${resultPath}`, { cause: error });
     }
 
     throw new Error(
-      `${workerLabel} result file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+      `${workerLabel} result file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
     );
   }
 }
@@ -268,18 +269,6 @@ function requiredNullableString(value: unknown, label: string) {
   }
 
   return requiredString(value, label);
-}
-
-function requiredNullableNumber(value: unknown, label: string) {
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`${label} must be a finite number.`);
-  }
-
-  return value;
 }
 
 function requiredEvaluationItemArray(value: unknown, label: string): VisionEvaluationItemResult[] {

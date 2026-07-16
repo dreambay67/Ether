@@ -256,7 +256,7 @@ describe("Codex provider worker contracts", () => {
         {
           ...validInput,
           sections: [{ nodeId: "prompt", kind: "system", section: "General", title: "Title", text: "Text" }]
-        } as GenerationProviderInput,
+        } as unknown as GenerationProviderInput,
         path.join(projectPath, "outputs")
       )
     ).toThrow(/sections\[0\]\.kind/i);
