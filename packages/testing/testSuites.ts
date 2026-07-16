@@ -12,7 +12,8 @@ export const testSuites = {
     "tests/graph-edge-semantics.test.ts",
     "tests/graph-taxonomy-25.test.ts",
     "tests/renderer-channel-registry.test.ts",
-    "tests/renderer-url.test.ts"
+    "tests/renderer-url.test.ts",
+    "tests/schema-4.0.test.ts"
   ],
   integration: [
     "tests/artifact-store.test.ts",

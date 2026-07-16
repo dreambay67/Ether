@@ -106,6 +106,12 @@ importers:
 
   packages/providers: {}
 
+  packages/schema:
+    dependencies:
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+
   packages/testing:
     dependencies:
       '@ether/brand':
@@ -117,6 +123,9 @@ importers:
       '@ether/providers':
         specifier: workspace:*
         version: link:../providers
+      '@ether/schema':
+        specifier: workspace:*
+        version: link:../schema
 
 packages:
 

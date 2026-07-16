@@ -4,14 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pretypecheck": "pnpm --filter @ether/mcp-server build",
+    "pretypecheck": "pnpm --filter @ether/schema build && pnpm --filter @ether/mcp-server build",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint . --max-warnings=0",
+    "pretest:unit": "pnpm --filter @ether/schema build",
     "test:unit": "vitest run --config vitest.config.ts",
+    "pretest:integration": "pnpm --filter @ether/schema build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "pretest:performance": "pnpm --filter @ether/schema build",
     "test:performance": "vitest run --config vitest.performance.config.ts",
+    "pretest:contracts": "pnpm --filter @ether/schema build",
     "test:contracts": "cross-env ETHER_TEST_SUITE=contracts vitest run --config vitest.integration.config.ts",
+    "pretest:conformance:codex": "pnpm --filter @ether/schema build",
     "test:conformance:codex": "cross-env ETHER_TEST_SUITE=conformance:codex vitest run --config vitest.integration.config.ts",
+    "pretest:conformance:antigravity": "pnpm --filter @ether/schema build",
     "test:conformance:antigravity": "cross-env ETHER_TEST_SUITE=conformance:antigravity vitest run --config vitest.integration.config.ts",
     "test:smoke": "playwright test --config playwright.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
@@ -20,6 +26,7 @@
   "dependencies": {
     "@ether/brand": "workspace:*",
     "@ether/engine": "workspace:*",
-    "@ether/providers": "workspace:*"
+    "@ether/providers": "workspace:*",
+    "@ether/schema": "workspace:*"
   }
 }
