@@ -7,6 +7,8 @@ Captured on 2026-07-16 before the Ether 4.0 implementation branch was created.
 - Repository: `C:\Users\deny7\Documents\Codex\2026-05-29\ether`
 - Starting branch: `feature/ether-v1`
 - Starting commit: `2dc39cac268cd592624b7069a25f2ebe53419b07`
+- Authorized checkpoint commit: `be8ec87f766d65c8a6000b1dcb8c2f4166b5744e`
+- Checkpoint boundary: 212 tracked paths, including 108 paths first captured by the checkpoint, compared with 104 tracked paths at the starting commit
 - Remote: none configured
 - Worktree: normal checkout, not a linked worktree or submodule
 - Source delta: 52 tracked files modified, with 21,621 insertions and 5,515 deletions before untracked source files are counted
@@ -88,7 +90,7 @@ Findings:
 
 - No private keys, Google credentials, GitHub tokens, real OpenAI keys, auth cookies, environment files, databases, logs, or credential containers were found.
 - `packages/testing/tests/api-provider-infrastructure.test.ts` and `packages/testing/tests/provider-registry.test.ts` contain deliberately fake `sk-...` values used to verify that secrets are not persisted and that platform API access is not enabled. These are test fixtures, not credentials.
-- The archived V1 master plan contains the local repository path as historical planning context. It does not name user media or contain a credential.
+- Historical V1/2.x documents preserve local source locations for the supplied DreamBay and Ether handbooks/logos under `C:/Users/deny7/Downloads`, plus the local repository path. Two provider tests preserve a deliberately non-runnable WindowsApps Codex path under `C:\\Users\\deny7\\AppData\\Local` as a negative fixture. These are user-specific paths, but they contain neither embedded user media nor credentials and are intentionally retained in the historical checkpoint.
 - No generated `.ether` project, user reference asset, screenshot, or test database is included in the checkpoint source allowlist.
 
 ## Baseline Interpretation
