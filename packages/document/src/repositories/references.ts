@@ -8,8 +8,8 @@ import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { mediaSignatureMatches } from "../blob/importBlob.js";
-import type { DocumentStore } from "../documentStore.js";
+import { mediaSignatureMatches } from "./blobs.js";
+import { DOCUMENT_STORE_INTERNAL, type DocumentStore } from "../documentStore.js";
 import type { RepositoryTransactionContext } from "./graphs.js";
 
 interface ReferenceRow {
@@ -53,11 +53,44 @@ export class ReferenceRepository {
 
   put(input: LinkedReference): LinkedReference {
     const reference = LinkedReferenceSchema.parse(input);
-    if (reference.previewContentKey !== null) {
-      const preview = this.context.database
-        .prepare("SELECT 1 FROM blobs WHERE content_key = ? AND status = 'ready'")
-        .get(reference.previewContentKey);
-      if (preview === undefined) throw new Error("Reference preview blob is not ready.");
+    const readyMediaType = (contentKey: string | null): string | undefined => {
+      if (contentKey === null) return undefined;
+      return (this.context.database
+        .prepare("SELECT media_type FROM blobs WHERE content_key = ? AND status = 'ready'")
+        .get(contentKey) as { media_type: string } | undefined)?.media_type;
+    };
+    const previewMediaType = readyMediaType(reference.previewContentKey);
+    const contentMediaType = readyMediaType(reference.contentKey);
+    if (reference.state === "linked") {
+      if (
+        reference.originalPath === null ||
+        reference.pathGrantId === null ||
+        reference.identity === null ||
+        reference.contentKey !== null ||
+        previewMediaType !== reference.mediaType
+      ) {
+        throw new ReferenceError(
+          "REFERENCE_STATE_MISMATCH",
+          "Linked references require a grant-bound path, durable identity, and ready preview."
+        );
+      }
+    }
+    if (reference.state === "embedded") {
+      if (
+        reference.originalPath !== null ||
+        reference.pathGrantId !== null ||
+        reference.contentKey === null ||
+        reference.previewContentKey === null ||
+        contentMediaType !== reference.mediaType ||
+        previewMediaType !== reference.mediaType
+      ) {
+        throw new ReferenceError(
+          "REFERENCE_CONTENT_MISMATCH",
+          "Embedded reference content and preview must be ready and media-consistent."
+        );
+      }
+    } else if (reference.previewContentKey !== null && previewMediaType === undefined) {
+      throw new ReferenceError("REFERENCE_CONTENT_MISMATCH", "Reference preview blob is not ready.");
     }
     this.context.database
       .prepare(
@@ -123,6 +156,13 @@ export class ReferenceError extends Error {
     this.name = "ReferenceError";
     this.code = code;
   }
+}
+
+function persistReference(
+  store: DocumentStore,
+  reference: LinkedReference
+): Promise<LinkedReference> {
+  return store[DOCUMENT_STORE_INTERNAL]("write", ({ references }) => references.put(reference));
 }
 
 async function inspectReferenceFile(filePath: string, mediaType: string): Promise<{
@@ -203,6 +243,12 @@ export async function linkReference(
 ): Promise<LinkedReference> {
   const resolved = path.resolve(input.sourcePath);
   const inspected = await inspectReferenceFile(resolved, input.mediaType);
+  store.assertReferenceGrant({
+    fingerprint: inspected.fingerprint,
+    grantId: input.pathGrantId,
+    operation: "link",
+    path: resolved
+  });
   const timestamp = new Date().toISOString();
   const reference = LinkedReferenceSchema.parse({
     id: input.id,
@@ -218,7 +264,7 @@ export async function linkReference(
     createdAt: timestamp,
     updatedAt: timestamp
   });
-  return store.transaction(({ references }) => references.put(reference));
+  return persistReference(store, reference);
 }
 
 async function missingReference(store: DocumentStore, reference: LinkedReference): Promise<LinkedReference> {
@@ -227,7 +273,7 @@ async function missingReference(store: DocumentStore, reference: LinkedReference
     state: "missing",
     updatedAt: new Date().toISOString()
   });
-  return store.transaction(({ references }) => references.put(missing));
+  return persistReference(store, missing);
 }
 
 export async function resolveReference(
@@ -239,6 +285,16 @@ export async function resolveReference(
     throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
   }
   if (reference.originalPath === null || reference.pathGrantId === null) {
+    return missingReference(store, reference);
+  }
+  try {
+    store.assertReferenceGrant({
+      fingerprint: reference.fingerprint,
+      grantId: reference.pathGrantId,
+      operation: "resolve",
+      path: reference.originalPath
+    });
+  } catch {
     return missingReference(store, reference);
   }
   try {
@@ -256,7 +312,7 @@ export async function resolveReference(
       fingerprint: inspected.fingerprint,
       updatedAt: new Date().toISOString()
     });
-    return store.transaction(({ references }) => references.put(linked));
+    return persistReference(store, linked);
   } catch (error) {
     const code =
       typeof error === "object" && error !== null && "code" in error
@@ -290,6 +346,12 @@ export async function relinkReference(
       "Relinked file does not match the durable identity or fingerprint."
     );
   }
+  store.assertReferenceGrant({
+    fingerprint: inspected.fingerprint,
+    grantId: pathGrantId,
+    operation: "relink",
+    path: resolved
+  });
   const relinked = LinkedReferenceSchema.parse({
     ...reference,
     state: "linked",
@@ -299,7 +361,7 @@ export async function relinkReference(
     fingerprint: inspected.fingerprint,
     updatedAt: new Date().toISOString()
   });
-  return store.transaction(({ references }) => references.put(relinked));
+  return persistReference(store, relinked);
 }
 
 export async function revokeReferenceGrant(
@@ -310,11 +372,34 @@ export async function revokeReferenceGrant(
   if (reference === undefined) {
     throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
   }
+  if (reference.pathGrantId !== null) {
+    store.revokeReferenceGrantAuthority(reference.pathGrantId);
+  }
   const revoked = LinkedReferenceSchema.parse({
     ...reference,
     state: "missing",
     pathGrantId: null,
     updatedAt: new Date().toISOString()
   });
-  return store.transaction(({ references }) => references.put(revoked));
+  return persistReference(store, revoked);
+}
+
+export async function embedReference(
+  store: DocumentStore,
+  referenceId: string,
+  contentKey: string
+): Promise<LinkedReference> {
+  const reference = await store.read(({ references }) => references.get(referenceId));
+  if (reference === undefined) {
+    throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
+  }
+  const embedded = LinkedReferenceSchema.parse({
+    ...reference,
+    state: "embedded",
+    contentKey,
+    originalPath: null,
+    pathGrantId: null,
+    updatedAt: new Date().toISOString()
+  });
+  return persistReference(store, embedded);
 }

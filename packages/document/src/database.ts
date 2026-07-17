@@ -295,7 +295,8 @@ export interface InternalEtherDocumentConnection {
 
 export function openEtherDocumentConnection(
   filePath: string,
-  readOnly: boolean
+  readOnly: boolean,
+  options: { allowDerivedIndexMismatch?: boolean } = {}
 ): InternalEtherDocumentConnection {
   const absolutePath = path.resolve(filePath);
   const identity = inspectEtherFileHeader(absolutePath);
@@ -319,7 +320,7 @@ export function openEtherDocumentConnection(
       );
     }
     assertEtherFileIdentity(absolutePath, identity);
-    const inspection = validateEtherDocumentConnection(database, absolutePath);
+    const inspection = validateEtherDocumentConnection(database, absolutePath, options);
     assertEtherFileIdentity(absolutePath, identity);
     return { database, inspection };
   } catch (error) {

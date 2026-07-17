@@ -1,18 +1,22 @@
 import path from "node:path";
 
 import { importBlob } from "../blob/importBlob.js";
-import type { DocumentStore } from "../documentStore.js";
+import { DOCUMENT_STORE_INTERNAL, type DocumentStore } from "../documentStore.js";
 import {
   assertAppDataOwnedPath,
+  assertDestructiveRecoveryPath,
   listRecoveryJournalPaths,
   quarantineRecoveryPath,
   readRecoveryJournal,
+  readRecoveryJournalOwner,
   removeOwnedStagingPath,
   removeRecoveryJournal,
-  resolveRecoveryRoots
+  resolveRecoveryRoots,
+  writeRecoveryJournal
 } from "./recoveryJournal.js";
 
 export interface ReconcileStagingResult {
+  attention: string[];
   quarantined: string[];
   recovered: string[];
   removed: string[];
@@ -29,10 +33,22 @@ export async function reconcileStaging(
   options: { appDataRoot?: string } = {}
 ): Promise<ReconcileStagingResult> {
   const roots = resolveRecoveryRoots(options.appDataRoot);
-  const result: ReconcileStagingResult = { quarantined: [], recovered: [], removed: [] };
+  const result: ReconcileStagingResult = {
+    attention: [],
+    quarantined: [],
+    recovered: [],
+    removed: []
+  };
   for (const journalPath of listRecoveryJournalPaths(roots.appDataRoot)) {
     let entry;
     try {
+      const owner = readRecoveryJournalOwner(journalPath);
+      if (
+        owner !== undefined &&
+        (owner.documentId !== store.documentId || !sameDocumentPath(owner.documentPath, store.path))
+      ) {
+        continue;
+      }
       entry = readRecoveryJournal(journalPath);
       assertAppDataOwnedPath(entry.stagedPath, roots.stagingRoot);
     } catch {
@@ -44,37 +60,62 @@ export async function reconcileStaging(
       entry.documentId !== store.documentId ||
       !sameDocumentPath(entry.documentPath, store.path)
     ) {
-      try {
-        quarantineRecoveryPath(entry.stagedPath, roots.appDataRoot);
-      } catch {
-        // The journal itself remains the durable evidence when staging is already absent.
-      }
-      removeRecoveryJournal(journalPath, roots.appDataRoot);
-      result.quarantined.push(entry.id);
+      continue;
+    }
+
+    try {
+      assertDestructiveRecoveryPath(entry.stagedPath, roots.stagingRoot);
+    } catch {
+      result.attention.push(entry.id);
       continue;
     }
 
     if (entry.kind === "blob-import") {
       if (entry.contentKey !== undefined) {
-        await store.transaction(({ blobs }) => blobs.removeIncomplete(entry.contentKey!));
+        await store[DOCUMENT_STORE_INTERNAL]("write", ({ blobs }) =>
+          blobs.removeIncomplete(entry.id, entry.contentKey)
+        );
       }
       try {
         removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
+        removeRecoveryJournal(journalPath, roots.appDataRoot);
+        result.removed.push(entry.id);
       } catch {
-        // Reclaim is idempotent when a prior startup already removed the staging directory.
+        writeRecoveryJournal({
+          appDataRoot: roots.appDataRoot,
+          entry: { ...entry, state: "failed", updatedAt: new Date().toISOString() }
+        });
+        result.attention.push(entry.id);
       }
-      removeRecoveryJournal(journalPath, roots.appDataRoot);
-      result.removed.push(entry.id);
+      continue;
+    }
+
+    if (entry.artifact === undefined) {
+      quarantineRecoveryPath(journalPath, roots.appDataRoot);
+      result.quarantined.push(entry.id);
+      result.attention.push(entry.id);
       continue;
     }
 
     try {
+      const artifact = {
+        ...entry.artifact,
+        metadata: {
+          ...entry.artifact.metadata,
+          recovery: {
+            journalId: entry.id,
+            recoveredAt: entry.updatedAt,
+            reviewRequired: true,
+            status: "recovered"
+          }
+        }
+      };
       await importBlob(
         store,
         {
           sourcePath: entry.stagedPath,
           mediaType: entry.mediaType,
-          ...(entry.artifact === undefined ? {} : { artifact: entry.artifact })
+          artifact
         },
         { appDataRoot: roots.appDataRoot }
       );
@@ -82,13 +123,11 @@ export async function reconcileStaging(
       removeRecoveryJournal(journalPath, roots.appDataRoot);
       result.recovered.push(entry.id);
     } catch {
-      try {
-        quarantineRecoveryPath(entry.stagedPath, roots.appDataRoot);
-      } catch {
-        // Missing staging is represented by the quarantined/reclaimed journal outcome.
-      }
-      removeRecoveryJournal(journalPath, roots.appDataRoot);
-      result.quarantined.push(entry.id);
+      writeRecoveryJournal({
+        appDataRoot: roots.appDataRoot,
+        entry: { ...entry, state: "failed", updatedAt: new Date().toISOString() }
+      });
+      result.attention.push(entry.id);
     }
   }
   return result;

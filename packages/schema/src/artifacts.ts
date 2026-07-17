@@ -77,7 +77,16 @@ export const RecoveryJournalEntrySchema = z
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema
   })
-  .strict();
+  .strict()
+  .superRefine((entry, context) => {
+    if (entry.kind === "provider-output" && entry.artifact === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Provider recovery requires catalog artifact metadata.",
+        path: ["artifact"]
+      });
+    }
+  });
 export type RecoveryJournalEntry = z.infer<typeof RecoveryJournalEntrySchema>;
 
 export const ArtifactLineageSchema = z

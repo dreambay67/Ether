@@ -28,6 +28,7 @@ import type { OwnedReplacementRollback } from "./database.js";
 import {
   type DocumentStoreEnvironment,
   type DocumentStoreRuntime,
+  type ReferenceGrantRequest,
   type ReadOnlyReason,
   WriterLease,
   locationSupportsWriting,
@@ -81,7 +82,7 @@ export interface OpenDocumentStoreOptions {
 
 export interface ReadDocumentRepositories {
   artifacts: Pick<ArtifactRepository, "get" | "list">;
-  blobs: Pick<BlobRepository, "get" | "list" | "readParts">;
+  blobs: Pick<BlobRepository, "get" | "list">;
   graphs: Pick<GraphRepository, "get" | "list">;
   outputs: Pick<OutputRepository, "getPayload" | "getVersion">;
   revisions: Pick<
@@ -101,7 +102,7 @@ export interface DocumentRepositories extends ReadDocumentRepositories {
   artifacts: Pick<ArtifactRepository, "attach" | "get" | "list">;
   blobs: Pick<
     BlobRepository,
-    "beginImport" | "finalize" | "get" | "list" | "readParts" | "removeIncomplete" | "writeChunk" | "writeInline"
+    "get" | "list"
   >;
   outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert">;
   revisions: Pick<
@@ -121,7 +122,7 @@ export interface DocumentRepositories extends ReadDocumentRepositories {
     SettingsRepository,
     "getHeader" | "getLiveOutput" | "setFeatureFlag" | "setLiveOutput" | "setTitle"
   >;
-  references: Pick<ReferenceRepository, "get" | "list" | "put">;
+  references: Pick<ReferenceRepository, "get" | "list">;
 }
 
 interface InternalDocumentRepositories {
@@ -133,6 +134,14 @@ interface InternalDocumentRepositories {
   settings: SettingsRepository;
   references: ReferenceRepository;
 }
+
+export const DOCUMENT_STORE_INTERNAL = Symbol("ether.document-store.internal");
+export const DOCUMENT_STORE_RECOVERY_OPEN = Symbol("ether.document-store.recovery-open");
+
+export type InternalDocumentStoreMode = "read" | "write";
+export type InternalDocumentStoreCallback<T> = (
+  repositories: InternalDocumentRepositories
+) => T;
 
 interface RepositoryScope<T> {
   close(): void;
@@ -358,6 +367,24 @@ export class DocumentStore {
     }
   }
 
+  static async [DOCUMENT_STORE_RECOVERY_OPEN](
+    filePath: string,
+    environment?: DocumentStoreEnvironment
+  ): Promise<DocumentStore> {
+    const absolutePath = path.resolve(filePath);
+    const runtime = resolveDocumentStoreEnvironment(environment);
+    const connection = openEtherDocumentConnection(absolutePath, true, {
+      allowDerivedIndexMismatch: true
+    });
+    return new DocumentStore({
+      database: connection.database,
+      documentId: connection.inspection.document.documentId,
+      mode: { kind: "read-only", reason: "requested" },
+      path: absolutePath,
+      runtime
+    });
+  }
+
   get dirty(): boolean {
     return false;
   }
@@ -372,6 +399,28 @@ export class DocumentStore {
 
   get path(): string {
     return this.currentPath;
+  }
+
+  assertReferenceGrant(request: Omit<ReferenceGrantRequest, "documentId">): void {
+    if (!this.runtime.referenceGrantAuthority.validate({ ...request, documentId: this.documentId })) {
+      throw new DocumentStoreError(
+        "REFERENCE_GRANT_DENIED",
+        "The reference path grant is missing, revoked, or bound to different content."
+      );
+    }
+  }
+
+  revokeReferenceGrantAuthority(grantId: string): void {
+    this.runtime.referenceGrantAuthority.revoke?.(grantId, this.documentId);
+  }
+
+  [DOCUMENT_STORE_INTERNAL]<T>(
+    mode: InternalDocumentStoreMode,
+    callback: InternalDocumentStoreCallback<T>
+  ): Promise<T> {
+    return this.enqueue(() =>
+      mode === "write" ? this.runInternalTransaction(callback) : this.runInternalRead(callback)
+    );
   }
 
   read<T>(callback: (repositories: ReadDocumentRepositories) => T): Promise<T> {
@@ -431,15 +480,30 @@ export class DocumentStore {
   rebuildDerivedIndexes(): Promise<void> {
     return this.transaction(() => {
       this.database.exec("REINDEX");
-      for (const table of [
-        "prompt_output_fts",
-        "artifact_fts",
-        "tag_fts",
-        "run_fts",
-        "metadata_fts"
-      ]) {
-        this.database.exec(`INSERT INTO ${table}(${table}) VALUES('optimize')`);
-      }
+      this.database.exec(`
+        DELETE FROM prompt_output_fts;
+        DELETE FROM artifact_fts;
+        DELETE FROM tag_fts;
+        DELETE FROM run_fts;
+        DELETE FROM metadata_fts;
+        INSERT INTO prompt_output_fts (source_type, source_id, title, body, metadata)
+          SELECT 'prompt', node_id, title, config_json, presentation_json FROM nodes;
+        INSERT INTO prompt_output_fts (source_type, source_id, title, body, metadata)
+          SELECT 'output', payload_id, channel || ':' || role,
+                 coalesce(content_text, content_json), metadata_json
+          FROM node_output_payloads;
+        INSERT INTO artifact_fts (artifact_id, title, description, metadata)
+          SELECT artifact_id, title, description, metadata_json FROM artifacts;
+        INSERT INTO tag_fts (artifact_id, tag)
+          SELECT artifact_id, tag FROM artifact_tags;
+        INSERT INTO run_fts (provider_run_id, provider_id, model_id, request, response, metadata)
+          SELECT provider_run_id, provider_id, model_id, request_json,
+                 coalesce(response_json, ''), metadata_json FROM provider_runs;
+        INSERT INTO metadata_fts (entity_type, entity_id, metadata)
+          SELECT 'document', document_id, title || ' ' || feature_flags_json FROM document;
+        INSERT INTO metadata_fts (entity_type, entity_id, metadata)
+          SELECT 'artifact', artifact_id, metadata_json FROM artifacts;
+      `);
     });
   }
 
@@ -510,9 +574,7 @@ export class DocumentStore {
         },
         blobs: {
           get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
-          list: () => invoke(() => repositories.blobs.list()),
-          readParts: (contentKey, start, endExclusive) =>
-            invoke(() => repositories.blobs.readParts(contentKey, start, endExclusive))
+          list: () => invoke(() => repositories.blobs.list())
         },
         graphs: {
           get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
@@ -562,19 +624,8 @@ export class DocumentStore {
         attach: (artifact) => invoke(() => repositories.artifacts.attach(artifact))
       },
       blobs: {
-        beginImport: (input) => invoke(() => repositories.blobs.beginImport(input)),
-        finalize: (importId, contentKey, chunkCount) =>
-          invoke(() => repositories.blobs.finalize(importId, contentKey, chunkCount)),
         get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
-        list: () => invoke(() => repositories.blobs.list()),
-        readParts: (contentKey, start, endExclusive) =>
-          invoke(() => repositories.blobs.readParts(contentKey, start, endExclusive)),
-        removeIncomplete: (contentKey) =>
-          invoke(() => repositories.blobs.removeIncomplete(contentKey)),
-        writeChunk: (importId, contentKey, chunk, data) =>
-          invoke(() => repositories.blobs.writeChunk(importId, contentKey, chunk, data)),
-        writeInline: (importId, contentKey, data) =>
-          invoke(() => repositories.blobs.writeInline(importId, contentKey, data))
+        list: () => invoke(() => repositories.blobs.list())
       },
       graphs: {
         get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
@@ -609,8 +660,7 @@ export class DocumentStore {
       },
       references: {
         get: (id) => invoke(() => repositories.references.get(id)),
-        list: () => invoke(() => repositories.references.list()),
-        put: (reference) => invoke(() => repositories.references.put(reference))
+        list: () => invoke(() => repositories.references.list())
       }
     };
     return {
@@ -647,6 +697,52 @@ export class DocumentStore {
       throw error;
     } finally {
       scope.close();
+    }
+  }
+
+  private runInternalRead<T>(callback: InternalDocumentStoreCallback<T>): T {
+    this.assertOpen();
+    const ownsTransaction = !this.database.isTransaction;
+    if (ownsTransaction) this.database.exec("BEGIN DEFERRED");
+    try {
+      const result = callback(this.internalRepositories());
+      if (isPromiseLike(result)) {
+        throw new DocumentStoreError(
+          "ASYNC_TRANSACTION_CALLBACK",
+          "Internal repository callbacks must complete synchronously."
+        );
+      }
+      if (ownsTransaction) this.database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      if (ownsTransaction) this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private runInternalTransaction<T>(callback: InternalDocumentStoreCallback<T>): T {
+    this.assertOpen();
+    if (this.currentMode.kind !== "writable") {
+      throw new DocumentStoreError("READ_ONLY", "This Ether document is open read-only.");
+    }
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const result = callback(this.internalRepositories());
+      if (isPromiseLike(result)) {
+        throw new DocumentStoreError(
+          "ASYNC_TRANSACTION_CALLBACK",
+          "Internal repository callbacks must complete synchronously."
+        );
+      }
+      this.database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        this.database.exec("ROLLBACK");
+      } catch {
+        // Preserve the internal operation error.
+      }
+      throw error;
     }
   }
 
@@ -935,6 +1031,8 @@ export { DocumentRepositoryError };
 export type {
   CreateStage,
   DocumentStoreEnvironment,
+  ReferenceGrantAuthority,
+  ReferenceGrantRequest,
   ReadOnlyReason,
   WritableLocationCapabilityAdapter,
   WritableLocationKind

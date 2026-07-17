@@ -1,7 +1,22 @@
 import * as documentPackage from "@ether/document";
-import type { Artifact, EtherGraph, PreparedGraphCommit } from "@ether/schema";
+import type {
+  Artifact,
+  EtherGraph,
+  NodeOutputVersion,
+  PayloadEnvelope,
+  PreparedGraphCommit
+} from "@ether/schema";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -19,6 +34,7 @@ interface Task6Store {
     revisions: { head(): { documentRevisionId: string; graphRevisions: Record<string, string> } };
   }) => T): Promise<T>;
   transaction<T>(callback: (repositories: {
+    outputs: { insert(version: NodeOutputVersion, payloads: PayloadEnvelope[]): void };
     revisions: { commit(input: PreparedGraphCommit): unknown };
   }) => T): Promise<T>;
 }
@@ -34,12 +50,14 @@ interface RecoveryApi {
     options?: { appDataRoot?: string; checkpoint?: (name: string) => void }
   ): Promise<{ contentKey: string }>;
   reconcileStaging(store: Task6Store, options: { appDataRoot: string }): Promise<{
+    attention: string[];
     quarantined: string[];
     recovered: string[];
     removed: string[];
   }>;
   repairDocument(sourcePath: string, destinationPath: string, options: {
     appDataRoot: string;
+    allowLossy?: boolean;
     environment: object;
   }): Promise<{
     destinationPath: string;
@@ -76,7 +94,17 @@ function graph(): EtherGraph {
     kind: "root",
     createdAt: now,
     updatedAt: now,
-    nodes: [],
+    nodes: [
+      {
+        id: "prompt-1",
+        definitionId: "prompt.text",
+        title: "Recovery prompt",
+        position: { x: 40, y: 60 },
+        size: { width: 220, height: 140 },
+        config: { kind: "prompt.text", body: "Recover this", assembly: "append" },
+        presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+      }
+    ],
     edges: [],
     groups: [],
     modules: [],
@@ -87,6 +115,47 @@ function graph(): EtherGraph {
       inspectorTarget: null
     }
   };
+}
+
+async function createProvenance(
+  store: Task6Store,
+  outputVersionId: string,
+  payloadId: string,
+  channel: PayloadEnvelope["channel"] = "image"
+): Promise<void> {
+  const head = await store.read(({ revisions }) => revisions.head());
+  const version: NodeOutputVersion = {
+    id: outputVersionId,
+    nodeId: "prompt-1",
+    graphId: "graph-root",
+    graphRevisionId: head.graphRevisions["graph-root"],
+    inputPayloadIds: [],
+    selectedOutputVersionIds: [],
+    compiledContextHash: "sha256:recovery",
+    producer: { kind: "local", executor: "deterministic-assembly" },
+    outputPayloadIds: [payloadId],
+    parentOutputVersionId: null,
+    approval: { state: "unreviewed" },
+    runId: null,
+    stepId: null,
+    workItemId: null,
+    attemptId: null,
+    timing: {
+      startedAt: "2026-07-17T08:00:00.000Z",
+      completedAt: "2026-07-17T08:00:01.000Z"
+    },
+    failure: null,
+    createdAt: "2026-07-17T08:00:01.000Z"
+  };
+  const payload: PayloadEnvelope = {
+    id: payloadId,
+    channel,
+    role: "general",
+    content: { kind: "object", value: { recovered: true } },
+    source: { nodeId: "prompt-1", outputVersionId, lineageKey: `lineage-${payloadId}` },
+    metadata: {}
+  };
+  await store.transaction(({ outputs }) => outputs.insert(version, [payload]));
 }
 
 function pngBytes(length: number, seed: number): Buffer {
@@ -137,6 +206,7 @@ describe("Ether AppData recovery and logical repair", () => {
   it("reconciles a staged provider output once and is idempotent", async () => {
     const store = await createStore(sourcePath, appDataRoot);
     stores.push(store);
+    await createProvenance(store, "output-provider", "payload-provider");
     const providerDirectory = path.join(appDataRoot, "staging", "provider", "attempt-1");
     const stagedPath = path.join(providerDirectory, "output.png");
     mkdirSync(providerDirectory, { recursive: true });
@@ -168,8 +238,17 @@ describe("Ether AppData recovery and logical repair", () => {
     expect(first.recovered).toEqual(["provider-attempt-1"]);
     await expect(
       store.read(({ artifacts }) => artifacts.get("artifact-provider-recovered"))
-    ).resolves.toMatchObject({ id: "artifact-provider-recovered" });
-    expect(second).toEqual({ recovered: [], quarantined: [], removed: [] });
+    ).resolves.toMatchObject({
+      id: "artifact-provider-recovered",
+      metadata: {
+        recovery: {
+          journalId: "provider-attempt-1",
+          reviewRequired: true,
+          status: "recovered"
+        }
+      }
+    });
+    expect(second).toEqual({ attention: [], recovered: [], quarantined: [], removed: [] });
     mkdirSync(providerDirectory, { recursive: true });
     writeFileSync(stagedPath, pngBytes(8192, 0x41), { flag: "wx" });
     api().writeRecoveryJournal({ appDataRoot, entry: recoveryEntry });
@@ -180,7 +259,7 @@ describe("Ether AppData recovery and logical repair", () => {
     expect(readdirSync(path.join(appDataRoot, "recovery"), { recursive: true })).toEqual([]);
   });
 
-  it("reconciles provider staging automatically during writable startup", async () => {
+  it("preserves provider staging without valid artifact metadata for attention", async () => {
     const created = await createStore(sourcePath, appDataRoot);
     const documentId = created.documentId;
     await created.close();
@@ -188,9 +267,11 @@ describe("Ether AppData recovery and logical repair", () => {
     const stagedPath = path.join(providerDirectory, "output.png");
     mkdirSync(providerDirectory, { recursive: true });
     writeFileSync(stagedPath, pngBytes(4096, 0x52), { flag: "wx" });
-    api().writeRecoveryJournal({
-      appDataRoot,
-      entry: {
+    const recoveryRoot = path.join(appDataRoot, "recovery");
+    mkdirSync(recoveryRoot, { recursive: true });
+    writeFileSync(
+      path.join(recoveryRoot, "media-deadfeed.json"),
+      JSON.stringify({
         id: "provider-attempt-startup",
         kind: "provider-output",
         state: "staged",
@@ -201,8 +282,8 @@ describe("Ether AppData recovery and logical repair", () => {
         mediaType: "image/png",
         createdAt: "2026-07-17T08:00:00.000Z",
         updatedAt: "2026-07-17T08:00:00.000Z"
-      }
-    });
+      })
+    );
 
     const reopened = (await documentPackage.DocumentStore.open(sourcePath, {
       access: "require-write",
@@ -210,12 +291,9 @@ describe("Ether AppData recovery and logical repair", () => {
     })) as Task6Store;
     stores.push(reopened);
 
-    expect(readdirSync(path.join(appDataRoot, "recovery"), { recursive: true })).toEqual([]);
-    await expect(api().reconcileStaging(reopened, { appDataRoot })).resolves.toEqual({
-      recovered: [],
-      quarantined: [],
-      removed: []
-    });
+    expect(existsSync(stagedPath)).toBe(true);
+    expect(readdirSync(path.join(appDataRoot, "quarantine"), { recursive: true })).not.toEqual([]);
+    await expect(reopened.read(({ artifacts }) => artifacts.get("provider-attempt-startup"))).resolves.toBeUndefined();
   });
 
   it("quarantines corrupt or incomplete staging without touching the document directory", async () => {
@@ -231,10 +309,178 @@ describe("Ether AppData recovery and logical repair", () => {
     expect(readdirSync(root).filter((name) => name.includes("staging") || name.includes("recovery"))).toEqual([]);
   });
 
+  it("uses unique quarantine destinations without clobbering existing evidence", async () => {
+    const store = await createStore(sourcePath, appDataRoot);
+    stores.push(store);
+    const recoveryRoot = path.join(appDataRoot, "recovery");
+    const quarantineRoot = path.join(appDataRoot, "quarantine");
+    mkdirSync(recoveryRoot, { recursive: true });
+    mkdirSync(quarantineRoot, { recursive: true });
+    writeFileSync(path.join(quarantineRoot, "media-deadbeef.json"), "older evidence");
+    writeFileSync(path.join(recoveryRoot, "media-deadbeef.json"), "{broken");
+
+    await api().reconcileStaging(store, { appDataRoot });
+    const evidence = readdirSync(quarantineRoot).map((name) =>
+      readFileSync(path.join(quarantineRoot, name), "utf8")
+    );
+    expect(evidence).toEqual(expect.arrayContaining(["older evidence", "{broken"]));
+  });
+
+  it("leaves another document's journal and staging completely untouched", async () => {
+    const firstPath = path.join(root, "First.ether");
+    const secondPath = path.join(root, "Second.ether");
+    const first = await createStore(firstPath, appDataRoot);
+    const second = await createStore(secondPath, appDataRoot);
+    stores.push(first, second);
+    const stagedPath = path.join(appDataRoot, "staging", "provider", "second", "output.png");
+    mkdirSync(path.dirname(stagedPath), { recursive: true });
+    writeFileSync(stagedPath, pngBytes(512, 0x33));
+    const journalPath = api().writeRecoveryJournal({
+      appDataRoot,
+      entry: {
+        id: "provider-second-document",
+        kind: "provider-output",
+        state: "staged",
+        documentId: second.documentId,
+        documentPath: secondPath,
+        stagedPath,
+        sourceName: "output.png",
+        mediaType: "image/png",
+        artifact: {
+          id: "artifact-second",
+          channel: "image",
+          mediaType: "image/png",
+          source: { outputVersionId: "output-second", payloadId: "payload-second" },
+          createdAt: "2026-07-17T08:00:00.000Z",
+          metadata: {}
+        },
+        createdAt: "2026-07-17T08:00:00.000Z",
+        updatedAt: "2026-07-17T08:00:00.000Z"
+      }
+    });
+
+    await expect(api().reconcileStaging(first, { appDataRoot })).resolves.toEqual({
+      attention: [],
+      quarantined: [],
+      recovered: [],
+      removed: []
+    });
+    expect(readFileSync(journalPath, "utf8")).toContain("provider-second-document");
+    expect(readFileSync(stagedPath)).toEqual(pngBytes(512, 0x33));
+  });
+
+  it.each(["journal-created", "staging-created", "chunk-staged:0", "validated"])(
+    "can reclaim an import interrupted at %s",
+    async (checkpoint) => {
+      const filePath = path.join(root, `${checkpoint.replace(/[:]/g, "-")}.ether`);
+      const store = await createStore(filePath, appDataRoot);
+      stores.push(store);
+      const inputPath = path.join(root, `${checkpoint.replace(/[:]/g, "-")}.png`);
+      writeFileSync(inputPath, pngBytes(4 * 1024 * 1024 + 17, checkpoint.length));
+
+      await expect(
+        api().importBlob(store, { sourcePath: inputPath, mediaType: "image/png" }, {
+          appDataRoot,
+          checkpoint: (name) => {
+            if (name === checkpoint) throw new Error(`stop at ${checkpoint}`);
+          }
+        })
+      ).rejects.toThrow(`stop at ${checkpoint}`);
+      expect(readdirSync(path.join(appDataRoot, "recovery"))).toHaveLength(1);
+      await expect(api().reconcileStaging(store, { appDataRoot })).resolves.toMatchObject({
+        removed: [expect.stringMatching(/^blob-import-/)]
+      });
+      expect(readdirSync(path.join(appDataRoot, "recovery"))).toEqual([]);
+    }
+  );
+
+  it("retains a failed provider journal and staged evidence for retry", async () => {
+    const store = await createStore(sourcePath, appDataRoot);
+    stores.push(store);
+    await createProvenance(store, "output-retry", "payload-retry");
+    const stagedPath = path.join(appDataRoot, "staging", "provider", "retry", "output.png");
+    mkdirSync(path.dirname(stagedPath), { recursive: true });
+    writeFileSync(stagedPath, Buffer.from("not a png"));
+    api().writeRecoveryJournal({
+      appDataRoot,
+      entry: {
+        id: "provider-retry",
+        kind: "provider-output",
+        state: "staged",
+        documentId: store.documentId,
+        documentPath: sourcePath,
+        stagedPath,
+        sourceName: "output.png",
+        mediaType: "image/png",
+        artifact: {
+          id: "artifact-retry",
+          channel: "image",
+          mediaType: "image/png",
+          source: { outputVersionId: "output-retry", payloadId: "payload-retry" },
+          createdAt: "2026-07-17T08:00:00.000Z",
+          metadata: {}
+        },
+        createdAt: "2026-07-17T08:00:00.000Z",
+        updatedAt: "2026-07-17T08:00:00.000Z"
+      }
+    });
+
+    await expect(api().reconcileStaging(store, { appDataRoot })).resolves.toMatchObject({
+      attention: ["provider-retry"]
+    });
+    expect(existsSync(stagedPath)).toBe(true);
+    const journalFiles = readdirSync(path.join(appDataRoot, "recovery"));
+    const providerJournal = journalFiles.find((name) =>
+      readFileSync(path.join(appDataRoot, "recovery", name), "utf8").includes("provider-retry")
+    );
+    expect(providerJournal).toBeDefined();
+    expect(readFileSync(path.join(appDataRoot, "recovery", providerJournal!), "utf8")).toContain('"state":"failed"');
+  });
+
+  it("refuses to reclaim a Windows junction that points outside Ether AppData", async () => {
+    if (process.platform !== "win32") return;
+    const store = await createStore(sourcePath, appDataRoot);
+    stores.push(store);
+    const outside = path.join(root, "outside");
+    const sentinel = path.join(outside, "keep.txt");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(sentinel, "keep");
+    const junction = path.join(appDataRoot, "staging", "imports", "junction-import");
+    mkdirSync(path.dirname(junction), { recursive: true });
+    symlinkSync(outside, junction, "junction");
+    api().writeRecoveryJournal({
+      appDataRoot,
+      entry: {
+        id: "junction-import",
+        kind: "blob-import" as never,
+        state: "staged",
+        documentId: store.documentId,
+        documentPath: sourcePath,
+        stagedPath: junction,
+        sourceName: "outside.bin",
+        mediaType: "application/octet-stream",
+        createdAt: "2026-07-17T08:00:00.000Z",
+        updatedAt: "2026-07-17T08:00:00.000Z"
+      }
+    });
+
+    await expect(api().reconcileStaging(store, { appDataRoot })).resolves.toMatchObject({
+      attention: ["junction-import"]
+    });
+    expect(readFileSync(sentinel, "utf8")).toBe("keep");
+    expect(existsSync(junction)).toBe(true);
+  });
+
   it("repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses", async () => {
     const store = await createStore(sourcePath, appDataRoot);
     stores.push(store);
-    const internalGraph = { ...graph(), id: "graph-module", title: "Module", kind: "module" as const };
+    const internalGraph = {
+      ...graph(),
+      id: "graph-module",
+      title: "Module",
+      kind: "module" as const,
+      nodes: []
+    };
     const module = {
       id: "module-repair",
       title: "Repair module",
@@ -260,6 +506,7 @@ describe("Ether AppData recovery and logical repair", () => {
         { type: "removeModule", graphId: rootWithModule.id, moduleId: module.id }
       ]
     }));
+    await createProvenance(store, "output-repair", "payload-repair");
     const goodPath = path.join(root, "good.png");
     const badPath = path.join(root, "bad.png");
     writeFileSync(goodPath, pngBytes(2048, 0x21));
@@ -278,14 +525,40 @@ describe("Ether AppData recovery and logical repair", () => {
 
     const sourceBefore = hashFile(sourcePath);
     const database = new DatabaseSync(sourcePath);
+    database.exec(`
+      INSERT INTO artifact_lineage (
+        artifact_id, parent_artifact_id, relation, source_output_version_id, metadata_json
+      ) VALUES ('artifact-good', 'artifact-good', 'derived-from', 'output-repair', '{"role":"general"}');
+      INSERT INTO artifact_tags (artifact_id, tag, created_at)
+      VALUES ('artifact-good', 'keeper', '2026-07-17T08:02:00.000Z');
+      INSERT INTO artifact_ratings (
+        rating_id, artifact_id, score, actor, rubric_id, notes, created_at
+      ) VALUES ('rating-good', 'artifact-good', 5, 'user', NULL, 'keep', '2026-07-17T08:02:00.000Z');
+      INSERT INTO collections (
+        collection_id, name, description, is_primary, metadata_json, created_at, updated_at
+      ) VALUES (
+        'collection-good', 'Keepers', 'Recovered set', 1, '{}',
+        '2026-07-17T08:02:00.000Z', '2026-07-17T08:02:00.000Z'
+      );
+      INSERT INTO collection_memberships (collection_id, artifact_id, position, added_at)
+      VALUES ('collection-good', 'artifact-good', 0, '2026-07-17T08:02:00.000Z');
+    `);
     database.prepare("UPDATE blob_chunks SET data = ? WHERE content_key = ? AND chunk_index = 1").run(Buffer.from("corrupt"), bad.contentKey);
     database.close();
     const damagedBeforeRepair = hashFile(sourcePath);
     expect(damagedBeforeRepair).not.toBe(sourceBefore);
 
+    const refusedPath = path.join(root, "Refused-lossy.ether");
+    await expect(api().repairDocument(sourcePath, refusedPath, {
+      appDataRoot,
+      environment: environment(appDataRoot)
+    })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
+    expect(existsSync(refusedPath)).toBe(false);
+
     const destinationPath = path.join(root, "Repaired.ether");
     const report = await api().repairDocument(sourcePath, destinationPath, {
       appDataRoot,
+      allowLossy: true,
       environment: environment(appDataRoot)
     });
 
@@ -299,6 +572,13 @@ describe("Ether AppData recovery and logical repair", () => {
 
     const headerDatabase = new DatabaseSync(destinationPath, { readOnly: true });
     expect(headerDatabase.prepare("PRAGMA user_version").get()).toEqual({ user_version: 40000 });
+    expect(headerDatabase.prepare("SELECT tag FROM artifact_tags WHERE artifact_id = 'artifact-good'").get()).toEqual({ tag: "keeper" });
+    expect(headerDatabase.prepare("SELECT score, notes FROM artifact_ratings WHERE artifact_id = 'artifact-good'").get()).toEqual({ score: 5, notes: "keep" });
+    expect(headerDatabase.prepare("SELECT name FROM collections WHERE collection_id = 'collection-good'").get()).toEqual({ name: "Keepers" });
+    expect(headerDatabase.prepare("SELECT artifact_id FROM collection_memberships WHERE collection_id = 'collection-good'").get()).toEqual({ artifact_id: "artifact-good" });
+    expect(headerDatabase.prepare("SELECT parent_artifact_id FROM artifact_lineage WHERE artifact_id = 'artifact-good'").get()).toEqual({ parent_artifact_id: "artifact-good" });
+    expect(headerDatabase.prepare("SELECT output_version_id FROM node_output_versions WHERE output_version_id = 'output-repair'").get()).toEqual({ output_version_id: "output-repair" });
+    expect(headerDatabase.prepare("SELECT payload_id FROM node_output_payloads WHERE payload_id = 'payload-repair'").get()).toEqual({ payload_id: "payload-repair" });
     headerDatabase.close();
     const repaired = (await documentPackage.DocumentStore.open(destinationPath, { access: "read-only" })) as Task6Store;
     stores.push(repaired);
@@ -308,5 +588,32 @@ describe("Ether AppData recovery and logical repair", () => {
       internalGraph,
       rootWithModule
     ]);
+  });
+
+  it("repairs through corrupt derived FTS state and rebuilds it from authoritative rows", async () => {
+    const store = await createStore(sourcePath, appDataRoot);
+    await store.close();
+    const sourceBefore = hashFile(sourcePath);
+    const database = new DatabaseSync(sourcePath);
+    database.prepare("DELETE FROM prompt_output_fts WHERE source_id = 'prompt-1'").run();
+    database.close();
+    const damagedBeforeRepair = hashFile(sourcePath);
+    expect(damagedBeforeRepair).not.toBe(sourceBefore);
+
+    await expect(documentPackage.DocumentStore.open(sourcePath, {
+      access: "read-only"
+    })).rejects.toMatchObject({ code: "FTS_INDEX_MISMATCH" });
+
+    const destinationPath = path.join(root, "Rebuilt-fts.ether");
+    await expect(api().repairDocument(sourcePath, destinationPath, {
+      appDataRoot,
+      environment: environment(appDataRoot)
+    })).resolves.toMatchObject({ losses: [] });
+    expect(hashFile(sourcePath)).toBe(damagedBeforeRepair);
+    const repairedDatabase = new DatabaseSync(destinationPath, { readOnly: true });
+    expect(repairedDatabase.prepare(
+      "SELECT source_id FROM prompt_output_fts WHERE prompt_output_fts MATCH 'Recover'"
+    ).all()).toEqual([{ source_id: "prompt-1" }]);
+    repairedDatabase.close();
   });
 });

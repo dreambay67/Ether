@@ -16,6 +16,8 @@ export {
   type DocumentStoreMode,
   type OpenDocumentStoreOptions,
   type ReadOnlyReason,
+  type ReferenceGrantAuthority,
+  type ReferenceGrantRequest,
   type WritableLocationCapabilityAdapter,
   type WritableLocationKind
 } from "./documentStore.js";
@@ -34,8 +36,14 @@ export {
   type ImportBlobOptions,
   type ImportBlobResult
 } from "./blob/importBlob.js";
-export { BlobReadError, readBlobRange } from "./blob/readBlobRange.js";
 export {
+  BlobReadError,
+  MAX_BUFFERED_BLOB_RANGE,
+  readBlobRange,
+  streamBlobRange
+} from "./blob/readBlobRange.js";
+export {
+  embedReference,
   linkReference,
   ReferenceError,
   relinkReference,
@@ -59,6 +67,7 @@ export {
 } from "./recovery/reconcileStaging.js";
 export {
   repairDocument,
+  RepairDocumentError,
   type RepairLoss,
   type RepairReport
 } from "./recovery/repairDocument.js";

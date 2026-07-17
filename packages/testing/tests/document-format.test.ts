@@ -176,9 +176,11 @@ function seedFtsParitySources(database: DatabaseSync): void {
       '{"kind":"text"}', '{"language":"en"}', '2026-07-17T10:00:01.000Z'
     );
     INSERT INTO artifacts (
-      artifact_id, content_key, kind, media_type, title, description, metadata_json, created_at
+      artifact_id, content_key, kind, media_type, source_output_version_id,
+      source_payload_id, title, description, metadata_json, created_at
     ) VALUES (
-      'artifact-parity', NULL, 'image', 'image/png', 'Parity artifact', 'source artifact',
+      'artifact-parity', NULL, 'image', 'image/png', 'output-parity', 'payload-parity',
+      'Parity artifact', 'source artifact',
       '{"camera":"source"}', '2026-07-17T10:00:02.000Z'
     );
     INSERT INTO artifact_tags (artifact_id, tag, created_at)
@@ -920,9 +922,11 @@ describe("Ether 4.0 document format", () => {
           '{"kind":"text"}', '{}', '2026-07-17T10:00:01.000Z'
         );
         INSERT INTO artifacts (
-          artifact_id, content_key, kind, media_type, title, description, metadata_json, created_at
+          artifact_id, content_key, kind, media_type, source_output_version_id,
+          source_payload_id, title, description, metadata_json, created_at
         ) VALUES (
-          'artifact-1', NULL, 'image', 'image/png', 'Aurora frame', 'magenta skyline',
+          'artifact-1', NULL, 'image', 'image/png', 'output-1', 'payload-1',
+          'Aurora frame', 'magenta skyline',
           '{"camera":"orbital"}', '2026-07-17T10:00:02.000Z'
         );
         INSERT INTO artifact_tags (artifact_id, tag, created_at)

@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 
-import type { DocumentStore } from "../documentStore.js";
-import { BLOB_CHUNK_SIZE } from "../repositories/blobs.js";
+import {
+  DOCUMENT_STORE_INTERNAL,
+  type DocumentStore
+} from "../documentStore.js";
+import { BLOB_CHUNK_SIZE, type BlobRecord, type StoredBlobPart } from "../repositories/blobs.js";
+
+export const MAX_BUFFERED_BLOB_RANGE = 8 * 1024 * 1024;
 
 export class BlobReadError extends Error {
   readonly code: string;
@@ -13,12 +18,7 @@ export class BlobReadError extends Error {
   }
 }
 
-export async function readBlobRange(
-  store: DocumentStore,
-  contentKey: string,
-  start: number,
-  endExclusive: number
-): Promise<Buffer> {
+function assertRange(start: number, endExclusive: number): void {
   if (
     !Number.isSafeInteger(start) ||
     !Number.isSafeInteger(endExclusive) ||
@@ -27,58 +27,74 @@ export async function readBlobRange(
   ) {
     throw new BlobReadError("INVALID_RANGE", "Blob range must use [start, endExclusive) integers.");
   }
-  const snapshot = await store.read(({ blobs }) => {
-    const blob = blobs.get(contentKey);
-    if (blob === undefined) return undefined;
-    if (endExclusive > blob.byteLength) {
-      throw new BlobReadError("INVALID_RANGE", "Blob range exceeds the content length.");
-    }
-    return {
-      blob,
-      parts: start === endExclusive ? [] : blobs.readParts(contentKey, start, endExclusive)
-    };
-  });
-  if (snapshot === undefined) {
+}
+
+function verifyPart(blob: BlobRecord, part: StoredBlobPart | undefined, index: number): Buffer {
+  const expectedLength = blob.storage === "inline"
+    ? blob.byteLength
+    : Math.min(BLOB_CHUNK_SIZE, blob.byteLength - index * BLOB_CHUNK_SIZE);
+  if (
+    part === undefined ||
+    part.index !== index ||
+    part.byteLength !== expectedLength ||
+    part.data.byteLength !== expectedLength ||
+    (blob.storage === "inline"
+      ? createHash("sha256").update(part.data).digest("hex") !== blob.contentKey
+      : createHash("sha256").update(part.data).digest("hex") !== part.sha256)
+  ) {
+    throw new BlobReadError("CORRUPT_BLOB_CHUNK", `Blob chunk ${index} is corrupt.`);
+  }
+  return Buffer.from(part.data);
+}
+
+export async function* streamBlobRange(
+  store: DocumentStore,
+  contentKey: string,
+  start: number,
+  endExclusive: number
+): AsyncGenerator<Buffer, void, void> {
+  assertRange(start, endExclusive);
+  const blob = await store[DOCUMENT_STORE_INTERNAL]("read", ({ blobs }) => blobs.get(contentKey));
+  if (blob === undefined) {
     throw new BlobReadError("BLOB_NOT_FOUND", "Blob is missing or not ready.");
   }
-  if (start === endExclusive) return Buffer.alloc(0);
-  const { blob, parts } = snapshot;
-  if (blob.storage === "inline") {
-    const part = parts[0];
-    if (
-      part === undefined ||
-      part.data.byteLength !== blob.byteLength ||
-      createHash("sha256").update(part.data).digest("hex") !== blob.contentKey
-    ) {
-      throw new BlobReadError("CORRUPT_BLOB_CHUNK", "Inline blob failed length or hash verification.");
-    }
-    return Buffer.from(part.data).subarray(start, endExclusive);
+  if (endExclusive > blob.byteLength) {
+    throw new BlobReadError("INVALID_RANGE", "Blob range exceeds the content length.");
   }
+  if (start === endExclusive) return;
 
-  const firstIndex = Math.floor(start / BLOB_CHUNK_SIZE);
-  const lastIndex = Math.floor((endExclusive - 1) / BLOB_CHUNK_SIZE);
-  if (parts.length !== lastIndex - firstIndex + 1) {
-    throw new BlobReadError("CORRUPT_BLOB_CHUNK", "Blob range has missing chunks.");
-  }
-  const slices: Buffer[] = [];
-  for (const [offset, part] of parts.entries()) {
-    const expectedIndex = firstIndex + offset;
-    const expectedLength = Math.min(
-      BLOB_CHUNK_SIZE,
-      blob.byteLength - expectedIndex * BLOB_CHUNK_SIZE
+  const firstIndex = blob.storage === "inline" ? 0 : Math.floor(start / BLOB_CHUNK_SIZE);
+  const lastIndex = blob.storage === "inline"
+    ? 0
+    : Math.floor((endExclusive - 1) / BLOB_CHUNK_SIZE);
+  for (let index = firstIndex; index <= lastIndex; index += 1) {
+    const part = await store[DOCUMENT_STORE_INTERNAL]("read", ({ blobs }) =>
+      blobs.readPart(contentKey, index)
     );
-    if (
-      part.index !== expectedIndex ||
-      part.byteLength !== expectedLength ||
-      part.data.byteLength !== expectedLength ||
-      createHash("sha256").update(part.data).digest("hex") !== part.sha256
-    ) {
-      throw new BlobReadError("CORRUPT_BLOB_CHUNK", `Blob chunk ${expectedIndex} is corrupt.`);
-    }
-    const partStart = expectedIndex * BLOB_CHUNK_SIZE;
+    const bytes = verifyPart(blob, part, index);
+    const partStart = blob.storage === "inline" ? 0 : index * BLOB_CHUNK_SIZE;
     const sliceStart = Math.max(start, partStart) - partStart;
-    const sliceEnd = Math.min(endExclusive, partStart + expectedLength) - partStart;
-    slices.push(Buffer.from(part.data).subarray(sliceStart, sliceEnd));
+    const sliceEnd = Math.min(endExclusive, partStart + bytes.byteLength) - partStart;
+    yield bytes.subarray(sliceStart, sliceEnd);
   }
-  return Buffer.concat(slices, endExclusive - start);
+}
+
+export async function readBlobRange(
+  store: DocumentStore,
+  contentKey: string,
+  start: number,
+  endExclusive: number
+): Promise<Buffer> {
+  assertRange(start, endExclusive);
+  if (endExclusive - start > MAX_BUFFERED_BLOB_RANGE) {
+    throw new BlobReadError(
+      "RANGE_TOO_LARGE",
+      `Buffered blob ranges are capped at ${MAX_BUFFERED_BLOB_RANGE} bytes.`
+    );
+  }
+  const parts: Buffer[] = [];
+  for await (const part of streamBlobRange(store, contentKey, start, endExclusive)) {
+    parts.push(part);
+  }
+  return Buffer.concat(parts, endExclusive - start);
 }

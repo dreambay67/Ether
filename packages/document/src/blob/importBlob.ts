@@ -3,14 +3,24 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { DocumentStore } from "../documentStore.js";
+import {
+  DOCUMENT_STORE_INTERNAL,
+  type DocumentStore
+} from "../documentStore.js";
 import {
   removeOwnedStagingPath,
   removeRecoveryJournal,
   resolveRecoveryRoots,
   writeRecoveryJournal
 } from "../recovery/recoveryJournal.js";
-import { BLOB_CHUNK_SIZE, INLINE_BLOB_LIMIT, type BlobRecord } from "../repositories/blobs.js";
+import {
+  BLOB_CHUNK_SIZE,
+  INLINE_BLOB_LIMIT,
+  mediaSignatureMatches,
+  type BlobRecord
+} from "../repositories/blobs.js";
+
+export { mediaSignatureMatches } from "../repositories/blobs.js";
 
 export interface ImportBlobInput {
   artifact?: Omit<Artifact, "byteLength" | "contentKey">;
@@ -41,6 +51,7 @@ interface StagedBlob {
   directory: string;
   importId: string;
   journalPath: string;
+  journalEntry: RecoveryJournalEntry;
   mediaType: string;
   sourceName: string;
 }
@@ -52,40 +63,6 @@ export class BlobImportError extends Error {
     super(message, options);
     this.name = "BlobImportError";
     this.code = code;
-  }
-}
-
-function bytesEqual(bytes: Uint8Array, signature: readonly number[], offset = 0): boolean {
-  return signature.every((value, index) => bytes[index + offset] === value);
-}
-
-export function mediaSignatureMatches(bytes: Uint8Array, mediaType: string): boolean {
-  switch (mediaType.toLowerCase()) {
-    case "image/png":
-      return bytesEqual(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    case "image/jpeg":
-      return bytesEqual(bytes, [0xff, 0xd8, 0xff]);
-    case "image/gif":
-      return bytesEqual(bytes, [0x47, 0x49, 0x46, 0x38]) &&
-        (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61;
-    case "image/webp":
-      return bytesEqual(bytes, [0x52, 0x49, 0x46, 0x46]) &&
-        bytesEqual(bytes, [0x57, 0x45, 0x42, 0x50], 8);
-    case "audio/wav":
-    case "audio/wave":
-      return bytesEqual(bytes, [0x52, 0x49, 0x46, 0x46]) &&
-        bytesEqual(bytes, [0x57, 0x41, 0x56, 0x45], 8);
-    case "audio/mpeg":
-      return bytesEqual(bytes, [0x49, 0x44, 0x33]) ||
-        (bytes[0] === 0xff && bytes[1] !== undefined && (bytes[1] & 0xe0) === 0xe0);
-    case "video/mp4":
-      return bytesEqual(bytes, [0x66, 0x74, 0x79, 0x70], 4);
-    case "application/pdf":
-      return bytesEqual(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]);
-    case "application/octet-stream":
-      return true;
-    default:
-      return mediaType.startsWith("text/");
   }
 }
 
@@ -106,7 +83,23 @@ async function stageBlob(
   const roots = resolveRecoveryRoots(options.appDataRoot);
   const importId = `blob-import-${randomUUID()}`;
   const directory = path.join(roots.stagingRoot, "imports", importId);
+  const timestamp = now();
+  let journalEntry: RecoveryJournalEntry = {
+    id: importId,
+    kind: "blob-import",
+    state: "staged",
+    documentId: store.documentId,
+    documentPath: store.path,
+    stagedPath: directory,
+    sourceName: path.basename(sourcePath),
+    mediaType: input.mediaType,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+  const journalPath = writeRecoveryJournal({ appDataRoot: roots.appDataRoot, entry: journalEntry });
+  options.checkpoint?.("journal-created");
   await mkdir(directory, { recursive: true });
+  options.checkpoint?.("staging-created");
   const file = await open(sourcePath, "r");
   const wholeHash = createHash("sha256");
   const chunks: StagedChunk[] = [];
@@ -130,10 +123,8 @@ async function stageBlob(
         sha256: createHash("sha256").update(bytes).digest("hex")
       });
       offset += bytesRead;
+      options.checkpoint?.(`chunk-staged:${index}`);
     }
-  } catch (error) {
-    removeOwnedStagingPath(directory, roots.appDataRoot);
-    throw error;
   } finally {
     await file.close();
   }
@@ -145,39 +136,31 @@ async function stageBlob(
     sourceBefore.mtimeNs !== sourceAfter.mtimeNs ||
     BigInt(offset) !== sourceBefore.size
   ) {
-    removeOwnedStagingPath(directory, roots.appDataRoot);
     throw new BlobImportError("SOURCE_CHANGED", "Blob source changed while it was being staged.");
   }
   if (firstBytes === undefined || !mediaSignatureMatches(firstBytes, input.mediaType)) {
-    removeOwnedStagingPath(directory, roots.appDataRoot);
     throw new BlobImportError(
       "MIME_MISMATCH",
       `Declared media type ${input.mediaType} does not match the file signature.`
     );
   }
   const contentKey = wholeHash.digest("hex");
-  const timestamp = now();
-  const entry: RecoveryJournalEntry = {
-    id: importId,
-    kind: "blob-import",
+  journalEntry = {
+    ...journalEntry,
     state: "validated",
-    documentId: store.documentId,
-    documentPath: store.path,
-    stagedPath: directory,
-    sourceName: path.basename(sourcePath),
-    mediaType: input.mediaType,
     contentKey,
     byteLength: offset,
-    createdAt: timestamp,
-    updatedAt: timestamp
+    updatedAt: now()
   };
-  const journalPath = writeRecoveryJournal({ appDataRoot: roots.appDataRoot, entry });
+  writeRecoveryJournal({ appDataRoot: roots.appDataRoot, entry: journalEntry });
+  options.checkpoint?.("validated");
   return {
     byteLength: offset,
     chunks,
     contentKey,
     directory,
     importId,
+    journalEntry,
     journalPath,
     mediaType: input.mediaType,
     sourceName: path.basename(sourcePath)
@@ -206,8 +189,17 @@ async function waitForReadyBlob(store: DocumentStore, contentKey: string): Promi
 }
 
 function cleanupStaging(staged: StagedBlob, appDataRoot?: string): void {
-  removeRecoveryJournal(staged.journalPath, appDataRoot);
   removeOwnedStagingPath(staged.directory, appDataRoot);
+  removeRecoveryJournal(staged.journalPath, appDataRoot);
+}
+
+function updateJournal(
+  staged: StagedBlob,
+  state: RecoveryJournalEntry["state"],
+  appDataRoot?: string
+): void {
+  staged.journalEntry = { ...staged.journalEntry, state, updatedAt: now() };
+  writeRecoveryJournal({ appDataRoot, entry: staged.journalEntry });
 }
 
 export async function importBlob(
@@ -218,7 +210,12 @@ export async function importBlob(
   const staged = await stageBlob(store, input, options);
   options.checkpoint?.("staged");
   const artifact = artifactFor(input, staged);
-  const ownership = await store.transaction(({ blobs }) =>
+  if (artifact !== undefined) {
+    await store[DOCUMENT_STORE_INTERNAL]("read", ({ artifacts }) =>
+      artifacts.validateProvenance(artifact)
+    );
+  }
+  const ownership = await store[DOCUMENT_STORE_INTERNAL]("write", ({ blobs }) =>
     blobs.beginImport({
       byteLength: staged.byteLength,
       contentKey: staged.contentKey,
@@ -230,22 +227,39 @@ export async function importBlob(
 
   if (ownership !== "owner") {
     const ready = ownership === "ready"
-      ? await store.read(({ blobs }) => blobs.get(staged.contentKey))
+      ? await store[DOCUMENT_STORE_INTERNAL]("read", ({ blobs }) =>
+          blobs.verifyReady(staged.contentKey, {
+            byteLength: staged.byteLength,
+            mediaType: staged.mediaType
+          })
+        )
       : await waitForReadyBlob(store, staged.contentKey);
     if (ready === undefined) {
       throw new BlobImportError("IMPORT_NOT_VISIBLE", "Deduplicated blob is not ready.");
     }
     if (artifact !== undefined) {
-      await store.transaction(({ artifacts }) => artifacts.attach(artifact));
+      await store[DOCUMENT_STORE_INTERNAL]("write", ({ artifacts }) => artifacts.attach(artifact));
     }
+    updateJournal(staged, "committed", options.appDataRoot);
     cleanupStaging(staged, options.appDataRoot);
     return { ...ready, deduplicated: true };
   }
 
+  updateJournal(staged, "publishing", options.appDataRoot);
   options.checkpoint?.("publishing");
   if (staged.byteLength <= INLINE_BLOB_LIMIT) {
     const data = await readFile(staged.chunks[0]?.path ?? "");
-    await store.transaction(({ blobs }) => blobs.writeInline(staged.importId, staged.contentKey, data));
+    const chunk = staged.chunks[0];
+    if (
+      chunk === undefined ||
+      data.byteLength !== chunk.byteLength ||
+      createHash("sha256").update(data).digest("hex") !== chunk.sha256
+    ) {
+      throw new BlobImportError("CORRUPT_STAGING", "Inline staged bytes failed verification.");
+    }
+    await store[DOCUMENT_STORE_INTERNAL]("write", ({ blobs }) =>
+      blobs.writeInline(staged.importId, staged.contentKey, data)
+    );
   } else {
     for (const chunk of staged.chunks) {
       const data = await readFile(chunk.path);
@@ -255,22 +269,20 @@ export async function importBlob(
       ) {
         throw new BlobImportError("CORRUPT_STAGING", "A staged blob chunk failed verification.");
       }
-      await store.transaction(({ blobs }) =>
+      await store[DOCUMENT_STORE_INTERNAL]("write", ({ blobs }) =>
         blobs.writeChunk(staged.importId, staged.contentKey, chunk, data)
       );
       options.checkpoint?.(`chunk:${chunk.index}`);
     }
   }
 
-  const ready = await store.transaction(({ artifacts, blobs }) => {
-    const result = blobs.finalize(
-      staged.importId,
-      staged.contentKey,
-      staged.byteLength <= INLINE_BLOB_LIMIT ? 0 : staged.chunks.length
-    );
+  options.checkpoint?.("before-finalize");
+  const ready = await store[DOCUMENT_STORE_INTERNAL]("write", ({ artifacts, blobs }) => {
+    const result = blobs.finalize(staged.importId, staged.contentKey);
     if (artifact !== undefined) artifacts.attach(artifact);
     return result;
   });
+  updateJournal(staged, "committed", options.appDataRoot);
   options.checkpoint?.("committed");
   cleanupStaging(staged, options.appDataRoot);
   return { ...ready, deduplicated: false };

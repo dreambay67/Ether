@@ -250,7 +250,8 @@ CREATE TABLE node_output_payloads (
   source_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_json)),
   artifact_id TEXT REFERENCES artifacts(artifact_id) ON DELETE SET NULL,
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  UNIQUE (output_version_id, payload_id)
 ) STRICT;
 
 CREATE TABLE approvals (
@@ -392,7 +393,9 @@ CREATE TABLE artifacts (
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (source_output_version_id, source_payload_id)
+    REFERENCES node_output_payloads(output_version_id, payload_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE artifact_lineage (
@@ -644,6 +647,7 @@ CREATE INDEX linked_references_preview_content_key_idx ON linked_references(prev
 CREATE INDEX artifacts_content_key_idx ON artifacts(content_key);
 CREATE INDEX artifact_lineage_parent_idx ON artifact_lineage(parent_artifact_id);
 CREATE INDEX artifact_lineage_output_version_idx ON artifact_lineage(source_output_version_id);
+CREATE INDEX artifacts_source_payload_idx ON artifacts(source_output_version_id, source_payload_id);
 CREATE INDEX artifact_ratings_artifact_id_idx ON artifact_ratings(artifact_id);
 CREATE INDEX collection_memberships_artifact_id_idx ON collection_memberships(artifact_id);
 CREATE INDEX export_records_collection_id_idx ON export_records(collection_id);

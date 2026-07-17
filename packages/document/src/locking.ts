@@ -33,6 +33,19 @@ export interface WritableLocationCapabilityAdapter {
   classify(filePath: string): WritableLocationKind;
 }
 
+export interface ReferenceGrantRequest {
+  documentId: string;
+  fingerprint: { byteLength: number; sampleSha256: string };
+  grantId: string;
+  operation: "link" | "relink" | "resolve";
+  path: string;
+}
+
+export interface ReferenceGrantAuthority {
+  revoke?(grantId: string, documentId: string): void;
+  validate(request: ReferenceGrantRequest): boolean;
+}
+
 export interface DocumentStoreEnvironment {
   appInstanceId?: string;
   heartbeatMs?: number;
@@ -47,6 +60,7 @@ export interface DocumentStoreEnvironment {
   pid?: number;
   processIsAlive?: (pid: number, machineId: string) => boolean;
   recoveryRoot?: string;
+  referenceGrantAuthority?: ReferenceGrantAuthority;
   staleMs?: number;
 }
 
@@ -73,6 +87,7 @@ interface ResolvedEnvironment {
   pid: number;
   processIsAlive: (pid: number, machineId: string) => boolean;
   recoveryRoot: string;
+  referenceGrantAuthority: ReferenceGrantAuthority;
   staleMs: number;
 }
 
@@ -158,6 +173,7 @@ export function resolveDocumentStoreEnvironment(
       environment.processIsAlive ??
       ((pid, ownerMachineId) => ownerMachineId === machineId && localProcessIsAlive(pid)),
     recoveryRoot: path.resolve(environment.recoveryRoot ?? defaultRecoveryRoot()),
+    referenceGrantAuthority: environment.referenceGrantAuthority ?? { validate: () => false },
     staleMs: environment.staleMs ?? 15_000
   };
 }

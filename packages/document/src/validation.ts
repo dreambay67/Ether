@@ -566,7 +566,8 @@ function assertFtsParity(database: DatabaseSync): void {
 
 export function validateEtherDocumentConnection(
   database: DatabaseSync,
-  filePath: string
+  filePath: string,
+  options: { allowDerivedIndexMismatch?: boolean } = {}
 ): EtherDocumentInspection {
   const applicationId = numberPragma(database, "application_id");
   if (applicationId !== ETHER_SQLITE_APPLICATION_ID) {
@@ -603,7 +604,7 @@ export function validateEtherDocumentConnection(
   const pragmas = readPragmas(database);
   assertPragmas(pragmas);
   assertSchema(database);
-  assertFtsParity(database);
+  if (options.allowDerivedIndexMismatch !== true) assertFtsParity(database);
 
   const quickCheckRows = database.prepare("PRAGMA quick_check").all() as Record<string, unknown>[];
   const quickCheckValues = quickCheckRows.flatMap((row) => Object.values(row));
