@@ -53,6 +53,7 @@ export type EtherDocumentErrorCode =
   | "UNSUPPORTED_SCHEMA"
   | "UNSUPPORTED_REQUIRED_FEATURE"
   | "SCHEMA_MISMATCH"
+  | "FTS_INDEX_MISMATCH"
   | "INVALID_PRAGMA"
   | "INTEGRITY_CHECK_FAILED"
   | "FOREIGN_KEY_CHECK_FAILED";
@@ -486,6 +487,82 @@ function assertSchema(database: DatabaseSync): void {
   );
 }
 
+const FTS_PARITY_QUERIES = [
+  {
+    actual: "SELECT source_type, source_id, title, body, metadata FROM prompt_output_fts",
+    expected: `
+      SELECT 'prompt' AS source_type, node_id AS source_id, title,
+             config_json AS body, presentation_json AS metadata
+      FROM nodes
+      UNION ALL
+      SELECT 'output' AS source_type, payload_id AS source_id,
+             channel || ':' || role AS title,
+             coalesce(content_text, content_json) AS body,
+             metadata_json AS metadata
+      FROM node_output_payloads
+    `,
+    name: "prompt_output_fts"
+  },
+  {
+    actual: "SELECT artifact_id, title, description, metadata FROM artifact_fts",
+    expected: `
+      SELECT artifact_id, title, description, metadata_json AS metadata
+      FROM artifacts
+    `,
+    name: "artifact_fts"
+  },
+  {
+    actual: "SELECT artifact_id, tag FROM tag_fts",
+    expected: "SELECT artifact_id, tag FROM artifact_tags",
+    name: "tag_fts"
+  },
+  {
+    actual: `
+      SELECT provider_run_id, provider_id, model_id, request, response, metadata
+      FROM run_fts
+    `,
+    expected: `
+      SELECT provider_run_id, provider_id, model_id,
+             request_json AS request, coalesce(response_json, '') AS response,
+             metadata_json AS metadata
+      FROM provider_runs
+    `,
+    name: "run_fts"
+  },
+  {
+    actual: "SELECT entity_type, entity_id, metadata FROM metadata_fts",
+    expected: `
+      SELECT 'document' AS entity_type, document_id AS entity_id,
+             title || ' ' || feature_flags_json AS metadata
+      FROM document
+      UNION ALL
+      SELECT 'artifact' AS entity_type, artifact_id AS entity_id,
+             metadata_json AS metadata
+      FROM artifacts
+    `,
+    name: "metadata_fts"
+  }
+] as const;
+
+function comparableRows(database: DatabaseSync, sql: string): string[] {
+  return (database.prepare(sql).all() as Record<string, unknown>[])
+    .map((row) => JSON.stringify(row))
+    .sort();
+}
+
+function assertFtsParity(database: DatabaseSync): void {
+  for (const query of FTS_PARITY_QUERIES) {
+    const expected = comparableRows(database, query.expected);
+    const actual = comparableRows(database, query.actual);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new EtherDocumentError(
+        "FTS_INDEX_MISMATCH",
+        `Ether document FTS index ${query.name} does not match its source rows.`
+      );
+    }
+  }
+}
+
 export function validateEtherDocumentConnection(
   database: DatabaseSync,
   filePath: string
@@ -525,6 +602,7 @@ export function validateEtherDocumentConnection(
   const pragmas = readPragmas(database);
   assertPragmas(pragmas);
   assertSchema(database);
+  assertFtsParity(database);
 
   const quickCheckRows = database.prepare("PRAGMA quick_check").all() as Record<string, unknown>[];
   const quickCheckValues = quickCheckRows.flatMap((row) => Object.values(row));

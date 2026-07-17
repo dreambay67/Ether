@@ -28,6 +28,7 @@ import {
   inspectEtherDocument,
   inspectEtherFileHeader,
   mapEtherDocumentError,
+  readEtherFileIdentity,
   validateEtherDocumentConnection,
   type EtherDocumentInspection,
   type EtherDocumentPragmas,
@@ -39,6 +40,7 @@ const TEST_HOOKS_SYMBOL = Symbol.for("@ether/document/boundary-test-hooks");
 export interface DocumentBoundaryTestHooks {
   afterWritableOpen?: (location: string) => void;
   beforeHardLinkPublication?: (temporaryPath: string, destinationPath: string) => void;
+  beforeTemporaryDatabaseOpen?: (temporaryPath: string) => void;
   beforeWritableDatabaseOpen?: (filePath: string) => void;
   beforeWritableOpen?: (filePath: string) => void;
   forceReadOnlyWritableConnection?: boolean;
@@ -208,24 +210,40 @@ function sameIdentity(left: EtherFileIdentity, right: EtherFileIdentity): boolea
   return left.dev === right.dev && left.ino === right.ino && left.birthtimeNs === right.birthtimeNs;
 }
 
+function assertSameOwnedFile(filePath: string, expectedIdentity: EtherFileIdentity): void {
+  const actualIdentity = readEtherFileIdentity(filePath, true);
+  if (!sameIdentity(actualIdentity, expectedIdentity)) {
+    throw new EtherDocumentError(
+      "PATH_CHANGED",
+      `Ether document temporary path changed after opening: ${filePath}`
+    );
+  }
+}
+
 function removePublishedLinkIfOwned(
   destinationPath: string,
   temporaryIdentity: EtherFileIdentity
 ): void {
   try {
-    const stats = lstatSync(destinationPath, { bigint: true });
-    const destinationIdentity: EtherFileIdentity = {
-      birthtimeNs: stats.birthtimeNs,
-      dev: stats.dev,
-      ino: stats.ino,
-      size: stats.size
-    };
-    if (sameIdentity(destinationIdentity, temporaryIdentity)) {
-      unlinkSync(destinationPath);
-    }
+    unlinkFileIfOwned(destinationPath, temporaryIdentity);
   } catch {
     // Cleanup is limited to a destination proven to be the link created by this attempt.
   }
+}
+
+function unlinkFileIfOwned(filePath: string, expectedIdentity: EtherFileIdentity): boolean {
+  const stats = lstatSync(filePath, { bigint: true });
+  const actualIdentity: EtherFileIdentity = {
+    birthtimeNs: stats.birthtimeNs,
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size
+  };
+  if (!sameIdentity(actualIdentity, expectedIdentity)) {
+    return false;
+  }
+  unlinkSync(filePath);
+  return true;
 }
 
 function canonicalPath(filePath: string): string {
@@ -358,12 +376,27 @@ export function createEtherDocument(
     const temporaryFile = openSync(temporaryPath, "wx", 0o600);
     closeSync(temporaryFile);
     temporaryOwned = true;
+    temporaryIdentity = readEtherFileIdentity(temporaryPath);
 
-    database = new DatabaseSync(temporaryPath, {
+    database = new DatabaseSync(writableDatabaseUrl(temporaryPath, false), {
       allowExtension: false,
       enableDoubleQuotedStringLiterals: false,
-      enableForeignKeyConstraints: true
+      enableForeignKeyConstraints: true,
+      open: false
     });
+    testHooks().beforeTemporaryDatabaseOpen?.(temporaryPath);
+    database.open();
+    const temporaryLocation = database.location();
+    if (
+      temporaryLocation === null ||
+      canonicalPath(temporaryLocation) !== canonicalPath(temporaryPath)
+    ) {
+      throw new EtherDocumentError(
+        "PATH_CHANGED",
+        `SQLite opened a different location than the owned temporary document: ${temporaryPath}`
+      );
+    }
+    assertEtherFileIdentity(temporaryPath, temporaryIdentity);
     configureNewDatabase(database);
     database.exec("BEGIN IMMEDIATE");
     try {
@@ -400,7 +433,7 @@ export function createEtherDocument(
     database = undefined;
 
     const inspection = inspectEtherDocument(temporaryPath);
-    temporaryIdentity = inspectEtherFileHeader(temporaryPath);
+    assertSameOwnedFile(temporaryPath, temporaryIdentity);
     try {
       testHooks().beforeHardLinkPublication?.(temporaryPath, absoluteDestination);
       linkSync(temporaryPath, absoluteDestination);
@@ -410,7 +443,12 @@ export function createEtherDocument(
     }
 
     try {
-      unlinkSync(temporaryPath);
+      if (!unlinkFileIfOwned(temporaryPath, temporaryIdentity)) {
+        throw new EtherDocumentError(
+          "PATH_CHANGED",
+          `Ether document temporary path changed during publication: ${temporaryPath}`
+        );
+      }
       temporaryOwned = false;
     } catch (error) {
       removePublishedLinkIfOwned(absoluteDestination, temporaryIdentity);
@@ -435,12 +473,8 @@ export function createEtherDocument(
     if (destinationOwned && temporaryIdentity !== undefined) {
       removePublishedLinkIfOwned(absoluteDestination, temporaryIdentity);
     }
-    if (temporaryOwned) {
-      try {
-        unlinkSync(temporaryPath);
-      } catch {
-        // Cleanup never removes a destination not proven to be owned by this attempt.
-      }
+    if (temporaryOwned && temporaryIdentity !== undefined) {
+      removePublishedLinkIfOwned(temporaryPath, temporaryIdentity);
     }
     throw creationError(error, absoluteDestination);
   }

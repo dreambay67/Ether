@@ -55,13 +55,15 @@ CREATE TABLE edges (
 CREATE TABLE graph_revisions (
   revision_id TEXT PRIMARY KEY,
   graph_id TEXT NOT NULL REFERENCES graphs(graph_id) ON DELETE CASCADE,
-  parent_revision_id TEXT REFERENCES graph_revisions(revision_id),
+  parent_revision_id TEXT,
   actor TEXT NOT NULL CHECK (actor IN ('user', 'codex', 'recipe', 'system')),
   title TEXT NOT NULL,
   created_at TEXT NOT NULL,
   operation_count INTEGER NOT NULL CHECK (operation_count >= 0),
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
-  UNIQUE (graph_id, revision_id)
+  UNIQUE (graph_id, revision_id),
+  FOREIGN KEY (graph_id, parent_revision_id)
+    REFERENCES graph_revisions(graph_id, revision_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE document_revisions (
@@ -143,7 +145,7 @@ CREATE TABLE node_output_versions (
   node_id TEXT NOT NULL,
   graph_id TEXT NOT NULL REFERENCES graphs(graph_id) ON DELETE CASCADE,
   graph_revision_id TEXT NOT NULL,
-  parent_output_version_id TEXT REFERENCES node_output_versions(output_version_id),
+  parent_output_version_id TEXT,
   producer_json TEXT NOT NULL CHECK (json_valid(producer_json)),
   input_payload_ids_json TEXT NOT NULL CHECK (json_valid(input_payload_ids_json)),
   selected_output_version_ids_json TEXT NOT NULL CHECK (json_valid(selected_output_version_ids_json)),
@@ -159,10 +161,13 @@ CREATE TABLE node_output_versions (
     (run_id IS NULL AND step_id IS NULL AND work_item_id IS NULL AND attempt_id IS NULL) OR
     (run_id IS NOT NULL AND step_id IS NOT NULL AND work_item_id IS NOT NULL AND attempt_id IS NOT NULL)
   ),
+  UNIQUE (graph_id, node_id, output_version_id),
   FOREIGN KEY (graph_id, node_id) REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE,
   FOREIGN KEY (graph_id, graph_revision_id) REFERENCES graph_revisions(graph_id, revision_id),
+  FOREIGN KEY (graph_id, node_id, parent_output_version_id)
+    REFERENCES node_output_versions(graph_id, node_id, output_version_id) ON DELETE RESTRICT,
   FOREIGN KEY (run_id, step_id, work_item_id, attempt_id)
-    REFERENCES provider_runs(provider_run_id, step_id, work_item_id, attempt_id) ON DELETE SET NULL
+    REFERENCES provider_runs(provider_run_id, step_id, work_item_id, attempt_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE node_output_payloads (
@@ -239,13 +244,15 @@ CREATE TABLE attempts (
   attempt_id TEXT PRIMARY KEY,
   work_item_id TEXT NOT NULL REFERENCES work_items(work_item_id) ON DELETE CASCADE,
   attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
-  provider_run_id TEXT REFERENCES provider_runs(provider_run_id) ON DELETE SET NULL,
+  provider_run_id TEXT,
   status TEXT NOT NULL,
   error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
   started_at TEXT NOT NULL,
   completed_at TEXT,
   UNIQUE (work_item_id, attempt_number),
-  UNIQUE (work_item_id, attempt_id)
+  UNIQUE (work_item_id, attempt_id),
+  FOREIGN KEY (provider_run_id, work_item_id, attempt_id)
+    REFERENCES provider_runs(provider_run_id, work_item_id, attempt_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE blobs (
@@ -399,7 +406,7 @@ CREATE TABLE provider_capability_snapshots (
 CREATE TABLE provider_runs (
   provider_run_id TEXT PRIMARY KEY,
   capability_snapshot_id TEXT REFERENCES provider_capability_snapshots(capability_snapshot_id) ON DELETE SET NULL,
-  plan_id TEXT REFERENCES execution_plans(plan_id) ON DELETE SET NULL,
+  plan_id TEXT REFERENCES execution_plans(plan_id) ON DELETE RESTRICT,
   step_id TEXT,
   work_item_id TEXT,
   attempt_id TEXT,
@@ -417,9 +424,10 @@ CREATE TABLE provider_runs (
   ),
   CHECK (step_id IS NULL OR plan_id IS NOT NULL),
   UNIQUE (provider_run_id, step_id, work_item_id, attempt_id),
-  FOREIGN KEY (plan_id, step_id) REFERENCES plan_steps(plan_id, step_id) ON DELETE SET NULL,
-  FOREIGN KEY (step_id, work_item_id) REFERENCES work_items(step_id, work_item_id) ON DELETE SET NULL,
-  FOREIGN KEY (work_item_id, attempt_id) REFERENCES attempts(work_item_id, attempt_id) ON DELETE SET NULL
+  UNIQUE (provider_run_id, work_item_id, attempt_id),
+  FOREIGN KEY (plan_id, step_id) REFERENCES plan_steps(plan_id, step_id) ON DELETE RESTRICT,
+  FOREIGN KEY (step_id, work_item_id) REFERENCES work_items(step_id, work_item_id) ON DELETE RESTRICT,
+  FOREIGN KEY (work_item_id, attempt_id) REFERENCES attempts(work_item_id, attempt_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE live_output_settings (
@@ -460,7 +468,7 @@ CREATE INDEX edges_graph_id_idx ON edges(graph_id);
 CREATE INDEX edges_graph_source_idx ON edges(graph_id, source_node_id);
 CREATE INDEX edges_graph_target_idx ON edges(graph_id, target_node_id);
 CREATE INDEX graph_revisions_graph_id_idx ON graph_revisions(graph_id);
-CREATE INDEX graph_revisions_parent_idx ON graph_revisions(parent_revision_id);
+CREATE INDEX graph_revisions_parent_idx ON graph_revisions(graph_id, parent_revision_id);
 CREATE INDEX document_revisions_parent_idx ON document_revisions(parent_document_revision_id);
 CREATE INDEX document_revision_members_graph_idx ON document_revision_members(graph_id);
 CREATE INDEX document_revision_members_graph_revision_idx
@@ -468,10 +476,10 @@ CREATE INDEX document_revision_members_graph_revision_idx
 CREATE INDEX groups_graph_id_idx ON groups(graph_id);
 CREATE INDEX modules_parent_graph_id_idx ON modules(parent_graph_id);
 CREATE INDEX workspace_views_graph_id_idx ON workspace_views(graph_id);
-CREATE INDEX node_output_versions_graph_node_idx ON node_output_versions(graph_id, node_id);
+CREATE INDEX node_output_versions_graph_node_parent_idx
+  ON node_output_versions(graph_id, node_id, parent_output_version_id);
 CREATE INDEX node_output_versions_graph_revision_idx
   ON node_output_versions(graph_id, graph_revision_id);
-CREATE INDEX node_output_versions_parent_idx ON node_output_versions(parent_output_version_id);
 CREATE INDEX node_output_versions_run_provenance_idx
   ON node_output_versions(run_id, step_id, work_item_id, attempt_id);
 CREATE INDEX node_output_payloads_output_version_idx ON node_output_payloads(output_version_id);
@@ -484,7 +492,8 @@ CREATE INDEX batches_plan_id_idx ON batches(plan_id);
 CREATE INDEX batches_plan_step_idx ON batches(plan_id, step_id);
 CREATE INDEX work_items_batch_step_idx ON work_items(batch_id, step_id);
 CREATE INDEX attempts_work_item_id_idx ON attempts(work_item_id);
-CREATE INDEX attempts_provider_run_id_idx ON attempts(provider_run_id);
+CREATE INDEX attempts_provider_run_ownership_idx
+  ON attempts(provider_run_id, work_item_id, attempt_id);
 CREATE INDEX blob_imports_content_key_idx ON blob_imports(content_key);
 CREATE INDEX linked_references_content_key_idx ON linked_references(content_key);
 CREATE INDEX artifacts_content_key_idx ON artifacts(content_key);

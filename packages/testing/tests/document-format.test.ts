@@ -49,6 +49,7 @@ interface NamedRow {
 interface ForeignKeyRow {
   from: string;
   id: number;
+  on_delete: string;
   seq: number;
   table: string;
   to: string;
@@ -139,6 +140,58 @@ function ftsIds(
       query
     ) as unknown as NamedRow[] | undefined
   )?.map((row) => row.name) ?? [];
+}
+
+function seedFtsParitySources(database: DatabaseSync): void {
+  database.exec(`
+    INSERT INTO graphs (graph_id, title, kind, created_at, updated_at)
+    VALUES ('graph-parity', 'Parity graph', 'root', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+    INSERT INTO nodes (
+      node_id, graph_id, definition_id, title, position_x, position_y, width, height,
+      config_json, presentation_json, created_at, updated_at
+    ) VALUES (
+      'node-parity', 'graph-parity', 'prompt.text', 'Parity prompt', 0, 0, 220, 140,
+      '{"body":"source prompt"}', '{"color":"green"}',
+      '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'
+    );
+    INSERT INTO graph_revisions (
+      revision_id, graph_id, parent_revision_id, actor, title, created_at, operation_count, metadata_json
+    ) VALUES (
+      'revision-parity', 'graph-parity', NULL, 'user', 'Parity revision',
+      '2026-07-17T10:00:00.000Z', 0, '{}'
+    );
+    INSERT INTO node_output_versions (
+      output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+      producer_json, input_payload_ids_json, selected_output_version_ids_json,
+      compiled_context_hash, timing_json, created_at
+    ) VALUES (
+      'output-parity', 'node-parity', 'graph-parity', 'revision-parity', NULL,
+      '{"kind":"manual"}', '[]', '[]', 'sha256:parity', '{}',
+      '2026-07-17T10:00:01.000Z'
+    );
+    INSERT INTO node_output_payloads (
+      payload_id, output_version_id, channel, role, content_text, content_json, metadata_json, created_at
+    ) VALUES (
+      'payload-parity', 'output-parity', 'text', 'general', 'source output',
+      '{"kind":"text"}', '{"language":"en"}', '2026-07-17T10:00:01.000Z'
+    );
+    INSERT INTO artifacts (
+      artifact_id, content_key, kind, media_type, title, description, metadata_json, created_at
+    ) VALUES (
+      'artifact-parity', NULL, 'image', 'image/png', 'Parity artifact', 'source artifact',
+      '{"camera":"source"}', '2026-07-17T10:00:02.000Z'
+    );
+    INSERT INTO artifact_tags (artifact_id, tag, created_at)
+    VALUES ('artifact-parity', 'source-tag', '2026-07-17T10:00:02.000Z');
+    INSERT INTO provider_runs (
+      provider_run_id, provider_id, model_id, status, request_json, response_json, metadata_json,
+      started_at, completed_at
+    ) VALUES (
+      'run-parity', 'codex', 'model-parity', 'succeeded', '{"prompt":"source run"}',
+      '{"result":"source response"}', '{"region":"source"}',
+      '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:02.000Z'
+    );
+  `);
 }
 
 describe("Ether 4.0 document format", () => {
@@ -351,6 +404,47 @@ describe("Ether 4.0 document format", () => {
     }
   });
 
+  it("reopens its owned temporary file without create capability or path-swap writes", () => {
+    const replacementTarget = path.join(root, "ReplacementTarget.ether");
+    createEtherDocument(replacementTarget, {
+      appVersion: "4.0.0",
+      documentId: "document-replacement-target",
+      title: "Replacement target"
+    });
+    const targetBefore = snapshotFile(replacementTarget);
+    let replacedTemporaryPath = "";
+
+    withBoundaryHooks(
+      {
+        beforeTemporaryDatabaseOpen: (temporaryPath) => {
+          replacedTemporaryPath = temporaryPath;
+          rmSync(temporaryPath);
+          linkSync(replacementTarget, temporaryPath);
+        }
+      },
+      () =>
+        expectEtherError(
+          () =>
+            createEtherDocument(documentPath, {
+              appVersion: "4.0.0",
+              documentId: "document-temp-swap",
+              title: "Temporary swap"
+            }),
+          "HARD_LINK_ALIAS"
+        )
+    );
+
+    expectFileUnchanged(replacementTarget, targetBefore);
+    expect(statSync(documentPath, { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(replacedTemporaryPath, { bigint: true }).ino).toBe(
+      statSync(replacementTarget, { bigint: true }).ino
+    );
+    expect(readdirSync(root).sort()).toEqual([
+      path.basename(replacedTemporaryPath),
+      "ReplacementTarget.ether"
+    ].sort());
+  });
+
   it("declares and indexes every normalized foreign-key boundary", () => {
     createEtherDocument(documentPath, {
       appVersion: "4.0.0",
@@ -393,6 +487,16 @@ describe("Ether 4.0 document format", () => {
           expect.objectContaining({ from: "target_node_id", table: "nodes", to: "node_id" })
         ])
       );
+      expect(foreignKeys.get("graph_revisions")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            from: "parent_revision_id",
+            table: "graph_revisions",
+            to: "revision_id"
+          }),
+          expect.objectContaining({ from: "graph_id", table: "graph_revisions", to: "graph_id" })
+        ])
+      );
       expect(foreignKeys.get("document_revision_members")).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -421,6 +525,11 @@ describe("Ether 4.0 document format", () => {
             from: "graph_revision_id",
             table: "graph_revisions",
             to: "revision_id"
+          }),
+          expect.objectContaining({
+            from: "parent_output_version_id",
+            table: "node_output_versions",
+            to: "output_version_id"
           })
         ])
       );
@@ -439,6 +548,24 @@ describe("Ether 4.0 document format", () => {
           })
         ])
       );
+      expect(
+        foreignKeys
+          .get("provider_runs")
+          ?.filter((row) => ["plan_id", "step_id", "work_item_id", "attempt_id"].includes(row.from))
+          .every((row) => row.on_delete === "RESTRICT")
+      ).toBe(true);
+      expect(
+        foreignKeys
+          .get("node_output_versions")
+          ?.filter((row) => ["run_id", "step_id", "work_item_id", "attempt_id"].includes(row.from))
+          .every((row) => row.on_delete === "RESTRICT")
+      ).toBe(true);
+      expect(
+        foreignKeys
+          .get("attempts")
+          ?.filter((row) => row.from === "provider_run_id")
+          .every((row) => row.on_delete === "RESTRICT")
+      ).toBe(true);
     } finally {
       database.close();
     }
@@ -477,6 +604,20 @@ describe("Ether 4.0 document format", () => {
 
       expectConstraintViolation(
         database,
+        `INSERT INTO graph_revisions (
+           revision_id, graph_id, parent_revision_id, actor, title, created_at, operation_count, metadata_json
+         ) VALUES ('revision-cross-parent', 'graph-1', 'revision-2', 'user', 'Cross parent',
+                   '2026-07-17T10:00:00.000Z', 0, '{}')`
+      );
+      database.exec(`
+        INSERT INTO graph_revisions (
+          revision_id, graph_id, parent_revision_id, actor, title, created_at, operation_count, metadata_json
+        ) VALUES ('revision-1-child', 'graph-1', 'revision-1', 'user', 'Child revision',
+                  '2026-07-17T10:00:00.000Z', 0, '{}');
+      `);
+
+      expectConstraintViolation(
+        database,
         `INSERT INTO edges (
            edge_id, graph_id, source_node_id, source_channel, target_node_id, target_channel,
            role, lane_order, selector_json, adapter_json, enabled
@@ -499,6 +640,34 @@ describe("Ether 4.0 document format", () => {
                    '{"kind":"manual","actor":"user"}', '[]', '[]', 'sha256:context', '{}',
                    '2026-07-17T10:00:00.000Z')`
       );
+      database.exec(`
+        INSERT INTO node_output_versions (
+          output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+          producer_json, input_payload_ids_json, selected_output_version_ids_json,
+          compiled_context_hash, timing_json, created_at
+        ) VALUES ('output-parent', 'node-1', 'graph-1', 'revision-1', NULL,
+                  '{"kind":"manual"}', '[]', '[]', 'sha256:parent', '{}',
+                  '2026-07-17T10:00:00.000Z');
+      `);
+      expectConstraintViolation(
+        database,
+        `INSERT INTO node_output_versions (
+           output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+           producer_json, input_payload_ids_json, selected_output_version_ids_json,
+           compiled_context_hash, timing_json, created_at
+         ) VALUES ('output-cross-parent', 'node-2', 'graph-2', 'revision-2', 'output-parent',
+                   '{"kind":"manual"}', '[]', '[]', 'sha256:cross-parent', '{}',
+                   '2026-07-17T10:00:00.000Z')`
+      );
+      database.exec(`
+        INSERT INTO node_output_versions (
+          output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+          producer_json, input_payload_ids_json, selected_output_version_ids_json,
+          compiled_context_hash, timing_json, created_at
+        ) VALUES ('output-child', 'node-1', 'graph-1', 'revision-1-child', 'output-parent',
+                  '{"kind":"manual"}', '[]', '[]', 'sha256:child', '{}',
+                  '2026-07-17T10:00:00.000Z');
+      `);
 
       database.exec(`
         INSERT INTO execution_plans (
@@ -527,12 +696,17 @@ describe("Ether 4.0 document format", () => {
       database.exec(`
         INSERT INTO work_items (
           work_item_id, batch_id, step_id, item_index, input_json, status, created_at, updated_at
-        ) VALUES ('work-1', 'batch-1', 'step-1', 0, '{}', 'ready',
-                  '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        ) VALUES
+          ('work-1', 'batch-1', 'step-1', 0, '{}', 'ready',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('work-2', 'batch-1', 'step-1', 1, '{}', 'ready',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
         INSERT INTO attempts (
           attempt_id, work_item_id, attempt_number, provider_run_id, status, error_json, started_at, completed_at
-        ) VALUES ('attempt-1', 'work-1', 1, NULL, 'running', NULL,
-                  '2026-07-17T10:00:00.000Z', NULL);
+        ) VALUES
+          ('attempt-1', 'work-1', 1, NULL, 'running', NULL, '2026-07-17T10:00:00.000Z', NULL),
+          ('attempt-2', 'work-1', 2, NULL, 'queued', NULL, '2026-07-17T10:00:00.000Z', NULL),
+          ('attempt-3', 'work-2', 1, NULL, 'queued', NULL, '2026-07-17T10:00:00.000Z', NULL);
       `);
 
       expectConstraintViolation(
@@ -562,6 +736,48 @@ describe("Ether 4.0 document format", () => {
                    'run-1', 'step-2', 'work-1', 'attempt-1', '{}',
                    '2026-07-17T10:00:00.000Z')`
       );
+
+      expectConstraintViolation(
+        database,
+        "UPDATE attempts SET provider_run_id = 'run-1' WHERE attempt_id = 'attempt-2'"
+      );
+      expectConstraintViolation(
+        database,
+        "UPDATE attempts SET provider_run_id = 'run-1' WHERE attempt_id = 'attempt-3'"
+      );
+      database.exec("UPDATE attempts SET provider_run_id = 'run-1' WHERE attempt_id = 'attempt-1'");
+
+      database.exec(`
+        INSERT INTO node_output_versions (
+          output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+          producer_json, input_payload_ids_json, selected_output_version_ids_json,
+          compiled_context_hash, run_id, step_id, work_item_id, attempt_id, timing_json, created_at
+        ) VALUES ('output-run-1', 'node-1', 'graph-1', 'revision-1', NULL,
+                  '{"kind":"provider"}', '[]', '[]', 'sha256:run-1',
+                  'run-1', 'step-1', 'work-1', 'attempt-1', '{}',
+                  '2026-07-17T10:00:00.000Z');
+      `);
+      expectConstraintViolation(database, "DELETE FROM work_items WHERE work_item_id = 'work-1'");
+      expectConstraintViolation(database, "DELETE FROM execution_plans WHERE plan_id = 'plan-1'");
+      expectConstraintViolation(database, "DELETE FROM provider_runs WHERE provider_run_id = 'run-1'");
+      expect(
+        database
+          .prepare(
+            `SELECT plan_id, step_id, work_item_id, attempt_id
+             FROM provider_runs WHERE provider_run_id = 'run-1'`
+          )
+          .get()
+      ).toEqual({
+        attempt_id: "attempt-1",
+        plan_id: "plan-1",
+        step_id: "step-1",
+        work_item_id: "work-1"
+      });
+      expect(
+        database
+          .prepare("SELECT provider_run_id FROM attempts WHERE attempt_id = 'attempt-1'")
+          .get()
+      ).toEqual({ provider_run_id: "run-1" });
 
       expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     } finally {
@@ -663,6 +879,48 @@ describe("Ether 4.0 document format", () => {
       expect(ftsIds(database, "metadata_fts", "entity_id", "terrestrial")).toEqual([]);
     } finally {
       database.close();
+    }
+  });
+
+  it("rejects missing, stale, extra, or mismatched rows in every FTS index", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-fts-parity",
+      title: "FTS parity"
+    });
+    const database = openTestDatabase(documentPath);
+    try {
+      seedFtsParitySources(database);
+    } finally {
+      database.close();
+    }
+
+    const fixtures = [
+      ["MissingPromptFts.ether", "DELETE FROM prompt_output_fts WHERE source_type = 'prompt'"],
+      [
+        "StaleArtifactFts.ether",
+        "UPDATE artifact_fts SET title = 'stale title' WHERE artifact_id = 'artifact-parity'"
+      ],
+      ["ExtraTagFts.ether", "INSERT INTO tag_fts (artifact_id, tag) VALUES ('extra', 'extra')"],
+      [
+        "MismatchedRunFts.ether",
+        "UPDATE run_fts SET request = 'mismatched request' WHERE provider_run_id = 'run-parity'"
+      ],
+      [
+        "MissingMetadataFts.ether",
+        "DELETE FROM metadata_fts WHERE entity_type = 'document'"
+      ]
+    ] as const;
+
+    for (const [fileName, mutation] of fixtures) {
+      const filePath = path.join(root, fileName);
+      copyFileSync(documentPath, filePath);
+      mutateDatabase(filePath, mutation);
+      const before = snapshotFile(filePath);
+
+      expectEtherError(() => inspectEtherDocument(filePath), "FTS_INDEX_MISMATCH");
+      expectEtherError(() => assertEtherDocumentWritable(filePath), "FTS_INDEX_MISMATCH");
+      expectFileUnchanged(filePath, before);
     }
   });
 
