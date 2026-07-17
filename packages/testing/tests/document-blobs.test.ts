@@ -7,7 +7,14 @@ import type {
   PayloadEnvelope
 } from "@ether/schema";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -36,15 +43,22 @@ interface Task6Repositories {
   revisions: { head(): { graphRevisions: Record<string, string> } };
 }
 
-interface GrantRequest {
+interface GrantPathRequest {
   documentId: string;
-  fingerprint: { byteLength: number; sampleSha256: string };
   grantId: string;
   operation: "link" | "relink" | "resolve";
   path: string;
 }
 
+interface GrantFingerprintRequest extends GrantPathRequest {
+  fingerprint: { byteLength: number; sampleSha256: string };
+}
+
 class TestGrantAuthority {
+  readonly events: string[] = [];
+  readonly fingerprintRequests: GrantFingerprintRequest[] = [];
+  readonly pathRequests: GrantPathRequest[] = [];
+  onAuthorizePath?: (request: GrantPathRequest) => void;
   private readonly grants = new Map<string, {
     documentId?: string;
     fingerprint?: string;
@@ -61,12 +75,30 @@ class TestGrantAuthority {
     if (grant !== undefined) grant.revoked = true;
   }
 
-  validate(request: GrantRequest): boolean {
+  authorizePath(request: GrantPathRequest): boolean {
+    this.events.push(`path:${request.operation}`);
+    this.pathRequests.push(request);
+    this.onAuthorizePath?.(request);
     const grant = this.grants.get(request.grantId);
     if (grant === undefined || grant.revoked || grant.path !== path.resolve(request.path)) return false;
     if (grant.documentId !== undefined && grant.documentId !== request.documentId) return false;
-    if (grant.fingerprint !== undefined && grant.fingerprint !== request.fingerprint.sampleSha256) return false;
     grant.documentId ??= request.documentId;
+    return true;
+  }
+
+  validateFingerprint(request: GrantFingerprintRequest): boolean {
+    this.events.push(`fingerprint:${request.operation}`);
+    this.fingerprintRequests.push(request);
+    const grant = this.grants.get(request.grantId);
+    if (
+      grant === undefined ||
+      grant.revoked ||
+      grant.path !== path.resolve(request.path) ||
+      grant.documentId !== request.documentId ||
+      (grant.fingerprint !== undefined && grant.fingerprint !== request.fingerprint.sampleSha256)
+    ) {
+      return false;
+    }
     grant.fingerprint ??= request.fingerprint.sampleSha256;
     return true;
   }
@@ -587,6 +619,147 @@ describe("Ether embedded blobs and linked references", () => {
         expect.objectContaining({ from: "source_payload_id", to: "payload_id" })
       ])
     );
+  });
+
+  it("denies every candidate path shape before filesystem inspection", async () => {
+    const grantAuthority = new TestGrantAuthority();
+    const store = await createStore(filePath, appDataRoot, grantAuthority);
+    stores.push(store);
+    const previewPath = path.join(root, "denied-preview.png");
+    const existentPath = path.join(root, "denied-existent.png");
+    const missingPath = path.join(root, "denied-missing.png");
+    const malformedPath = path.join(root, "denied\0malformed.png");
+    writeFileSync(previewPath, pngBytes(512, 0x19));
+    writeFileSync(existentPath, pngBytes(1024, 0x20));
+    const preview = await api().importBlob(
+      store,
+      { sourcePath: previewPath, mediaType: "image/png" },
+      { appDataRoot }
+    );
+    const candidates = [existentPath, missingPath, root, malformedPath];
+    const denials: Array<{ code?: unknown; message?: unknown; name?: unknown }> = [];
+
+    for (const [index, sourcePath] of candidates.entries()) {
+      try {
+        await api().linkReference(store, {
+          id: `reference-denied-${index}`,
+          displayName: "Denied reference",
+          sourcePath,
+          mediaType: "image/png",
+          pathGrantId: `grant-denied-${index}`,
+          previewContentKey: preview.contentKey
+        });
+      } catch (error) {
+        denials.push(error as { code?: unknown; message?: unknown; name?: unknown });
+      }
+    }
+
+    expect(denials).toHaveLength(candidates.length);
+    expect(denials.map(({ code, message, name }) => ({ code, message, name }))).toEqual(
+      candidates.map(() => ({
+        code: "REFERENCE_GRANT_DENIED",
+        message: "The reference path grant is missing, revoked, or bound to different content.",
+        name: "DocumentStoreError"
+      }))
+    );
+    expect(grantAuthority.pathRequests).toHaveLength(candidates.length);
+    expect(grantAuthority.pathRequests.map((request) => request.path)).toEqual(
+      candidates.map((candidate) => path.resolve(candidate))
+    );
+    expect(grantAuthority.fingerprintRequests).toEqual([]);
+    expect(grantAuthority.events).toEqual(candidates.map(() => "path:link"));
+
+    const linkedPath = path.join(root, "denied-relink-source.png");
+    writeFileSync(linkedPath, pngBytes(1024, 0x21));
+    grantAuthority.issue("grant-denied-setup", linkedPath);
+    const linked = await api().linkReference(store, {
+      id: "reference-denied-relink",
+      displayName: "Denied relink reference",
+      sourcePath: linkedPath,
+      mediaType: "image/png",
+      pathGrantId: "grant-denied-setup",
+      previewContentKey: preview.contentKey
+    });
+    grantAuthority.events.length = 0;
+    grantAuthority.pathRequests.length = 0;
+    grantAuthority.fingerprintRequests.length = 0;
+    const relinkDenials: Array<{ code?: unknown; message?: unknown; name?: unknown }> = [];
+
+    for (const [index, sourcePath] of candidates.entries()) {
+      try {
+        await api().relinkReference(
+          store,
+          linked.id,
+          sourcePath,
+          `grant-denied-relink-${index}`
+        );
+      } catch (error) {
+        relinkDenials.push(error as { code?: unknown; message?: unknown; name?: unknown });
+      }
+    }
+
+    expect(relinkDenials.map(({ code, message, name }) => ({ code, message, name }))).toEqual(
+      denials.map(({ code, message, name }) => ({ code, message, name }))
+    );
+    expect(grantAuthority.pathRequests.map((request) => request.path)).toEqual(
+      candidates.map((candidate) => path.resolve(candidate))
+    );
+    expect(grantAuthority.fingerprintRequests).toEqual([]);
+    expect(grantAuthority.events).toEqual(candidates.map(() => "path:relink"));
+  });
+
+  it("authorizes normalized link and relink paths before reading, then binds fingerprints", async () => {
+    const grantAuthority = new TestGrantAuthority();
+    const store = await createStore(filePath, appDataRoot, grantAuthority);
+    stores.push(store);
+    const previewPath = path.join(root, "ordered-preview.png");
+    const sourceInput = path.join(root, "nested", "..", "ordered-source.png");
+    const sourcePath = path.resolve(sourceInput);
+    const relinkInput = path.join(root, ".", "ordered-relinked.png");
+    const relinkPath = path.resolve(relinkInput);
+    const sourceBytes = pngBytes(4096, 0x2a);
+    writeFileSync(previewPath, pngBytes(512, 0x18));
+    const preview = await api().importBlob(
+      store,
+      { sourcePath: previewPath, mediaType: "image/png" },
+      { appDataRoot }
+    );
+    grantAuthority.issue("grant-ordered-link", sourcePath);
+    grantAuthority.onAuthorizePath = (request) => {
+      if (request.grantId !== "grant-ordered-link") return;
+      expect(request.path).toBe(sourcePath);
+      expect(existsSync(sourcePath)).toBe(false);
+      writeFileSync(sourcePath, sourceBytes);
+    };
+
+    const linked = await api().linkReference(store, {
+      id: "reference-ordered",
+      displayName: "Ordered reference",
+      sourcePath: sourceInput,
+      mediaType: "image/png",
+      pathGrantId: "grant-ordered-link",
+      previewContentKey: preview.contentKey
+    });
+    expect(linked.state).toBe("linked");
+    expect(grantAuthority.events).toEqual(["path:link", "fingerprint:link"]);
+    expect(grantAuthority.fingerprintRequests[0]?.path).toBe(sourcePath);
+
+    grantAuthority.events.length = 0;
+    grantAuthority.pathRequests.length = 0;
+    grantAuthority.fingerprintRequests.length = 0;
+    grantAuthority.issue("grant-ordered-relink", relinkPath);
+    grantAuthority.onAuthorizePath = (request) => {
+      if (request.grantId !== "grant-ordered-relink") return;
+      expect(request.path).toBe(relinkPath);
+      expect(existsSync(relinkPath)).toBe(false);
+      writeFileSync(relinkPath, sourceBytes);
+    };
+
+    await expect(
+      api().relinkReference(store, linked.id, relinkInput, "grant-ordered-relink")
+    ).resolves.toMatchObject({ state: "linked", originalPath: relinkPath });
+    expect(grantAuthority.events).toEqual(["path:relink", "fingerprint:relink"]);
+    expect(grantAuthority.fingerprintRequests[0]?.path).toBe(relinkPath);
   });
 
   it("tracks missing links, revoked grants, and relinks only matching durable identity", async () => {

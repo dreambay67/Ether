@@ -33,17 +33,23 @@ export interface WritableLocationCapabilityAdapter {
   classify(filePath: string): WritableLocationKind;
 }
 
-export interface ReferenceGrantRequest {
+export interface ReferenceGrantPathRequest {
   documentId: string;
-  fingerprint: { byteLength: number; sampleSha256: string };
   grantId: string;
   operation: "link" | "relink" | "resolve";
   path: string;
 }
 
+export interface ReferenceGrantFingerprintRequest extends ReferenceGrantPathRequest {
+  fingerprint: { byteLength: number; sampleSha256: string };
+}
+
+export type ReferenceGrantRequest = ReferenceGrantFingerprintRequest;
+
 export interface ReferenceGrantAuthority {
+  authorizePath(request: ReferenceGrantPathRequest): boolean;
   revoke?(grantId: string, documentId: string): void;
-  validate(request: ReferenceGrantRequest): boolean;
+  validateFingerprint(request: ReferenceGrantFingerprintRequest): boolean;
 }
 
 export interface DocumentStoreEnvironment {
@@ -173,7 +179,10 @@ export function resolveDocumentStoreEnvironment(
       environment.processIsAlive ??
       ((pid, ownerMachineId) => ownerMachineId === machineId && localProcessIsAlive(pid)),
     recoveryRoot: path.resolve(environment.recoveryRoot ?? defaultRecoveryRoot()),
-    referenceGrantAuthority: environment.referenceGrantAuthority ?? { validate: () => false },
+    referenceGrantAuthority: environment.referenceGrantAuthority ?? {
+      authorizePath: () => false,
+      validateFingerprint: () => false
+    },
     staleMs: environment.staleMs ?? 15_000
   };
 }

@@ -242,8 +242,13 @@ export async function linkReference(
   }
 ): Promise<LinkedReference> {
   const resolved = path.resolve(input.sourcePath);
+  store.authorizeReferencePath({
+    grantId: input.pathGrantId,
+    operation: "link",
+    path: resolved
+  });
   const inspected = await inspectReferenceFile(resolved, input.mediaType);
-  store.assertReferenceGrant({
+  store.validateReferenceFingerprint({
     fingerprint: inspected.fingerprint,
     grantId: input.pathGrantId,
     operation: "link",
@@ -288,8 +293,7 @@ export async function resolveReference(
     return missingReference(store, reference);
   }
   try {
-    store.assertReferenceGrant({
-      fingerprint: reference.fingerprint,
+    store.authorizeReferencePath({
       grantId: reference.pathGrantId,
       operation: "resolve",
       path: reference.originalPath
@@ -299,6 +303,16 @@ export async function resolveReference(
   }
   try {
     const inspected = await inspectReferenceFile(reference.originalPath, reference.mediaType);
+    try {
+      store.validateReferenceFingerprint({
+        fingerprint: inspected.fingerprint,
+        grantId: reference.pathGrantId,
+        operation: "resolve",
+        path: reference.originalPath
+      });
+    } catch {
+      return missingReference(store, reference);
+    }
     if (
       !sameIdentity(reference.identity, inspected.identity) &&
       !sameFingerprint(reference.fingerprint, inspected.fingerprint)
@@ -336,7 +350,18 @@ export async function relinkReference(
     throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
   }
   const resolved = path.resolve(sourcePath);
+  store.authorizeReferencePath({
+    grantId: pathGrantId,
+    operation: "relink",
+    path: resolved
+  });
   const inspected = await inspectReferenceFile(resolved, reference.mediaType);
+  store.validateReferenceFingerprint({
+    fingerprint: inspected.fingerprint,
+    grantId: pathGrantId,
+    operation: "relink",
+    path: resolved
+  });
   if (
     !sameIdentity(reference.identity, inspected.identity) &&
     !sameFingerprint(reference.fingerprint, inspected.fingerprint)
@@ -346,12 +371,6 @@ export async function relinkReference(
       "Relinked file does not match the durable identity or fingerprint."
     );
   }
-  store.assertReferenceGrant({
-    fingerprint: inspected.fingerprint,
-    grantId: pathGrantId,
-    operation: "relink",
-    path: resolved
-  });
   const relinked = LinkedReferenceSchema.parse({
     ...reference,
     state: "linked",

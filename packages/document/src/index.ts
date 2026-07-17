@@ -17,6 +17,8 @@ export {
   type OpenDocumentStoreOptions,
   type ReadOnlyReason,
   type ReferenceGrantAuthority,
+  type ReferenceGrantFingerprintRequest,
+  type ReferenceGrantPathRequest,
   type ReferenceGrantRequest,
   type WritableLocationCapabilityAdapter,
   type WritableLocationKind

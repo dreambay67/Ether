@@ -28,7 +28,8 @@ import type { OwnedReplacementRollback } from "./database.js";
 import {
   type DocumentStoreEnvironment,
   type DocumentStoreRuntime,
-  type ReferenceGrantRequest,
+  type ReferenceGrantFingerprintRequest,
+  type ReferenceGrantPathRequest,
   type ReadOnlyReason,
   WriterLease,
   locationSupportsWriting,
@@ -401,17 +402,43 @@ export class DocumentStore {
     return this.currentPath;
   }
 
-  assertReferenceGrant(request: Omit<ReferenceGrantRequest, "documentId">): void {
-    if (!this.runtime.referenceGrantAuthority.validate({ ...request, documentId: this.documentId })) {
-      throw new DocumentStoreError(
-        "REFERENCE_GRANT_DENIED",
-        "The reference path grant is missing, revoked, or bound to different content."
-      );
+  authorizeReferencePath(request: Omit<ReferenceGrantPathRequest, "documentId">): void {
+    let authorized: boolean;
+    try {
+      authorized = this.runtime.referenceGrantAuthority.authorizePath({
+        ...request,
+        documentId: this.documentId
+      });
+    } catch {
+      authorized = false;
     }
+    if (!authorized) this.throwReferenceGrantDenied();
+  }
+
+  validateReferenceFingerprint(
+    request: Omit<ReferenceGrantFingerprintRequest, "documentId">
+  ): void {
+    let authorized: boolean;
+    try {
+      authorized = this.runtime.referenceGrantAuthority.validateFingerprint({
+        ...request,
+        documentId: this.documentId
+      });
+    } catch {
+      authorized = false;
+    }
+    if (!authorized) this.throwReferenceGrantDenied();
   }
 
   revokeReferenceGrantAuthority(grantId: string): void {
     this.runtime.referenceGrantAuthority.revoke?.(grantId, this.documentId);
+  }
+
+  private throwReferenceGrantDenied(): never {
+    throw new DocumentStoreError(
+      "REFERENCE_GRANT_DENIED",
+      "The reference path grant is missing, revoked, or bound to different content."
+    );
   }
 
   [DOCUMENT_STORE_INTERNAL]<T>(
@@ -1032,6 +1059,8 @@ export type {
   CreateStage,
   DocumentStoreEnvironment,
   ReferenceGrantAuthority,
+  ReferenceGrantFingerprintRequest,
+  ReferenceGrantPathRequest,
   ReferenceGrantRequest,
   ReadOnlyReason,
   WritableLocationCapabilityAdapter,
