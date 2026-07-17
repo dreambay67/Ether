@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -26,6 +26,7 @@ async function createLinkedPackage(root: string, linkRelativePath: string, realR
 
 async function createFakePackageRoot() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ether-package-"));
+  const engineManifest = await readFile(path.join(repoRoot, "packages/engine/package.json"), "utf8");
 
   await createFile(path.join(root, "node_modules/electron/dist/electron.exe"), "fake exe");
   await createFile(path.join(root, "node_modules/electron/dist/LICENSE"), "license");
@@ -44,27 +45,7 @@ async function createFakePackageRoot() {
     path.join(root, "packages/engine/dist/browser.d.mts"),
     'export declare const LATEST_GRAPH_VERSION: "2.5";\n'
   );
-  await createFile(
-    path.join(root, "packages/engine/package.json"),
-    JSON.stringify({
-      name: "@ether/engine",
-      main: "dist/index.js",
-      types: "dist/index.d.ts",
-      type: "commonjs",
-      exports: {
-        ".": {
-          types: "./dist/index.d.ts",
-          browser: {
-            types: "./dist/browser.d.mts",
-            default: "./dist/browser.mjs"
-          },
-          import: "./dist/index.js",
-          require: "./dist/index.js",
-          default: "./dist/index.js"
-        }
-      }
-    })
-  );
+  await createFile(path.join(root, "packages/engine/package.json"), engineManifest);
   await createFile(path.join(root, "packages/providers/dist/index.js"), "module.exports = {};");
   await createFile(
     path.join(root, "packages/providers/package.json"),
@@ -111,74 +92,86 @@ describe("Windows desktop package", () => {
   it("declares the build artifacts required for a runnable unpacked app", async () => {
     const root = await createFakePackageRoot();
 
-    expect(requiredPackageInputs(root).map((entry) => path.relative(root, entry.path))).toEqual([
-      "node_modules\\electron\\dist\\electron.exe",
-      "apps\\desktop\\dist\\index.html",
-      "apps\\desktop\\dist-electron\\main\\main.js",
-      "packages\\engine\\dist\\index.js",
-      "packages\\providers\\dist\\index.js",
-      "packages\\engine\\node_modules\\zod\\package.json"
-    ]);
+    try {
+      expect(requiredPackageInputs(root).map((entry) => path.relative(root, entry.path))).toEqual([
+        "node_modules\\electron\\dist\\electron.exe",
+        "apps\\desktop\\dist\\index.html",
+        "apps\\desktop\\dist-electron\\main\\main.js",
+        "packages\\engine\\dist\\index.js",
+        "packages\\providers\\dist\\index.js",
+        "packages\\engine\\node_modules\\zod\\package.json"
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("creates a Windows unpacked package with app runtime dependencies", async () => {
     const root = await createFakePackageRoot();
-    const result = await packageWindowsApp({
-      rootDir: root,
-      outputDir: path.join(root, "release/ether-windows-unpacked")
-    });
+    try {
+      const result = await packageWindowsApp({
+        rootDir: root,
+        outputDir: path.join(root, "release/ether-windows-unpacked")
+      });
 
-    expect(path.relative(root, result.outputDir)).toBe("release\\ether-windows-unpacked");
-    await expect(readFile(path.join(result.outputDir, "Ether.exe"), "utf8")).resolves.toBe("fake exe");
-    await expect(
-      readFile(path.join(result.outputDir, "resources/app/package.json"), "utf8")
-    ).resolves.toContain("\"name\": \"ether-desktop-package\"");
-    await expect(
-      readFile(path.join(result.outputDir, "resources/app/node_modules/@ether/engine/dist/index.js"), "utf8")
-    ).resolves.toContain("module.exports");
-    await expect(
-      readFile(path.join(result.outputDir, "resources/app/node_modules/@ether/providers/dist/index.js"), "utf8")
-    ).resolves.toContain("module.exports");
-    expect(
-      (await lstat(path.join(result.outputDir, "resources/app/node_modules/zod"))).isSymbolicLink()
-    ).toBe(false);
+      expect(path.relative(root, result.outputDir)).toBe("release\\ether-windows-unpacked");
+      await expect(readFile(path.join(result.outputDir, "Ether.exe"), "utf8")).resolves.toBe("fake exe");
+      await expect(
+        readFile(path.join(result.outputDir, "resources/app/package.json"), "utf8")
+      ).resolves.toContain("\"name\": \"ether-desktop-package\"");
+      await expect(
+        readFile(path.join(result.outputDir, "resources/app/node_modules/@ether/engine/dist/index.js"), "utf8")
+      ).resolves.toContain("module.exports");
+      await expect(
+        readFile(path.join(result.outputDir, "resources/app/node_modules/@ether/providers/dist/index.js"), "utf8")
+      ).resolves.toContain("module.exports");
+      expect(
+        (await lstat(path.join(result.outputDir, "resources/app/node_modules/zod"))).isSymbolicLink()
+      ).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("ships the engine browser entry and declarations across the copied package boundary", async () => {
     const root = await createFakePackageRoot();
-    const result = await packageWindowsApp({
-      rootDir: root,
-      outputDir: path.join(root, "release/ether-windows-unpacked")
-    });
-    const appRoot = path.join(result.outputDir, "resources", "app");
-    const engineRoot = path.join(appRoot, "node_modules", "@ether", "engine");
-    const packageJson = JSON.parse(
-      await readFile(path.join(engineRoot, "package.json"), "utf8")
-    ) as {
-      exports: { ".": { browser: { types: string; default: string } } };
-    };
+    try {
+      const result = await packageWindowsApp({
+        rootDir: root,
+        outputDir: path.join(root, "release/ether-windows-unpacked")
+      });
+      const appRoot = path.join(result.outputDir, "resources", "app");
+      const engineRoot = path.join(appRoot, "node_modules", "@ether", "engine");
+      const packageJson = JSON.parse(
+        await readFile(path.join(engineRoot, "package.json"), "utf8")
+      ) as {
+        exports: { ".": { browser: { types: string; default: string } } };
+      };
 
-    expect(packageJson.exports["."]).toMatchObject({
-      browser: {
-        types: "./dist/browser.d.mts",
-        default: "./dist/browser.mjs"
-      }
-    });
-    await expect(readFile(path.join(engineRoot, "dist/browser.mjs"), "utf8"))
-      .resolves.toContain("LATEST_GRAPH_VERSION");
-    await expect(readFile(path.join(engineRoot, "dist/browser.d.mts"), "utf8"))
-      .resolves.toContain("LATEST_GRAPH_VERSION");
-    expect(
-      execFileSync(
-        process.execPath,
-        [
-          "--conditions=browser",
-          "--input-type=module",
-          "--eval",
-          "import(\"@ether/engine\").then((engine) => console.log(engine.LATEST_GRAPH_VERSION))"
-        ],
-        { cwd: appRoot, encoding: "utf8" }
-      ).trim()
-    ).toBe("2.5");
+      expect(packageJson.exports["."]).toMatchObject({
+        browser: {
+          types: "./dist/browser.d.mts",
+          default: "./dist/browser.mjs"
+        }
+      });
+      await expect(readFile(path.join(engineRoot, "dist/browser.mjs"), "utf8"))
+        .resolves.toContain("LATEST_GRAPH_VERSION");
+      await expect(readFile(path.join(engineRoot, "dist/browser.d.mts"), "utf8"))
+        .resolves.toContain("LATEST_GRAPH_VERSION");
+      expect(
+        execFileSync(
+          process.execPath,
+          [
+            "--conditions=browser",
+            "--input-type=module",
+            "--eval",
+            "import(\"@ether/engine\").then((engine) => console.log(engine.LATEST_GRAPH_VERSION))"
+          ],
+          { cwd: appRoot, encoding: "utf8" }
+        ).trim()
+      ).toBe("2.5");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
