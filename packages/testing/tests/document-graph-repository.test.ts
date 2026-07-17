@@ -7,7 +7,7 @@ import type {
   PayloadEnvelope,
   PreparedGraphCommit
 } from "@ether/schema";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -264,6 +264,146 @@ describe("transactional Ether document repositories", () => {
     const reopened = await storeClass().open(filePath, { access: "read-only" });
     expect(reopened.mode).toEqual({ kind: "read-only", reason: "requested" });
     await expect(reopened.read(({ graphs }) => graphs.get(initialGraph.id))).resolves.toEqual(initialGraph);
+    await reopened.close();
+  });
+
+  it("rejects malformed lanes and graph cycles through the DocumentStore semantic boundary", async () => {
+    const malformed = graph("malformed", "root", [promptNode("source", "Source"), promptNode("target", "Target")]);
+    malformed.edges = [{
+      id: "bad-channel",
+      from: { kind: "node", nodeId: "source", channel: "image" },
+      to: { kind: "node", nodeId: "target", channel: "text" },
+      role: "general", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true
+    }];
+    const malformedPath = path.join(root, "Malformed.ether");
+    const malformedError = await storeClass().create(malformedPath, {
+      appVersion: "4.0.0", documentId: "malformed", initialGraph: malformed, title: "Malformed"
+    }).then(async (store) => { await store.close(); return undefined; }, (error: unknown) => error);
+    expect(malformedError).toMatchObject({ code: "INVALID_GRAPH_SEMANTICS" });
+    expect(existsSync(malformedPath)).toBe(false);
+
+    const cyclic = graph("cyclic", "root", [promptNode("cycle-a", "A"), promptNode("cycle-b", "B")]);
+    const lane = (id: string, from: string, to: string): EtherGraph["edges"][number] => ({
+      id, from: { kind: "node", nodeId: from, channel: "text" }, to: { kind: "node", nodeId: to, channel: "text" },
+      role: "general", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true
+    });
+    cyclic.edges = [lane("cycle-forward", "cycle-a", "cycle-b"), lane("cycle-back", "cycle-b", "cycle-a")];
+    const cyclicPath = path.join(root, "Cyclic.ether");
+    const cyclicError = await storeClass().create(cyclicPath, {
+      appVersion: "4.0.0", documentId: "cyclic", initialGraph: cyclic, title: "Cyclic"
+    }).then(async (store) => { await store.close(); return undefined; }, (error: unknown) => error);
+    expect(cyclicError).toMatchObject({ code: "INVALID_GRAPH_SEMANTICS" });
+    expect(existsSync(cyclicPath)).toBe(false);
+
+    const preparedPath = path.join(root, "Prepared-cycle.ether");
+    const initial = graph();
+    const store = await storeClass().create(preparedPath, {
+      appVersion: "4.0.0", documentId: "prepared-cycle", initialGraph: initial, title: "Prepared cycle"
+    });
+    try {
+      const head = await store.read(({ revisions }) => revisions.head());
+      const target = promptNode("cycle-target", "Target");
+      const forward = lane("prepared-forward", "prompt-1", target.id);
+      const backward = lane("prepared-backward", target.id, "prompt-1");
+      const snapshot = { ...initial, nodes: [...initial.nodes, target], edges: [forward, backward] };
+      await expect(store.transaction(({ revisions }) => revisions.commit({
+        id: "prepared-cycle", baseDocumentRevisionId: head.documentRevisionId,
+        baseGraphRevisions: head.graphRevisions, title: "Prepared cycle", actor: "user",
+        graphSnapshots: [snapshot],
+        forwardOperations: [
+          { type: "addNode", graphId: initial.id, node: target },
+          { type: "addEdge", graphId: initial.id, edge: forward },
+          { type: "addEdge", graphId: initial.id, edge: backward }
+        ],
+        inverseOperations: [
+          { type: "removeNode", graphId: initial.id, nodeId: target.id },
+          { type: "removeEdge", graphId: initial.id, edgeId: forward.id },
+          { type: "removeEdge", graphId: initial.id, edgeId: backward.id }
+        ]
+      }))).rejects.toMatchObject({ code: "INVALID_GRAPH_SEMANTICS" });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("rejects unresolved temporary IDs recursively at DocumentStore and prepared commit boundaries", async () => {
+    const unresolvedInitial = { ...graph(), id: "$temp:graph:initial" };
+    const unresolvedInitialPath = path.join(root, "Unresolved-initial.ether");
+    await expect(storeClass().create(unresolvedInitialPath, {
+      appVersion: "4.0.0", documentId: "document-temp-initial",
+      initialGraph: unresolvedInitial, title: "Unresolved initial"
+    })).rejects.toMatchObject({ code: "UNRESOLVED_TEMP_ID" });
+    expect(existsSync(unresolvedInitialPath)).toBe(false);
+
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0", documentId: "document-temp-guard", initialGraph: initial, title: "Temp guard"
+    });
+    try {
+      const head = await store.read(({ revisions }) => revisions.head());
+      const tempNode = promptNode("$temp:node:unresolved", "Temporary");
+      const tempSnapshot = { ...initial, nodes: [...initial.nodes, tempNode] };
+      await expect(store.transaction(({ revisions }) => revisions.commit({
+        id: "temp-node", baseDocumentRevisionId: head.documentRevisionId, baseGraphRevisions: head.graphRevisions,
+        title: "Temp node", actor: "user", graphSnapshots: [tempSnapshot],
+        forwardOperations: [{ type: "addNode", graphId: initial.id, node: tempNode }],
+        inverseOperations: [{ type: "removeNode", graphId: initial.id, nodeId: tempNode.id }]
+      }))).rejects.toMatchObject({ code: "UNRESOLVED_TEMP_ID" });
+
+      const nestedNode = promptNode("prompt-1", "$temp:value:body");
+      const nestedSnapshot = { ...initial, nodes: [nestedNode] };
+      await expect(store.transaction(({ revisions }) => revisions.commit({
+        id: "temp-config", baseDocumentRevisionId: head.documentRevisionId, baseGraphRevisions: head.graphRevisions,
+        title: "Temp config", actor: "user", graphSnapshots: [nestedSnapshot],
+        forwardOperations: [{ type: "updateNode", graphId: initial.id, nodeId: nestedNode.id, node: nestedNode }],
+        inverseOperations: [{ type: "updateNode", graphId: initial.id, nodeId: initial.nodes[0]!.id, node: initial.nodes[0]! }]
+      }))).rejects.toMatchObject({ code: "UNRESOLVED_TEMP_ID" });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("commits, undoes, redoes, and reopens nested updateModule subtree edits", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0", documentId: "document-nested-update", initialGraph: initial, title: "Nested update"
+    });
+    const deep = graph("graph-deep", "module", [promptNode("deep-prompt", "Deep before")]);
+    const nestedModule = {
+      id: "nested-module", title: "Nested", graphId: deep.id, position: { x: 0, y: 0 },
+      size: { width: 200, height: 100 }, interface: { inputs: [], outputs: [], parameters: [] }, collapsed: false
+    };
+    const inner = { ...graph("graph-inner", "module", [promptNode("inner-prompt", "Inner before")]), modules: [nestedModule] };
+    const parentModule = {
+      id: "parent-module", title: "Parent", graphId: inner.id, position: { x: 0, y: 0 },
+      size: { width: 240, height: 120 }, interface: { inputs: [], outputs: [], parameters: [] }, collapsed: false
+    };
+    const parent = { ...initial, modules: [parentModule] };
+    const genesis = await store.read(({ revisions }) => revisions.head());
+    await store.transaction(({ revisions }) => revisions.commit({
+      id: "create-nested", baseDocumentRevisionId: genesis.documentRevisionId, baseGraphRevisions: genesis.graphRevisions,
+      title: "Create nested", actor: "user", graphSnapshots: [parent, inner, deep],
+      forwardOperations: [{ type: "createModule", graphId: initial.id, module: parentModule, subtree: { rootGraphId: inner.id, graphs: [inner, deep] } }],
+      inverseOperations: [{ type: "removeModule", graphId: initial.id, moduleId: parentModule.id }]
+    }));
+    const created = await store.read(({ revisions }) => revisions.head());
+    const updatedInner = { ...inner, nodes: [promptNode("inner-prompt", "Inner after")] };
+    const updatedDeep = { ...deep, nodes: [promptNode("deep-prompt", "Deep after")] };
+    await store.transaction(({ revisions }) => revisions.commit({
+      id: "update-nested", baseDocumentRevisionId: created.documentRevisionId, baseGraphRevisions: created.graphRevisions,
+      title: "Update nested", actor: "user", graphSnapshots: [parent, updatedInner, updatedDeep],
+      forwardOperations: [{ type: "updateModule", graphId: parent.id, moduleId: parentModule.id, module: parentModule, subtree: { rootGraphId: inner.id, graphs: [updatedInner, updatedDeep] } }],
+      inverseOperations: [{ type: "updateModule", graphId: parent.id, moduleId: parentModule.id, module: parentModule, subtree: { rootGraphId: inner.id, graphs: [inner, deep] } }]
+    }));
+    expect((await store.read(({ graphs }) => graphs.get(deep.id)))?.nodes[0]?.config).toMatchObject({ body: "Deep after" });
+    await store.transaction(({ revisions }) => revisions.undo());
+    expect((await store.read(({ graphs }) => graphs.get(inner.id)))?.nodes[0]?.config).toMatchObject({ body: "Inner before" });
+    await store.transaction(({ revisions }) => revisions.redo());
+    expect((await store.read(({ graphs }) => graphs.get(deep.id)))?.nodes[0]?.config).toMatchObject({ body: "Deep after" });
+    await store.close();
+
+    const reopened = await storeClass().open(filePath, { access: "read-only" });
+    expect((await reopened.read(({ graphs }) => graphs.get(inner.id)))?.nodes[0]?.config).toMatchObject({ body: "Inner after" });
     await reopened.close();
   });
 

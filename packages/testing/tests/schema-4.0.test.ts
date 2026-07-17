@@ -1284,7 +1284,7 @@ describe("Ether 4.0 schema", () => {
           }
         ]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipe,
@@ -1317,7 +1317,7 @@ describe("Ether 4.0 schema", () => {
           }
         ]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipe,
@@ -1350,7 +1350,7 @@ describe("Ether 4.0 schema", () => {
           }
         ]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipe,
@@ -1384,7 +1384,7 @@ describe("Ether 4.0 schema", () => {
           }
         ]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipe,
@@ -1600,7 +1600,7 @@ describe("Ether 4.0 schema", () => {
           }
         ]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipe,
@@ -1630,7 +1630,7 @@ describe("Ether 4.0 schema", () => {
           }
         ]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipe,

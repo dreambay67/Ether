@@ -617,6 +617,13 @@ export function createInitializedEtherDocument(
         initialize(database);
       } catch (error) {
         const detail = error instanceof Error ? `: ${error.message}` : "";
+        if (nodeErrorCode(error) === "INVALID_GRAPH_SEMANTICS") {
+          throw new EtherDocumentError(
+            "INVALID_GRAPH_SEMANTICS",
+            `Ether document graph semantics are invalid${detail}`,
+            { cause: error }
+          );
+        }
         throw new EtherDocumentError(
           "PUBLICATION_FAILED",
           `Ether document initialization failed${detail}`,

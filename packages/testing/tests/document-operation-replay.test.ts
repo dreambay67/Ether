@@ -285,4 +285,53 @@ describe("document graph operation replay", () => {
   it.each(cases)("replays $name", ({ operation, verify }) => {
     verify(replay(operation));
   });
+
+  it("applies updateModule subtree graph changes atomically, including nested internals", () => {
+    const deep = { ...graph("graph-deep", "module"), modules: [], edges: [], groups: [], nodes: [node("deep-node")] };
+    const innerModule = module("nested-module", deep.id);
+    const inner = { ...graph("graph-inner", "module"), modules: [innerModule], edges: [], groups: [], nodes: [node("inner-node")] };
+    const parentModule = module("parent-module", inner.id);
+    const parent = { ...graph("graph-parent"), modules: [parentModule], edges: [], groups: [] };
+    const updatedInner = { ...inner, title: "Updated inner", nodes: [{ ...inner.nodes[0]!, config: { kind: "prompt.text" as const, body: "Updated inner body", assembly: "append" as const } }] };
+    const updatedDeep = { ...deep, title: "Updated deep", nodes: [{ ...deep.nodes[0]!, config: { kind: "prompt.text" as const, body: "Updated deep body", assembly: "append" as const } }] };
+
+    const result = replayGraphOperations([parent, inner, deep], [{
+      type: "updateModule",
+      graphId: parent.id,
+      moduleId: parentModule.id,
+      module: { ...parentModule, collapsed: true },
+      subtree: { rootGraphId: inner.id, graphs: [updatedInner, updatedDeep] }
+    }]);
+
+    expect(result.find((item) => item.id === inner.id)).toEqual(updatedInner);
+    expect(result.find((item) => item.id === deep.id)).toEqual(updatedDeep);
+    expect(result.find((item) => item.id === parent.id)?.modules[0]?.collapsed).toBe(true);
+  });
+
+  it("compares existing module subtrees by canonical structure rather than object key order", () => {
+    const internal = { ...graph("graph-canonical", "module"), modules: [], edges: [], groups: [] };
+    const reordered: EtherGraph = {
+      updatedAt: internal.updatedAt,
+      createdAt: internal.createdAt,
+      kind: internal.kind,
+      title: internal.title,
+      id: internal.id,
+      viewState: internal.viewState,
+      modules: internal.modules,
+      groups: internal.groups,
+      edges: internal.edges,
+      nodes: internal.nodes
+    };
+    const parent = { ...graph("graph-canonical-parent"), modules: [], edges: [], groups: [] };
+    const created = module("canonical-module", internal.id);
+
+    expect(() => replayGraphOperations([parent, internal], [{
+      type: "createModule", graphId: parent.id, module: created,
+      subtree: { rootGraphId: internal.id, graphs: [reordered] }
+    }])).not.toThrow();
+    expect(() => replayGraphOperations([parent, internal], [{
+      type: "createModule", graphId: parent.id, module: created,
+      subtree: { rootGraphId: internal.id, graphs: [{ ...reordered, title: "Different" }] }
+    }])).toThrow(/different state/i);
+  });
 });

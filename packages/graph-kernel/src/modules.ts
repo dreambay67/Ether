@@ -93,7 +93,7 @@ export function validateGraphSet(graphs: readonly EtherGraph[]): GraphDiagnostic
     visiting.delete(graphId);
     visited.add(graphId);
   };
-  graphs.filter((graph) => graph.kind === "root").forEach((graph) => visit(graph.id));
+  [...graphs].sort((left, right) => left.id.localeCompare(right.id)).forEach((graph) => visit(graph.id));
   for (const graph of graphs) if (graph.kind === "module" && !internalOwners.has(graph.id)) diagnostics.push({ code: "UNOWNED_MODULE_GRAPH", message: `Module graph ${graph.id} has no owner.`, graphId: graph.id });
   return diagnostics;
 }

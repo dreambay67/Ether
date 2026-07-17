@@ -127,13 +127,28 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
   const root = graphs.find((graph) => graph.kind === "root");
   if (root === undefined) throw new Error("Repair source has no validated root graph.");
   const byId = new Map(graphs.map((graph) => [graph.id, graph]));
-  const initialGraph = { ...root, modules: [] };
+  const stripModuleDependencies = (graph: EtherGraph): EtherGraph => ({
+    ...graph,
+    edges: graph.edges.filter(
+      (edge) => edge.from.kind === "node" && edge.to.kind === "node"
+    ),
+    modules: []
+  });
+  const initialGraph = stripModuleDependencies(root);
   const forward: GraphOperation[] = [];
   const inverse: GraphOperation[] = [];
+  const boundaryEdges: Array<{ graphId: string; edge: EtherGraph["edges"][number] }> = [];
+  const createdModules = new Map<string, Set<string>>();
+  const restoredBoundaryEdges = new Set<string>();
   const visited = new Set([root.id]);
   const queue = [root];
   while (queue.length > 0) {
     const parent = queue.shift()!;
+    boundaryEdges.push(
+      ...parent.edges
+        .filter((edge) => edge.from.kind === "module" || edge.to.kind === "module")
+        .map((edge) => ({ graphId: parent.id, edge }))
+    );
     for (const module of parent.modules) {
       const internal = byId.get(module.graphId);
       if (internal === undefined || internal.kind !== "module") {
@@ -153,7 +168,7 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
         continue;
       }
       visited.add(internal.id);
-      const stagedInternal = { ...internal, modules: [] };
+      const stagedInternal = stripModuleDependencies(internal);
       forward.push({
         type: "createModule",
         graphId: parent.id,
@@ -161,8 +176,27 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
         subtree: { rootGraphId: stagedInternal.id, graphs: [stagedInternal] }
       });
       inverse.push({ type: "removeModule", graphId: parent.id, moduleId: module.id });
+      const parentModules = createdModules.get(parent.id) ?? new Set<string>();
+      parentModules.add(module.id);
+      createdModules.set(parent.id, parentModules);
       queue.push(internal);
     }
+  }
+  for (const { graphId, edge } of boundaryEdges) {
+    const moduleIds = [edge.from, edge.to]
+      .filter((endpoint) => endpoint.kind === "module")
+      .map((endpoint) => endpoint.kind === "module" ? endpoint.moduleId : "");
+    if (moduleIds.some((moduleId) => !createdModules.get(graphId)?.has(moduleId))) {
+      losses.push({
+        type: "graph",
+        entityId: edge.id,
+        reason: "Module boundary edge could not be restored because its module dependency is unavailable."
+      });
+      continue;
+    }
+    forward.push({ type: "addEdge", graphId, edge });
+    inverse.push({ type: "removeEdge", graphId, edgeId: edge.id });
+    restoredBoundaryEdges.add(`${graphId}:${edge.id}`);
   }
   for (const graph of graphs) {
     if (!visited.has(graph.id)) {
@@ -177,7 +211,17 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
     forward,
     initialGraph,
     inverse,
-    snapshots: graphs.filter((graph) => visited.has(graph.id))
+    snapshots: graphs
+      .filter((graph) => visited.has(graph.id))
+      .map((graph) => ({
+        ...graph,
+        edges: graph.edges.filter(
+          (edge) =>
+            (edge.from.kind === "node" && edge.to.kind === "node") ||
+            restoredBoundaryEdges.has(`${graph.id}:${edge.id}`)
+        ),
+        modules: graph.modules.filter((module) => createdModules.get(graph.id)?.has(module.id))
+      }))
   };
 }
 

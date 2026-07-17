@@ -1,4 +1,5 @@
 import * as documentPackage from "@ether/document";
+import { validateFullGraphState } from "@ether/graph-kernel";
 import type {
   Artifact,
   EtherGraph,
@@ -675,12 +676,56 @@ describe("Ether AppData recovery and logical repair", () => {
   it("repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses", async () => {
     const store = await createStore(sourcePath, appDataRoot);
     stores.push(store);
+    const internalNode = {
+      ...graph().nodes[0]!,
+      id: "module-prompt",
+      title: "Module prompt"
+    };
+    const deepNode = {
+      ...graph().nodes[0]!,
+      id: "deep-prompt",
+      title: "Deep prompt"
+    };
+    const deepGraph = {
+      ...graph(),
+      id: "graph-deep",
+      title: "Deep module",
+      kind: "module" as const,
+      nodes: [deepNode]
+    };
+    const nestedModule = {
+      id: "module-nested",
+      title: "Nested module",
+      graphId: deepGraph.id,
+      position: { x: 20, y: 30 },
+      size: { width: 240, height: 160 },
+      interface: {
+        inputs: [{
+          id: "nested-in", name: "Nested input", channel: "text" as const,
+          internalNodeId: deepNode.id, internalChannel: "text" as const, required: true
+        }],
+        outputs: [],
+        parameters: []
+      },
+      collapsed: true
+    };
     const internalGraph = {
       ...graph(),
       id: "graph-module",
       title: "Module",
       kind: "module" as const,
-      nodes: []
+      nodes: [internalNode],
+      edges: [{
+        id: "edge-nested-boundary",
+        from: { kind: "node" as const, nodeId: internalNode.id, channel: "text" as const },
+        to: { kind: "module" as const, moduleId: nestedModule.id, portId: "nested-in", channel: "text" as const },
+        role: "general" as const,
+        order: 0,
+        selector: { kind: "latest" as const },
+        adapter: { kind: "auto" as const },
+        enabled: true
+      }],
+      modules: [nestedModule]
     };
     const module = {
       id: "module-repair",
@@ -688,10 +733,27 @@ describe("Ether AppData recovery and logical repair", () => {
       graphId: internalGraph.id,
       position: { x: 10, y: 20 },
       size: { width: 320, height: 240 },
-      interface: { inputs: [], outputs: [], parameters: [] },
+      interface: {
+        inputs: [{
+          id: "module-in", name: "Module input", channel: "text" as const,
+          internalNodeId: internalNode.id, internalChannel: "text" as const, required: true
+        }],
+        outputs: [],
+        parameters: []
+      },
       collapsed: false
     };
-    const rootWithModule = { ...graph(), modules: [module] };
+    const rootBoundaryEdge = {
+      id: "edge-root-boundary",
+      from: { kind: "node" as const, nodeId: "prompt-1", channel: "text" as const },
+      to: { kind: "module" as const, moduleId: module.id, portId: "module-in", channel: "text" as const },
+      role: "general" as const,
+      order: 0,
+      selector: { kind: "latest" as const },
+      adapter: { kind: "auto" as const },
+      enabled: true
+    };
+    const rootWithModule = { ...graph(), edges: [rootBoundaryEdge], modules: [module] };
     const head = await store.read(({ revisions }) => revisions.head());
     await store.transaction(({ revisions }) => revisions.commit({
       id: "transaction-repair-module",
@@ -699,12 +761,14 @@ describe("Ether AppData recovery and logical repair", () => {
       baseGraphRevisions: head.graphRevisions,
       title: "Add repair module",
       actor: "user",
-      graphSnapshots: [rootWithModule, internalGraph],
+      graphSnapshots: [rootWithModule, internalGraph, deepGraph],
       forwardOperations: [
-        { type: "createModule", graphId: rootWithModule.id, module, subtree: { rootGraphId: internalGraph.id, graphs: [internalGraph] } }
+        { type: "createModule", graphId: rootWithModule.id, module, subtree: { rootGraphId: internalGraph.id, graphs: [internalGraph, deepGraph] } },
+        { type: "addEdge", graphId: rootWithModule.id, edge: rootBoundaryEdge }
       ],
       inverseOperations: [
-        { type: "removeModule", graphId: rootWithModule.id, moduleId: module.id }
+        { type: "removeModule", graphId: rootWithModule.id, moduleId: module.id },
+        { type: "removeEdge", graphId: rootWithModule.id, edgeId: rootBoundaryEdge.id }
       ]
     }));
     await createProvenance(store, "output-repair", "payload-repair");
@@ -786,10 +850,9 @@ describe("Ether AppData recovery and logical repair", () => {
     expect(repaired.dirty).toBe(true);
     await expect(repaired.read(({ artifacts }) => artifacts.get("artifact-good"))).resolves.toMatchObject({ id: "artifact-good" });
     await expect(repaired.read(({ artifacts }) => artifacts.get("artifact-bad"))).resolves.toBeUndefined();
-    await expect(repaired.read(({ graphs }) => graphs.list())).resolves.toEqual([
-      internalGraph,
-      rootWithModule
-    ]);
+    const repairedGraphs = await repaired.read(({ graphs }) => graphs.list());
+    expect(repairedGraphs).toEqual([deepGraph, internalGraph, rootWithModule]);
+    expect(validateFullGraphState(repairedGraphs)).toEqual([]);
   });
 
   it("repairs through corrupt derived FTS state and rebuilds it from authoritative rows", async () => {

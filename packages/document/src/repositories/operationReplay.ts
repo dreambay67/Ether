@@ -4,6 +4,7 @@ import {
   type EtherGraph,
   type GraphOperation
 } from "@ether/schema";
+import { structurallyEqual } from "@ether/graph-kernel";
 
 export class GraphOperationReplayError extends Error {
   constructor(message: string) {
@@ -159,7 +160,7 @@ export function replayGraphOperations(
         for (const subtreeGraph of operation.subtree.graphs) {
           const internal = EtherGraphSchema.parse(subtreeGraph);
           const existing = graphs.get(internal.id);
-          if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(internal)) {
+          if (existing !== undefined && !structurallyEqual(existing, internal)) {
             throw new GraphOperationReplayError(`Module graph ${internal.id} already exists with different state.`);
           }
           graphs.set(internal.id, internal);
@@ -170,12 +171,33 @@ export function replayGraphOperations(
         });
         break;
       }
-      case "updateModule":
+      case "updateModule": {
+        const current = graph.modules.find(({ id }) => id === operation.moduleId);
+        if (current === undefined) {
+          throw new GraphOperationReplayError(`Module ${operation.moduleId} does not exist.`);
+        }
+        if (operation.subtree !== undefined) {
+          const replacing = new Set<string>();
+          const collectSubtree = (graphId: string): void => {
+            if (replacing.has(graphId)) return;
+            const internal = graphs.get(graphId);
+            if (internal === undefined) throw new GraphOperationReplayError(`Module graph ${graphId} does not exist.`);
+            replacing.add(graphId);
+            internal.modules.forEach((nested) => collectSubtree(nested.graphId));
+          };
+          collectSubtree(current.graphId);
+          const replacements = operation.subtree.graphs.map((item) => EtherGraphSchema.parse(item));
+          const collision = replacements.find((item) => graphs.has(item.id) && !replacing.has(item.id));
+          if (collision !== undefined) throw new GraphOperationReplayError(`Module graph ${collision.id} collides with a graph outside the replaced subtree.`);
+          replacing.forEach((graphId) => graphs.delete(graphId));
+          replacements.forEach((item) => graphs.set(item.id, item));
+        }
         graphs.set(graph.id, {
           ...graph,
           modules: replaceRequired(graph.modules, operation.moduleId, operation.module, "Module")
         });
         break;
+      }
       case "removeModule": {
         const removed = graph.modules.find(({ id }) => id === operation.moduleId);
         if (removed === undefined) {

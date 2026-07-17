@@ -2,6 +2,7 @@ import {
   EtherGraphSchema,
   type EtherGraph
 } from "@ether/schema";
+import { validateFullGraphState } from "@ether/graph-kernel";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -233,8 +234,14 @@ export class GraphRepository {
     return graphs;
   }
 
-  persistMany(input: EtherGraph[]): EtherGraph[] {
+  persistMany(input: EtherGraph[], deletedGraphIds: readonly string[] = []): EtherGraph[] {
     const graphs = this.validateMany(input);
+    const replacing = new Set([...graphs.map((graph) => graph.id), ...deletedGraphIds]);
+    const proposed = [...this.list().filter((graph) => !replacing.has(graph.id)), ...graphs];
+    const diagnostics = validateFullGraphState(proposed);
+    if (diagnostics.length > 0) {
+      throw new GraphRepositoryError("INVALID_GRAPH_SEMANTICS", diagnostics.map((item) => `${item.code}: ${item.message}`).join("\n"), { diagnostics });
+    }
     const now = this.context.now();
     for (const graph of graphs) {
       this.context.database

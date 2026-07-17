@@ -18,6 +18,7 @@ function shortHash(values: readonly string[]): string {
 export function deriveLineageKey(lanes: readonly { edgeId: string; payloads: readonly PayloadEnvelope[] }[]): string {
   const keys = [...new Set(lanes.flatMap((lane) => lane.payloads.map((payload) => payload.source.lineageKey)))].sort();
   if (lanes.length === 1 && keys.length === 1) return keys[0]!;
+  if (keys.length === 0) return `empty:${shortHash(lanes.map((lane) => lane.edgeId).sort())}`;
   return `fanin:${shortHash(keys)}`;
 }
 

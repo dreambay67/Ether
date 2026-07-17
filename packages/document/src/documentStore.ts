@@ -61,6 +61,7 @@ import {
   validateEtherDocumentConnection,
   type EtherFileIdentity
 } from "./validation.js";
+import { unresolvedTemporaryPath } from "./temporaryIds.js";
 
 export type DocumentAccessMode = "prefer-write" | "read-only" | "require-write";
 export type DocumentStoreMode =
@@ -270,6 +271,13 @@ export class DocumentStore {
     filePath: string,
     options: CreateDocumentStoreOptions
   ): Promise<DocumentStore> {
+    const temporaryPath = unresolvedTemporaryPath(options.initialGraph);
+    if (temporaryPath !== null) {
+      throw new DocumentStoreError(
+        "UNRESOLVED_TEMP_ID",
+        `Initial graph contains an unresolved temporary ID at ${temporaryPath.join(".")}.`
+      );
+    }
     const initialGraph = EtherGraphSchema.parse(options.initialGraph);
     if (initialGraph.kind !== "root") {
       throw new DocumentStoreError("INVALID_INITIAL_GRAPH", "New Ether documents require a root graph.");

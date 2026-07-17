@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   ConnectionDecisionSchema,
   EtherEdgeSchema,
+  RecipeManifestSchema,
   type EtherEdge,
   type EtherGraph,
   type GraphOperation,
@@ -18,14 +19,17 @@ import {
   assembleExecutorContext,
   canonicalConnectionIdentity,
   createNodeRegistry,
+  deriveLineageKey,
   expandModuleBoundaries,
   getNodeDefinition,
   nodeDefinitions,
   planTraversal,
   previewGraphTransaction,
   resolveOutputSelector,
+  structurallyEqual,
   validateConnection,
-  validateGraphSet
+  validateGraphSet,
+  validateRecipeManifest
 } from "../../graph-kernel/src/index.js";
 
 const timestamp = "2026-07-17T08:00:00.000Z";
@@ -139,6 +143,35 @@ function payload(id: string, nodeId: string, versionId: string, value: string, l
   };
 }
 
+function semanticRecipeFixture() {
+  const source = promptNode("recipe-source");
+  const target = workerNode("recipe-target");
+  return {
+    id: "semantic-recipe",
+    version: "1.0.0",
+    title: "Semantic recipe",
+    description: "Kernel validation fixture",
+    parameters: [],
+    graph: {
+      graphRef: "recipe-root", title: "Root", kind: "root", nodes: [source, target],
+      edges: [edge("recipe-edge", source.id, target.id)], groups: [], modules: [], viewState
+    },
+    moduleGraphs: [],
+    capabilityRequirements: [{
+      id: "llm", operation: "llm", inputChannels: ["text"], outputChannels: ["text"],
+      minimumReferences: 0, minimumOutputs: 1, supportsCancellation: false, supportsSeed: false
+    }],
+    substitutions: [],
+    layout: { policy: "preserve", direction: "horizontal", spacing: { x: 80, y: 60 }, focusNodeRef: source.id },
+    checkpoints: [],
+    expectedWork: { minimumCalls: 1, maximumCalls: 1, minimumWorkItems: 1, maximumWorkItems: 1 },
+    acceptanceScenario: {
+      id: "success",
+      steps: [{ kind: "success", requirementId: "llm", latencyMs: 0, outputs: [{ graphRef: "recipe-root", nodeRef: target.id, channel: "text", fixtureId: "text", mediaType: "text/plain" }] }]
+    }
+  } as const;
+}
+
 describe("Ether 4.0 graph kernel registry", () => {
   it("publishes a runtime-importable pure domain package", () => {
     const packageJson = JSON.parse(readFileSync(`${workspaceRoot}/packages/graph-kernel/package.json`, "utf8")) as { dependencies: Record<string, string> };
@@ -178,6 +211,127 @@ describe("Ether 4.0 graph kernel registry", () => {
     expect(() => createNodeRegistry(nodeDefinitions.map((item, index) => index === 0 ? mismatchedProjection : item))).toThrow(/library.*contract/i);
     const emptyRunnable = { ...nodeDefinitions[3]!, contract: { inputs: [], outputs: nodeDefinitions[3]!.contract.outputs, consequences: {} }, library: { ...nodeDefinitions[3]!.library, inputChannels: [] } };
     expect(() => createNodeRegistry(nodeDefinitions.map((item, index) => index === 3 ? emptyRunnable : item))).toThrow(/meaningful consequence/i);
+  });
+
+  it("compares structures canonically without erasing semantic differences", () => {
+    expect(structurallyEqual(
+      { id: "same", nested: { alpha: 1, beta: [2, 3] } },
+      { nested: { beta: [2, 3], alpha: 1 }, id: "same" }
+    )).toBe(true);
+    expect(structurallyEqual(
+      { id: "same", nested: { alpha: 1, beta: [2, 3] } },
+      { nested: { beta: [3, 2], alpha: 1 }, id: "same" }
+    )).toBe(false);
+  });
+});
+
+describe("registry-backed recipe semantics", () => {
+  it("keeps structural parsing separate from node config, lane, and module contract validation", () => {
+    const base = semanticRecipeFixture();
+    const badConfig = {
+      ...base,
+      graph: { ...base.graph, nodes: [{ ...base.graph.nodes[0], config: { kind: "prompt.text", body: 42, assembly: "append" } }, base.graph.nodes[1]] }
+    };
+    const badConfigStructural = RecipeManifestSchema.safeParse(badConfig);
+    expect(badConfigStructural.success, badConfigStructural.success ? "" : badConfigStructural.error.message).toBe(true);
+    expect(validateRecipeManifest(badConfig)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({ code: "NODE_CONFIG_INVALID", entityId: "recipe-source" })])
+    }));
+
+    const badLane = structuredClone(base);
+    badLane.graph.edges[0]!.from.channel = "image";
+    expect(RecipeManifestSchema.safeParse(badLane).success).toBe(true);
+    expect(validateRecipeManifest(badLane)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({ code: "SOURCE_CHANNEL_UNAVAILABLE", entityId: "recipe-edge" })])
+    }));
+
+    const internal = {
+      graphRef: "recipe-module", title: "Internal", kind: "module" as const,
+      nodes: [promptNode("internal-prompt")], edges: [], groups: [], modules: [], viewState
+    };
+    const invalidModule = {
+      id: "recipe-module-instance", title: "Module", graphId: internal.graphRef,
+      position: { x: 0, y: 0 }, size: { width: 200, height: 100 }, collapsed: false,
+      interface: {
+        inputs: [],
+        outputs: [{ id: "bad-output", name: "Bad", channel: "image", internalNodeId: "internal-prompt", internalChannel: "image", required: true }],
+        parameters: []
+      }
+    };
+    const badModule = {
+      ...base,
+      graph: { ...base.graph, modules: [invalidModule] },
+      moduleGraphs: [internal]
+    };
+    expect(RecipeManifestSchema.safeParse(badModule).success).toBe(true);
+    expect(validateRecipeManifest(badModule)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({ code: "MODULE_PORT_CHANNEL_MISMATCH", entityId: "recipe-module-instance" })])
+    }));
+
+    const badBinding = {
+      ...base,
+      parameters: [{
+        id: "enabled", type: "boolean", title: "Enabled", description: "Invalid body binding",
+        required: true, defaultValue: true
+      }],
+      substitutions: [{
+        requirementId: "llm", providerId: "codex", profileId: "llm-balanced", priority: 0,
+        capability: {
+          providerId: "codex", profileId: "llm-balanced", operation: "llm",
+          inputChannels: ["text"], outputChannels: ["text"], aspectRatios: [], resolutions: [],
+          maxReferences: 8, maxOutputsPerCall: 1, supportsCancellation: false,
+          supportsSeed: false, provenance: "conformance-verified", limitations: []
+        },
+        parameterBindings: [{
+          parameterId: "enabled",
+          target: { graphRef: "recipe-root", nodeRef: "recipe-source", configPath: ["body"] }
+        }]
+      }]
+    };
+    expect(RecipeManifestSchema.safeParse(badBinding).success).toBe(true);
+    expect(validateRecipeManifest(badBinding)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({
+        code: "RECIPE_PARAMETER_BINDING_INVALID",
+        entityId: "recipe-source"
+      })])
+    }));
+  });
+
+  it("rejects a recipe parameter domain that includes invalid target values", () => {
+    const base = semanticRecipeFixture();
+    const invalidDomain = {
+      ...base,
+      parameters: [{
+        id: "model", type: "string", title: "Model", description: "Worker model",
+        required: true, defaultValue: "balanced", minLength: 0, maxLength: 32
+      }],
+      substitutions: [{
+        requirementId: "llm", providerId: "codex", profileId: "llm-balanced", priority: 0,
+        capability: {
+          providerId: "codex", profileId: "llm-balanced", operation: "llm",
+          inputChannels: ["text"], outputChannels: ["text"], aspectRatios: [], resolutions: [],
+          maxReferences: 8, maxOutputsPerCall: 1, supportsCancellation: false,
+          supportsSeed: false, provenance: "conformance-verified", limitations: []
+        },
+        parameterBindings: [{
+          parameterId: "model",
+          target: { graphRef: "recipe-root", nodeRef: "recipe-target", configPath: ["model"] }
+        }]
+      }]
+    };
+
+    expect(RecipeManifestSchema.safeParse(invalidDomain).success).toBe(true);
+    expect(validateRecipeManifest(invalidDomain)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({
+        code: "RECIPE_PARAMETER_BINDING_INVALID",
+        entityId: "recipe-target"
+      })])
+    }));
   });
 });
 
@@ -246,13 +400,46 @@ describe("immutable selectors and context assembly", () => {
 
   it("resolves approved, latest, all, and owned pinned versions deterministically", () => {
     const versions = [other, latest, approved];
-    expect(resolveOutputSelector({ selector: { kind: "latest-approved" }, nodeId: "source", channel: "text", versions, payloads: [] }).versionIds).toEqual(["approved"]);
-    expect(resolveOutputSelector({ selector: { kind: "latest" }, nodeId: "source", channel: "text", versions, payloads: [] }).versionIds).toEqual(["latest"]);
-    expect(resolveOutputSelector({ selector: { kind: "all" }, nodeId: "source", channel: "text", versions, payloads: [] }).versionIds).toEqual(["approved", "latest"]);
-    expect(resolveOutputSelector({ selector: { kind: "pinned", outputVersionId: "latest" }, nodeId: "source", channel: "text", versions, payloads: [] }).diagnostics).toEqual([]);
+    const textPayloads = [
+      payload("payload-approved", "source", "approved", "approved", "approved-lineage"),
+      payload("payload-latest", "source", "latest", "latest", "latest-lineage")
+    ];
+    expect(resolveOutputSelector({ selector: { kind: "latest-approved" }, nodeId: "source", channel: "text", versions, payloads: textPayloads }).versionIds).toEqual(["approved"]);
+    expect(resolveOutputSelector({ selector: { kind: "latest" }, nodeId: "source", channel: "text", versions, payloads: textPayloads }).versionIds).toEqual(["latest"]);
+    expect(resolveOutputSelector({ selector: { kind: "all" }, nodeId: "source", channel: "text", versions, payloads: textPayloads }).versionIds).toEqual(["approved", "latest"]);
+    expect(resolveOutputSelector({ selector: { kind: "pinned", outputVersionId: "latest" }, nodeId: "source", channel: "text", versions, payloads: textPayloads }).diagnostics).toEqual([]);
     expect(resolveOutputSelector({ selector: { kind: "pinned", outputVersionId: "other" }, nodeId: "source", channel: "text", versions, payloads: [] }).diagnostics[0]?.code).toBe("PINNED_VERSION_WRONG_NODE");
     const imagePayload = { ...payload("payload-latest", "source", "latest", "image", "lineage"), channel: "image" as const, content: { kind: "artifact" as const, artifactId: "image-1" } };
     expect(resolveOutputSelector({ selector: { kind: "pinned", outputVersionId: "latest" }, nodeId: "source", channel: "text", versions, payloads: [imagePayload] }).diagnostics[0]?.code).toBe("PINNED_VERSION_WRONG_CHANNEL");
+  });
+
+  it("filters immutable versions by node and channel before selector ranking", () => {
+    const olderText = version("older-text", "source", "2026-07-17T08:00:00.000Z", { state: "approved", actor: "user", at: timestamp });
+    const newerImage = version("newer-image", "source", "2026-07-17T09:00:00.000Z", { state: "approved", actor: "user", at: timestamp });
+    const text = payload("payload-older-text", "source", olderText.id, "matching text", "text-lineage");
+    const image: PayloadEnvelope = {
+      ...payload("payload-newer-image", "source", newerImage.id, "unused", "image-lineage"),
+      channel: "image",
+      content: { kind: "artifact", artifactId: "image-1" }
+    };
+    const input = { nodeId: "source", channel: "text" as const, versions: [olderText, newerImage], payloads: [text, image] };
+
+    expect(resolveOutputSelector({ ...input, selector: { kind: "latest" } }).versionIds).toEqual([olderText.id]);
+    expect(resolveOutputSelector({ ...input, selector: { kind: "latest-approved" } }).versionIds).toEqual([olderText.id]);
+    expect(resolveOutputSelector({ ...input, selector: { kind: "all" } }).versionIds).toEqual([olderText.id]);
+  });
+
+  it("returns a typed diagnostic when a source has versions but none for the requested channel", () => {
+    const imageVersion = version("image-only", "source", timestamp, { state: "approved", actor: "user", at: timestamp });
+    const image: PayloadEnvelope = {
+      ...payload("payload-image-only", "source", imageVersion.id, "unused", "image-lineage"),
+      channel: "image",
+      content: { kind: "artifact", artifactId: "image-only" }
+    };
+    const result = resolveOutputSelector({ selector: { kind: "latest" }, nodeId: "source", channel: "text", versions: [imageVersion], payloads: [image] });
+
+    expect(result.versionIds).toEqual([]);
+    expect(result.diagnostics).toEqual([{ code: "NO_OUTPUT_FOR_CHANNEL", message: "The source node has no immutable output version for text.", channel: "text" }]);
   });
 
   it("runs selector, payload, adapter, role/order, consequence, and manifest stages in order", () => {
@@ -291,11 +478,17 @@ describe("immutable selectors and context assembly", () => {
       graph: { ...graph("root", "root", [a, b, target]), edges: [edge("b-edge", "b", "target", "subject", 0), edge("a-edge", "a", "target", "subject", 0)] },
       targetNodeId: "target",
       versions,
-      payloads: [payload("pa", "a", "a-version", "first", "linear"), payload("pb", "b", "b-version", "second", "branch")],
+      payloads: [payload("payload-a-version", "a", "a-version", "first", "linear"), payload("payload-b-version", "b", "b-version", "second", "branch")],
       capabilities: FULL_ADAPTER_CAPABILITIES
     });
     expect(result.manifest.inputs.map((input) => input.caption)).toEqual(["Subject", "Subject 2"]);
     expect(result.manifest.lineageKey).toMatch(/^fanin:/);
+  });
+
+  it("derives distinct stable lineage for different empty direct lanes", () => {
+    expect(deriveLineageKey([{ edgeId: "empty-a", payloads: [] }])).not.toBe(
+      deriveLineageKey([{ edgeId: "empty-b", payloads: [] }])
+    );
   });
 
   it("keeps captions attached to their payload when non-text inputs are omitted from prompt bodies", () => {
@@ -305,7 +498,7 @@ describe("immutable selectors and context assembly", () => {
     const artifactVersion = version("artifact-version", artifactSource.id, timestamp, { state: "approved", actor: "user", at: timestamp });
     const textVersion = version("text-version", textSource.id, timestamp, { state: "approved", actor: "user", at: timestamp });
     const artifactPayload: PayloadEnvelope = {
-      ...payload("artifact", artifactSource.id, artifactVersion.id, "unused", "artifact-lineage"),
+      ...payload("payload-artifact-version", artifactSource.id, artifactVersion.id, "unused", "artifact-lineage"),
       content: { kind: "artifact", artifactId: "artifact-1" }
     };
     const result = assembleExecutorContext({
@@ -315,7 +508,7 @@ describe("immutable selectors and context assembly", () => {
       },
       targetNodeId: target.id,
       versions: [artifactVersion, textVersion],
-      payloads: [artifactPayload, payload("text", textSource.id, textVersion.id, "visible text", "text-lineage")],
+      payloads: [artifactPayload, payload("payload-text-version", textSource.id, textVersion.id, "visible text", "text-lineage")],
       capabilities: FULL_ADAPTER_CAPABILITIES
     });
 
@@ -388,6 +581,40 @@ describe("modules and traversal", () => {
     const graphs = moduleFixture();
     graphs[0]!.edges.push(edge("cycle", "sink", "source"));
     expect(() => planTraversal(graphs, "root")).toThrow(/cycle/i);
+  });
+
+  it("rejects a proposed lane that closes a cycle through virtual module boundaries", () => {
+    const graphs = moduleFixture();
+    const candidate = edge("proposed-cycle", "sink", "source");
+    const decision = validateConnection({
+      sourceDefinitionId: "prompt.worker", sourceChannel: "text",
+      targetDefinitionId: "prompt.text", targetChannel: "text", role: "general",
+      candidate,
+      existingEdges: graphs.flatMap((item) => item.edges),
+      topology: { graphs }
+    } as Parameters<typeof validateConnection>[0]);
+
+    expect(decision).toEqual(expect.objectContaining({
+      allowed: false,
+      code: "CYCLE_NOT_ALLOWED",
+      remedies: [expect.objectContaining({
+        kind: "remove-cycle-edges",
+        edgeIds: expect.arrayContaining(["enter", "inner-edge", "leave"])
+      })]
+    }));
+    expect(() => ConnectionDecisionSchema.parse(decision)).not.toThrow();
+  });
+
+  it("detects ownership cycles in detached graph components deterministically", () => {
+    const first = graph("detached-a", "module", []);
+    const second = graph("detached-b", "module", []);
+    const moduleShape = { title: "Detached", position: { x: 0, y: 0 }, size: { width: 200, height: 100 }, interface: { inputs: [], outputs: [], parameters: [] }, collapsed: false };
+    first.modules = [{ ...moduleShape, id: "owns-b", graphId: second.id }];
+    second.modules = [{ ...moduleShape, id: "owns-a", graphId: first.id }];
+
+    expect(validateGraphSet([second, first]).filter((item) => item.code === "MODULE_OWNERSHIP_CYCLE")).toEqual([
+      expect.objectContaining({ graphId: "detached-a" })
+    ]);
   });
 
   it("flattens nested module interfaces into executable internal nodes", () => {
@@ -492,7 +719,7 @@ describe("atomic graph transactions", () => {
       transaction: { id: "layout", baseDocumentRevisionId: "doc", baseGraphRevisions: { root: "r" }, title: "Layout", actor: "system", layoutPolicy: "tidy-affected", operations: [{ type: "updateGraphProperties", graphId: "root", title: "No implicit layout" }] }
     })).toThrow(/explicit move\/resize/i);
   });
-  it("resolves forward temporary references once and proves forward/inverse replay", () => {
+  it("resolves temporary references once and proves forward/inverse replay", () => {
     const initial = graph("root", "root", []);
     const draftNode = { ...promptNode("$temp:node:prompt"), title: "Temporary" };
     const preview = previewGraphTransaction({
@@ -501,8 +728,8 @@ describe("atomic graph transactions", () => {
         id: "tx-temp", baseDocumentRevisionId: "doc-rev", baseGraphRevisions: { root: "graph-rev" },
         title: "Add with temp", actor: "recipe", layoutPolicy: "preserve",
         operations: [
-          { type: "moveNodes", graphId: "root", positions: [{ nodeId: "$temp:node:prompt", position: { x: 40, y: 50 } }] },
-          { type: "addNode", graphId: "root", node: draftNode }
+          { type: "addNode", graphId: "root", node: draftNode },
+          { type: "moveNodes", graphId: "root", positions: [{ nodeId: "$temp:node:prompt", position: { x: 40, y: 50 } }] }
         ]
       },
       idFactory: ({ kind, name }) => `${kind}-${name}-resolved`
@@ -511,6 +738,62 @@ describe("atomic graph transactions", () => {
     expect(preview.graphs[0]!.nodes[0]).toMatchObject({ id: "node-prompt-resolved", position: { x: 40, y: 50 } });
     expect(preview.inverseReplay).toEqual([initial]);
     expect(preview.forwardReplay).toEqual(preview.graphs);
+    expect(JSON.stringify({
+      graphs: preview.graphs,
+      forwardOperations: preview.forwardOperations,
+      inverseOperations: preview.inverseOperations
+    })).not.toContain("$temp:");
+  });
+
+  it("resolves forward temporary references without reordering transaction operations", () => {
+    const initial = graph("root", "root", []);
+    const source = promptNode("$temp:node:source");
+    const target = workerNode("$temp:node:target");
+    const forwardEdge = edge("forward-edge", source.id, target.id, "subject");
+    const preview = previewGraphTransaction({
+      graphs: [initial],
+      transaction: {
+        id: "tx-temp-order", baseDocumentRevisionId: "doc-rev", baseGraphRevisions: { root: "graph-rev" },
+        title: "Keep operation order", actor: "recipe", layoutPolicy: "preserve",
+        operations: [
+          { type: "addEdge", graphId: "root", edge: forwardEdge },
+          { type: "addNode", graphId: "root", node: source },
+          { type: "addNode", graphId: "root", node: target }
+        ]
+      },
+      idFactory: ({ kind, name }) => `${kind}-${name}-resolved`
+    });
+
+    expect(preview.forwardOperations.map((operation) => operation.type)).toEqual([
+      "addEdge",
+      "addNode",
+      "addNode"
+    ]);
+    expect(preview.graphs[0]?.edges[0]).toMatchObject({
+      from: { kind: "node", nodeId: "node-source-resolved" },
+      to: { kind: "node", nodeId: "node-target-resolved" }
+    });
+    expect(preview.inverseReplay).toEqual([initial]);
+  });
+
+  it("preserves explicit remove-then-add order when replacing an exact lane", () => {
+    const initial = graph("root", "root", [promptNode("source"), workerNode("target")]);
+    initial.edges = [edge("old-lane", "source", "target", "subject")];
+    const replacement = { ...initial.edges[0]!, id: "new-lane" };
+    const preview = previewGraphTransaction({
+      graphs: [initial],
+      transaction: {
+        id: "replace-lane", baseDocumentRevisionId: "doc", baseGraphRevisions: { root: "r" },
+        title: "Replace lane", actor: "user", layoutPolicy: "preserve",
+        operations: [
+          { type: "removeEdge", graphId: "root", edgeId: "old-lane" },
+          { type: "addEdge", graphId: "root", edge: replacement }
+        ]
+      }
+    });
+
+    expect(preview.forwardOperations.map((operation) => operation.type)).toEqual(["removeEdge", "addEdge"]);
+    expect(preview.graphs[0]!.edges.map((item) => item.id)).toEqual(["new-lane"]);
   });
 
   it("rejects temp kind mismatches, ID collisions, and any invalid graph atomically", () => {

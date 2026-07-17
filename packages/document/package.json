@@ -17,13 +17,14 @@
     "node": ">=24.16.0"
   },
   "scripts": {
-    "prebuild": "pnpm --filter @ether/schema build",
+    "prebuild": "pnpm --filter @ether/graph-kernel build",
     "build": "tsc -p tsconfig.json && node --input-type=module --eval \"import { cpSync, mkdirSync } from 'node:fs'; mkdirSync('dist/schema', { recursive: true }); cpSync('src/schema/40000.sql', 'dist/schema/40000.sql');\"",
-    "pretypecheck": "pnpm --filter @ether/schema build",
+    "pretypecheck": "pnpm --filter @ether/graph-kernel build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
+    "@ether/graph-kernel": "workspace:*",
     "@ether/schema": "workspace:*"
   }
 }

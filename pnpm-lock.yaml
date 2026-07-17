@@ -87,6 +87,9 @@ importers:
 
   packages/document:
     dependencies:
+      '@ether/graph-kernel':
+        specifier: workspace:*
+        version: link:../graph-kernel
       '@ether/schema':
         specifier: workspace:*
         version: link:../schema

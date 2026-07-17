@@ -7,9 +7,11 @@ import {
   type PreparedGraphCommit,
   type RevisionActor
 } from "@ether/schema";
+import { structurallyEqual, validateFullGraphState } from "@ether/graph-kernel";
 
 import { GraphRepository, type RepositoryTransactionContext } from "./graphs.js";
 import { replayGraphOperations } from "./operationReplay.js";
+import { unresolvedTemporaryPath } from "../temporaryIds.js";
 
 export type DocumentRevisionKind = "genesis" | "edit" | "undo" | "redo";
 
@@ -76,7 +78,7 @@ function parseSnapshot(serialized: string | null): EtherGraph | undefined {
 }
 
 function sameSnapshot(left: EtherGraph | undefined, right: EtherGraph | undefined): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return structurallyEqual(left, right);
 }
 
 function normalizeUpdatedAt(
@@ -148,6 +150,8 @@ export class RevisionRepository {
   }
 
   commit(input: PreparedGraphCommit): CommitResult {
+    const temporaryPath = unresolvedTemporaryPath(input);
+    if (temporaryPath !== null) throw new DocumentRepositoryError("UNRESOLVED_TEMP_ID", `Prepared commit contains an unresolved temporary ID at ${temporaryPath.join(".")}.`);
     const commit = PreparedGraphCommitSchema.parse(input);
     const current = this.head();
     const deletedGraphIds = commit.deletedGraphIds ?? [];
@@ -219,6 +223,14 @@ export class RevisionRepository {
         ...currentGraphs.filter((graph) => !affected.has(graph.id)),
         ...commit.graphSnapshots
       ];
+      const semanticDiagnostics = validateFullGraphState(declaredResult);
+      if (semanticDiagnostics.length > 0) {
+        throw new DocumentRepositoryError(
+          "INVALID_GRAPH_SEMANTICS",
+          semanticDiagnostics.map((item) => `${item.code}: ${item.message}`).join("\n"),
+          { details: { diagnostics: semanticDiagnostics } }
+        );
+      }
       const replayedInverse = replayGraphOperations(
         declaredResult,
         commit.inverseOperations.slice().reverse()
@@ -237,6 +249,9 @@ export class RevisionRepository {
         }
       }
     } catch (error) {
+      if (error instanceof DocumentRepositoryError && error.code === "INVALID_GRAPH_SEMANTICS") {
+        throw error;
+      }
       throw new DocumentRepositoryError(
         "INVALID_PREPARED_COMMIT",
         `Prepared graph snapshots and operations do not describe an exact reversible commit.${error instanceof Error ? ` ${error.message}` : ""}`,
@@ -250,7 +265,7 @@ export class RevisionRepository {
     const before = new Map(
       affectedGraphIds.map((graphId) => [graphId, currentById.get(graphId)])
     );
-    const snapshots = this.graphs.persistMany(commit.graphSnapshots);
+    const snapshots = this.graphs.persistMany(commit.graphSnapshots, deletedGraphIds);
     for (const snapshot of snapshots) {
       if (!sameSnapshot(this.graphs.get(snapshot.id), snapshot)) {
         throw new DocumentRepositoryError(
@@ -531,7 +546,10 @@ export class RevisionRepository {
         { details: { documentRevisionId: targetDocumentRevisionId, cause: error } }
       );
     }
-    this.graphs.persistMany(desired.flatMap(({ snapshot }) => (snapshot === undefined ? [] : [snapshot])));
+    this.graphs.persistMany(
+      desired.flatMap(({ snapshot }) => (snapshot === undefined ? [] : [snapshot])),
+      desired.flatMap(({ graphId, snapshot }) => snapshot === undefined ? [graphId] : [])
+    );
     for (const item of desired) {
       if (item.snapshot === undefined) {
         this.graphs.markDeleted(item.graphId);

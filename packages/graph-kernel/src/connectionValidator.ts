@@ -6,6 +6,7 @@ import {
   type ConnectionRole,
   type EdgeAdapter,
   type EtherEdge,
+  type EtherGraph,
   type NodeDefinitionId,
   type OutputSelector,
   type PayloadChannel
@@ -23,6 +24,7 @@ export type ConnectionValidationInput = {
   candidate?: EtherEdge;
   existingEdges?: readonly EtherEdge[];
   capabilities?: readonly string[];
+  topology?: { graphs: readonly EtherGraph[] };
 };
 
 export function canonicalSelector(selector: OutputSelector): string {
@@ -41,6 +43,42 @@ function reject(code: Exclude<ConnectionDecision, { allowed: true }>["code"], me
   return { allowed: false, code, message, remedies };
 }
 
+function cyclePath(candidate: EtherEdge, graphs: readonly EtherGraph[]): string[] | null {
+  if (!candidate.enabled) return null;
+  const modules = new Map(graphs.flatMap((graph) => graph.modules.map((module) => [module.id, module] as const)));
+  const resolve = (endpoint: EtherEdge["from"], direction: "input" | "output"): string | null => {
+    if (endpoint.kind === "node") return endpoint.nodeId;
+    const module = modules.get(endpoint.moduleId);
+    const ports = direction === "input" ? module?.interface.inputs : module?.interface.outputs;
+    return ports?.find((port) => port.id === endpoint.portId && port.channel === endpoint.channel)?.internalNodeId ?? null;
+  };
+  const candidateSource = resolve(candidate.from, "output");
+  const candidateTarget = resolve(candidate.to, "input");
+  if (candidateSource === null || candidateTarget === null) return null;
+  const adjacency = new Map<string, Array<{ edgeId: string; targetId: string }>>();
+  for (const edge of graphs.flatMap((graph) => graph.edges).filter((edge) => edge.enabled && edge.id !== candidate.id)) {
+    const sourceId = resolve(edge.from, "output");
+    const targetId = resolve(edge.to, "input");
+    if (sourceId === null || targetId === null) continue;
+    const outgoing = adjacency.get(sourceId) ?? [];
+    outgoing.push({ edgeId: edge.id, targetId });
+    outgoing.sort((left, right) => left.edgeId.localeCompare(right.edgeId) || left.targetId.localeCompare(right.targetId));
+    adjacency.set(sourceId, outgoing);
+  }
+  const queue: Array<{ nodeId: string; edgeIds: string[] }> = [{ nodeId: candidateTarget, edgeIds: [] }];
+  const visited = new Set([candidateTarget]);
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current.nodeId === candidateSource) return current.edgeIds;
+    for (const next of adjacency.get(current.nodeId) ?? []) {
+      if (visited.has(next.targetId)) continue;
+      visited.add(next.targetId);
+      queue.push({ nodeId: next.targetId, edgeIds: [...current.edgeIds, next.edgeId] });
+    }
+  }
+  return null;
+}
+
 export function validateConnection(input: ConnectionValidationInput): ConnectionDecision {
   const sourceDefinition = nodeRegistry.get(input.sourceDefinitionId as NodeDefinitionId);
   if (sourceDefinition === undefined) return reject("UNKNOWN_NODE_DEFINITION", `Unknown source node definition: ${input.sourceDefinitionId}`, [{ kind: "select-node-definition", endpoint: "source", definitionIds: [...canonicalNodeDefinitionIds] }]);
@@ -57,6 +95,10 @@ export function validateConnection(input: ConnectionValidationInput): Connection
     const identity = canonicalConnectionIdentity(input.candidate);
     const duplicate = input.existingEdges?.find((edge) => edge.id !== input.candidate!.id && canonicalConnectionIdentity(edge) === identity);
     if (duplicate !== undefined) return reject("DUPLICATE_LANE", "An exact connection lane already exists.", [{ kind: "remove-edge", edgeId: duplicate.id }]);
+  }
+  if (input.candidate !== undefined && input.topology !== undefined) {
+    const path = cyclePath(input.candidate, input.topology.graphs);
+    if (path !== null) return reject("CYCLE_NOT_ALLOWED", "The proposed connection would create an execution cycle.", [{ kind: "remove-cycle-edges", edgeIds: path.length > 0 ? path : [input.candidate.id] }]);
   }
   const capabilities = new Set(input.capabilities ?? []);
   let adapter = null;

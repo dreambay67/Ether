@@ -1,14 +1,35 @@
 import { describe, expect, it } from "vitest";
+import type { PayloadEnvelope } from "@ether/schema";
 
 import {
   FULL_ADAPTER_CAPABILITIES,
+  adapterDefinitions,
+  applyInputConsequence,
   connectionMatrixHash,
+  createExecutorInputFixture,
   enumerateConnectionMatrix,
+  enumerateExplicitAdapterMatrix,
   nodeDefinitions,
   payloadChannels,
   connectionRoles,
   resolveAdapter
 } from "../../graph-kernel/src/index.js";
+
+function matrixPayload(row: { key: string; targetChannel: PayloadEnvelope["channel"]; role: PayloadEnvelope["role"] }): PayloadEnvelope {
+  const content: PayloadEnvelope["content"] = row.targetChannel === "text"
+    ? { kind: "text", value: row.key }
+    : row.targetChannel === "data"
+      ? { kind: "object", value: { key: row.key } }
+      : { kind: "artifact", artifactId: `artifact:${row.key}` };
+  return {
+    id: `payload:${row.key}`,
+    channel: row.targetChannel,
+    role: row.role,
+    content,
+    source: { nodeId: `source:${row.key}`, outputVersionId: `version:${row.key}`, lineageKey: `lineage:${row.key}` },
+    metadata: {}
+  };
+}
 
 describe("Ether 4.0 exhaustive connection matrix", () => {
   it("enumerates every definition, channel, and role tuple in stable order", () => {
@@ -42,6 +63,10 @@ describe("Ether 4.0 exhaustive connection matrix", () => {
       for (const row of rows) {
         if (row.decision.allowed) {
           if (row.decision.consequences.length === 0 || row.decision.consequences.some((consequence) => consequence.executorInputField === "")) invalidRows.push(row.key);
+          for (const consequence of row.decision.consequences) {
+            const applied = applyInputConsequence(createExecutorInputFixture(row.targetDefinitionId), consequence, matrixPayload(row));
+            expect(applied.inputs[consequence.executorInputField]?.payloads).toHaveLength(1);
+          }
         } else {
           if (!/^[A-Z_]+$/.test(row.decision.code) || row.decision.remedies.length === 0 || row.decision.remedies.some((remedy) => !("kind" in remedy))) invalidRows.push(row.key);
         }
@@ -49,6 +74,35 @@ describe("Ether 4.0 exhaustive connection matrix", () => {
     }
     expect(invalidRows).toEqual([]);
   }, 20_000);
+
+  it("enumerates and executes every explicit adapter tuple and capability scenario", () => {
+    const rows = enumerateExplicitAdapterMatrix();
+    expect(adapterDefinitions).toHaveLength(16);
+    expect(rows).toHaveLength(65_970);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    expect(new Set(rows.map((row) => row.adapterId))).toEqual(new Set(adapterDefinitions.map((adapter) => adapter.id)));
+
+    for (const row of rows) {
+      if (row.decision.allowed) {
+        expect(row.decision.adapter?.adapterId).toBe(row.adapterId);
+        for (const consequence of row.decision.consequences) {
+          const applied = applyInputConsequence(createExecutorInputFixture(row.targetDefinitionId), consequence, matrixPayload(row));
+          expect(applied.inputs[consequence.executorInputField]).toMatchObject({
+            assemblyStrategy: consequence.assemblyStrategy,
+            preservationRule: consequence.preservationRule,
+            payloads: [expect.objectContaining({ id: `payload:${row.key}` })]
+          });
+        }
+      } else {
+        const adapter = adapterDefinitions.find((candidate) => candidate.id === row.adapterId)!;
+        expect(adapter.requiredCapability).not.toBeNull();
+        expect(row.capabilityScenario).toBe("none");
+        expect(row.decision.code).toBe("PROVIDER_CAPABILITY_UNAVAILABLE");
+      }
+    }
+    expect(connectionMatrixHash(rows)).toBe("ether-matrix-v1:603a2c5521278897");
+    expect(connectionMatrixHash(rows)).toBe(connectionMatrixHash(enumerateExplicitAdapterMatrix()));
+  }, 30_000);
 
   it("contains only the bounded adapter graph and never invents generation or masking", () => {
     const full = new Set(FULL_ADAPTER_CAPABILITIES);

@@ -8,13 +8,27 @@ import {
   WorkspaceViewStateSchema
 } from "./graph.js";
 import {
-  EtherNodeSchema,
-  NodeConfigSchemas,
+  NodePositionSchema,
+  NodePresentationSchema,
+  NodeSizeSchema,
   PayloadChannelSchema
 } from "./nodes.js";
 import { ProviderCapabilitySchema, ProviderOperationSchema } from "./outputs.js";
 
 const idSchema = z.string().min(1);
+
+export const RecipeNodeBlueprintSchema = z
+  .object({
+    id: idSchema,
+    definitionId: idSchema,
+    title: z.string(),
+    position: NodePositionSchema,
+    size: NodeSizeSchema,
+    config: z.record(JsonValueSchema),
+    presentation: NodePresentationSchema
+  })
+  .strict();
+export type RecipeNodeBlueprint = z.infer<typeof RecipeNodeBlueprintSchema>;
 
 const recipeParameterShape = {
   id: idSchema,
@@ -100,7 +114,7 @@ const GraphBlueprintObjectSchema = z
     graphRef: idSchema,
     title: z.string(),
     kind: z.enum(["root", "module"]),
-    nodes: z.array(EtherNodeSchema),
+    nodes: z.array(RecipeNodeBlueprintSchema),
     edges: z.array(EtherEdgeSchema),
     groups: z.array(EtherGroupSchema),
     modules: z.array(EtherModuleSchema),
@@ -418,170 +432,6 @@ function resolveConfigPath(config: unknown, path: readonly string[]): ConfigPath
   return { found: true, value: current };
 }
 
-function replaceConfigPathValue(
-  config: unknown,
-  path: readonly string[],
-  value: unknown
-): ConfigPathResolution {
-  if (path.length === 0) {
-    return { found: true, value };
-  }
-  const [segment, ...rest] = path;
-  if (Array.isArray(config)) {
-    if (!/^\d+$/.test(segment)) {
-      return { found: false };
-    }
-    const index = Number(segment);
-    if (index >= config.length) {
-      return { found: false };
-    }
-    const replacement = replaceConfigPathValue(config[index], rest, value);
-    if (!replacement.found) {
-      return replacement;
-    }
-    const next = [...config];
-    next[index] = replacement.value;
-    return { found: true, value: next };
-  }
-  if (typeof config !== "object" || config === null || !Object.hasOwn(config, segment)) {
-    return { found: false };
-  }
-  const replacement = replaceConfigPathValue(Reflect.get(config, segment), rest, value);
-  if (!replacement.found) {
-    return replacement;
-  }
-  const next = { ...config };
-  Reflect.set(next, segment, replacement.value);
-  return { found: true, value: next };
-}
-
-type UnknownZodSchema = z.ZodType<unknown, z.ZodTypeDef, unknown>;
-
-function resolveConfigSchemaPath(
-  schema: UnknownZodSchema,
-  path: readonly string[]
-): UnknownZodSchema | null {
-  if (path.length === 0) {
-    return schema;
-  }
-  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
-    return resolveConfigSchemaPath(schema.unwrap(), path);
-  }
-  const [segment, ...rest] = path;
-  if (schema instanceof z.ZodObject) {
-    const child: UnknownZodSchema | undefined = schema.shape[segment];
-    return child ? resolveConfigSchemaPath(child, rest) : null;
-  }
-  if (schema instanceof z.ZodArray && /^\d+$/.test(segment)) {
-    return resolveConfigSchemaPath(schema.element, rest);
-  }
-  return null;
-}
-
-function stringDomainFitsTarget(
-  parameter: z.infer<typeof RecipeStringParameterSchema>,
-  targetSchema: UnknownZodSchema
-): boolean {
-  if (!(targetSchema instanceof z.ZodString)) {
-    return false;
-  }
-  return targetSchema._def.checks.every((check) => {
-    if (check.kind === "min") {
-      return parameter.minLength >= check.value;
-    }
-    if (check.kind === "max") {
-      return parameter.maxLength <= check.value;
-    }
-    if (check.kind === "length") {
-      return parameter.minLength === check.value && parameter.maxLength === check.value;
-    }
-    return false;
-  });
-}
-
-function isMultipleOf(value: number, factor: number): boolean {
-  const quotient = value / factor;
-  return Math.abs(quotient - Math.round(quotient)) < Number.EPSILON * 16;
-}
-
-function numberDomainFitsTarget(
-  parameter: z.infer<typeof RecipeNumberParameterSchema>,
-  targetSchema: UnknownZodSchema
-): boolean {
-  if (!(targetSchema instanceof z.ZodNumber)) {
-    return false;
-  }
-  if (!isMultipleOf(parameter.defaultValue - parameter.minimum, parameter.step)) {
-    return false;
-  }
-  return targetSchema._def.checks.every((check) => {
-    if (check.kind === "min") {
-      return (
-        parameter.minimum > check.value ||
-        (parameter.minimum === check.value && check.inclusive)
-      );
-    }
-    if (check.kind === "max") {
-      return (
-        parameter.maximum < check.value ||
-        (parameter.maximum === check.value && check.inclusive)
-      );
-    }
-    if (check.kind === "int") {
-      return [
-        parameter.minimum,
-        parameter.maximum,
-        parameter.defaultValue,
-        parameter.step
-      ].every(Number.isInteger);
-    }
-    if (check.kind === "multipleOf") {
-      return [
-        parameter.minimum,
-        parameter.maximum,
-        parameter.defaultValue,
-        parameter.step
-      ].every((value) => isMultipleOf(value, check.value));
-    }
-    return check.kind === "finite";
-  });
-}
-
-function parameterFitsTarget(
-  parameter: z.infer<typeof RecipeParameterSchema>,
-  node: z.infer<typeof EtherNodeSchema>,
-  configPath: readonly string[]
-): boolean {
-  const targetSchema = resolveConfigSchemaPath(
-    NodeConfigSchemas[node.definitionId],
-    configPath
-  );
-  if (!targetSchema) {
-    return false;
-  }
-  if (parameter.type === "string" && !stringDomainFitsTarget(parameter, targetSchema)) {
-    return false;
-  }
-  if (parameter.type === "number" && !numberDomainFitsTarget(parameter, targetSchema)) {
-    return false;
-  }
-  const values =
-    parameter.type === "choice"
-      ? parameter.options.map((option) => option.value)
-      : parameter.type === "artifact"
-        ? [[]]
-        : parameter.type === "number"
-          ? [parameter.minimum, parameter.maximum, parameter.defaultValue]
-          : [parameter.defaultValue];
-  return values.every((value) => {
-    const replacement = replaceConfigPathValue(node.config, configPath, value);
-    return (
-      replacement.found &&
-      NodeConfigSchemas[node.definitionId].safeParse(replacement.value).success
-    );
-  });
-}
-
 function validateRecipeManifest(
   manifest: z.infer<typeof RecipeManifestObjectSchema>,
   context: z.RefinementCtx
@@ -799,17 +649,6 @@ function validateRecipeManifest(
             path: ["substitutions", index, "parameterBindings", bindingIndex, "target", "configPath"],
             message: "Binding target config path does not exist"
           });
-        } else {
-          const parameter = manifest.parameters.find(
-            (candidate) => candidate.id === binding.parameterId
-          );
-          if (parameter && !parameterFitsTarget(parameter, node, binding.target.configPath)) {
-            context.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: ["substitutions", index, "parameterBindings", bindingIndex, "target"],
-              message: "Recipe parameter values are incompatible with the target config field"
-            });
-          }
         }
       }
       const targetKey = `${binding.target.graphRef}:${binding.target.nodeRef}:${binding.target.configPath.join(".")}`;

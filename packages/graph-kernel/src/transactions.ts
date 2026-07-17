@@ -6,9 +6,9 @@ import {
   type GraphTransaction,
   type ModuleSubtreeSnapshot
 } from "@ether/schema";
-import { validateConnection } from "./connectionValidator.js";
-import { expandModuleBoundaries, moduleSubtree, validateGraphSet } from "./modules.js";
-import { planTraversal } from "./traversal.js";
+import { moduleSubtree } from "./modules.js";
+import { structurallyEqual } from "./structural.js";
+import { validateFullGraphState } from "./validation.js";
 
 export class GraphKernelError extends Error {
   constructor(public readonly code: string, message: string, public readonly diagnostics: readonly { code: string; message: string }[] = []) {
@@ -23,12 +23,6 @@ const tempPattern = /^\$temp:(node|edge|group|module|graph):(.+)$/;
 
 function cloneGraphs(graphs: readonly EtherGraph[]): Map<string, EtherGraph> {
   return new Map(structuredClone(graphs).map((graph) => [graph.id, graph]));
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (typeof value === "object" && value !== null) return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`).join(",")}}`;
-  return JSON.stringify(value);
 }
 
 function entityIds(graphs: readonly EtherGraph[]): Set<string> {
@@ -82,11 +76,6 @@ function replaceTemporaryIds(value: unknown, resolved: ReadonlyMap<string, strin
   if (Array.isArray(value)) return value.map((item) => replaceTemporaryIds(item, resolved, key));
   if (typeof value === "object" && value !== null) return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, replaceTemporaryIds(child, resolved, childKey)]));
   return value;
-}
-
-function normalizeOperations(operations: readonly GraphOperation[]): GraphOperation[] {
-  const declarationTypes = new Set(["addNode", "createGroup", "createModule", "addEdge"]);
-  return operations.map((operation, index) => ({ operation, index })).sort((left, right) => Number(!declarationTypes.has(left.operation.type)) - Number(!declarationTypes.has(right.operation.type)) || left.index - right.index).map(({ operation }) => operation);
 }
 
 function requireGraph(graphs: Map<string, EtherGraph>, graphId: string): EtherGraph {
@@ -185,19 +174,7 @@ function replay(inputGraphs: readonly EtherGraph[], operations: readonly GraphOp
 }
 
 function validateResult(graphs: readonly EtherGraph[], capabilities: readonly string[]): void {
-  const diagnostics = validateGraphSet(graphs);
-  const nodeById = new Map(graphs.flatMap((graph) => graph.nodes.map((node) => [node.id, node] as const)));
-  for (const edge of expandModuleBoundaries(graphs)) {
-    if (edge.from.kind !== "node" || edge.to.kind !== "node") continue;
-    const source = nodeById.get(edge.from.nodeId);
-    const target = nodeById.get(edge.to.nodeId);
-    if (source === undefined || target === undefined) continue;
-    const decision = validateConnection({ sourceDefinitionId: source.definitionId, sourceChannel: edge.from.channel, targetDefinitionId: target.definitionId, targetChannel: edge.to.channel, role: edge.role, adapter: edge.adapter, capabilities });
-    if (!decision.allowed) diagnostics.push({ code: decision.code, message: `${edge.id}: ${decision.message}` });
-  }
-  for (const root of graphs.filter((graph) => graph.kind === "root")) {
-    try { planTraversal(graphs, root.id); } catch (error) { diagnostics.push({ code: "TRAVERSAL_INVALID", message: error instanceof Error ? error.message : "Traversal failed." }); }
-  }
+  const diagnostics = validateFullGraphState(graphs, capabilities);
   if (diagnostics.length > 0) throw new GraphKernelError("INVALID_POST_TRANSACTION_GRAPH", diagnostics.map((item) => `${item.code}: ${item.message}`).join("\n"), diagnostics);
 }
 
@@ -232,14 +209,14 @@ export function previewGraphTransaction(input: { graphs: readonly EtherGraph[]; 
     if (occupied.has(id) || [...resolved.values()].includes(id)) throw new GraphKernelError("TEMP_ID_COLLISION", `Resolved temporary ID collision: ${id}.`);
     resolved.set(reference, id);
   }
-  const forwardOperations = normalizeOperations(parsed.operations.map((operation) => GraphOperationSchema.parse(replaceTemporaryIds(operation, resolved))));
+  const forwardOperations = parsed.operations.map((operation) => GraphOperationSchema.parse(replaceTemporaryIds(operation, resolved)));
   requireAffectedBaseRevisions(input.graphs, forwardOperations, parsed.baseGraphRevisions);
   const forward = replay(input.graphs, forwardOperations, true);
   validateResult(forward.graphs, input.capabilities ?? []);
   const replayedForward = replay(input.graphs, forwardOperations, false).graphs;
   const replayedInverse = replay(forward.graphs, forward.inverse.slice().reverse(), false).graphs;
-  if (stableStringify(replayedForward) !== stableStringify(forward.graphs)) throw new GraphKernelError("FORWARD_REPLAY_PROOF_FAILED", "Forward graph transaction replay did not reproduce the preview snapshots.");
+  if (!structurallyEqual(replayedForward, forward.graphs)) throw new GraphKernelError("FORWARD_REPLAY_PROOF_FAILED", "Forward graph transaction replay did not reproduce the preview snapshots.");
   const expectedInverse = [...input.graphs].sort((left, right) => left.id.localeCompare(right.id));
-  if (stableStringify(replayedInverse) !== stableStringify(expectedInverse)) throw new GraphKernelError("INVERSE_REPLAY_PROOF_FAILED", "Inverse graph transaction replay did not reproduce the input snapshots.");
+  if (!structurallyEqual(replayedInverse, expectedInverse)) throw new GraphKernelError("INVERSE_REPLAY_PROOF_FAILED", "Inverse graph transaction replay did not reproduce the input snapshots.");
   return { graphs: forward.graphs, forwardOperations, inverseOperations: forward.inverse, tempIds: Object.fromEntries(resolved), forwardReplay: replayedForward, inverseReplay: replayedInverse };
 }
