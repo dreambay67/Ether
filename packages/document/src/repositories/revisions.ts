@@ -9,6 +9,7 @@ import {
 } from "@ether/schema";
 
 import { GraphRepository, type RepositoryTransactionContext } from "./graphs.js";
+import { replayGraphOperations } from "./operationReplay.js";
 
 export type DocumentRevisionKind = "genesis" | "edit" | "undo" | "redo";
 
@@ -72,6 +73,10 @@ function record(rows: MemberRow[]): Record<string, string> {
 
 function parseSnapshot(serialized: string | null): EtherGraph | undefined {
   return serialized === null ? undefined : EtherGraphSchema.parse(JSON.parse(serialized));
+}
+
+function sameSnapshot(left: EtherGraph | undefined, right: EtherGraph | undefined): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 export class RevisionRepository {
@@ -372,11 +377,53 @@ export class RevisionRepository {
       kind === "undo" ? storedOperations.inverse.slice().reverse() : storedOperations.forward;
     const replayInverse =
       kind === "undo" ? storedOperations.forward.slice().reverse() : storedOperations.inverse;
-    const desired = snapshots.map((row) => ({
-      graphId: row.graph_id,
-      snapshot: parseSnapshot(kind === "undo" ? row.previous_snapshot_json : row.snapshot_json)
-    }));
-    const existingSnapshots = new Map(desired.map(({ graphId }) => [graphId, this.graphs.get(graphId)]));
+    const currentGraphs = this.graphs.list();
+    const existingSnapshots = new Map(currentGraphs.map((graph) => [graph.id, graph]));
+    const affected = new Set(snapshots.map((row) => row.graph_id));
+    let desired: Array<{ graphId: string; snapshot: EtherGraph | undefined }>;
+    try {
+      for (const row of snapshots) {
+        const expectedCurrent = parseSnapshot(
+          kind === "undo" ? row.snapshot_json : row.previous_snapshot_json
+        );
+        if (!sameSnapshot(existingSnapshots.get(row.graph_id), expectedCurrent)) {
+          throw new Error(`Current graph ${row.graph_id} does not match the replay base snapshot.`);
+        }
+      }
+
+      const replayed = new Map(
+        replayGraphOperations(currentGraphs, replayForward).map((graph) => [graph.id, graph])
+      );
+      for (const graph of currentGraphs) {
+        if (!affected.has(graph.id) && !sameSnapshot(replayed.get(graph.id), graph)) {
+          throw new Error(`Replay mutated unaffected graph ${graph.id}.`);
+        }
+      }
+      desired = snapshots.map((row) => {
+        const expected = parseSnapshot(
+          kind === "undo" ? row.previous_snapshot_json : row.snapshot_json
+        );
+        const actual = replayed.get(row.graph_id);
+        const normalized =
+          actual === undefined || expected === undefined
+            ? actual
+            : EtherGraphSchema.parse({
+                ...actual,
+                createdAt: expected.createdAt,
+                updatedAt: expected.updatedAt
+              });
+        if (!sameSnapshot(normalized, expected)) {
+          throw new Error(`Replayed graph ${row.graph_id} does not match its stored target snapshot.`);
+        }
+        return { graphId: row.graph_id, snapshot: normalized };
+      });
+    } catch (error) {
+      throw new DocumentRepositoryError(
+        "CORRUPT_REVISION_HISTORY",
+        `Document revision ${targetDocumentRevisionId} cannot be replayed from its stored operations.`,
+        { details: { documentRevisionId: targetDocumentRevisionId, cause: error } }
+      );
+    }
     this.graphs.persistMany(desired.flatMap(({ snapshot }) => (snapshot === undefined ? [] : [snapshot])));
     for (const item of desired) {
       if (item.snapshot === undefined) {

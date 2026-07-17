@@ -227,6 +227,19 @@ function sameIdentity(left: EtherFileIdentity, right: EtherFileIdentity): boolea
   return left.dev === right.dev && left.ino === right.ino && left.birthtimeNs === right.birthtimeNs;
 }
 
+function readOwnedAliasIdentity(filePath: string): EtherFileIdentity {
+  const stats = lstatSync(filePath, { bigint: true });
+  if (!stats.isFile()) {
+    throw new EtherDocumentError("NOT_A_REGULAR_FILE", `Owned rollback is not a file: ${filePath}`);
+  }
+  return {
+    birthtimeNs: stats.birthtimeNs,
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size
+  };
+}
+
 function assertSameOwnedFile(filePath: string, expectedIdentity: EtherFileIdentity): void {
   const actualIdentity = readEtherFileIdentity(filePath, true);
   if (!sameIdentity(actualIdentity, expectedIdentity)) {
@@ -297,6 +310,7 @@ export function openEtherDocumentConnection(
   try {
     database.open();
     opened = true;
+    database.exec("PRAGMA busy_timeout = 0");
     const location = database.location();
     if (location === null || canonicalPath(location) !== canonicalPath(absolutePath)) {
       throw new EtherDocumentError(
@@ -364,6 +378,68 @@ export function replaceWithOwnedTemporaryDatabase(
     assertSameOwnedFile(absoluteDestination, temporaryIdentity);
   } catch (error) {
     throw replacementError(error);
+  }
+}
+
+export interface OwnedReplacementRollback {
+  identity: EtherFileIdentity;
+  path: string;
+}
+
+export function createOwnedReplacementRollback(
+  destinationPath: string
+): OwnedReplacementRollback {
+  const absoluteDestination = path.resolve(destinationPath);
+  const identity = readEtherFileIdentity(absoluteDestination, true);
+  const rollbackPath = path.join(
+    path.dirname(absoluteDestination),
+    `.${path.basename(absoluteDestination)}.ether-rollback-${randomUUID()}`
+  );
+  try {
+    linkSync(absoluteDestination, rollbackPath);
+    if (!sameIdentity(readOwnedAliasIdentity(rollbackPath), identity)) {
+      throw new EtherDocumentError(
+        "PATH_CHANGED",
+        `Ether document replacement rollback has the wrong identity: ${rollbackPath}`
+      );
+    }
+    return { identity, path: rollbackPath };
+  } catch (error) {
+    removePublishedLinkIfOwned(rollbackPath, identity);
+    throw replacementError(error);
+  }
+}
+
+export function restoreOwnedReplacementRollback(
+  rollback: OwnedReplacementRollback,
+  destinationPath: string
+): void {
+  const absoluteDestination = path.resolve(destinationPath);
+  if (!sameIdentity(readOwnedAliasIdentity(rollback.path), rollback.identity)) {
+    throw new EtherDocumentError(
+      "PATH_CHANGED",
+      `Ether document replacement rollback path changed: ${rollback.path}`
+    );
+  }
+  try {
+    const current = readOwnedAliasIdentity(absoluteDestination);
+    if (sameIdentity(current, rollback.identity)) {
+      unlinkSync(rollback.path);
+      return;
+    }
+    renameSync(rollback.path, absoluteDestination);
+    assertSameOwnedFile(absoluteDestination, rollback.identity);
+  } catch (error) {
+    throw replacementError(error);
+  }
+}
+
+export function removeOwnedReplacementRollback(rollback: OwnedReplacementRollback): void {
+  if (!unlinkFileIfOwned(rollback.path, rollback.identity)) {
+    throw new EtherDocumentError(
+      "PATH_CHANGED",
+      `Ether document replacement rollback path changed: ${rollback.path}`
+    );
   }
 }
 

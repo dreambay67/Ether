@@ -17,10 +17,14 @@ import { backup, type DatabaseSync } from "node:sqlite";
 
 import {
   createInitializedEtherDocument,
+  createOwnedReplacementRollback,
   openEtherDocumentConnection,
   publishOwnedTemporaryDatabase,
+  removeOwnedReplacementRollback,
+  restoreOwnedReplacementRollback,
   replaceWithOwnedTemporaryDatabase
 } from "./database.js";
+import type { OwnedReplacementRollback } from "./database.js";
 import {
   type DocumentStoreEnvironment,
   type DocumentStoreRuntime,
@@ -593,6 +597,7 @@ export class DocumentStore {
     );
     let temporaryIdentity: EtherFileIdentity | undefined;
     let publishedIdentity: EtherFileIdentity | undefined;
+    let replacementRollback: OwnedReplacementRollback | undefined;
     let destinationLease: WriterLease | undefined;
     let connectionOnSource = true;
     const nextDocumentId = randomUUID();
@@ -638,7 +643,19 @@ export class DocumentStore {
           absoluteDestination,
           nextDocumentId,
           this.runtime,
-          () => sqliteProbe(this.database)
+          () => sqliteProbe(this.database),
+          () => {
+            if (!destinationExisted) {
+              sqliteProbe(this.database);
+              return;
+            }
+            const existing = openEtherDocumentConnection(absoluteDestination, false);
+            try {
+              sqliteProbe(existing.database);
+            } finally {
+              existing.database.close();
+            }
+          }
         );
         if (acquisition.lease === undefined) {
           throw new DocumentStoreError(
@@ -654,6 +671,9 @@ export class DocumentStore {
       this.runtime.onSaveStage?.("publication");
       publishedIdentity = temporaryIdentity;
       if (switchActive) {
+        if (destinationExisted) {
+          replacementRollback = createOwnedReplacementRollback(absoluteDestination);
+        }
         replaceWithOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
       } else {
         publishOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
@@ -661,6 +681,7 @@ export class DocumentStore {
       temporaryIdentity = undefined;
 
       if (switchActive) {
+        this.runtime.onSaveStage?.("post-publication");
         const destination = openEtherDocumentConnection(absoluteDestination, false);
         this.database = destination.database;
         this.writerLease?.release();
@@ -670,6 +691,10 @@ export class DocumentStore {
         this.currentDocumentId = nextDocumentId;
         this.currentMode = { kind: "writable" };
         this.startHeartbeat();
+        if (replacementRollback !== undefined) {
+          removeOwnedReplacementRollback(replacementRollback);
+          replacementRollback = undefined;
+        }
       } else {
         const source = openEtherDocumentConnection(sourcePath, sourceMode.kind === "read-only");
         this.database = source.database;
@@ -687,7 +712,15 @@ export class DocumentStore {
         // Reopening the active source below is the recovery authority.
       }
       removeOwnedFile(temporaryPath, temporaryIdentity);
-      if (!switchActive || !destinationExisted) {
+      let restorationError: unknown;
+      if (replacementRollback !== undefined) {
+        try {
+          restoreOwnedReplacementRollback(replacementRollback, absoluteDestination);
+          replacementRollback = undefined;
+        } catch (restoreError) {
+          restorationError = restoreError;
+        }
+      } else if (!switchActive || !destinationExisted) {
         removeOwnedFile(absoluteDestination, publishedIdentity);
       }
       if (!connectionOnSource) {
@@ -697,6 +730,14 @@ export class DocumentStore {
       this.currentPath = sourcePath;
       this.currentDocumentId = sourceDocumentId;
       this.currentMode = sourceMode;
+      if (restorationError !== undefined) {
+        throw new DocumentStoreError(
+          "REPLACEMENT_ROLLBACK_FAILED",
+          "Save As failed and the owned destination rollback could not be restored.",
+          undefined,
+          { cause: restorationError }
+        );
+      }
       throw error;
     }
   }

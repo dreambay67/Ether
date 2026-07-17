@@ -293,10 +293,12 @@ describe("transactional Ether document repositories", () => {
       "module",
       [
         { type: "createModule", graphId: initial.id, module, internalGraph: internal },
+        graphPropertyOperation(initial.id, parent.title),
         graphPropertyOperation(internal.id, internal.title)
       ],
       [
         { type: "removeModule", graphId: initial.id, moduleId: module.id },
+        graphPropertyOperation(initial.id, initial.title),
         graphPropertyOperation(internal.id, "removed")
       ]
     );
@@ -311,8 +313,10 @@ describe("transactional Ether document repositories", () => {
     expect(rows.map(({ direction, globalOrder }) => [direction, globalOrder])).toEqual([
       ["forward", 0],
       ["forward", 1],
+      ["forward", 2],
       ["inverse", 0],
-      ["inverse", 1]
+      ["inverse", 1],
+      ["inverse", 2]
     ]);
 
     const beforeRollback = await store.read(({ revisions }) => revisions.head());
@@ -333,12 +337,12 @@ describe("transactional Ether document repositories", () => {
       undoOperations
         .filter((entry) => entry.direction === "forward")
         .map((entry) => entry.operation.graphId)
-    ).toEqual([internal.id, parent.id]);
+    ).toEqual([internal.id, parent.id, parent.id]);
     expect(
       undoOperations
         .filter((entry) => entry.direction === "inverse")
         .map((entry) => entry.operation.graphId)
-    ).toEqual([internal.id, parent.id]);
+    ).toEqual([internal.id, parent.id, parent.id]);
 
     const redoAudit = await store.transaction(({ revisions }) => revisions.redo());
     const redoOperations = await store.read(({ revisions }) =>
@@ -348,7 +352,7 @@ describe("transactional Ether document repositories", () => {
       redoOperations
         .filter((entry) => entry.direction === "forward")
         .map((entry) => entry.operation.graphId)
-    ).toEqual([parent.id, internal.id]);
+    ).toEqual([parent.id, parent.id, internal.id]);
     await store.close();
   });
 
@@ -532,7 +536,15 @@ describe("transactional Ether document repositories", () => {
     head = await store.read(({ revisions }) => revisions.head());
     const third = renamed(second, "Third", "2026-07-17T08:02:00.000Z");
     const userCommit = await store.transaction(({ revisions }) =>
-      revisions.commit(prepared(head, [third], "third"))
+      revisions.commit(
+        prepared(
+          head,
+          [third],
+          "third",
+          [graphPropertyOperation(initial.id, third.title)],
+          [graphPropertyOperation(initial.id, second.title)]
+        )
+      )
     );
 
     const undo = await store.transaction(({ revisions }) => revisions.undo());
@@ -561,8 +573,8 @@ describe("transactional Ether document repositories", () => {
     await store.close();
   });
 
-  it("fails undo atomically when stored inverse history is missing or schema-invalid", async () => {
-    for (const corruption of ["missing", "invalid"] as const) {
+  it("fails undo atomically when stored inverse history is missing, invalid, or semantically wrong", async () => {
+    for (const corruption of ["missing", "invalid", "wrong"] as const) {
       const corruptionPath = path.join(root, `History-${corruption}.ether`);
       const initial = graph();
       let store = await storeClass().create(corruptionPath, {
@@ -583,12 +595,21 @@ describe("transactional Ether document repositories", () => {
         database
           .prepare("DELETE FROM graph_operations WHERE document_revision_id = ?")
           .run(committed.documentRevisionId);
-      } else {
+      } else if (corruption === "invalid") {
         database
           .prepare(
             "UPDATE graph_operations SET inverse_json = '{}' WHERE document_revision_id = ?"
           )
           .run(committed.documentRevisionId);
+      } else {
+        database
+          .prepare(
+            "UPDATE graph_operations SET inverse_json = ? WHERE document_revision_id = ?"
+          )
+          .run(
+            JSON.stringify(graphPropertyOperation(initial.id, "Wrong previous title")),
+            committed.documentRevisionId
+          );
       }
       database.close();
 

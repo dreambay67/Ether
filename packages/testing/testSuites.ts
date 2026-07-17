@@ -6,6 +6,7 @@ export const testSuites = {
     "tests/canvas-history.test.ts",
     "tests/desktop-vite-config.test.ts",
     "tests/desktop-window-options.test.ts",
+    "tests/document-operation-replay.test.ts",
     "tests/graph-assembly.test.ts",
     "tests/graph-catalog.test.ts",
     "tests/graph-channels.test.ts",

@@ -51,7 +51,8 @@ export type SaveStage =
   | "identity-rewrite"
   | "validation"
   | "fsync"
-  | "publication";
+  | "publication"
+  | "post-publication";
 
 interface ResolvedEnvironment {
   appInstanceId: string;
@@ -158,6 +159,110 @@ function leasePath(runtime: ResolvedEnvironment, filePath: string): string {
   return path.join(runtime.leaseRoot, `${documentPathHash(filePath)}.json`);
 }
 
+interface LeaseMutexRecord {
+  acquiredAt: number;
+  machineId: string;
+  ownerToken: string;
+  pid: number;
+}
+
+interface LeaseMutexClaim {
+  filePath: string;
+  record: LeaseMutexRecord;
+}
+
+function mutexPath(leaseFilePath: string): string {
+  return leaseFilePath.replace(/\.json$/, ".mutex.json");
+}
+
+function readMutex(filePath: string): LeaseMutexRecord | undefined {
+  try {
+    const value = JSON.parse(readFileSync(filePath, "utf8")) as Partial<LeaseMutexRecord>;
+    if (
+      typeof value.acquiredAt !== "number" ||
+      !Number.isFinite(value.acquiredAt) ||
+      typeof value.machineId !== "string" ||
+      typeof value.ownerToken !== "string" ||
+      value.ownerToken.length === 0 ||
+      typeof value.pid !== "number" ||
+      !Number.isInteger(value.pid)
+    ) {
+      return undefined;
+    }
+    return value as LeaseMutexRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+function reserveMutex(filePath: string, record: LeaseMutexRecord): boolean {
+  let descriptor: number;
+  try {
+    descriptor = openSync(filePath, "wx", 0o600);
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : undefined;
+    if (code === "EEXIST") {
+      return false;
+    }
+    throw error;
+  }
+  try {
+    writeFileSync(descriptor, JSON.stringify(record), "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+  return true;
+}
+
+function acquireMutex(
+  leaseFilePath: string,
+  runtime: ResolvedEnvironment
+): LeaseMutexClaim | undefined {
+  const filePath = mutexPath(leaseFilePath);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const record: LeaseMutexRecord = {
+      acquiredAt: runtime.now(),
+      machineId: runtime.machineId,
+      ownerToken: randomUUID(),
+      pid: runtime.pid
+    };
+    if (reserveMutex(filePath, record)) {
+      return { filePath, record };
+    }
+    const existing = readMutex(filePath);
+    if (
+      existing === undefined ||
+      runtime.now() - existing.acquiredAt <= runtime.staleMs ||
+      runtime.processIsAlive(existing.pid, existing.machineId)
+    ) {
+      return undefined;
+    }
+    const current = readMutex(filePath);
+    if (current?.ownerToken !== existing.ownerToken) {
+      return undefined;
+    }
+    try {
+      unlinkSync(filePath);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function releaseMutex(claim: LeaseMutexClaim): void {
+  try {
+    if (readMutex(claim.filePath)?.ownerToken === claim.record.ownerToken) {
+      unlinkSync(claim.filePath);
+    }
+  } catch {
+    // A claim is removed only while its token still proves ownership.
+  }
+}
+
 function readLease(filePath: string): WriterLeaseRecord | undefined {
   try {
     return WriterLeaseRecordSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
@@ -225,47 +330,63 @@ export class WriterLease {
     filePath: string,
     documentId: string,
     runtime: ResolvedEnvironment,
-    sqliteProbe: () => void
+    sqliteProbe: () => void,
+    staleReclaimProbe: () => void = sqliteProbe
   ): LeaseAcquisition {
     mkdirSync(runtime.leaseRoot, { recursive: true });
     const targetPath = leasePath(runtime, filePath);
-    const existing = readLease(targetPath);
-    if (existing !== undefined) {
-      const heartbeatFresh = runtime.now() - existing.heartbeatAt <= runtime.staleMs;
-      const ownerAlive = runtime.processIsAlive(existing.pid, existing.machineId);
-      if (heartbeatFresh || ownerAlive) {
-        return { reason: "writer-active" };
-      }
-      if (!probeAvailable(sqliteProbe)) {
-        return { reason: "sqlite-busy" };
-      }
-      const current = readLease(targetPath);
-      if (current === undefined || current.ownerToken !== existing.ownerToken) {
-        return { reason: "writer-active" };
-      }
-      const refreshedHeartbeatFresh = runtime.now() - current.heartbeatAt <= runtime.staleMs;
-      const refreshedOwnerAlive = runtime.processIsAlive(current.pid, current.machineId);
-      if (refreshedHeartbeatFresh || refreshedOwnerAlive) {
-        return { reason: "writer-active" };
-      }
-      unlinkSync(targetPath);
-    } else if (!probeAvailable(sqliteProbe)) {
-      return { reason: "sqlite-busy" };
-    }
-
-    const record = WriterLeaseRecordSchema.parse({
-      pid: runtime.pid,
-      machineId: runtime.machineId,
-      appInstanceId: runtime.appInstanceId,
-      pathHash: documentPathHash(filePath),
-      documentId,
-      ownerToken: randomUUID(),
-      heartbeatAt: runtime.now()
-    });
-    if (!reserveLease(targetPath, record)) {
+    const mutex = acquireMutex(targetPath, runtime);
+    if (mutex === undefined) {
       return { reason: "writer-active" };
     }
-    return { lease: new WriterLease(targetPath, record, runtime) };
+    try {
+      const existing = readLease(targetPath);
+      if (existing !== undefined) {
+        const heartbeatFresh = runtime.now() - existing.heartbeatAt <= runtime.staleMs;
+        const ownerAlive = runtime.processIsAlive(existing.pid, existing.machineId);
+        if (heartbeatFresh || ownerAlive) {
+          return { reason: "writer-active" };
+        }
+        if (!probeAvailable(staleReclaimProbe)) {
+          return { reason: "sqlite-busy" };
+        }
+        const current = readLease(targetPath);
+        if (current === undefined || current.ownerToken !== existing.ownerToken) {
+          return { reason: "writer-active" };
+        }
+        const refreshedHeartbeatFresh = runtime.now() - current.heartbeatAt <= runtime.staleMs;
+        const refreshedOwnerAlive = runtime.processIsAlive(current.pid, current.machineId);
+        const finalRecord = readLease(targetPath);
+        if (
+          refreshedHeartbeatFresh ||
+          refreshedOwnerAlive ||
+          finalRecord === undefined ||
+          finalRecord.ownerToken !== current.ownerToken ||
+          runtime.now() - finalRecord.heartbeatAt <= runtime.staleMs
+        ) {
+          return { reason: "writer-active" };
+        }
+        unlinkSync(targetPath);
+      } else if (!probeAvailable(sqliteProbe)) {
+        return { reason: "sqlite-busy" };
+      }
+
+      const record = WriterLeaseRecordSchema.parse({
+        pid: runtime.pid,
+        machineId: runtime.machineId,
+        appInstanceId: runtime.appInstanceId,
+        pathHash: documentPathHash(filePath),
+        documentId,
+        ownerToken: randomUUID(),
+        heartbeatAt: runtime.now()
+      });
+      if (!reserveLease(targetPath, record)) {
+        return { reason: "writer-active" };
+      }
+      return { lease: new WriterLease(targetPath, record, runtime) };
+    } finally {
+      releaseMutex(mutex);
+    }
   }
 
   start(onFailure: () => void): void {
@@ -273,6 +394,18 @@ export class WriterLease {
       return;
     }
     this.heartbeatTimer = setInterval(() => {
+      let mutex: LeaseMutexClaim | undefined;
+      try {
+        mutex = acquireMutex(this.filePath, this.runtime);
+      } catch {
+        this.release();
+        onFailure();
+        return;
+      }
+      if (mutex === undefined) {
+        return;
+      }
+      let failed = false;
       try {
         this.runtime.onHeartbeat?.();
         const current = readLease(this.filePath);
@@ -286,6 +419,11 @@ export class WriterLease {
           "utf8"
         );
       } catch {
+        failed = true;
+      } finally {
+        releaseMutex(mutex);
+      }
+      if (failed) {
         this.release();
         onFailure();
       }
@@ -302,12 +440,23 @@ export class WriterLease {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
     }
+    let mutex: LeaseMutexClaim | undefined;
+    try {
+      mutex = acquireMutex(this.filePath, this.runtime);
+    } catch {
+      return;
+    }
+    if (mutex === undefined) {
+      return;
+    }
     try {
       if (readLease(this.filePath)?.ownerToken === this.record.ownerToken) {
         unlinkSync(this.filePath);
       }
     } catch {
       // Releasing a lease never removes a file whose owner token cannot be proven.
+    } finally {
+      releaseMutex(mutex);
     }
   }
 }
