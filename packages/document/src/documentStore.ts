@@ -354,6 +354,10 @@ export class DocumentStore {
   read<T>(callback: (repositories: ReadDocumentRepositories) => T): Promise<T> {
     return this.enqueue(() => {
       this.assertOpen();
+      const ownsTransaction = !this.database.isTransaction;
+      if (ownsTransaction) {
+        this.database.exec("BEGIN DEFERRED");
+      }
       const scope = this.readRepositories();
       try {
         const result = callback(scope.repositories);
@@ -363,7 +367,19 @@ export class DocumentStore {
             "Document repository callbacks must complete synchronously."
           );
         }
+        if (ownsTransaction) {
+          this.database.exec("COMMIT");
+        }
         return result;
+      } catch (error) {
+        if (ownsTransaction) {
+          try {
+            this.database.exec("ROLLBACK");
+          } catch {
+            // Preserve the read or commit error that ended this snapshot.
+          }
+        }
+        throw error;
       } finally {
         scope.close();
       }
@@ -609,6 +625,7 @@ export class DocumentStore {
     const sourcePath = this.currentPath;
     const sourceDocumentId = this.currentDocumentId;
     const sourceMode = this.currentMode;
+    const sourceWriterLease = this.writerLease;
     const temporaryPath = path.join(
       path.dirname(absoluteDestination),
       `.${path.basename(absoluteDestination)}.ether-save-${randomUUID()}`
@@ -719,9 +736,8 @@ export class DocumentStore {
         this.runtime.onSaveStage?.("post-publication");
         const destination = openEtherDocumentConnection(absoluteDestination, false);
         this.database = destination.database;
-        await this.writerLease?.release();
+        await sourceWriterLease?.release();
         this.writerLease = destinationLease;
-        destinationLease = undefined;
         this.currentPath = absoluteDestination;
         this.currentDocumentId = nextDocumentId;
         this.currentMode = { kind: "writable" };
@@ -734,6 +750,7 @@ export class DocumentStore {
           completeReplacementRecovery(replacementRecovery);
           replacementRecovery = undefined;
         }
+        destinationLease = undefined;
       } else {
         const source = openEtherDocumentConnection(sourcePath, sourceMode.kind === "read-only");
         this.database = source.database;
@@ -742,9 +759,13 @@ export class DocumentStore {
       publishedIdentity = undefined;
       return { documentId: nextDocumentId, path: absoluteDestination };
     } catch (error) {
+      const failedDestinationLease = destinationLease;
+      if (failedDestinationLease !== undefined && this.writerLease === failedDestinationLease) {
+        this.writerLease = undefined;
+      }
       let destinationLeaseReleaseError: unknown;
       try {
-        await destinationLease?.release();
+        await failedDestinationLease?.release();
       } catch (releaseError) {
         destinationLeaseReleaseError = releaseError;
       }
@@ -779,11 +800,11 @@ export class DocumentStore {
       this.currentDocumentId = sourceDocumentId;
       this.currentMode = sourceMode;
       if (sourceMode.kind === "writable") {
-        const sourceLease = this.writerLease;
-        const sourceLeaseOwned = (await sourceLease?.owns()) ?? false;
+        this.writerLease = sourceWriterLease;
+        const sourceLeaseOwned = (await sourceWriterLease?.owns()) ?? false;
         if (!sourceLeaseOwned) {
           try {
-            await sourceLease?.release();
+            await sourceWriterLease?.release();
           } catch {
             // A still-contended lease remains attached so close can retry its release.
           }
@@ -801,7 +822,7 @@ export class DocumentStore {
             this.database.close();
             const readOnly = openEtherDocumentConnection(sourcePath, true);
             this.database = readOnly.database;
-            this.writerLease = sourceLease;
+            this.writerLease = sourceWriterLease;
             this.currentMode = {
               kind: "read-only",
               reason: reacquired.reason ?? "writer-active"

@@ -79,7 +79,7 @@ function sameSnapshot(left: EtherGraph | undefined, right: EtherGraph | undefine
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function normalizeTimestamps(
+function normalizeUpdatedAt(
   actual: EtherGraph | undefined,
   expected: EtherGraph | undefined
 ): EtherGraph | undefined {
@@ -88,7 +88,6 @@ function normalizeTimestamps(
   }
   return EtherGraphSchema.parse({
     ...actual,
-    createdAt: expected.createdAt,
     updatedAt: expected.updatedAt
   });
 }
@@ -190,6 +189,15 @@ export class RevisionRepository {
         if (hasRevision !== hasBase || (deletedGraphIds.includes(graphId) && !exists)) {
           throw new Error(`Affected graph ${graphId} has an invalid base revision declaration.`);
         }
+        const currentGraph = currentById.get(graphId);
+        const declaredGraph = declaredById.get(graphId);
+        if (
+          currentGraph !== undefined &&
+          declaredGraph !== undefined &&
+          currentGraph.createdAt !== declaredGraph.createdAt
+        ) {
+          throw new Error(`Existing graph ${graphId} cannot change its creation timestamp.`);
+        }
       }
 
       const replayedForward = replayGraphOperations(currentGraphs, commit.forwardOperations);
@@ -201,7 +209,7 @@ export class RevisionRepository {
       ]);
       for (const graphId of allForwardIds) {
         const expected = affected.has(graphId) ? declaredById.get(graphId) : currentById.get(graphId);
-        const actual = normalizeTimestamps(forwardById.get(graphId), expected);
+        const actual = normalizeUpdatedAt(forwardById.get(graphId), expected);
         if (!sameSnapshot(actual, expected)) {
           throw new Error(`Forward operations do not produce declared graph ${graphId}.`);
         }
@@ -223,7 +231,7 @@ export class RevisionRepository {
       ]);
       for (const graphId of allInverseIds) {
         const expected = currentById.get(graphId);
-        const actual = normalizeTimestamps(inverseById.get(graphId), expected);
+        const actual = normalizeUpdatedAt(inverseById.get(graphId), expected);
         if (!sameSnapshot(actual, expected)) {
           throw new Error(`Inverse operations do not restore original graph ${graphId}.`);
         }
@@ -243,6 +251,14 @@ export class RevisionRepository {
       affectedGraphIds.map((graphId) => [graphId, currentById.get(graphId)])
     );
     const snapshots = this.graphs.persistMany(commit.graphSnapshots);
+    for (const snapshot of snapshots) {
+      if (!sameSnapshot(this.graphs.get(snapshot.id), snapshot)) {
+        throw new DocumentRepositoryError(
+          "INVALID_PREPARED_COMMIT",
+          `Persisted graph ${snapshot.id} does not match its prepared revision snapshot.`
+        );
+      }
+    }
     for (const graphId of deletedGraphIds) {
       this.graphs.markDeleted(graphId);
     }

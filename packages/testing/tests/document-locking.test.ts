@@ -724,6 +724,97 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(leaseRecordPaths(leaseRoot)).toEqual([]);
   });
 
+  it("does not treat the destination lease as source ownership after handoff cleanup fails", async () => {
+    const destination = path.join(root, "Handoff-cleanup.ether");
+    const recoveryRoot = path.join(root, "recovery");
+    const existing = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId: "document-handoff-existing",
+      environment: environment(leaseRoot, "handoff-existing", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Handoff existing"
+    });
+    await existing.close();
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-handoff-source",
+      environment: environment(leaseRoot, "handoff-source", {
+        recoveryRoot,
+        onSaveStage: (stage) => {
+          if (stage !== "post-publication") {
+            return;
+          }
+          const rollback = readdirSync(root).find((name) => name.includes("ether-rollback"));
+          expect(rollback).toBeDefined();
+          rmSync(path.join(root, rollback as string));
+        }
+      }),
+      initialGraph: initialGraph(),
+      title: "Handoff source"
+    });
+
+    await expect(source.saveAs(destination)).rejects.toMatchObject({
+      code: "REPLACEMENT_ROLLBACK_FAILED"
+    });
+    let competitor: StoreInstance | undefined;
+    let sourceOwnershipWasSafe: boolean;
+    try {
+      competitor = await storeClass().open(sourcePath, {
+        access: "require-write",
+        environment: environment(leaseRoot, "handoff-source-competitor", { recoveryRoot })
+      });
+      sourceOwnershipWasSafe = source.mode.kind === "read-only";
+    } catch (error) {
+      expect(error).toMatchObject({ code: "WRITER_LEASE_UNAVAILABLE" });
+      sourceOwnershipWasSafe = source.mode.kind === "writable";
+    } finally {
+      await competitor?.close();
+      await source.close();
+    }
+    expect(sourceOwnershipWasSafe).toBe(true);
+  });
+
+  it("removes a published recovery journal when its rollback was already cleaned", async () => {
+    const destination = path.join(root, "Published-cleanup.ether");
+    const recoveryRoot = path.join(root, "recovery");
+    const documentId = "document-published-cleanup";
+    const destinationStore = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId,
+      environment: environment(leaseRoot, "published-cleanup-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Published cleanup"
+    });
+    await destinationStore.close();
+    mkdirSync(recoveryRoot, { recursive: true });
+    const journalPath = path.join(recoveryRoot, `${randomUUID()}.json`);
+    writeFileSync(
+      journalPath,
+      JSON.stringify({
+        version: 1,
+        journalId: path.basename(journalPath, ".json"),
+        destinationPath: destination,
+        sourcePath,
+        sourceDocumentId: "document-published-source",
+        newDocumentId: documentId,
+        previousDocumentId: "document-published-previous",
+        phase: "published",
+        rollback: {
+          path: path.join(root, `.Published-cleanup.ether.ether-rollback-${randomUUID()}`),
+          sha256: "0".repeat(64),
+          identity: { birthtimeNs: "0", dev: "0", ino: "0", size: "0" }
+        }
+      })
+    );
+
+    const reopened = await storeClass().open(destination, {
+      access: "read-only",
+      environment: environment(leaseRoot, "published-cleanup-open", { recoveryRoot })
+    });
+    await reopened.close();
+    expect(statSync(journalPath, { throwIfNoEntry: false })).toBeUndefined();
+  });
+
   it("never leaves two writable stores when releasing the source lease times out during Save As", async () => {
     const destination = path.join(root, "Held-source-lease.ether");
     let now = 1;

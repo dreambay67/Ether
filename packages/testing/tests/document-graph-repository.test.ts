@@ -402,6 +402,75 @@ describe("transactional Ether document repositories", () => {
     await store.close();
   });
 
+  it("rejects a prepared commit that changes an existing graph creation timestamp", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-created-at-integrity",
+      initialGraph: initial,
+      title: "Creation timestamp integrity"
+    });
+    const head = await store.read(({ revisions }) => revisions.head());
+    const forged = {
+      ...initial,
+      createdAt: "2026-07-17T09:00:00.000Z"
+    };
+    const commit = prepared(
+      head,
+      [forged],
+      "forged-created-at",
+      [graphPropertyOperation(initial.id, initial.title)],
+      [graphPropertyOperation(initial.id, initial.title)]
+    );
+
+    await expect(
+      store.transaction(({ revisions }) => revisions.commit(commit))
+    ).rejects.toMatchObject({ code: "INVALID_PREPARED_COMMIT" });
+    expect(await store.read(({ revisions }) => revisions.head())).toEqual(head);
+    expect(await store.read(({ graphs }) => graphs.get(initial.id))).toEqual(initial);
+    await store.close();
+  });
+
+  it("keeps revision heads and graph snapshots in one deferred read snapshot", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-read-snapshot",
+      initialGraph: initial,
+      title: "Read snapshot"
+    });
+
+    const observed = await store.read(({ graphs, revisions }) => {
+      const head = revisions.head();
+      const concurrent = new DatabaseSync(filePath);
+      let writerWasBlocked = false;
+      try {
+        try {
+          concurrent
+            .prepare("UPDATE graphs SET title = ? WHERE graph_id = ?")
+            .run("Concurrent graph", initial.id);
+        } catch (error) {
+          expect(error).toMatchObject({ message: expect.stringMatching(/locked|busy/i) });
+          writerWasBlocked = true;
+        }
+        const snapshot = graphs.get(initial.id);
+        if (!writerWasBlocked) {
+          concurrent
+            .prepare("UPDATE graphs SET title = ? WHERE graph_id = ?")
+            .run(initial.title, initial.id);
+        }
+        return { head, snapshot, writerWasBlocked };
+      } finally {
+        concurrent.close();
+      }
+    });
+
+    expect(observed.head.graphRevisions[initial.id]).toBeDefined();
+    expect(observed.writerWasBlocked).toBe(true);
+    expect(observed.snapshot).toEqual(initial);
+    await store.close();
+  });
+
   it("tombstones a removed module graph and restores it through undo, redo, and reopen", async () => {
     const initial = graph();
     const store = await storeClass().create(filePath, {

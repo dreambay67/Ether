@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -246,7 +247,10 @@ export function reconcileReplacementRecovery(destinationPath: string, recoveryRo
     const currentDocumentId = documentIdAt(record.destinationPath);
     const rollback = ownedRollback(record);
     if (record.phase === "published" && currentDocumentId === record.newDocumentId) {
-      if (record.rollback !== undefined && rollback === undefined) {
+      const rollbackPathStillExists =
+        record.rollback !== undefined &&
+        lstatSync(record.rollback.path, { throwIfNoEntry: false }) !== undefined;
+      if (rollbackPathStillExists && rollback === undefined) {
         continue;
       }
       if (rollback !== undefined) {
