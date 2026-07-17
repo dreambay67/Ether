@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pretypecheck": "pnpm --filter @ether/schema build && pnpm --filter @ether/mcp-server build",
+    "pretypecheck": "pnpm --filter @ether/schema build && pnpm --filter @ether/document build && pnpm --filter @ether/mcp-server build",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint . --max-warnings=0",
     "pretest:unit": "pnpm --filter @ether/schema build",
     "test:unit": "vitest run --config vitest.config.ts",
-    "pretest:integration": "pnpm --filter @ether/schema build",
+    "pretest:integration": "pnpm --filter @ether/schema build && pnpm --filter @ether/document build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "pretest:performance": "pnpm --filter @ether/schema build",
     "test:performance": "vitest run --config vitest.performance.config.ts",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@ether/brand": "workspace:*",
+    "@ether/document": "workspace:*",
     "@ether/engine": "workspace:*",
     "@ether/providers": "workspace:*",
     "@ether/schema": "workspace:*"

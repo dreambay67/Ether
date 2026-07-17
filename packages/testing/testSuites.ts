@@ -19,6 +19,7 @@ export const testSuites = {
     "tests/artifact-store.test.ts",
     "tests/assets.test.ts",
     "tests/desktop-settings-store.test.ts",
+    "tests/document-format.test.ts",
     "tests/execution-engine.test.ts",
     "tests/job-coordinator.test.ts",
     "tests/migration.test.ts",
