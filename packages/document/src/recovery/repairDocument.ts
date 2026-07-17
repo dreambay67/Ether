@@ -11,6 +11,7 @@ import type {
   PreparedGraphCommit,
   RecoveryJournalEntry
 } from "@ether/schema";
+import { validateFullGraphState, type GraphDiagnostic } from "@ether/graph-kernel";
 
 import { importBlob } from "../blob/importBlob.js";
 import { readBlobRange } from "../blob/readBlobRange.js";
@@ -123,32 +124,50 @@ function collectProvenance(
   };
 }
 
+function diagnosticKey(diagnostic: GraphDiagnostic): string {
+  return JSON.stringify([
+    diagnostic.code,
+    diagnostic.message,
+    diagnostic.graphId ?? null,
+    diagnostic.entityId ?? null
+  ]);
+}
+
+function diagnosticsAdded(
+  before: readonly GraphDiagnostic[],
+  after: readonly GraphDiagnostic[]
+): GraphDiagnostic[] {
+  const prior = new Set(before.map(diagnosticKey));
+  return after.filter((diagnostic) => !prior.has(diagnosticKey(diagnostic)));
+}
+
+function edgeDiagnostic(
+  edgeId: string,
+  diagnostics: readonly GraphDiagnostic[]
+): GraphDiagnostic | undefined {
+  return diagnostics.find((diagnostic) => diagnostic.entityId === edgeId)
+    ?? diagnostics.find((diagnostic) => diagnostic.code === "TRAVERSAL_INVALID")
+    ?? diagnostics[0];
+}
+
 function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRecoveryPlan {
-  const root = graphs.find((graph) => graph.kind === "root");
+  const orderedGraphs = [...graphs].sort((left, right) => left.id.localeCompare(right.id));
+  const root = orderedGraphs.find((graph) => graph.kind === "root");
   if (root === undefined) throw new Error("Repair source has no validated root graph.");
-  const byId = new Map(graphs.map((graph) => [graph.id, graph]));
+  const byId = new Map(orderedGraphs.map((graph) => [graph.id, graph]));
   const stripModuleDependencies = (graph: EtherGraph): EtherGraph => ({
     ...graph,
-    edges: graph.edges.filter(
-      (edge) => edge.from.kind === "node" && edge.to.kind === "node"
-    ),
+    edges: [],
     modules: []
   });
   const initialGraph = stripModuleDependencies(root);
   const forward: GraphOperation[] = [];
   const inverse: GraphOperation[] = [];
-  const boundaryEdges: Array<{ graphId: string; edge: EtherGraph["edges"][number] }> = [];
   const createdModules = new Map<string, Set<string>>();
-  const restoredBoundaryEdges = new Set<string>();
   const visited = new Set([root.id]);
   const queue = [root];
   while (queue.length > 0) {
     const parent = queue.shift()!;
-    boundaryEdges.push(
-      ...parent.edges
-        .filter((edge) => edge.from.kind === "module" || edge.to.kind === "module")
-        .map((edge) => ({ graphId: parent.id, edge }))
-    );
     for (const module of parent.modules) {
       const internal = byId.get(module.graphId);
       if (internal === undefined || internal.kind !== "module") {
@@ -182,23 +201,7 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
       queue.push(internal);
     }
   }
-  for (const { graphId, edge } of boundaryEdges) {
-    const moduleIds = [edge.from, edge.to]
-      .filter((endpoint) => endpoint.kind === "module")
-      .map((endpoint) => endpoint.kind === "module" ? endpoint.moduleId : "");
-    if (moduleIds.some((moduleId) => !createdModules.get(graphId)?.has(moduleId))) {
-      losses.push({
-        type: "graph",
-        entityId: edge.id,
-        reason: "Module boundary edge could not be restored because its module dependency is unavailable."
-      });
-      continue;
-    }
-    forward.push({ type: "addEdge", graphId, edge });
-    inverse.push({ type: "removeEdge", graphId, edgeId: edge.id });
-    restoredBoundaryEdges.add(`${graphId}:${edge.id}`);
-  }
-  for (const graph of graphs) {
+  for (const graph of orderedGraphs) {
     if (!visited.has(graph.id)) {
       losses.push({
         type: "graph",
@@ -207,21 +210,58 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
       });
     }
   }
+  const snapshots: EtherGraph[] = orderedGraphs
+    .filter((graph) => visited.has(graph.id))
+    .map((graph) => ({
+      ...graph,
+      edges: [],
+      modules: graph.modules.filter((module) => createdModules.get(graph.id)?.has(module.id))
+    }));
+  const snapshotById = new Map(snapshots.map((graph) => [graph.id, graph]));
+  for (const graph of orderedGraphs.filter((candidate) => visited.has(candidate.id))) {
+    for (const edge of graph.edges) {
+      const moduleIds = [edge.from, edge.to]
+        .filter((endpoint) => endpoint.kind === "module")
+        .map((endpoint) => endpoint.kind === "module" ? endpoint.moduleId : "");
+      if (moduleIds.some((moduleId) => !createdModules.get(graph.id)?.has(moduleId))) {
+        losses.push({
+          type: "graph",
+          entityId: edge.id,
+          reason: "Module boundary edge could not be restored because its module dependency is unavailable."
+        });
+        continue;
+      }
+      const currentGraphs = snapshots.map((snapshot) => snapshotById.get(snapshot.id)!);
+      const current = snapshotById.get(graph.id)!;
+      const candidate = { ...current, edges: [...current.edges, edge] };
+      const candidateGraphs = currentGraphs.map((snapshot) =>
+        snapshot.id === candidate.id ? candidate : snapshot
+      );
+      const diagnostic = edgeDiagnostic(
+        edge.id,
+        diagnosticsAdded(
+          validateFullGraphState(currentGraphs),
+          validateFullGraphState(candidateGraphs)
+        )
+      );
+      if (diagnostic !== undefined) {
+        losses.push({
+          type: "graph",
+          entityId: edge.id,
+          reason: `Edge ${edge.id} was omitted because ${diagnostic.code}: ${diagnostic.message}`
+        });
+        continue;
+      }
+      snapshotById.set(graph.id, candidate);
+      forward.push({ type: "addEdge", graphId: graph.id, edge });
+      inverse.push({ type: "removeEdge", graphId: graph.id, edgeId: edge.id });
+    }
+  }
   return {
     forward,
     initialGraph,
     inverse,
-    snapshots: graphs
-      .filter((graph) => visited.has(graph.id))
-      .map((graph) => ({
-        ...graph,
-        edges: graph.edges.filter(
-          (edge) =>
-            (edge.from.kind === "node" && edge.to.kind === "node") ||
-            restoredBoundaryEdges.has(`${graph.id}:${edge.id}`)
-        ),
-        modules: graph.modules.filter((module) => createdModules.get(graph.id)?.has(module.id))
-      }))
+    snapshots: snapshots.map((graph) => snapshotById.get(graph.id)!)
   };
 }
 

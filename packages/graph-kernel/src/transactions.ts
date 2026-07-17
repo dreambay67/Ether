@@ -1,10 +1,14 @@
 import {
+  firstTemporaryIdentityReference,
+  graphOperationIdentityReferences,
   GraphOperationSchema,
   GraphTransactionSchema,
+  parseTemporaryReference,
   type EtherGraph,
   type GraphOperation,
   type GraphTransaction,
-  type ModuleSubtreeSnapshot
+  type ModuleSubtreeSnapshot,
+  type TemporaryReferenceKind
 } from "@ether/schema";
 import { moduleSubtree } from "./modules.js";
 import { structurallyEqual } from "./structural.js";
@@ -17,9 +21,7 @@ export class GraphKernelError extends Error {
   }
 }
 
-type TempKind = "node" | "edge" | "group" | "module" | "graph";
-type TempFactory = (reference: { kind: TempKind; name: string }) => string;
-const tempPattern = /^\$temp:(node|edge|group|module|graph):(.+)$/;
+type TempFactory = (reference: { kind: TemporaryReferenceKind; name: string }) => string;
 
 function cloneGraphs(graphs: readonly EtherGraph[]): Map<string, EtherGraph> {
   return new Map(structuredClone(graphs).map((graph) => [graph.id, graph]));
@@ -29,12 +31,12 @@ function entityIds(graphs: readonly EtherGraph[]): Set<string> {
   return new Set(graphs.flatMap((graph) => [graph.id, ...graph.nodes.map((item) => item.id), ...graph.edges.map((item) => item.id), ...graph.groups.map((item) => item.id), ...graph.modules.map((item) => item.id)]));
 }
 
-function declarations(operations: readonly GraphOperation[]): Map<string, TempKind> {
-  const result = new Map<string, TempKind>();
-  const add = (value: string, kind: TempKind): void => {
-    const match = tempPattern.exec(value);
-    if (match === null) return;
-    if (match[1] !== kind) throw new GraphKernelError("TEMP_KIND_MISMATCH", `Temporary ID ${value} declares ${match[1]} where ${kind} is required.`);
+function declarations(operations: readonly GraphOperation[]): Map<string, TemporaryReferenceKind> {
+  const result = new Map<string, TemporaryReferenceKind>();
+  const add = (value: string, kind: TemporaryReferenceKind): void => {
+    const temporary = parseTemporaryReference(value);
+    if (temporary === null) return;
+    if (temporary.kind !== kind) throw new GraphKernelError("TEMP_KIND_MISMATCH", `Temporary ID ${value} declares ${temporary.kind} where ${kind} is required.`);
     if (result.has(value)) throw new GraphKernelError("TEMP_DECLARATION_COLLISION", `Temporary ID ${value} is declared more than once.`);
     result.set(value, kind);
   };
@@ -54,28 +56,43 @@ function declarations(operations: readonly GraphOperation[]): Map<string, TempKi
   return result;
 }
 
-function expectedKind(key: string): TempKind | null {
-  if (["nodeId", "internalNodeId"].includes(key)) return "node";
-  if (key === "edgeId") return "edge";
-  if (key === "groupId") return "group";
-  if (key === "moduleId") return "module";
-  if (["graphId", "rootGraphId"].includes(key)) return "graph";
-  return null;
+function setPath(root: object, path: readonly string[], value: string): void {
+  let owner: unknown = root;
+  for (const segment of path.slice(0, -1)) {
+    owner = Reflect.get(owner as object, segment);
+  }
+  Reflect.set(owner as object, path.at(-1)!, value);
 }
 
-function replaceTemporaryIds(value: unknown, resolved: ReadonlyMap<string, string>, key = ""): unknown {
-  if (typeof value === "string") {
-    const match = tempPattern.exec(value);
-    if (match === null) return value;
-    const expected = expectedKind(key);
-    if (expected !== null && match[1] !== expected) throw new GraphKernelError("TEMP_KIND_MISMATCH", `Temporary reference ${value} has kind ${match[1]}, expected ${expected}.`);
-    const replacement = resolved.get(value);
-    if (replacement === undefined) throw new GraphKernelError("TEMP_REFERENCE_UNRESOLVED", `Temporary reference ${value} has no declaration.`);
-    return replacement;
+function replaceTemporaryIds(
+  operation: GraphOperation,
+  resolved: ReadonlyMap<string, string>
+): GraphOperation {
+  const replacement = structuredClone(operation);
+  for (const reference of graphOperationIdentityReferences(replacement)) {
+    const temporary = parseTemporaryReference(reference.value);
+    if (temporary === null) continue;
+    if (reference.expectedKind === null) {
+      throw new GraphKernelError(
+        "TEMP_REFERENCE_UNSUPPORTED",
+        `Temporary reference ${reference.value} is not supported at ${reference.path.join(".")}.`
+      );
+    }
+    if (temporary.kind !== reference.expectedKind) {
+      throw new GraphKernelError("TEMP_KIND_MISMATCH", `Temporary reference ${reference.value} has kind ${temporary.kind}, expected ${reference.expectedKind}.`);
+    }
+    const resolvedId = resolved.get(reference.value);
+    if (resolvedId === undefined) throw new GraphKernelError("TEMP_REFERENCE_UNRESOLVED", `Temporary reference ${reference.value} has no declaration.`);
+    setPath(replacement, reference.path, resolvedId);
   }
-  if (Array.isArray(value)) return value.map((item) => replaceTemporaryIds(item, resolved, key));
-  if (typeof value === "object" && value !== null) return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, replaceTemporaryIds(child, resolved, childKey)]));
-  return value;
+  const unresolved = firstTemporaryIdentityReference(graphOperationIdentityReferences(replacement));
+  if (unresolved !== null) {
+    throw new GraphKernelError(
+      "TEMP_REFERENCE_UNRESOLVED",
+      `Temporary reference ${unresolved.value} survived resolution at ${unresolved.path.join(".")}.`
+    );
+  }
+  return replacement;
 }
 
 function requireGraph(graphs: Map<string, EtherGraph>, graphId: string): EtherGraph {
@@ -204,8 +221,8 @@ export function previewGraphTransaction(input: { graphs: readonly EtherGraph[]; 
   const occupied = entityIds(input.graphs);
   const resolved = new Map<string, string>();
   for (const [reference, kind] of declared) {
-    const match = tempPattern.exec(reference)!;
-    const id = (input.idFactory ?? ((item) => `${item.kind}-${item.name}`))({ kind, name: match[2]! });
+    const temporary = parseTemporaryReference(reference)!;
+    const id = (input.idFactory ?? ((item) => `${item.kind}-${item.name}`))({ kind, name: temporary.name });
     if (occupied.has(id) || [...resolved.values()].includes(id)) throw new GraphKernelError("TEMP_ID_COLLISION", `Resolved temporary ID collision: ${id}.`);
     resolved.set(reference, id);
   }

@@ -1,5 +1,7 @@
 import {
   EtherGraphSchema,
+  firstTemporaryIdentityReference,
+  preparedCommitIdentityReferences,
   GraphOperationSchema,
   PreparedGraphCommitSchema,
   type EtherGraph,
@@ -11,7 +13,6 @@ import { structurallyEqual, validateFullGraphState } from "@ether/graph-kernel";
 
 import { GraphRepository, type RepositoryTransactionContext } from "./graphs.js";
 import { replayGraphOperations } from "./operationReplay.js";
-import { unresolvedTemporaryPath } from "../temporaryIds.js";
 
 export type DocumentRevisionKind = "genesis" | "edit" | "undo" | "redo";
 
@@ -150,8 +151,10 @@ export class RevisionRepository {
   }
 
   commit(input: PreparedGraphCommit): CommitResult {
-    const temporaryPath = unresolvedTemporaryPath(input);
-    if (temporaryPath !== null) throw new DocumentRepositoryError("UNRESOLVED_TEMP_ID", `Prepared commit contains an unresolved temporary ID at ${temporaryPath.join(".")}.`);
+    const temporaryReference = firstTemporaryIdentityReference(
+      preparedCommitIdentityReferences(input)
+    );
+    if (temporaryReference !== null) throw new DocumentRepositoryError("UNRESOLVED_TEMP_ID", `Prepared commit contains an unresolved temporary ID at ${temporaryReference.path.join(".")}: ${temporaryReference.value}.`);
     const commit = PreparedGraphCommitSchema.parse(input);
     const current = this.head();
     const deletedGraphIds = commit.deletedGraphIds ?? [];

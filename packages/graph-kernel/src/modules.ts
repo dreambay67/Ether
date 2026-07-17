@@ -54,6 +54,8 @@ export function validateGraphSet(graphs: readonly EtherGraph[]): GraphDiagnostic
       else internalOwners.set(module.graphId, { parentGraphId: graph.id, moduleId: module.id });
       const portIds = [...module.interface.inputs, ...module.interface.outputs].map((port) => port.id);
       if (new Set(portIds).size !== portIds.length) diagnostics.push({ code: "DUPLICATE_MODULE_PORT", message: `Module ${module.id} has duplicate port IDs.`, graphId: graph.id, entityId: module.id });
+      const parameterIds = module.interface.parameters.map((parameter) => parameter.id);
+      if (new Set(parameterIds).size !== parameterIds.length) diagnostics.push({ code: "DUPLICATE_MODULE_PARAMETER", message: `Module ${module.id} has duplicate parameter IDs.`, graphId: graph.id, entityId: module.id });
       if (internal !== undefined) {
         for (const [direction, ports] of [["inputs", module.interface.inputs], ["outputs", module.interface.outputs]] as const) for (const port of ports) {
           const node = internal.nodes.find((candidate) => candidate.id === port.internalNodeId);

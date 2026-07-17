@@ -10,7 +10,8 @@ import {
   type EtherGraph,
   type GraphOperation,
   type NodeOutputVersion,
-  type PayloadEnvelope
+  type PayloadEnvelope,
+  type RecipeManifest
 } from "@ether/schema";
 
 import {
@@ -29,6 +30,7 @@ import {
   structurallyEqual,
   validateConnection,
   validateGraphSet,
+  validateFullGraphState,
   validateRecipeManifest
 } from "../../graph-kernel/src/index.js";
 
@@ -143,7 +145,7 @@ function payload(id: string, nodeId: string, versionId: string, value: string, l
   };
 }
 
-function semanticRecipeFixture() {
+function semanticRecipeFixture(): RecipeManifest {
   const source = promptNode("recipe-source");
   const target = workerNode("recipe-target");
   return {
@@ -330,6 +332,47 @@ describe("registry-backed recipe semantics", () => {
       diagnostics: expect.arrayContaining([expect.objectContaining({
         code: "RECIPE_PARAMETER_BINDING_INVALID",
         entityId: "recipe-target"
+      })])
+    }));
+  });
+
+  it("requires acceptance outputs to use a channel produced by the target node contract", () => {
+    const invalidOutput = structuredClone(semanticRecipeFixture());
+    invalidOutput.capabilityRequirements[0]!.outputChannels = ["text", "image"];
+    const invalidStep = invalidOutput.acceptanceScenario.steps[0]!;
+    if (invalidStep.kind !== "success") throw new Error("Fixture must contain a success step.");
+    invalidStep.outputs = [{
+      graphRef: "recipe-root",
+      nodeRef: "recipe-source",
+      channel: "image",
+      fixtureId: "claimed-image",
+      mediaType: "image/png"
+    }];
+
+    expect(RecipeManifestSchema.safeParse(invalidOutput).success).toBe(true);
+    expect(validateRecipeManifest(invalidOutput)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({
+        code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_INVALID",
+        graphId: "recipe-root",
+        entityId: "recipe-source"
+      })])
+    }));
+  });
+
+  it("leaves acceptance output node resolution to the graph-kernel semantic validator", () => {
+    const missingOutputNode = structuredClone(semanticRecipeFixture());
+    const missingStep = missingOutputNode.acceptanceScenario.steps[0]!;
+    if (missingStep.kind !== "success") throw new Error("Fixture must contain a success step.");
+    missingStep.outputs[0]!.nodeRef = "missing-node";
+
+    expect(RecipeManifestSchema.safeParse(missingOutputNode).success).toBe(true);
+    expect(validateRecipeManifest(missingOutputNode)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({
+        code: "RECIPE_SCENARIO_OUTPUT_NODE_MISSING",
+        graphId: "recipe-root",
+        entityId: "missing-node"
       })])
     }));
   });
@@ -577,6 +620,23 @@ describe("modules and traversal", () => {
     expect(validateGraphSet(moduleGraphs).map((diagnostic) => diagnostic.code)).toContain("MODULE_PARAMETER_PATH_INVALID");
   });
 
+  it("reports duplicate module parameter IDs in the full graph state", () => {
+    const graphs = moduleFixture();
+    const module = graphs[0]!.modules[0]!;
+    module.interface.parameters.push({
+      ...module.interface.parameters[0]!,
+      name: "Duplicate instruction"
+    });
+
+    expect(validateFullGraphState(graphs)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "DUPLICATE_MODULE_PARAMETER",
+        graphId: "root",
+        entityId: "module-1"
+      })
+    ]));
+  });
+
   it("detects cycles that cross virtual module boundaries", () => {
     const graphs = moduleFixture();
     graphs[0]!.edges.push(edge("cycle", "sink", "source"));
@@ -721,7 +781,10 @@ describe("atomic graph transactions", () => {
   });
   it("resolves temporary references once and proves forward/inverse replay", () => {
     const initial = graph("root", "root", []);
-    const draftNode = { ...promptNode("$temp:node:prompt"), title: "Temporary" };
+    const draftNode = {
+      ...promptNode("$temp:node:prompt", "$temp:node:prompt"),
+      title: "Temporary"
+    };
     const preview = previewGraphTransaction({
       graphs: [initial],
       transaction: {
@@ -735,14 +798,35 @@ describe("atomic graph transactions", () => {
       idFactory: ({ kind, name }) => `${kind}-${name}-resolved`
     });
     expect(preview.tempIds).toEqual({ "$temp:node:prompt": "node-prompt-resolved" });
-    expect(preview.graphs[0]!.nodes[0]).toMatchObject({ id: "node-prompt-resolved", position: { x: 40, y: 50 } });
+    expect(preview.graphs[0]!.nodes[0]).toMatchObject({
+      id: "node-prompt-resolved",
+      position: { x: 40, y: 50 },
+      config: { body: "$temp:node:prompt" }
+    });
     expect(preview.inverseReplay).toEqual([initial]);
     expect(preview.forwardReplay).toEqual(preview.graphs);
-    expect(JSON.stringify({
-      graphs: preview.graphs,
-      forwardOperations: preview.forwardOperations,
-      inverseOperations: preview.inverseOperations
-    })).not.toContain("$temp:");
+    expect(preview.forwardOperations[0]).toMatchObject({
+      type: "addNode",
+      node: { id: "node-prompt-resolved", config: { body: "$temp:node:prompt" } }
+    });
+  });
+
+  it("keeps exact reserved-looking strings literal in authored node config", () => {
+    const initial = graph("root", "root", [promptNode("prompt")]);
+    const authored = promptNode("prompt", "$temp:node:authored-literal");
+
+    const preview = previewGraphTransaction({
+      graphs: [initial],
+      transaction: {
+        id: "tx-authored-temp", baseDocumentRevisionId: "doc-rev", baseGraphRevisions: { root: "graph-rev" },
+        title: "Keep authored text", actor: "user", layoutPolicy: "preserve",
+        operations: [{ type: "updateNode", graphId: "root", nodeId: "prompt", node: authored }]
+      }
+    });
+
+    expect(preview.graphs[0]!.nodes[0]!.config).toMatchObject({
+      body: "$temp:node:authored-literal"
+    });
   });
 
   it("resolves forward temporary references without reordering transaction operations", () => {

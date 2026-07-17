@@ -1,5 +1,7 @@
 import {
   EtherGraphSchema,
+  firstTemporaryIdentityReference,
+  graphIdentityReferences,
   type EtherGraph,
   type PreparedGraphCommit
 } from "@ether/schema";
@@ -61,7 +63,6 @@ import {
   validateEtherDocumentConnection,
   type EtherFileIdentity
 } from "./validation.js";
-import { unresolvedTemporaryPath } from "./temporaryIds.js";
 
 export type DocumentAccessMode = "prefer-write" | "read-only" | "require-write";
 export type DocumentStoreMode =
@@ -271,11 +272,13 @@ export class DocumentStore {
     filePath: string,
     options: CreateDocumentStoreOptions
   ): Promise<DocumentStore> {
-    const temporaryPath = unresolvedTemporaryPath(options.initialGraph);
-    if (temporaryPath !== null) {
+    const temporaryReference = firstTemporaryIdentityReference(
+      graphIdentityReferences(options.initialGraph)
+    );
+    if (temporaryReference !== null) {
       throw new DocumentStoreError(
         "UNRESOLVED_TEMP_ID",
-        `Initial graph contains an unresolved temporary ID at ${temporaryPath.join(".")}.`
+        `Initial graph contains an unresolved temporary ID at ${temporaryReference.path.join(".")}: ${temporaryReference.value}.`
       );
     }
     const initialGraph = EtherGraphSchema.parse(options.initialGraph);

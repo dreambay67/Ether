@@ -702,27 +702,6 @@ function validateRecipeManifest(
           message: "Scenario success outputs must satisfy the capability minimum"
         });
       }
-      for (const [outputIndex, output] of step.outputs.entries()) {
-        const blueprint = blueprintByRef.get(output.graphRef);
-        const node = blueprint?.nodes.find((candidate) => candidate.id === output.nodeRef);
-        if (!node) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["acceptanceScenario", "steps", index, "outputs", outputIndex, "nodeRef"],
-            message: "Scenario output must resolve to a blueprint node"
-          });
-          continue;
-        }
-        if (
-          !requirement.outputChannels.includes(output.channel)
-        ) {
-          context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["acceptanceScenario", "steps", index, "outputs", outputIndex, "channel"],
-            message: "Scenario output channel must be produced by the capability requirement"
-          });
-        }
-      }
     }
   }
 }

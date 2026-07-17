@@ -105,6 +105,55 @@ function validateParameterBindings(
   }
 }
 
+function validateAcceptanceOutputs(
+  manifest: RecipeManifest,
+  diagnostics: RecipeSemanticDiagnostic[]
+): void {
+  const blueprints = new Map(
+    [manifest.graph, ...manifest.moduleGraphs].map((blueprint) => [blueprint.graphRef, blueprint])
+  );
+  const requirements = new Map(
+    manifest.capabilityRequirements.map((requirement) => [requirement.id, requirement])
+  );
+  for (const step of manifest.acceptanceScenario.steps) {
+    if (step.kind !== "success") continue;
+    const requirement = requirements.get(step.requirementId);
+    for (const output of step.outputs) {
+      if (requirement !== undefined && !requirement.outputChannels.includes(output.channel)) {
+        diagnostics.push({
+          code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_REQUIREMENT_INVALID",
+          message: `Acceptance output ${output.fixtureId} requests ${output.channel}, which is not declared by requirement ${requirement.id}.`,
+          graphId: output.graphRef,
+          entityId: output.nodeRef
+        });
+      }
+      const blueprint = blueprints.get(output.graphRef);
+      const node = blueprint?.nodes.find((candidate) => candidate.id === output.nodeRef);
+      if (node === undefined) {
+        diagnostics.push({
+          code: "RECIPE_SCENARIO_OUTPUT_NODE_MISSING",
+          message: `Acceptance output ${output.fixtureId} references missing node ${output.nodeRef}.`,
+          graphId: output.graphRef,
+          entityId: output.nodeRef
+        });
+        continue;
+      }
+      const definition = nodeRegistry.get(node.definitionId as EtherNode["definitionId"]);
+      if (
+        definition !== undefined
+        && !definition.contract.outputs.some((port) => port.channel === output.channel)
+      ) {
+        diagnostics.push({
+          code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_INVALID",
+          message: `Acceptance output ${output.fixtureId} requests ${output.channel}, which ${definition.id} does not produce.`,
+          graphId: output.graphRef,
+          entityId: output.nodeRef
+        });
+      }
+    }
+  }
+}
+
 export function validateRecipeManifest(input: unknown): RecipeManifestValidation {
   const structural = RecipeManifestSchema.safeParse(input);
   if (!structural.success) {
@@ -116,6 +165,7 @@ export function validateRecipeManifest(input: unknown): RecipeManifestValidation
   const manifest = structural.data;
   const diagnostics: RecipeSemanticDiagnostic[] = [];
   validateParameterBindings(manifest, diagnostics);
+  validateAcceptanceOutputs(manifest, diagnostics);
   const blueprints = [manifest.graph, ...manifest.moduleGraphs];
   const graphs: EtherGraph[] = [];
   for (const blueprint of blueprints) {

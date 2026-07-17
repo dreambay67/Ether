@@ -326,7 +326,36 @@ describe("transactional Ether document repositories", () => {
     }
   });
 
-  it("rejects unresolved temporary IDs recursively at DocumentStore and prepared commit boundaries", async () => {
+  it("persists temporary-looking authored text but rejects reserved tokens in typed graph references", async () => {
+    const authoredInitial = graph("graph-authored", "root", [
+      promptNode("prompt-literal", "$temp: keep this literal"),
+      promptNode("prompt-value", "$temp:value:body"),
+      promptNode("prompt-reserved-looking", "$temp:node:authored-literal")
+    ]);
+    const authoredPath = path.join(root, "Authored-temp-text.ether");
+    const authoredStore = await storeClass().create(authoredPath, {
+      appVersion: "4.0.0", documentId: "document-authored-temp",
+      initialGraph: authoredInitial, title: "Authored temp text"
+    });
+    const authoredHead = await authoredStore.read(({ revisions }) => revisions.head());
+    const committedNode = promptNode("prompt-literal", "$temp:module:still-authored");
+    const committedSnapshot = { ...authoredInitial, nodes: [committedNode, ...authoredInitial.nodes.slice(1)] };
+    await authoredStore.transaction(({ revisions }) => revisions.commit({
+      id: "authored-temp-commit", baseDocumentRevisionId: authoredHead.documentRevisionId,
+      baseGraphRevisions: authoredHead.graphRevisions, title: "Keep authored temp text", actor: "user",
+      graphSnapshots: [committedSnapshot],
+      forwardOperations: [{ type: "updateNode", graphId: authoredInitial.id, nodeId: committedNode.id, node: committedNode }],
+      inverseOperations: [{ type: "updateNode", graphId: authoredInitial.id, nodeId: authoredInitial.nodes[0]!.id, node: authoredInitial.nodes[0]! }]
+    }));
+    await authoredStore.close();
+    const authoredReopened = await storeClass().open(authoredPath, { access: "read-only" });
+    expect((await authoredReopened.read(({ graphs }) => graphs.get(authoredInitial.id)))?.nodes.map((node) => node.config)).toEqual([
+      expect.objectContaining({ body: "$temp:module:still-authored" }),
+      expect.objectContaining({ body: "$temp:value:body" }),
+      expect.objectContaining({ body: "$temp:node:authored-literal" })
+    ]);
+    await authoredReopened.close();
+
     const unresolvedInitial = { ...graph(), id: "$temp:graph:initial" };
     const unresolvedInitialPath = path.join(root, "Unresolved-initial.ether");
     await expect(storeClass().create(unresolvedInitialPath, {
@@ -350,17 +379,141 @@ describe("transactional Ether document repositories", () => {
         inverseOperations: [{ type: "removeNode", graphId: initial.id, nodeId: tempNode.id }]
       }))).rejects.toMatchObject({ code: "UNRESOLVED_TEMP_ID" });
 
-      const nestedNode = promptNode("prompt-1", "$temp:value:body");
-      const nestedSnapshot = { ...initial, nodes: [nestedNode] };
+      const edgeReference = {
+        id: "edge-temp-reference",
+        from: { kind: "node" as const, nodeId: "$temp:node:source", channel: "text" as const },
+        to: { kind: "node" as const, nodeId: "prompt-1", channel: "text" as const },
+        role: "general" as const, order: 0, selector: { kind: "latest" as const },
+        adapter: { kind: "auto" as const }, enabled: true
+      };
+      const moduleReference = {
+        id: "module-temp-reference", title: "Temporary references", graphId: "$temp:graph:module",
+        position: { x: 0, y: 0 }, size: { width: 200, height: 100 }, collapsed: false,
+        interface: {
+          inputs: [{
+            id: "input", name: "Input", channel: "text" as const,
+            internalNodeId: "$temp:node:internal", internalChannel: "text" as const, required: true
+          }],
+          outputs: [],
+          parameters: [{
+            id: "parameter", name: "Parameter", nodeId: "$temp:node:parameter",
+            configPath: ["body"], required: true
+          }]
+        }
+      };
+      const recursiveSnapshot = {
+        ...initial,
+        edges: [edgeReference],
+        groups: [{
+          id: "group", title: "Group", nodeIds: ["$temp:node:group-member"],
+          position: { x: 0, y: 0 }, size: { width: 200, height: 100 }, color: "teal"
+        }],
+        modules: [moduleReference]
+      };
       await expect(store.transaction(({ revisions }) => revisions.commit({
-        id: "temp-config", baseDocumentRevisionId: head.documentRevisionId, baseGraphRevisions: head.graphRevisions,
-        title: "Temp config", actor: "user", graphSnapshots: [nestedSnapshot],
-        forwardOperations: [{ type: "updateNode", graphId: initial.id, nodeId: nestedNode.id, node: nestedNode }],
-        inverseOperations: [{ type: "updateNode", graphId: initial.id, nodeId: initial.nodes[0]!.id, node: initial.nodes[0]! }]
+        id: "temp-recursive", baseDocumentRevisionId: head.documentRevisionId,
+        baseGraphRevisions: head.graphRevisions, title: "Recursive temp refs", actor: "user",
+        graphSnapshots: [recursiveSnapshot],
+        forwardOperations: [{
+          type: "updateModule", graphId: "$temp:graph:operation", moduleId: "$temp:module:selector",
+          module: moduleReference,
+          subtree: {
+            rootGraphId: "$temp:graph:subtree-root",
+            graphs: [{ ...graph("$temp:graph:subtree-graph", "module"), nodes: [] }]
+          }
+        }],
+        inverseOperations: [{ type: "removeModule", graphId: initial.id, moduleId: moduleReference.id }]
       }))).rejects.toMatchObject({ code: "UNRESOLVED_TEMP_ID" });
     } finally {
       await store.close();
     }
+  });
+
+  it("rejects duplicate module parameter IDs in nested module commits without persisting them", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-duplicate-module-parameter",
+      initialGraph: initial,
+      title: "Duplicate module parameter"
+    });
+    const deep = graph("graph-deep", "module", [promptNode("deep-prompt", "Deep")]);
+    const parameter = {
+      id: "duplicate-parameter",
+      name: "First",
+      nodeId: "deep-prompt",
+      configPath: ["body"],
+      required: true
+    };
+    const nestedModule = {
+      id: "nested-module",
+      title: "Nested module",
+      graphId: deep.id,
+      position: { x: 0, y: 0 },
+      size: { width: 220, height: 120 },
+      interface: {
+        inputs: [],
+        outputs: [],
+        parameters: [parameter, { ...parameter, name: "Second" }]
+      },
+      collapsed: false
+    };
+    const inner = {
+      ...graph("graph-inner", "module", [promptNode("inner-prompt", "Inner")]),
+      modules: [nestedModule]
+    };
+    const parentModule = {
+      id: "parent-module",
+      title: "Parent module",
+      graphId: inner.id,
+      position: { x: 0, y: 0 },
+      size: { width: 240, height: 140 },
+      interface: { inputs: [], outputs: [], parameters: [] },
+      collapsed: false
+    };
+    const parent = { ...initial, modules: [parentModule] };
+    const head = await store.read(({ revisions }) => revisions.head());
+
+    try {
+      await expect(store.transaction(({ revisions }) => revisions.commit({
+        id: "duplicate-module-parameter",
+        baseDocumentRevisionId: head.documentRevisionId,
+        baseGraphRevisions: head.graphRevisions,
+        title: "Reject duplicate module parameter",
+        actor: "user",
+        graphSnapshots: [parent, inner, deep],
+        forwardOperations: [{
+          type: "createModule",
+          graphId: initial.id,
+          module: parentModule,
+          subtree: { rootGraphId: inner.id, graphs: [inner, deep] }
+        }],
+        inverseOperations: [{
+          type: "removeModule",
+          graphId: initial.id,
+          moduleId: parentModule.id
+        }]
+      }))).rejects.toMatchObject({
+        code: "INVALID_GRAPH_SEMANTICS",
+        details: {
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({
+              code: "DUPLICATE_MODULE_PARAMETER",
+              graphId: inner.id,
+              entityId: nestedModule.id
+            })
+          ])
+        }
+      });
+    } finally {
+      await store.close();
+    }
+
+    const reopened = await storeClass().open(filePath, { access: "read-only" });
+    await expect(reopened.read(({ graphs }) => graphs.list().map((item) => item.id))).resolves.toEqual([
+      initial.id
+    ]);
+    await reopened.close();
   });
 
   it("commits, undoes, redoes, and reopens nested updateModule subtree edits", async () => {

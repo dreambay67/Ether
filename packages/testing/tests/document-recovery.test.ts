@@ -673,6 +673,224 @@ describe("Ether AppData recovery and logical repair", () => {
     });
   });
 
+  it("omits corrupt direct source-channel and cyclic lanes before lossy publication", async () => {
+    const base = graph();
+    const node = (id: string) => ({ ...base.nodes[0]!, id, title: id });
+    const lane = (id: string, from: string, to: string) => ({
+      id,
+      from: { kind: "node" as const, nodeId: from, channel: "text" as const },
+      to: { kind: "node" as const, nodeId: to, channel: "text" as const },
+      role: "general" as const,
+      order: 0,
+      selector: { kind: "latest" as const },
+      adapter: { kind: "auto" as const },
+      enabled: true
+    });
+    const sourceGraph = {
+      ...base,
+      nodes: [node("node-a"), node("node-b"), node("node-c"), node("node-d")],
+      edges: [
+        lane("edge-cycle-a-b", "node-a", "node-b"),
+        lane("edge-cycle-b-c", "node-b", "node-c"),
+        lane("edge-cycle-close", "node-a", "node-c"),
+        lane("edge-invalid-channel", "node-d", "node-c")
+      ]
+    };
+    const created = await documentPackage.DocumentStore.create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-corrupt-lanes",
+      environment: environment(appDataRoot),
+      initialGraph: sourceGraph,
+      title: "Corrupt lanes"
+    }) as Task6Store;
+    await created.close();
+
+    const database = new DatabaseSync(sourcePath);
+    database.prepare(
+      "UPDATE edges SET source_node_id = 'node-c', target_node_id = 'node-a' WHERE edge_id = 'edge-cycle-close'"
+    ).run();
+    database.prepare(
+      "UPDATE edges SET source_channel = 'image' WHERE edge_id = 'edge-invalid-channel'"
+    ).run();
+    database.close();
+
+    const strictDestination = path.join(root, "Strict-corrupt-lanes.ether");
+    await expect(api().repairDocument(sourcePath, strictDestination, {
+      appDataRoot,
+      environment: environment(appDataRoot)
+    })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
+    expect(existsSync(strictDestination)).toBe(false);
+
+    const destinationPath = path.join(root, "Repaired-corrupt-lanes.ether");
+    const report = await api().repairDocument(sourcePath, destinationPath, {
+      appDataRoot,
+      allowLossy: true,
+      environment: environment(appDataRoot)
+    });
+    expect(report.losses).toEqual([
+      {
+        type: "graph",
+        entityId: "edge-cycle-close",
+        reason: "Edge edge-cycle-close was omitted because TRAVERSAL_INVALID: Graph contains an execution cycle across node or module boundaries."
+      },
+      {
+        type: "graph",
+        entityId: "edge-invalid-channel",
+        reason: "Edge edge-invalid-channel was omitted because SOURCE_CHANNEL_UNAVAILABLE: Prompt does not produce image."
+      }
+    ]);
+
+    const repaired = await documentPackage.DocumentStore.open(destinationPath, {
+      access: "read-only",
+      environment: environment(appDataRoot)
+    }) as Task6Store;
+    stores.push(repaired);
+    const repairedGraphs = await repaired.read(({ graphs }) => graphs.list());
+    expect(repairedGraphs[0]!.edges.map((edge) => edge.id)).toEqual([
+      "edge-cycle-a-b",
+      "edge-cycle-b-c"
+    ]);
+    expect(validateFullGraphState(repairedGraphs)).toEqual([]);
+  });
+
+  it("omits corrupt duplicate and module-boundary lanes in deterministic loss order", async () => {
+    const base = graph();
+    const node = (id: string) => ({ ...base.nodes[0]!, id, title: id });
+    const lane = (
+      id: string,
+      from: EtherGraph["edges"][number]["from"],
+      to: EtherGraph["edges"][number]["to"],
+      selector: EtherGraph["edges"][number]["selector"]
+    ): EtherGraph["edges"][number] => ({
+      id,
+      from,
+      to,
+      role: "general",
+      order: 0,
+      selector,
+      adapter: { kind: "auto" },
+      enabled: true
+    });
+    const sourceGraph = {
+      ...base,
+      nodes: [node("root-source"), node("root-sink"), node("root-extra")]
+    };
+    const inner = {
+      ...base,
+      id: "module-graph",
+      title: "Module graph",
+      kind: "module" as const,
+      nodes: [node("inner-in"), node("inner-out")],
+      edges: [lane("inner-edge", { kind: "node", nodeId: "inner-in", channel: "text" }, { kind: "node", nodeId: "inner-out", channel: "text" }, { kind: "latest" })]
+    };
+    const module = {
+      id: "module-1",
+      title: "Module",
+      graphId: inner.id,
+      position: { x: 0, y: 0 },
+      size: { width: 260, height: 160 },
+      interface: {
+        inputs: [{ id: "input", name: "Input", channel: "text" as const, internalNodeId: "inner-in", internalChannel: "text" as const, required: true }],
+        outputs: [{ id: "output", name: "Output", channel: "text" as const, internalNodeId: "inner-out", internalChannel: "text" as const, required: true }],
+        parameters: []
+      },
+      collapsed: false
+    };
+    const parent = { ...sourceGraph, modules: [module] };
+    const created = await documentPackage.DocumentStore.create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-boundary-losses",
+      environment: environment(appDataRoot),
+      initialGraph: sourceGraph,
+      title: "Boundary losses"
+    }) as Task6Store;
+    const genesis = await created.read(({ revisions }) => revisions.head());
+    await created.transaction(({ revisions }) => revisions.commit({
+      id: "create-boundary-module",
+      baseDocumentRevisionId: genesis.documentRevisionId,
+      baseGraphRevisions: genesis.graphRevisions,
+      title: "Create boundary module",
+      actor: "user",
+      graphSnapshots: [parent, inner],
+      forwardOperations: [{ type: "createModule", graphId: sourceGraph.id, module, subtree: { rootGraphId: inner.id, graphs: [inner] } }],
+      inverseOperations: [{ type: "removeModule", graphId: sourceGraph.id, moduleId: module.id }]
+    }));
+    const moduleHead = await created.read(({ revisions }) => revisions.head());
+    const rootEdges = [
+      lane("direct-valid", { kind: "node", nodeId: "root-source", channel: "text" }, { kind: "node", nodeId: "root-sink", channel: "text" }, { kind: "latest" }),
+      lane("direct-duplicate", { kind: "node", nodeId: "root-source", channel: "text" }, { kind: "node", nodeId: "root-sink", channel: "text" }, { kind: "latest-approved" }),
+      lane("module-valid", { kind: "node", nodeId: "root-extra", channel: "text" }, { kind: "module", moduleId: module.id, portId: "input", channel: "text" }, { kind: "latest" }),
+      lane("module-duplicate", { kind: "node", nodeId: "root-extra", channel: "text" }, { kind: "module", moduleId: module.id, portId: "input", channel: "text" }, { kind: "latest-approved" }),
+      lane("module-invalid-port", { kind: "node", nodeId: "root-source", channel: "text" }, { kind: "module", moduleId: module.id, portId: "input", channel: "text" }, { kind: "all" }),
+      lane("module-leave", { kind: "module", moduleId: module.id, portId: "output", channel: "text" }, { kind: "node", nodeId: "root-sink", channel: "text" }, { kind: "latest" })
+    ];
+    const parentWithEdges = { ...parent, edges: rootEdges };
+    await created.transaction(({ revisions }) => revisions.commit({
+      id: "add-boundary-edges",
+      baseDocumentRevisionId: moduleHead.documentRevisionId,
+      baseGraphRevisions: { [sourceGraph.id]: moduleHead.graphRevisions[sourceGraph.id]! },
+      title: "Add boundary edges",
+      actor: "user",
+      graphSnapshots: [parentWithEdges],
+      forwardOperations: rootEdges.map((edge) => ({ type: "addEdge" as const, graphId: sourceGraph.id, edge })),
+      inverseOperations: rootEdges.slice().reverse().map((edge) => ({ type: "removeEdge" as const, graphId: sourceGraph.id, edgeId: edge.id }))
+    }));
+    await created.close();
+
+    const database = new DatabaseSync(sourcePath);
+    try {
+      database.prepare("UPDATE edges SET selector_json = ? WHERE edge_id = ?").run('{ "kind": "latest" }', "direct-duplicate");
+      database.prepare("UPDATE edges SET selector_json = ? WHERE edge_id = ?").run('{ "kind": "latest" }', "module-duplicate");
+      database.prepare("UPDATE edges SET target_port_id = ? WHERE edge_id = ?").run("missing-port", "module-invalid-port");
+    } finally {
+      database.close();
+    }
+
+    const strictDestination = path.join(root, "Strict-boundary-losses.ether");
+    await expect(api().repairDocument(sourcePath, strictDestination, {
+      appDataRoot,
+      environment: environment(appDataRoot)
+    })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
+    expect(existsSync(strictDestination)).toBe(false);
+
+    const destinationPath = path.join(root, "Repaired-boundary-losses.ether");
+    const report = await api().repairDocument(sourcePath, destinationPath, {
+      appDataRoot,
+      allowLossy: true,
+      environment: environment(appDataRoot)
+    });
+    expect(report.losses).toEqual([
+      {
+        type: "graph",
+        entityId: "direct-duplicate",
+        reason: "Edge direct-duplicate was omitted because DUPLICATE_LANE: Edges direct-valid and direct-duplicate have the same canonical lane identity."
+      },
+      {
+        type: "graph",
+        entityId: "module-duplicate",
+        reason: "Edge module-duplicate was omitted because DUPLICATE_LANE: Edges module-valid and module-duplicate have the same canonical lane identity."
+      },
+      {
+        type: "graph",
+        entityId: "module-invalid-port",
+        reason: "Edge module-invalid-port was omitted because EDGE_MODULE_PORT_INVALID: Edge module-invalid-port references an invalid module input port."
+      }
+    ]);
+
+    const repaired = await documentPackage.DocumentStore.open(destinationPath, {
+      access: "read-only",
+      environment: environment(appDataRoot)
+    }) as Task6Store;
+    stores.push(repaired);
+    const repairedGraphs = await repaired.read(({ graphs }) => graphs.list());
+    expect(repairedGraphs.find((candidate) => candidate.id === sourceGraph.id)?.edges.map((edge) => edge.id)).toEqual([
+      "direct-valid",
+      "module-valid",
+      "module-leave"
+    ]);
+    expect(validateFullGraphState(repairedGraphs)).toEqual([]);
+  });
+
   it("repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses", async () => {
     const store = await createStore(sourcePath, appDataRoot);
     stores.push(store);
