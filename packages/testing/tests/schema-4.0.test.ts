@@ -1149,6 +1149,104 @@ describe("Ether 4.0 schema", () => {
         parameters: [
           {
             id: "assembly",
+            type: "string",
+            title: "Assembly",
+            description: "Prompt assembly mode",
+            required: true,
+            defaultValue: "append",
+            minLength: 1,
+            maxLength: 20
+          }
+        ],
+        substitutions: [
+          {
+            ...recipe.substitutions[0],
+            parameterBindings: [
+              {
+                parameterId: "assembly",
+                target: {
+                  graphRef: "recipe-root",
+                  nodeRef: "node-0",
+                  configPath: ["assembly"]
+                }
+              }
+            ]
+          }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      RecipeManifestSchema.safeParse({
+        ...recipe,
+        parameters: [
+          {
+            id: "count",
+            type: "number",
+            title: "Count",
+            description: "Generated image count",
+            required: true,
+            defaultValue: 1,
+            minimum: 0.5,
+            maximum: 4,
+            step: 0.5
+          }
+        ],
+        substitutions: [
+          {
+            ...recipe.substitutions[0],
+            parameterBindings: [
+              {
+                parameterId: "count",
+                target: {
+                  graphRef: "recipe-root",
+                  nodeRef: "node-1",
+                  configPath: ["outputCount"]
+                }
+              }
+            ]
+          }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      RecipeManifestSchema.safeParse({
+        ...recipe,
+        parameters: [
+          {
+            id: "count",
+            type: "number",
+            title: "Count",
+            description: "Generated image count",
+            required: true,
+            defaultValue: 1,
+            minimum: 0,
+            maximum: 4,
+            step: 1
+          }
+        ],
+        substitutions: [
+          {
+            ...recipe.substitutions[0],
+            parameterBindings: [
+              {
+                parameterId: "count",
+                target: {
+                  graphRef: "recipe-root",
+                  nodeRef: "node-1",
+                  configPath: ["outputCount"]
+                }
+              }
+            ]
+          }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      RecipeManifestSchema.safeParse({
+        ...recipe,
+        parameters: [
+          {
+            id: "assembly",
             type: "choice",
             title: "Assembly",
             description: "Prompt assembly mode",

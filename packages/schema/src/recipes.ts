@@ -442,17 +442,124 @@ function replaceConfigPathValue(
   return { found: true, value: next };
 }
 
+type UnknownZodSchema = z.ZodType<unknown, z.ZodTypeDef, unknown>;
+
+function resolveConfigSchemaPath(
+  schema: UnknownZodSchema,
+  path: readonly string[]
+): UnknownZodSchema | null {
+  if (path.length === 0) {
+    return schema;
+  }
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
+    return resolveConfigSchemaPath(schema.unwrap(), path);
+  }
+  const [segment, ...rest] = path;
+  if (schema instanceof z.ZodObject) {
+    const child: UnknownZodSchema | undefined = schema.shape[segment];
+    return child ? resolveConfigSchemaPath(child, rest) : null;
+  }
+  if (schema instanceof z.ZodArray && /^\d+$/.test(segment)) {
+    return resolveConfigSchemaPath(schema.element, rest);
+  }
+  return null;
+}
+
+function stringDomainFitsTarget(
+  parameter: z.infer<typeof RecipeStringParameterSchema>,
+  targetSchema: UnknownZodSchema
+): boolean {
+  if (!(targetSchema instanceof z.ZodString)) {
+    return false;
+  }
+  return targetSchema._def.checks.every((check) => {
+    if (check.kind === "min") {
+      return parameter.minLength >= check.value;
+    }
+    if (check.kind === "max") {
+      return parameter.maxLength <= check.value;
+    }
+    if (check.kind === "length") {
+      return parameter.minLength === check.value && parameter.maxLength === check.value;
+    }
+    return false;
+  });
+}
+
+function isMultipleOf(value: number, factor: number): boolean {
+  const quotient = value / factor;
+  return Math.abs(quotient - Math.round(quotient)) < Number.EPSILON * 16;
+}
+
+function numberDomainFitsTarget(
+  parameter: z.infer<typeof RecipeNumberParameterSchema>,
+  targetSchema: UnknownZodSchema
+): boolean {
+  if (!(targetSchema instanceof z.ZodNumber)) {
+    return false;
+  }
+  if (!isMultipleOf(parameter.defaultValue - parameter.minimum, parameter.step)) {
+    return false;
+  }
+  return targetSchema._def.checks.every((check) => {
+    if (check.kind === "min") {
+      return (
+        parameter.minimum > check.value ||
+        (parameter.minimum === check.value && check.inclusive)
+      );
+    }
+    if (check.kind === "max") {
+      return (
+        parameter.maximum < check.value ||
+        (parameter.maximum === check.value && check.inclusive)
+      );
+    }
+    if (check.kind === "int") {
+      return [
+        parameter.minimum,
+        parameter.maximum,
+        parameter.defaultValue,
+        parameter.step
+      ].every(Number.isInteger);
+    }
+    if (check.kind === "multipleOf") {
+      return [
+        parameter.minimum,
+        parameter.maximum,
+        parameter.defaultValue,
+        parameter.step
+      ].every((value) => isMultipleOf(value, check.value));
+    }
+    return check.kind === "finite";
+  });
+}
+
 function parameterFitsTarget(
   parameter: z.infer<typeof RecipeParameterSchema>,
   node: z.infer<typeof EtherNodeSchema>,
   configPath: readonly string[]
 ): boolean {
+  const targetSchema = resolveConfigSchemaPath(
+    NodeConfigSchemas[node.definitionId],
+    configPath
+  );
+  if (!targetSchema) {
+    return false;
+  }
+  if (parameter.type === "string" && !stringDomainFitsTarget(parameter, targetSchema)) {
+    return false;
+  }
+  if (parameter.type === "number" && !numberDomainFitsTarget(parameter, targetSchema)) {
+    return false;
+  }
   const values =
     parameter.type === "choice"
       ? parameter.options.map((option) => option.value)
       : parameter.type === "artifact"
         ? [[]]
-        : [parameter.defaultValue];
+        : parameter.type === "number"
+          ? [parameter.minimum, parameter.maximum, parameter.defaultValue]
+          : [parameter.defaultValue];
   return values.every((value) => {
     const replacement = replaceConfigPathValue(node.config, configPath, value);
     return (
