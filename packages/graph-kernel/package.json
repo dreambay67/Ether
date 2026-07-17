@@ -1,0 +1,24 @@
+{
+  "name": "@ether/graph-kernel",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "prebuild": "pnpm --filter @ether/schema build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ether/schema build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings=0"
+  },
+  "dependencies": {
+    "@ether/schema": "workspace:*"
+  }
+}

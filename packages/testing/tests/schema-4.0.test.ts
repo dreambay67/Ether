@@ -204,8 +204,8 @@ const validGraph = {
   edges: [
     {
       id: "edge-1",
-      from: { nodeId: "node-0", channel: "text" },
-      to: { nodeId: "node-1", channel: "text" },
+      from: { kind: "node", nodeId: "node-0", channel: "text" },
+      to: { kind: "node", nodeId: "node-1", channel: "text" },
       role: "subject",
       order: 0,
       selector: { kind: "latest-approved" },
@@ -451,13 +451,13 @@ describe("Ether 4.0 schema", () => {
     ).toBe(false);
     expect(
       NodeDefinitionSchema.safeParse({ ...definition, family: "generation" }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       NodeDefinitionSchema.safeParse({
         ...definition,
         contract: { ...definition.contract, outputs: [] }
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(() =>
       NodeDefinitionSchema.safeParse({
         ...definition,
@@ -491,7 +491,7 @@ describe("Ether 4.0 schema", () => {
         allowed: false,
         code: "UNKNOWN_CHANNEL",
         message: "The source channel is not part of the node contract.",
-        remedies: [{ code: "SELECT_CHANNEL", message: "Choose a declared output channel." }]
+        remedies: [{ kind: "select-channel", endpoint: "source", channels: ["text", "data"] }]
       })
     ).toMatchObject({ allowed: false, code: "UNKNOWN_CHANNEL" });
   });
@@ -829,7 +829,7 @@ describe("Ether 4.0 schema", () => {
       ...validTransaction,
       baseGraphRevisions: { "graph-root": "graph-revision-1" },
       operations: [
-        { type: "createModule", graphId: "graph-root", module, internalGraph },
+        { type: "createModule", graphId: "graph-root", module, subtree: { rootGraphId: internalGraph.id, graphs: [internalGraph] } },
         {
           type: "addNode",
           graphId: internalGraph.id,
@@ -855,7 +855,7 @@ describe("Ether 4.0 schema", () => {
         operations: [
           {
             ...createModuleTransaction.operations[0],
-            internalGraph: { ...internalGraph, kind: "root" }
+            subtree: { rootGraphId: internalGraph.id, graphs: [{ ...internalGraph, kind: "root" }] }
           }
         ]
       }).success
@@ -1481,7 +1481,7 @@ describe("Ether 4.0 schema", () => {
         edges: [
           {
             ...recipe.graph.edges[0],
-            to: { nodeId: "missing-node", channel: "text" }
+            to: { kind: "node", nodeId: "missing-node", channel: "text" }
           }
         ]
       }).success
@@ -1538,7 +1538,7 @@ describe("Ether 4.0 schema", () => {
           ]
         }
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       RecipeManifestSchema.safeParse({
         ...recipeWithModule,
@@ -1569,7 +1569,7 @@ describe("Ether 4.0 schema", () => {
           edges: [
             {
               ...recipe.graph.edges[0],
-              from: { nodeId: "missing-node", channel: "text" }
+              from: { kind: "node", nodeId: "missing-node", channel: "text" }
             }
           ]
         }

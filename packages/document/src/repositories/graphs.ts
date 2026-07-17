@@ -46,10 +46,16 @@ interface EdgeRow {
   lane_order: number;
   role: EtherGraph["edges"][number]["role"];
   selector_json: string;
+  source_kind: "node" | "module";
   source_channel: EtherGraph["edges"][number]["from"]["channel"];
-  source_node_id: string;
+  source_node_id: string | null;
+  source_module_id: string | null;
+  source_port_id: string | null;
+  target_kind: "node" | "module";
   target_channel: EtherGraph["edges"][number]["to"]["channel"];
-  target_node_id: string;
+  target_node_id: string | null;
+  target_module_id: string | null;
+  target_port_id: string | null;
 }
 
 interface GroupRow {
@@ -128,7 +134,8 @@ export class GraphRepository {
       .all(graphId) as unknown as NodeRow[];
     const edges = this.context.database
       .prepare(
-        `SELECT edge_id, source_node_id, source_channel, target_node_id, target_channel,
+        `SELECT edge_id, source_kind, source_node_id, source_module_id, source_port_id, source_channel,
+                target_kind, target_node_id, target_module_id, target_port_id, target_channel,
                 role, lane_order, selector_json, adapter_json, enabled
          FROM edges WHERE graph_id = ? AND deleted_at IS NULL
          ORDER BY edge_order, edge_id`
@@ -176,8 +183,12 @@ export class GraphRepository {
       })),
       edges: edges.map((edge) => ({
         id: edge.edge_id,
-        from: { nodeId: edge.source_node_id, channel: edge.source_channel },
-        to: { nodeId: edge.target_node_id, channel: edge.target_channel },
+        from: edge.source_kind === "node"
+          ? { kind: "node", nodeId: edge.source_node_id, channel: edge.source_channel }
+          : { kind: "module", moduleId: edge.source_module_id, portId: edge.source_port_id, channel: edge.source_channel },
+        to: edge.target_kind === "node"
+          ? { kind: "node", nodeId: edge.target_node_id, channel: edge.target_channel }
+          : { kind: "module", moduleId: edge.target_module_id, portId: edge.target_port_id, channel: edge.target_channel },
         role: edge.role,
         order: edge.lane_order,
         selector: parseJson(edge.selector_json),
@@ -345,12 +356,17 @@ export class GraphRepository {
       this.context.database
         .prepare(
           `INSERT INTO edges (
-             edge_id, graph_id, source_node_id, source_channel, target_node_id, target_channel,
+             edge_id, graph_id,
+             source_kind, source_node_id, source_module_id, source_port_id, source_channel,
+             target_kind, target_node_id, target_module_id, target_port_id, target_channel,
              role, lane_order, selector_json, adapter_json, enabled, edge_order, deleted_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
            ON CONFLICT(edge_id) DO UPDATE SET
-             graph_id = excluded.graph_id, source_node_id = excluded.source_node_id,
-             source_channel = excluded.source_channel, target_node_id = excluded.target_node_id,
+             graph_id = excluded.graph_id, source_kind = excluded.source_kind,
+             source_node_id = excluded.source_node_id, source_module_id = excluded.source_module_id,
+             source_port_id = excluded.source_port_id, source_channel = excluded.source_channel,
+             target_kind = excluded.target_kind, target_node_id = excluded.target_node_id,
+             target_module_id = excluded.target_module_id, target_port_id = excluded.target_port_id,
              target_channel = excluded.target_channel, role = excluded.role,
              lane_order = excluded.lane_order, selector_json = excluded.selector_json,
              adapter_json = excluded.adapter_json, enabled = excluded.enabled,
@@ -359,9 +375,15 @@ export class GraphRepository {
         .run(
           edge.id,
           graph.id,
-          edge.from.nodeId,
+          edge.from.kind,
+          edge.from.kind === "node" ? edge.from.nodeId : null,
+          edge.from.kind === "module" ? edge.from.moduleId : null,
+          edge.from.kind === "module" ? edge.from.portId : null,
           edge.from.channel,
-          edge.to.nodeId,
+          edge.to.kind,
+          edge.to.kind === "node" ? edge.to.nodeId : null,
+          edge.to.kind === "module" ? edge.to.moduleId : null,
+          edge.to.kind === "module" ? edge.to.portId : null,
           edge.to.channel,
           edge.role,
           edge.order,

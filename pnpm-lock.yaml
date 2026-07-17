@@ -100,6 +100,12 @@ importers:
         specifier: ^3.25.67
         version: 3.25.76
 
+  packages/graph-kernel:
+    dependencies:
+      '@ether/schema':
+        specifier: workspace:*
+        version: link:../schema
+
   packages/mcp-server:
     dependencies:
       '@ether/engine':
@@ -129,6 +135,9 @@ importers:
       '@ether/engine':
         specifier: workspace:*
         version: link:../engine
+      '@ether/graph-kernel':
+        specifier: workspace:*
+        version: link:../graph-kernel
       '@ether/providers':
         specifier: workspace:*
         version: link:../providers

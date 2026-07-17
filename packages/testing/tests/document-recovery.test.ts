@@ -701,7 +701,7 @@ describe("Ether AppData recovery and logical repair", () => {
       actor: "user",
       graphSnapshots: [rootWithModule, internalGraph],
       forwardOperations: [
-        { type: "createModule", graphId: rootWithModule.id, module, internalGraph }
+        { type: "createModule", graphId: rootWithModule.id, module, subtree: { rootGraphId: internalGraph.id, graphs: [internalGraph] } }
       ],
       inverseOperations: [
         { type: "removeModule", graphId: rootWithModule.id, moduleId: module.id }

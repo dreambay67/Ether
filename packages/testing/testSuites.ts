@@ -7,11 +7,13 @@ export const testSuites = {
     "tests/desktop-vite-config.test.ts",
     "tests/desktop-window-options.test.ts",
     "tests/document-operation-replay.test.ts",
+    "tests/graph-kernel.test.ts",
     "tests/graph-assembly.test.ts",
     "tests/graph-catalog.test.ts",
     "tests/graph-channels.test.ts",
     "tests/graph-edge-semantics.test.ts",
     "tests/graph-taxonomy-25.test.ts",
+    "tests/connection-matrix-4.0.test.ts",
     "tests/renderer-channel-registry.test.ts",
     "tests/renderer-url.test.ts",
     "tests/schema-4.0.test.ts"

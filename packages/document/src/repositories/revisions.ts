@@ -239,7 +239,7 @@ export class RevisionRepository {
     } catch (error) {
       throw new DocumentRepositoryError(
         "INVALID_PREPARED_COMMIT",
-        "Prepared graph snapshots and operations do not describe an exact reversible commit.",
+        `Prepared graph snapshots and operations do not describe an exact reversible commit.${error instanceof Error ? ` ${error.message}` : ""}`,
         { details: { cause: error } }
       );
     }

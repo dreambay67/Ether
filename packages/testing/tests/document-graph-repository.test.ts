@@ -283,21 +283,40 @@ describe("transactional Ether document repositories", () => {
       graphId: internal.id,
       position: { x: 320, y: 80 },
       size: { width: 240, height: 160 },
-      interface: { inputs: [], outputs: [], parameters: [] },
+      interface: {
+        inputs: [{ id: "prompt-in", name: "Prompt", channel: "text" as const, internalNodeId: "module-prompt", internalChannel: "text" as const, required: true }],
+        outputs: [],
+        parameters: []
+      },
       collapsed: false
     };
-    const parent = { ...renamed(initial, "Parent with module"), modules: [module] };
+    const parent = {
+      ...renamed(initial, "Parent with module"),
+      modules: [module],
+      edges: [{
+        id: "edge-to-module",
+        from: { kind: "node" as const, nodeId: "prompt-1", channel: "text" as const },
+        to: { kind: "module" as const, moduleId: module.id, portId: "prompt-in", channel: "text" as const },
+        role: "general" as const,
+        order: 0,
+        selector: { kind: "latest-approved" as const },
+        adapter: { kind: "auto" as const },
+        enabled: true
+      }]
+    };
     const commit = prepared(
       head,
       [parent, internal],
       "module",
       [
-        { type: "createModule", graphId: initial.id, module, internalGraph: internal },
+        { type: "createModule", graphId: initial.id, module, subtree: { rootGraphId: internal.id, graphs: [internal] } },
+        { type: "addEdge", graphId: initial.id, edge: parent.edges[0] },
         graphPropertyOperation(initial.id, parent.title),
         graphPropertyOperation(internal.id, internal.title)
       ],
       [
         { type: "removeModule", graphId: initial.id, moduleId: module.id },
+        { type: "removeEdge", graphId: initial.id, edgeId: parent.edges[0].id },
         graphPropertyOperation(initial.id, initial.title),
         graphPropertyOperation(internal.id, "removed")
       ]
@@ -314,9 +333,11 @@ describe("transactional Ether document repositories", () => {
       ["forward", 0],
       ["forward", 1],
       ["forward", 2],
+      ["forward", 3],
       ["inverse", 0],
       ["inverse", 1],
-      ["inverse", 2]
+      ["inverse", 2],
+      ["inverse", 3]
     ]);
 
     const beforeRollback = await store.read(({ revisions }) => revisions.head());
@@ -345,12 +366,12 @@ describe("transactional Ether document repositories", () => {
       undoOperations
         .filter((entry) => entry.direction === "forward")
         .map((entry) => entry.operation.graphId)
-    ).toEqual([internal.id, parent.id, parent.id]);
+    ).toEqual([internal.id, parent.id, parent.id, parent.id]);
     expect(
       undoOperations
         .filter((entry) => entry.direction === "inverse")
         .map((entry) => entry.operation.graphId)
-    ).toEqual([internal.id, parent.id, parent.id]);
+    ).toEqual([internal.id, parent.id, parent.id, parent.id]);
 
     const redoAudit = await store.transaction(({ revisions }) => revisions.redo());
     const redoOperations = await store.read(({ revisions }) =>
@@ -360,7 +381,7 @@ describe("transactional Ether document repositories", () => {
       redoOperations
         .filter((entry) => entry.direction === "forward")
         .map((entry) => entry.operation.graphId)
-    ).toEqual([parent.id, parent.id, internal.id]);
+    ).toEqual([parent.id, parent.id, parent.id, internal.id]);
     await store.close();
   });
 
@@ -499,7 +520,7 @@ describe("transactional Ether document repositories", () => {
           genesis,
           [parent, internal],
           "create-removable-module",
-          [{ type: "createModule", graphId: initial.id, module, internalGraph: internal }],
+          [{ type: "createModule", graphId: initial.id, module, subtree: { rootGraphId: internal.id, graphs: [internal] } }],
           [{ type: "removeModule", graphId: initial.id, moduleId: module.id }]
         )
       )
@@ -520,7 +541,7 @@ describe("transactional Ether document repositories", () => {
         { type: "removeModule", graphId: initial.id, moduleId: module.id }
       ],
       inverseOperations: [
-        { type: "createModule", graphId: initial.id, module, internalGraph: internal }
+        { type: "createModule", graphId: initial.id, module, subtree: { rootGraphId: internal.id, graphs: [internal] } }
       ]
     } as unknown as PreparedGraphCommit;
     const removed = await store.transaction(({ revisions }) => revisions.commit(removal));

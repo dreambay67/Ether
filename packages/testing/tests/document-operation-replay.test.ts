@@ -40,8 +40,8 @@ function graph(id = "graph-root", kind: "root" | "module" = "root"): EtherGraph 
     edges: [
       {
         id: "edge-update",
-        from: { nodeId: "node-update", channel: "text" },
-        to: { nodeId: "node-remove", channel: "text" },
+        from: { kind: "node", nodeId: "node-update", channel: "text" },
+        to: { kind: "node", nodeId: "node-remove", channel: "text" },
         role: "subject",
         order: 0,
         selector: { kind: "latest-approved" },
@@ -50,8 +50,8 @@ function graph(id = "graph-root", kind: "root" | "module" = "root"): EtherGraph 
       },
       {
         id: "edge-remove",
-        from: { nodeId: "node-remove", channel: "text" },
-        to: { nodeId: "node-update", channel: "text" },
+        from: { kind: "node", nodeId: "node-remove", channel: "text" },
+        to: { kind: "node", nodeId: "node-update", channel: "text" },
         role: "general",
         order: 1,
         selector: { kind: "latest" },
@@ -149,8 +149,8 @@ describe("document graph operation replay", () => {
         graphId: "graph-root",
         edge: {
           id: "edge-added",
-          from: { nodeId: "node-update", channel: "text" },
-          to: { nodeId: "node-remove", channel: "text" },
+          from: { kind: "node", nodeId: "node-update", channel: "text" },
+          to: { kind: "node", nodeId: "node-remove", channel: "text" },
           role: "subject",
           order: 2,
           selector: { kind: "all" },
@@ -230,7 +230,7 @@ describe("document graph operation replay", () => {
         type: "createModule",
         graphId: "graph-root",
         module: createdModule,
-        internalGraph: createdModuleGraph
+        subtree: { rootGraphId: createdModuleGraph.id, graphs: [createdModuleGraph] }
       },
       verify: (result) => {
         expect(root(result).modules.map(({ id }) => id)).toContain(createdModule.id);

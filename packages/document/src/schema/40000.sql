@@ -47,9 +47,15 @@ CREATE TABLE nodes (
 CREATE TABLE edges (
   edge_id TEXT PRIMARY KEY,
   graph_id TEXT NOT NULL REFERENCES graphs(graph_id) ON DELETE CASCADE,
-  source_node_id TEXT NOT NULL,
+  source_kind TEXT NOT NULL CHECK (source_kind IN ('node', 'module')),
+  source_node_id TEXT,
+  source_module_id TEXT,
+  source_port_id TEXT,
   source_channel TEXT NOT NULL,
-  target_node_id TEXT NOT NULL,
+  target_kind TEXT NOT NULL CHECK (target_kind IN ('node', 'module')),
+  target_node_id TEXT,
+  target_module_id TEXT,
+  target_port_id TEXT,
   target_channel TEXT NOT NULL,
   role TEXT NOT NULL,
   lane_order INTEGER NOT NULL,
@@ -58,9 +64,18 @@ CREATE TABLE edges (
   enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
   edge_order INTEGER NOT NULL DEFAULT 0 CHECK (edge_order >= 0),
   deleted_at TEXT,
-  UNIQUE (source_node_id, source_channel, target_node_id, target_channel, role, selector_json),
-  FOREIGN KEY (graph_id, source_node_id) REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE,
-  FOREIGN KEY (graph_id, target_node_id) REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE
+  CHECK (
+    (source_kind = 'node' AND source_node_id IS NOT NULL AND source_module_id IS NULL AND source_port_id IS NULL) OR
+    (source_kind = 'module' AND source_node_id IS NULL AND source_module_id IS NOT NULL AND source_port_id IS NOT NULL)
+  ),
+  CHECK (
+    (target_kind = 'node' AND target_node_id IS NOT NULL AND target_module_id IS NULL AND target_port_id IS NULL) OR
+    (target_kind = 'module' AND target_node_id IS NULL AND target_module_id IS NOT NULL AND target_port_id IS NOT NULL)
+  ),
+  FOREIGN KEY (graph_id, source_node_id) REFERENCES nodes(graph_id, node_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (graph_id, target_node_id) REFERENCES nodes(graph_id, node_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (graph_id, source_module_id) REFERENCES modules(parent_graph_id, module_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (graph_id, target_module_id) REFERENCES modules(parent_graph_id, module_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED
 ) STRICT;
 
 CREATE TABLE graph_revisions (
@@ -179,6 +194,7 @@ CREATE TABLE modules (
   updated_at TEXT NOT NULL,
   deleted_at TEXT,
   CHECK (parent_graph_id <> internal_graph_id),
+  UNIQUE (parent_graph_id, module_id),
   FOREIGN KEY (parent_graph_id, node_id)
     REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE
 ) STRICT;
@@ -602,6 +618,14 @@ CREATE INDEX nodes_graph_id_idx ON nodes(graph_id);
 CREATE INDEX edges_graph_id_idx ON edges(graph_id);
 CREATE INDEX edges_graph_source_idx ON edges(graph_id, source_node_id);
 CREATE INDEX edges_graph_target_idx ON edges(graph_id, target_node_id);
+CREATE INDEX edges_graph_source_module_idx ON edges(graph_id, source_module_id);
+CREATE INDEX edges_graph_target_module_idx ON edges(graph_id, target_module_id);
+CREATE UNIQUE INDEX edges_lane_identity_idx ON edges(
+  graph_id,
+  source_kind, ifnull(source_node_id, ''), ifnull(source_module_id, ''), ifnull(source_port_id, ''), source_channel,
+  target_kind, ifnull(target_node_id, ''), ifnull(target_module_id, ''), ifnull(target_port_id, ''), target_channel,
+  role, selector_json
+) WHERE deleted_at IS NULL;
 CREATE INDEX graph_revisions_graph_id_idx ON graph_revisions(graph_id);
 CREATE INDEX graph_revisions_parent_idx ON graph_revisions(graph_id, parent_revision_id);
 CREATE INDEX document_revisions_parent_idx ON document_revisions(parent_document_revision_id);

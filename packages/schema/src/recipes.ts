@@ -10,8 +10,7 @@ import {
 import {
   EtherNodeSchema,
   NodeConfigSchemas,
-  PayloadChannelSchema,
-  canonicalNodeDefinitionContracts
+  PayloadChannelSchema
 } from "./nodes.js";
 import { ProviderCapabilitySchema, ProviderOperationSchema } from "./outputs.js";
 
@@ -147,18 +146,32 @@ function validateGraphBlueprint(blueprint: GraphBlueprintObject, context: z.Refi
   }
 
   for (const [index, edge] of blueprint.edges.entries()) {
-    if (!nodeIds.has(edge.from.nodeId)) {
+    if (edge.from.kind === "node" && !nodeIds.has(edge.from.nodeId)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["edges", index, "from", "nodeId"],
         message: "Blueprint edge source references an unknown node"
       });
     }
-    if (!nodeIds.has(edge.to.nodeId)) {
+    if (edge.from.kind === "module" && !moduleIds.has(edge.from.moduleId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["edges", index, "from", "moduleId"],
+        message: "Blueprint edge source references an unknown module"
+      });
+    }
+    if (edge.to.kind === "node" && !nodeIds.has(edge.to.nodeId)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["edges", index, "to", "nodeId"],
         message: "Blueprint edge target references an unknown node"
+      });
+    }
+    if (edge.to.kind === "module" && !moduleIds.has(edge.to.moduleId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["edges", index, "to", "moduleId"],
+        message: "Blueprint edge target references an unknown module"
       });
     }
   }
@@ -709,15 +722,6 @@ function validateRecipeManifest(
             });
             continue;
           }
-          const channels: readonly z.infer<typeof PayloadChannelSchema>[] =
-            canonicalNodeDefinitionContracts[node.definitionId][direction];
-          if (!channels.includes(port.internalChannel)) {
-            context.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: [...modulePath, "interface", direction, portIndex, "internalChannel"],
-              message: `Internal node does not expose ${port.internalChannel} on ${direction}`
-            });
-          }
         }
       }
       for (const [parameterIndex, parameter] of module.interface.parameters.entries()) {
@@ -871,15 +875,12 @@ function validateRecipeManifest(
           continue;
         }
         if (
-          !requirement.outputChannels.includes(output.channel) ||
-          !(canonicalNodeDefinitionContracts[node.definitionId].outputs as readonly z.infer<
-            typeof PayloadChannelSchema
-          >[]).includes(output.channel)
+          !requirement.outputChannels.includes(output.channel)
         ) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["acceptanceScenario", "steps", index, "outputs", outputIndex, "channel"],
-            message: "Scenario output channel must be produced by both requirement and node"
+            message: "Scenario output channel must be produced by the capability requirement"
           });
         }
       }

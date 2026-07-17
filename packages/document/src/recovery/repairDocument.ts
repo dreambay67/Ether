@@ -158,7 +158,7 @@ function planGraphRecovery(graphs: EtherGraph[], losses: RepairLoss[]): GraphRec
         type: "createModule",
         graphId: parent.id,
         module,
-        internalGraph: stagedInternal
+        subtree: { rootGraphId: stagedInternal.id, graphs: [stagedInternal] }
       });
       inverse.push({ type: "removeModule", graphId: parent.id, moduleId: module.id });
       queue.push(internal);

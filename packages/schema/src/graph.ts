@@ -18,9 +18,25 @@ export const OutputSelectorSchema = z.discriminatedUnion("kind", [
 ]);
 export type OutputSelector = z.infer<typeof OutputSelectorSchema>;
 
-export const EdgeEndpointSchema = z
-  .object({ nodeId: z.string().min(1), channel: PayloadChannelSchema })
+export const NodeEdgeEndpointSchema = z
+  .object({
+    kind: z.literal("node"),
+    nodeId: z.string().min(1),
+    channel: PayloadChannelSchema
+  })
   .strict();
+export const ModuleEdgeEndpointSchema = z
+  .object({
+    kind: z.literal("module"),
+    moduleId: z.string().min(1),
+    portId: z.string().min(1),
+    channel: PayloadChannelSchema
+  })
+  .strict();
+export const EdgeEndpointSchema = z.discriminatedUnion("kind", [
+  NodeEdgeEndpointSchema,
+  ModuleEdgeEndpointSchema
+]);
 export type EdgeEndpoint = z.infer<typeof EdgeEndpointSchema>;
 
 export const EdgeAdapterSchema = z.discriminatedUnion("kind", [
@@ -66,13 +82,16 @@ export const ConnectionErrorCodeSchema = z.enum([
 ]);
 export type ConnectionErrorCode = z.infer<typeof ConnectionErrorCodeSchema>;
 
-export const ConnectionRemedySchema = z
-  .object({
-    code: z.string().min(1),
-    message: z.string(),
-    adapterId: z.string().min(1).optional()
-  })
-  .strict();
+export const ConnectionRemedySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("select-node-definition"), endpoint: z.enum(["source", "target"]), definitionIds: z.array(z.string().min(1)).min(1) }).strict(),
+  z.object({ kind: z.literal("select-channel"), endpoint: z.enum(["source", "target"]), channels: z.array(PayloadChannelSchema).min(1) }).strict(),
+  z.object({ kind: z.literal("select-role"), roles: z.array(ConnectionRoleSchema).min(1) }).strict(),
+  z.object({ kind: z.literal("choose-adapter"), adapterIds: z.array(z.string().min(1)).min(1) }).strict(),
+  z.object({ kind: z.literal("enable-capability"), capability: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("remove-edge"), edgeId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("remove-cycle-edges"), edgeIds: z.array(z.string().min(1)).min(1) }).strict(),
+  z.object({ kind: z.literal("expose-module-port"), moduleId: z.string().min(1), direction: z.enum(["input", "output"]), channel: PayloadChannelSchema }).strict()
+]);
 export type ConnectionRemedy = z.infer<typeof ConnectionRemedySchema>;
 
 export const ConnectionDecisionSchema = z.discriminatedUnion("allowed", [
@@ -187,10 +206,28 @@ export const EtherGraphSchema = z
   .strict();
 export type EtherGraph = z.infer<typeof EtherGraphSchema>;
 
+export const ModuleSubtreeSnapshotSchema = z
+  .object({
+    rootGraphId: z.string().min(1),
+    graphs: z.array(EtherGraphSchema).min(1)
+  })
+  .strict()
+  .superRefine((snapshot, context) => {
+    const graphIds = snapshot.graphs.map((graph) => graph.id);
+    if (new Set(graphIds).size !== graphIds.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["graphs"], message: "Module subtree graph IDs must be unique" });
+    }
+    const root = snapshot.graphs.find((graph) => graph.id === snapshot.rootGraphId);
+    if (root === undefined || root.kind !== "module") {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["rootGraphId"], message: "Module subtree root must identify a module graph" });
+    }
+  });
+export type ModuleSubtreeSnapshot = z.infer<typeof ModuleSubtreeSnapshotSchema>;
+
 const graphOperationBase = { graphId: z.string().min(1) };
 
 export const AddNodeOperationSchema = z
-  .object({ type: z.literal("addNode"), ...graphOperationBase, node: EtherNodeSchema })
+  .object({ type: z.literal("addNode"), ...graphOperationBase, node: EtherNodeSchema, index: z.number().int().nonnegative().optional() })
   .strict();
 export const UpdateNodeOperationSchema = z
   .object({
@@ -204,7 +241,7 @@ export const RemoveNodeOperationSchema = z
   .object({ type: z.literal("removeNode"), ...graphOperationBase, nodeId: z.string().min(1) })
   .strict();
 export const AddEdgeOperationSchema = z
-  .object({ type: z.literal("addEdge"), ...graphOperationBase, edge: EtherEdgeSchema })
+  .object({ type: z.literal("addEdge"), ...graphOperationBase, edge: EtherEdgeSchema, index: z.number().int().nonnegative().optional() })
   .strict();
 export const UpdateEdgeOperationSchema = z
   .object({
@@ -234,7 +271,7 @@ export const ResizeNodesOperationSchema = z
   })
   .strict();
 export const CreateGroupOperationSchema = z
-  .object({ type: z.literal("createGroup"), ...graphOperationBase, group: EtherGroupSchema })
+  .object({ type: z.literal("createGroup"), ...graphOperationBase, group: EtherGroupSchema, index: z.number().int().nonnegative().optional() })
   .strict();
 export const UpdateGroupOperationSchema = z
   .object({
@@ -252,7 +289,8 @@ export const CreateModuleOperationSchema = z
     type: z.literal("createModule"),
     ...graphOperationBase,
     module: EtherModuleSchema,
-    internalGraph: EtherGraphSchema
+    subtree: ModuleSubtreeSnapshotSchema,
+    index: z.number().int().nonnegative().optional()
   })
   .strict();
 export const UpdateModuleOperationSchema = z
@@ -260,7 +298,8 @@ export const UpdateModuleOperationSchema = z
     type: z.literal("updateModule"),
     ...graphOperationBase,
     moduleId: z.string().min(1),
-    module: EtherModuleSchema
+    module: EtherModuleSchema,
+    subtree: ModuleSubtreeSnapshotSchema.optional()
   })
   .strict();
 export const RemoveModuleOperationSchema = z
@@ -325,6 +364,13 @@ export const GraphOperationSchema = GraphOperationObjectSchema.superRefine((oper
     requireReplacementIdentity(operation.groupId, operation.group.id, "groupId", "group");
   } else if (operation.type === "updateModule") {
     requireReplacementIdentity(operation.moduleId, operation.module.id, "moduleId", "module");
+    if (operation.subtree !== undefined && operation.module.graphId !== operation.subtree.rootGraphId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["module", "graphId"],
+        message: "Updated module graphId must identify its subtree root graph"
+      });
+    }
   } else if (operation.type === "moveNodes") {
     const nodeIds = operation.positions.map((entry) => entry.nodeId);
     if (new Set(nodeIds).size !== nodeIds.length) {
@@ -344,24 +390,17 @@ export const GraphOperationSchema = GraphOperationObjectSchema.superRefine((oper
       });
     }
   } else if (operation.type === "createModule") {
-    if (operation.module.graphId !== operation.internalGraph.id) {
+    if (operation.module.graphId !== operation.subtree.rootGraphId) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["module", "graphId"],
-        message: "Module graphId must identify its internal graph"
+        message: "Module graphId must identify its subtree root graph"
       });
     }
-    if (operation.internalGraph.kind !== "module") {
+    if (operation.subtree.graphs.some((graph) => graph.id === operation.graphId)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["internalGraph", "kind"],
-        message: "A module internal graph must have kind module"
-      });
-    }
-    if (operation.internalGraph.id === operation.graphId) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["internalGraph", "id"],
+        path: ["subtree", "graphs"],
         message: "A module internal graph must be distinct from its parent graph"
       });
     }
@@ -383,7 +422,7 @@ export const GraphTransactionSchema = z
   .superRefine((transaction, context) => {
     const newInternalGraphIds = transaction.operations
       .filter((operation) => operation.type === "createModule")
-      .map((operation) => operation.internalGraph.id);
+      .flatMap((operation) => operation.subtree.graphs.map((graph) => graph.id));
     if (new Set(newInternalGraphIds).size !== newInternalGraphIds.length) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -418,7 +457,19 @@ export const GraphTransactionSchema = z
   });
 export type GraphTransaction = z.infer<typeof GraphTransactionSchema>;
 
-export const PreparedGraphCommitSchema = z
+export type PreparedGraphCommit = {
+  id: string;
+  baseDocumentRevisionId: string;
+  baseGraphRevisions: Record<string, string>;
+  title: string;
+  actor: z.infer<typeof RevisionActorSchema>;
+  graphSnapshots: EtherGraph[];
+  deletedGraphIds?: string[] | undefined;
+  forwardOperations: GraphOperation[];
+  inverseOperations: GraphOperation[];
+};
+
+export const PreparedGraphCommitSchema: z.ZodType<PreparedGraphCommit> = z
   .object({
     id: z.string().min(1),
     baseDocumentRevisionId: z.string().min(1),
@@ -508,7 +559,6 @@ export const PreparedGraphCommitSchema = z
       }
     }
   });
-export type PreparedGraphCommit = z.infer<typeof PreparedGraphCommitSchema>;
 
 export function parseEtherGraph(input: unknown): EtherGraph {
   return EtherGraphSchema.parse(input);

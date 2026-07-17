@@ -20,7 +20,8 @@ import {
 import {
   EtherEdgeSchema,
   EtherGraphSchema,
-  GraphTransactionSchema
+  GraphTransactionSchema,
+  type GraphTransaction
 } from "./graph.js";
 import {
   ConnectionRoleSchema,
@@ -656,7 +657,7 @@ const documentLocationResponseSchema = z
   .object({ documentId: idSchema, pathGrantId: idSchema })
   .strict();
 const referenceResponseSchema = z.object({ referenceId: idSchema }).strict();
-const recipePreviewResponseSchema = z
+const recipePreviewResponseSchema: z.ZodType<{ transaction: GraphTransaction; warnings: string[] }> = z
   .object({ transaction: GraphTransactionSchema, warnings: z.array(z.string()) })
   .strict();
 const executionPlanResponseSchema = z.object({ plan: ExecutionPlanSchema }).strict();

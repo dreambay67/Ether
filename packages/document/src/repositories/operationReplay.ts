@@ -27,6 +27,12 @@ function addUnique<T extends { id: string }>(items: T[], item: T, kind: string):
   return [...items, item];
 }
 
+function insertUnique<T extends { id: string }>(items: T[], item: T, kind: string, index?: number): T[] {
+  const appended = addUnique(items, item, kind);
+  if (index === undefined || index >= items.length) return appended;
+  return [...items.slice(0, index), item, ...items.slice(index)];
+}
+
 function replaceRequired<T extends { id: string }>(
   items: T[],
   id: string,
@@ -73,7 +79,7 @@ export function replayGraphOperations(
     const graph = requireGraph(graphs, operation.graphId);
     switch (operation.type) {
       case "addNode":
-        graphs.set(graph.id, { ...graph, nodes: addUnique(graph.nodes, operation.node, "Node") });
+        graphs.set(graph.id, { ...graph, nodes: insertUnique(graph.nodes, operation.node, "Node", operation.index) });
         break;
       case "updateNode":
         graphs.set(graph.id, {
@@ -88,7 +94,7 @@ export function replayGraphOperations(
         });
         break;
       case "addEdge":
-        graphs.set(graph.id, { ...graph, edges: addUnique(graph.edges, operation.edge, "Edge") });
+        graphs.set(graph.id, { ...graph, edges: insertUnique(graph.edges, operation.edge, "Edge", operation.index) });
         break;
       case "updateEdge":
         graphs.set(graph.id, {
@@ -134,7 +140,7 @@ export function replayGraphOperations(
       case "createGroup":
         graphs.set(graph.id, {
           ...graph,
-          groups: addUnique(graph.groups, operation.group, "Group")
+          groups: insertUnique(graph.groups, operation.group, "Group", operation.index)
         });
         break;
       case "updateGroup":
@@ -150,16 +156,18 @@ export function replayGraphOperations(
         });
         break;
       case "createModule": {
-        const internal = EtherGraphSchema.parse(operation.internalGraph);
-        const existing = graphs.get(internal.id);
-        if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(internal)) {
-          throw new GraphOperationReplayError(`Module graph ${internal.id} already exists with different state.`);
+        for (const subtreeGraph of operation.subtree.graphs) {
+          const internal = EtherGraphSchema.parse(subtreeGraph);
+          const existing = graphs.get(internal.id);
+          if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(internal)) {
+            throw new GraphOperationReplayError(`Module graph ${internal.id} already exists with different state.`);
+          }
+          graphs.set(internal.id, internal);
         }
         graphs.set(graph.id, {
           ...graph,
-          modules: addUnique(graph.modules, operation.module, "Module")
+          modules: insertUnique(graph.modules, operation.module, "Module", operation.index)
         });
-        graphs.set(internal.id, internal);
         break;
       }
       case "updateModule":
@@ -173,11 +181,31 @@ export function replayGraphOperations(
         if (removed === undefined) {
           throw new GraphOperationReplayError(`Module ${operation.moduleId} does not exist.`);
         }
+        const connected = graph.edges.filter((edge) =>
+          (edge.from.kind === "module" && edge.from.moduleId === removed.id) ||
+          (edge.to.kind === "module" && edge.to.moduleId === removed.id)
+        );
+        if (connected.length > 0) {
+          throw new GraphOperationReplayError(`Module ${operation.moduleId} still has connected edge dependencies.`);
+        }
+        const removing = new Set<string>();
+        const removeSubtree = (graphId: string): void => {
+          if (removing.has(graphId)) {
+            return;
+          }
+          const internal = graphs.get(graphId);
+          if (internal === undefined) {
+            throw new GraphOperationReplayError(`Module graph ${graphId} does not exist.`);
+          }
+          removing.add(graphId);
+          graphs.delete(graphId);
+          for (const nested of internal.modules) removeSubtree(nested.graphId);
+        };
         graphs.set(graph.id, {
           ...graph,
           modules: graph.modules.filter(({ id }) => id !== operation.moduleId)
         });
-        graphs.delete(removed.graphId);
+        removeSubtree(removed.graphId);
         break;
       }
       case "updateModuleInterface": {

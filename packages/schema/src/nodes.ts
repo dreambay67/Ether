@@ -407,120 +407,6 @@ export const NodeExecutorKindSchema = z.enum([
 ]);
 export type NodeExecutorKind = z.infer<typeof NodeExecutorKindSchema>;
 
-type CanonicalNodeDefinitionContract = {
-  family: NodeFamily;
-  executor: NodeExecutorKind;
-  inputs: readonly PayloadChannel[];
-  outputs: readonly PayloadChannel[];
-};
-
-const allPayloadChannels = [...payloadChannels] as const;
-
-export const canonicalNodeDefinitionContracts = {
-  "prompt.text": {
-    family: "prompt",
-    executor: "deterministic-assembly",
-    inputs: ["text", "data"],
-    outputs: ["text", "data"]
-  },
-  "prompt.worker": {
-    family: "prompt",
-    executor: "codex-llm",
-    inputs: allPayloadChannels,
-    outputs: ["text", "data"]
-  },
-  "reference.set": {
-    family: "reference",
-    executor: "asset-resolution",
-    inputs: allPayloadChannels,
-    outputs: allPayloadChannels
-  },
-  "generation.image": {
-    family: "generation",
-    executor: "image-provider",
-    inputs: ["text", "image", "data"],
-    outputs: ["image", "text", "data"]
-  },
-  "edit.image": {
-    family: "edit",
-    executor: "edit-provider",
-    inputs: ["text", "image", "mask", "data"],
-    outputs: ["image", "mask", "data"]
-  },
-  "edit.mask": {
-    family: "edit",
-    executor: "mask",
-    inputs: ["image", "text", "data", "mask"],
-    outputs: ["mask", "image", "data"]
-  },
-  "edit.transform": {
-    family: "edit",
-    executor: "transform",
-    inputs: ["image", "data"],
-    outputs: ["image", "data"]
-  },
-  "review.compare": {
-    family: "review",
-    executor: "human-checkpoint",
-    inputs: ["text", "image", "video", "audio", "data"],
-    outputs: ["text", "image", "video", "audio", "data"]
-  },
-  "review.evaluate": {
-    family: "review",
-    executor: "codex-evaluation",
-    inputs: allPayloadChannels,
-    outputs: allPayloadChannels
-  },
-  "review.filter": {
-    family: "review",
-    executor: "deterministic-filter",
-    inputs: allPayloadChannels,
-    outputs: allPayloadChannels
-  },
-  "flow.variables": {
-    family: "flow",
-    executor: "deterministic",
-    inputs: ["text", "data"],
-    outputs: ["text", "data"]
-  },
-  "flow.batch": {
-    family: "flow",
-    executor: "batch",
-    inputs: allPayloadChannels,
-    outputs: allPayloadChannels
-  },
-  "flow.join": {
-    family: "flow",
-    executor: "join",
-    inputs: allPayloadChannels,
-    outputs: allPayloadChannels
-  },
-  "output.collection": {
-    family: "output",
-    executor: "collection",
-    inputs: allPayloadChannels,
-    outputs: allPayloadChannels
-  },
-  "output.export": {
-    family: "output",
-    executor: "export",
-    inputs: allPayloadChannels,
-    outputs: ["data"]
-  },
-  "canvas.note": {
-    family: "canvas",
-    executor: "non-runnable",
-    inputs: [],
-    outputs: ["text", "data"]
-  },
-  "canvas.drawing": {
-    family: "canvas",
-    executor: "drawing",
-    inputs: ["image", "data"],
-    outputs: ["image", "mask", "data"]
-  }
-} as const satisfies Record<NodeDefinitionId, CanonicalNodeDefinitionContract>;
-
 export const NodePortSchema = z
   .object({
     id: z.string().min(1),
@@ -618,36 +504,11 @@ export const NodeDefinitionSchema = z
   })
   .strict()
   .superRefine((definition, context) => {
-    const canonical = canonicalNodeDefinitionContracts[definition.id];
-    if (definition.configSchema !== NodeConfigSchemas[definition.id]) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["configSchema"],
-        message: `Config schema must be the canonical schema for ${definition.id}`
-      });
-    }
-    if (definition.family !== canonical.family) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["family"],
-        message: `Node family must be ${canonical.family} for ${definition.id}`
-      });
-    }
-    if (definition.executor !== canonical.executor) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["executor"],
-        message: `Node executor must be ${canonical.executor} for ${definition.id}`
-      });
-    }
-
     const validatePorts = (
-      direction: "inputs" | "outputs",
-      expectedChannels: readonly PayloadChannel[]
+      direction: "inputs" | "outputs"
     ): void => {
       const ports = definition.contract[direction];
       const portIds = ports.map((port) => port.id);
-      const channels = new Set(ports.map((port) => port.channel));
       if (new Set(portIds).size !== portIds.length) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -655,19 +516,9 @@ export const NodeDefinitionSchema = z
           message: `${direction} port IDs must be unique`
         });
       }
-      if (
-        channels.size !== expectedChannels.length ||
-        expectedChannels.some((channel) => !channels.has(channel))
-      ) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["contract", direction],
-          message: `${direction} channels must match the canonical ${definition.id} contract`
-        });
-      }
     };
-    validatePorts("inputs", canonical.inputs);
-    validatePorts("outputs", canonical.outputs);
+    validatePorts("inputs");
+    validatePorts("outputs");
 
     let defaultConfig: unknown;
     try {
@@ -680,12 +531,12 @@ export const NodeDefinitionSchema = z
       });
       return;
     }
-    const parsedDefaultConfig = NodeConfigSchema.safeParse(defaultConfig);
+    const parsedDefaultConfig = definition.configSchema.safeParse(defaultConfig);
     if (!parsedDefaultConfig.success) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["defaultConfig"],
-        message: "Default config factory must return a canonical node configuration object"
+        message: "Default config factory must return a value accepted by configSchema"
       });
       return;
     }
