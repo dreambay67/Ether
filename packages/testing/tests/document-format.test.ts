@@ -2,10 +2,12 @@ import {
   ETHER_DOCUMENT_FORMAT,
   ETHER_FTS_TABLES,
   ETHER_SCHEMA_TABLES,
+  EtherDocumentError,
+  assertEtherDocumentWritable,
   createEtherDocument,
-  inspectEtherDocument,
-  openEtherDocument
+  inspectEtherDocument
 } from "@ether/document";
+import * as documentPackage from "@ether/document";
 import {
   ETHER_FORMAT_MARKER,
   ETHER_FORMAT_VERSION,
@@ -13,11 +15,19 @@ import {
   ETHER_SQLITE_APPLICATION_ID
 } from "@ether/schema";
 import {
+  __setDocumentBoundaryTestHooks,
+  type DocumentBoundaryTestHooks
+} from "../../document/src/database.js";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
   copyFileSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync
@@ -38,6 +48,8 @@ interface NamedRow {
 
 interface ForeignKeyRow {
   from: string;
+  id: number;
+  seq: number;
   table: string;
   to: string;
 }
@@ -78,6 +90,44 @@ function mutateDatabase(filePath: string, sql: string): void {
   }
 }
 
+function openTestDatabase(filePath: string): DatabaseSync {
+  return new DatabaseSync(filePath, {
+    allowExtension: false,
+    enableDoubleQuotedStringLiterals: false,
+    enableForeignKeyConstraints: true
+  });
+}
+
+function expectEtherError(action: () => unknown, code: string): EtherDocumentError {
+  try {
+    action();
+  } catch (error) {
+    expect(error).toBeInstanceOf(EtherDocumentError);
+    expect((error as EtherDocumentError).code).toBe(code);
+    return error as EtherDocumentError;
+  }
+  throw new Error(`Expected EtherDocumentError with code ${code}.`);
+}
+
+function withBoundaryHooks<T>(hooks: DocumentBoundaryTestHooks, operation: () => T): T {
+  const restore = __setDocumentBoundaryTestHooks(hooks);
+  try {
+    return operation();
+  } finally {
+    restore();
+  }
+}
+
+function injectedFsError(code: string, message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = code;
+  return error;
+}
+
+function expectConstraintViolation(database: DatabaseSync, sql: string): void {
+  expect(() => database.exec(sql)).toThrow(/constraint|foreign key/i);
+}
+
 function ftsIds(
   database: DatabaseSync,
   table: string,
@@ -102,6 +152,20 @@ describe("Ether 4.0 document format", () => {
 
   afterEach(() => {
     rmSync(root, { force: true, recursive: true });
+  });
+
+  it("exports closed document probes without exposing SQLite handles or package deep imports", () => {
+    expect(Object.keys(documentPackage)).toContain("assertEtherDocumentWritable");
+    expect(Object.keys(documentPackage)).not.toContain("openEtherDocument");
+    expect(Object.keys(documentPackage)).not.toContain("DatabaseSync");
+
+    const deepImport = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", "import('@ether/document/database')"],
+      { cwd: path.join(import.meta.dirname, ".."), encoding: "utf8" }
+    );
+    expect(deepImport.status).not.toBe(0);
+    expect(deepImport.stderr).toMatch(/ERR_PACKAGE_PATH_NOT_EXPORTED|not defined by "exports"/);
   });
 
   it("creates one validated Campaign.ether file with the provisional 4.0 identity", () => {
@@ -132,8 +196,9 @@ describe("Ether 4.0 document format", () => {
       userVersion: ETHER_SCHEMA_VERSION
     });
     expect(inspection.quickCheck).toBe("ok");
+    expect(assertEtherDocumentWritable(documentPath)).toEqual(inspection);
 
-    const database = openEtherDocument(documentPath);
+    const database = openTestDatabase(documentPath);
     try {
       expect(scalar(database, "PRAGMA application_id")).toBe(ETHER_SQLITE_APPLICATION_ID);
       expect(scalar(database, "PRAGMA page_size")).toBe(16_384);
@@ -169,40 +234,121 @@ describe("Ether 4.0 document format", () => {
   });
 
   it("publishes safely without replacing existing files or directories", () => {
+    expectEtherError(
+      () =>
+        createEtherDocument(path.join(root, "NotEther.sqlite"), {
+          appVersion: "4.0.0",
+          documentId: "document-invalid-destination",
+          title: "Invalid destination"
+        }),
+      "INVALID_DESTINATION"
+    );
+
     writeFileSync(documentPath, "keep this destination");
     const before = snapshotFile(documentPath);
 
-    expect(() =>
+    expectEtherError(() =>
       createEtherDocument(documentPath, {
         appVersion: "4.0.0",
         documentId: "document-collision",
         title: "Collision"
-      })
-    ).toThrow(/already exists/i);
+      }), "DESTINATION_EXISTS");
     expectFileUnchanged(documentPath, before);
 
     const directoryPath = path.join(root, "Directory.ether");
     mkdirSync(directoryPath);
-    expect(() =>
+    expectEtherError(() =>
       createEtherDocument(directoryPath, {
         appVersion: "4.0.0",
         documentId: "document-directory",
         title: "Directory"
-      })
-    ).toThrow(/already exists|regular file|directory/i);
+      }), "DESTINATION_EXISTS");
     expect(statSync(directoryPath).isDirectory()).toBe(true);
 
     const failedPublicationPath = path.join(root, "UnsupportedFeature.ether");
-    expect(() =>
+    expectEtherError(() =>
       createEtherDocument(failedPublicationPath, {
         appVersion: "4.0.0",
         documentId: "document-unsupported-feature",
         featureFlags: { "required.future-renderer": true },
         title: "Unsupported feature"
-      })
-    ).toThrow(/required feature/i);
+      }), "UNSUPPORTED_REQUIRED_FEATURE");
     expect(statSync(failedPublicationPath, { throwIfNoEntry: false })).toBeUndefined();
     expect(readdirSync(root).filter((entry) => entry.includes(".ether-tmp-"))).toEqual([]);
+  });
+
+  it("preserves racing collisions during atomic hard-link publication", () => {
+    withBoundaryHooks(
+      {
+        beforeHardLinkPublication: (_temporaryPath, destinationPath) => {
+          writeFileSync(destinationPath, "racing owner");
+        }
+      },
+      () => {
+        expectEtherError(
+          () =>
+            createEtherDocument(documentPath, {
+              appVersion: "4.0.0",
+              documentId: "document-race",
+              title: "Race"
+            }),
+          "DESTINATION_EXISTS"
+        );
+      }
+    );
+    expect(readFileSync(documentPath, "utf8")).toBe("racing owner");
+    expect(readdirSync(root).filter((entry) => entry.includes(".ether-tmp-"))).toEqual([]);
+  });
+
+  it("reports unsupported atomic publication without weakening no-clobber guarantees", () => {
+    for (const code of ["EPERM", "ENOTSUP", "EXDEV"]) {
+      withBoundaryHooks(
+        {
+          beforeHardLinkPublication: () => {
+            throw injectedFsError(code, "hard links unsupported");
+          }
+        },
+        () => {
+          expectEtherError(
+            () =>
+              createEtherDocument(documentPath, {
+                appVersion: "4.0.0",
+                documentId: `document-${code.toLowerCase()}`,
+                title: code
+              }),
+            "ATOMIC_NO_CLOBBER_UNSUPPORTED"
+          );
+        }
+      );
+      expect(readdirSync(root)).toEqual([]);
+    }
+  });
+
+  it("maps publication and permission failures without deleting paths it does not own", () => {
+    for (const [code, expectedCode] of [
+      ["EIO", "PUBLICATION_FAILED"],
+      ["EACCES", "PERMISSION_DENIED"]
+    ] as const) {
+      withBoundaryHooks(
+        {
+          beforeHardLinkPublication: () => {
+            throw injectedFsError(code, expectedCode);
+          }
+        },
+        () => {
+          expectEtherError(
+            () =>
+              createEtherDocument(documentPath, {
+                appVersion: "4.0.0",
+                documentId: `document-${code.toLowerCase()}`,
+                title: expectedCode
+              }),
+            expectedCode
+          );
+        }
+      );
+      expect(readdirSync(root)).toEqual([]);
+    }
   });
 
   it("declares and indexes every normalized foreign-key boundary", () => {
@@ -211,7 +357,7 @@ describe("Ether 4.0 document format", () => {
       documentId: "document-foreign-keys",
       title: "Foreign keys"
     });
-    const database = openEtherDocument(documentPath);
+    const database = openTestDatabase(documentPath);
 
     try {
       const foreignKeys = new Map<string, ForeignKeyRow[]>();
@@ -222,30 +368,66 @@ describe("Ether 4.0 document format", () => {
 
         const indexes = database.prepare(`PRAGMA index_list("${table}")`).all() as unknown as
           IndexListRow[];
-        const indexedFirstColumns = indexes.flatMap((index) =>
+        const indexColumns = indexes.map((index) =>
           (database.prepare(`PRAGMA index_info("${index.name}")`).all() as unknown as IndexColumnRow[])
             .sort((left, right) => left.seqno - right.seqno)
-            .slice(0, 1)
             .map((column) => column.name)
         );
-        for (const foreignKey of rows) {
-          expect(indexedFirstColumns, `${table}.${foreignKey.from} needs an FK index`).toContain(
-            foreignKey.from
-          );
+        for (const foreignKeyId of new Set(rows.map((row) => row.id))) {
+          const foreignKeyColumns = rows
+            .filter((row) => row.id === foreignKeyId)
+            .sort((left, right) => left.seq - right.seq)
+            .map((row) => row.from);
+          expect(
+            indexColumns.some((columns) =>
+              foreignKeyColumns.every((column, index) => columns[index] === column)
+            ),
+            `${table}.${foreignKeyColumns.join(",")} needs a matching FK index`
+          ).toBe(true);
         }
       }
 
-      expect(foreignKeys.get("node_output_payloads")).toEqual(
+      expect(foreignKeys.get("edges")).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ from: "artifact_id", table: "artifacts", to: "artifact_id" })
+          expect.objectContaining({ from: "source_node_id", table: "nodes", to: "node_id" }),
+          expect.objectContaining({ from: "target_node_id", table: "nodes", to: "node_id" })
+        ])
+      );
+      expect(foreignKeys.get("document_revision_members")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            from: "graph_revision_id",
+            table: "graph_revisions",
+            to: "revision_id"
+          })
+        ])
+      );
+      expect(foreignKeys.get("work_items")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ from: "batch_id", table: "batches", to: "batch_id" }),
+          expect.objectContaining({ from: "step_id", table: "batches", to: "step_id" })
+        ])
+      );
+      expect(foreignKeys.get("provider_runs")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ from: "work_item_id", table: "work_items" }),
+          expect.objectContaining({ from: "attempt_id", table: "attempts" })
         ])
       );
       expect(foreignKeys.get("node_output_versions")).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ from: "run_id", table: "provider_runs", to: "provider_run_id" }),
-          expect.objectContaining({ from: "step_id", table: "plan_steps", to: "step_id" }),
-          expect.objectContaining({ from: "work_item_id", table: "work_items", to: "work_item_id" }),
-          expect.objectContaining({ from: "attempt_id", table: "attempts", to: "attempt_id" })
+          expect.objectContaining({ from: "node_id", table: "nodes", to: "node_id" }),
+          expect.objectContaining({
+            from: "graph_revision_id",
+            table: "graph_revisions",
+            to: "revision_id"
+          })
+        ])
+      );
+
+      expect(foreignKeys.get("node_output_payloads")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ from: "artifact_id", table: "artifacts", to: "artifact_id" })
         ])
       );
       expect(foreignKeys.get("attempts")).toEqual(
@@ -262,13 +444,138 @@ describe("Ether 4.0 document format", () => {
     }
   });
 
+  it("enforces graph, revision, job, output, and provenance ownership in SQLite", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-semantic-ownership",
+      title: "Semantic ownership"
+    });
+    const database = openTestDatabase(documentPath);
+
+    try {
+      database.exec(`
+        INSERT INTO graphs (graph_id, title, kind, created_at, updated_at) VALUES
+          ('graph-1', 'Graph 1', 'root', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('graph-2', 'Graph 2', 'module', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        INSERT INTO nodes (
+          node_id, graph_id, definition_id, title, position_x, position_y, width, height,
+          config_json, presentation_json, created_at, updated_at
+        ) VALUES
+          ('node-1', 'graph-1', 'prompt.text', 'Node 1', 0, 0, 220, 140, '{}', '{}',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('node-2', 'graph-2', 'prompt.text', 'Node 2', 0, 0, 220, 140, '{}', '{}',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        INSERT INTO graph_revisions (
+          revision_id, graph_id, parent_revision_id, actor, title, created_at, operation_count, metadata_json
+        ) VALUES
+          ('revision-1', 'graph-1', NULL, 'user', 'Revision 1', '2026-07-17T10:00:00.000Z', 0, '{}'),
+          ('revision-2', 'graph-2', NULL, 'user', 'Revision 2', '2026-07-17T10:00:00.000Z', 0, '{}');
+        INSERT INTO document_revisions (
+          document_revision_id, parent_document_revision_id, actor, title, created_at, metadata_json
+        ) VALUES ('document-revision-1', NULL, 'user', 'Document revision', '2026-07-17T10:00:00.000Z', '{}');
+      `);
+
+      expectConstraintViolation(
+        database,
+        `INSERT INTO edges (
+           edge_id, graph_id, source_node_id, source_channel, target_node_id, target_channel,
+           role, lane_order, selector_json, adapter_json, enabled
+         ) VALUES ('edge-cross-graph', 'graph-1', 'node-1', 'text', 'node-2', 'text',
+                   'general', 0, '{}', '{}', 1)`
+      );
+      expectConstraintViolation(
+        database,
+        `INSERT INTO document_revision_members (
+           document_revision_id, graph_id, graph_revision_id
+         ) VALUES ('document-revision-1', 'graph-1', 'revision-2')`
+      );
+      expectConstraintViolation(
+        database,
+        `INSERT INTO node_output_versions (
+           output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+           producer_json, input_payload_ids_json, selected_output_version_ids_json,
+           compiled_context_hash, timing_json, created_at
+         ) VALUES ('output-cross-graph', 'node-2', 'graph-1', 'revision-1', NULL,
+                   '{"kind":"manual","actor":"user"}', '[]', '[]', 'sha256:context', '{}',
+                   '2026-07-17T10:00:00.000Z')`
+      );
+
+      database.exec(`
+        INSERT INTO execution_plans (
+          plan_id, document_revision_id, status, policy_json, inputs_json, metadata_json, created_at, updated_at
+        ) VALUES
+          ('plan-1', NULL, 'draft', '{}', '{}', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('plan-2', NULL, 'draft', '{}', '{}', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        INSERT INTO plan_steps (
+          step_id, plan_id, node_id, step_order, dependencies_json, config_json, status
+        ) VALUES
+          ('step-1', 'plan-1', 'node-1', 0, '[]', '{}', 'ready'),
+          ('step-2', 'plan-2', 'node-1', 0, '[]', '{}', 'ready');
+        INSERT INTO batches (batch_id, plan_id, step_id, dimensions_json, status, created_at, updated_at) VALUES
+          ('batch-1', 'plan-1', 'step-1', '{}', 'ready', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('batch-2', 'plan-2', 'step-2', '{}', 'ready', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+      `);
+
+      expectConstraintViolation(
+        database,
+        `INSERT INTO work_items (
+           work_item_id, batch_id, step_id, item_index, input_json, status, created_at, updated_at
+         ) VALUES ('work-cross-plan', 'batch-1', 'step-2', 0, '{}', 'ready',
+                   '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z')`
+      );
+
+      database.exec(`
+        INSERT INTO work_items (
+          work_item_id, batch_id, step_id, item_index, input_json, status, created_at, updated_at
+        ) VALUES ('work-1', 'batch-1', 'step-1', 0, '{}', 'ready',
+                  '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        INSERT INTO attempts (
+          attempt_id, work_item_id, attempt_number, provider_run_id, status, error_json, started_at, completed_at
+        ) VALUES ('attempt-1', 'work-1', 1, NULL, 'running', NULL,
+                  '2026-07-17T10:00:00.000Z', NULL);
+      `);
+
+      expectConstraintViolation(
+        database,
+        `INSERT INTO provider_runs (
+           provider_run_id, plan_id, step_id, work_item_id, attempt_id, provider_id, model_id,
+           status, request_json, response_json, metadata_json, started_at, completed_at
+         ) VALUES ('run-cross-job', 'plan-1', 'step-2', 'work-1', 'attempt-1', 'codex', 'model',
+                   'running', '{}', NULL, '{}', '2026-07-17T10:00:00.000Z', NULL)`
+      );
+
+      database.exec(`
+        INSERT INTO provider_runs (
+          provider_run_id, plan_id, step_id, work_item_id, attempt_id, provider_id, model_id,
+          status, request_json, response_json, metadata_json, started_at, completed_at
+        ) VALUES ('run-1', 'plan-1', 'step-1', 'work-1', 'attempt-1', 'codex', 'model',
+                  'running', '{}', NULL, '{}', '2026-07-17T10:00:00.000Z', NULL);
+      `);
+      expectConstraintViolation(
+        database,
+        `INSERT INTO node_output_versions (
+           output_version_id, node_id, graph_id, graph_revision_id, parent_output_version_id,
+           producer_json, input_payload_ids_json, selected_output_version_ids_json,
+           compiled_context_hash, run_id, step_id, work_item_id, attempt_id, timing_json, created_at
+         ) VALUES ('output-cross-run', 'node-1', 'graph-1', 'revision-1', NULL,
+                   '{"kind":"provider"}', '[]', '[]', 'sha256:context',
+                   'run-1', 'step-2', 'work-1', 'attempt-1', '{}',
+                   '2026-07-17T10:00:00.000Z')`
+      );
+
+      expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      database.close();
+    }
+  });
+
   it("keeps prompt, output, artifact, tag, run, and metadata FTS indexes synchronized", () => {
     createEtherDocument(documentPath, {
       appVersion: "4.0.0",
       documentId: "document-search",
       title: "Cobalt campaign metadata"
     });
-    const database = openEtherDocument(documentPath);
+    const database = openTestDatabase(documentPath);
 
     try {
       database.exec(`
@@ -373,13 +680,14 @@ describe("Ether 4.0 document format", () => {
     wrongApplication.exec("PRAGMA application_id = 1234; CREATE TABLE document (value TEXT)");
     wrongApplication.close();
 
-    for (const [filePath, expectedError] of [
-      [invalidPath, /SQLite header/i],
-      [nonEtherPath, /application id/i],
-      [wrongApplicationPath, /application id/i]
+    for (const [filePath, expectedCode] of [
+      [invalidPath, "INVALID_SQLITE_HEADER"],
+      [nonEtherPath, "WRONG_APPLICATION_ID"],
+      [wrongApplicationPath, "WRONG_APPLICATION_ID"]
     ] as const) {
       const before = snapshotFile(filePath);
-      expect(() => openEtherDocument(filePath)).toThrow(expectedError);
+      expectEtherError(() => inspectEtherDocument(filePath), expectedCode);
+      expectEtherError(() => assertEtherDocumentWritable(filePath), expectedCode);
       expectFileUnchanged(filePath, before);
     }
   });
@@ -401,10 +709,163 @@ describe("Ether 4.0 document format", () => {
     const fileBefore = snapshotFile(documentPath);
     expect(directoryBefore).toEqual(["Campaign.ether"]);
 
-    for (const operation of [inspectEtherDocument, openEtherDocument]) {
-      expect(() => operation(documentPath)).toThrow(/WAL|journal mode/i);
+    for (const operation of [inspectEtherDocument, assertEtherDocumentWritable]) {
+      expectEtherError(() => operation(documentPath), "UNSUPPORTED_JOURNAL_MODE");
       expect(readdirSync(root).sort()).toEqual(directoryBefore);
       expectFileUnchanged(documentPath, fileBefore);
+    }
+  });
+
+  it("uses no-create private-cache file URLs for missing and Unicode writable paths", () => {
+    const unicodePath = path.join(root, "Kampaň žltý mesiac.ether");
+    createEtherDocument(unicodePath, {
+      appVersion: "4.0.0",
+      documentId: "document-unicode",
+      title: "Unicode"
+    });
+    let openedLocation = "";
+    withBoundaryHooks(
+      {
+        afterWritableOpen: (location) => {
+          openedLocation = location;
+        }
+      },
+      () => expect(assertEtherDocumentWritable(unicodePath).document.documentId).toBe("document-unicode")
+    );
+    expect(path.resolve(openedLocation)).toBe(path.resolve(unicodePath));
+
+    const removedPath = path.join(root, "Removed before open.ether");
+    createEtherDocument(removedPath, {
+      appVersion: "4.0.0",
+      documentId: "document-removed",
+      title: "Removed"
+    });
+    withBoundaryHooks(
+      {
+        beforeWritableDatabaseOpen: () => rmSync(removedPath)
+      },
+      () => expectEtherError(() => assertEtherDocumentWritable(removedPath), "PATH_CHANGED")
+    );
+    expect(statSync(removedPath, { throwIfNoEntry: false })).toBeUndefined();
+    expect(readdirSync(root).sort()).toEqual(["Kampaň žltý mesiac.ether"]);
+  });
+
+  it("detects deterministic path swaps before writable validation", () => {
+    const replacementPath = path.join(root, "Replacement.ether");
+    const displacedPath = path.join(root, "Displaced.ether");
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-original",
+      title: "Original"
+    });
+    createEtherDocument(replacementPath, {
+      appVersion: "4.0.0",
+      documentId: "document-replacement",
+      title: "Replacement"
+    });
+
+    withBoundaryHooks(
+      {
+        beforeWritableDatabaseOpen: () => {
+          renameSync(documentPath, displacedPath);
+          renameSync(replacementPath, documentPath);
+        }
+      },
+      () => expectEtherError(() => assertEtherDocumentWritable(documentPath), "PATH_CHANGED")
+    );
+    expect(inspectEtherDocument(displacedPath).document.documentId).toBe("document-original");
+    expect(inspectEtherDocument(documentPath).document.documentId).toBe("document-replacement");
+  });
+
+  it("rejects pre-existing hard-link aliases without mutating either path", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-aliased",
+      title: "Aliased"
+    });
+    const aliasPath = path.join(root, "Alias.ether");
+    linkSync(documentPath, aliasPath);
+    const directoryBefore = readdirSync(root).sort();
+    const fileBefore = snapshotFile(documentPath);
+
+    expectEtherError(() => inspectEtherDocument(documentPath), "HARD_LINK_ALIAS");
+    expectEtherError(() => assertEtherDocumentWritable(documentPath), "HARD_LINK_ALIAS");
+    expect(readdirSync(root).sort()).toEqual(directoryBefore);
+    expectFileUnchanged(documentPath, fileBefore);
+    expectFileUnchanged(aliasPath, fileBefore);
+  });
+
+  it("proves writable capability and maps read-only and busy failures", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-writable-probe",
+      title: "Writable probe"
+    });
+    const before = snapshotFile(documentPath);
+    const directoryBefore = readdirSync(root).sort();
+    expect(assertEtherDocumentWritable(documentPath).document.documentId).toBe(
+      "document-writable-probe"
+    );
+    expectFileUnchanged(documentPath, before);
+    expect(readdirSync(root).sort()).toEqual(directoryBefore);
+
+    withBoundaryHooks(
+      {
+        beforeWritableDatabaseOpen: () => {
+          throw injectedFsError("EACCES", "writable access denied");
+        }
+      },
+      () => expectEtherError(() => assertEtherDocumentWritable(documentPath), "PERMISSION_DENIED")
+    );
+
+    withBoundaryHooks(
+      { forceReadOnlyWritableConnection: true },
+      () => expectEtherError(() => assertEtherDocumentWritable(documentPath), "READ_ONLY")
+    );
+
+    const lockingDatabase = openTestDatabase(documentPath);
+    lockingDatabase.exec("BEGIN EXCLUSIVE");
+    try {
+      expectEtherError(() => assertEtherDocumentWritable(documentPath), "BUSY_OR_LOCKED");
+    } finally {
+      lockingDatabase.exec("ROLLBACK");
+      lockingDatabase.close();
+    }
+
+    if (process.platform !== "win32") {
+      chmodSync(documentPath, 0o444);
+      try {
+        expectEtherError(() => assertEtherDocumentWritable(documentPath), "READ_ONLY");
+      } finally {
+        chmodSync(documentPath, 0o600);
+      }
+    }
+  });
+
+  it("rejects missing or changed schema 40000 objects without mutating the candidate", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-schema-manifest",
+      title: "Schema manifest"
+    });
+    const fixtures = [
+      ["MissingTable.ether", "DROP TABLE groups"],
+      ["MissingIndex.ether", "DROP INDEX nodes_graph_id_idx"],
+      ["MissingTrigger.ether", "DROP TRIGGER artifacts_fts_update"],
+      ["MissingFts.ether", "DROP TABLE tag_fts"]
+    ] as const;
+
+    for (const [fileName, mutation] of fixtures) {
+      const filePath = path.join(root, fileName);
+      copyFileSync(documentPath, filePath);
+      mutateDatabase(filePath, mutation);
+      const directoryBefore = readdirSync(root).sort();
+      const fileBefore = snapshotFile(filePath);
+
+      expectEtherError(() => inspectEtherDocument(filePath), "SCHEMA_MISMATCH");
+      expectEtherError(() => assertEtherDocumentWritable(filePath), "SCHEMA_MISMATCH");
+      expect(readdirSync(root).sort()).toEqual(directoryBefore);
+      expectFileUnchanged(filePath, fileBefore);
     }
   });
 
@@ -419,29 +880,29 @@ describe("Ether 4.0 document format", () => {
       {
         fileName: "MissingMetadata.ether",
         mutation: "DELETE FROM document",
-        error: /exactly one document row/i
+        code: "INVALID_DOCUMENT_METADATA"
       },
       {
         fileName: "MalformedMetadata.ether",
         mutation:
           "PRAGMA ignore_check_constraints = ON; UPDATE document SET feature_flags_json = '[]'",
-        error: /feature flags/i
+        code: "INVALID_DOCUMENT_METADATA"
       },
       {
         fileName: "FutureMajor.ether",
         mutation: "UPDATE document SET format_version = '5.0.0'",
-        error: /future major|unsupported format/i
+        code: "UNSUPPORTED_FORMAT"
       },
       {
         fileName: "UnsupportedSchema.ether",
         mutation: "UPDATE document SET schema_version = 40001",
-        error: /schema version/i
+        code: "UNSUPPORTED_SCHEMA"
       },
       {
         fileName: "RequiredFeature.ether",
         mutation:
           "UPDATE document SET feature_flags_json = '{\"required.future-renderer\":true}'",
-        error: /required feature/i
+        code: "UNSUPPORTED_REQUIRED_FEATURE"
       }
     ] as const;
 
@@ -451,8 +912,8 @@ describe("Ether 4.0 document format", () => {
       mutateDatabase(filePath, fixture.mutation);
       const before = snapshotFile(filePath);
 
-      expect(() => inspectEtherDocument(filePath)).toThrow(fixture.error);
-      expect(() => openEtherDocument(filePath)).toThrow(fixture.error);
+      expectEtherError(() => inspectEtherDocument(filePath), fixture.code);
+      expectEtherError(() => assertEtherDocumentWritable(filePath), fixture.code);
       expectFileUnchanged(filePath, before);
     }
   });
@@ -475,7 +936,7 @@ describe("Ether 4.0 document format", () => {
     );
     const before = snapshotFile(documentPath);
 
-    expect(() => openEtherDocument(documentPath)).toThrow(/foreign key/i);
+    expectEtherError(() => assertEtherDocumentWritable(documentPath), "FOREIGN_KEY_CHECK_FAILED");
     expectFileUnchanged(documentPath, before);
   });
 

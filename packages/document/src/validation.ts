@@ -5,7 +5,15 @@ import {
   ETHER_SCHEMA_VERSION,
   ETHER_SQLITE_APPLICATION_ID
 } from "@ether/schema";
-import { closeSync, lstatSync, openSync, readSync } from "node:fs";
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  type BigIntStats
+} from "node:fs";
+import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { DocumentHeader } from "@ether/schema";
 
@@ -23,8 +31,19 @@ const SQLITE_ROLLBACK_JOURNAL_VERSION = 1;
 const SQLITE_WAL_VERSION = 2;
 const SUPPORTED_FORMAT_MAJOR = 4;
 
+export const ETHER_SCHEMA_SQL = readFileSync(new URL("./schema/40000.sql", import.meta.url), "utf8");
+
 export type EtherDocumentErrorCode =
   | "NOT_A_REGULAR_FILE"
+  | "INVALID_DESTINATION"
+  | "DESTINATION_EXISTS"
+  | "PERMISSION_DENIED"
+  | "READ_ONLY"
+  | "BUSY_OR_LOCKED"
+  | "PUBLICATION_FAILED"
+  | "ATOMIC_NO_CLOBBER_UNSUPPORTED"
+  | "PATH_CHANGED"
+  | "HARD_LINK_ALIAS"
   | "INVALID_SQLITE_HEADER"
   | "UNSUPPORTED_JOURNAL_MODE"
   | "INVALID_SQLITE"
@@ -33,6 +52,7 @@ export type EtherDocumentErrorCode =
   | "UNSUPPORTED_FORMAT"
   | "UNSUPPORTED_SCHEMA"
   | "UNSUPPORTED_REQUIRED_FEATURE"
+  | "SCHEMA_MISMATCH"
   | "INVALID_PRAGMA"
   | "INTEGRITY_CHECK_FAILED"
   | "FOREIGN_KEY_CHECK_FAILED";
@@ -64,6 +84,13 @@ export interface EtherDocumentInspection {
   quickCheck: "ok";
 }
 
+export interface EtherFileIdentity {
+  birthtimeNs: bigint;
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+}
+
 interface DocumentRow {
   app_version: string;
   created_at: string;
@@ -74,6 +101,53 @@ interface DocumentRow {
   schema_version: number;
   title: string;
   updated_at: string;
+}
+
+interface SchemaObject {
+  name: string;
+  sql: string | null;
+  type: string;
+}
+
+let expectedSchemaObjects: SchemaObject[] | undefined;
+
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function mapEtherDocumentError(
+  error: unknown,
+  fallback: EtherDocumentErrorCode,
+  message: string
+): EtherDocumentError {
+  if (error instanceof EtherDocumentError) {
+    return error;
+  }
+
+  const code = errorCode(error);
+  const detail = errorMessage(error).toLowerCase();
+  if (code === "EACCES" || code === "EPERM" || detail.includes("permission denied")) {
+    return new EtherDocumentError("PERMISSION_DENIED", message, { cause: error });
+  }
+  if (code === "EROFS" || detail.includes("readonly") || detail.includes("read-only")) {
+    return new EtherDocumentError("READ_ONLY", message, { cause: error });
+  }
+  if (
+    code === "SQLITE_BUSY" ||
+    code === "SQLITE_LOCKED" ||
+    detail.includes("database is locked") ||
+    detail.includes("database table is locked") ||
+    detail.includes("database is busy")
+  ) {
+    return new EtherDocumentError("BUSY_OR_LOCKED", message, { cause: error });
+  }
+  return new EtherDocumentError(fallback, message, { cause: error });
 }
 
 function firstValue(database: DatabaseSync, sql: string): unknown {
@@ -127,26 +201,89 @@ function assertPragmas(pragmas: EtherDocumentPragmas): void {
   }
 }
 
-function assertRegularSqliteFile(filePath: string): void {
-  let stats;
-  try {
-    stats = lstatSync(filePath);
-  } catch (error) {
-    throw new EtherDocumentError(
-      "NOT_A_REGULAR_FILE",
-      `Ether document does not exist or is not accessible: ${filePath}`,
-      { cause: error }
-    );
-  }
+function identityFromStats(stats: BigIntStats): EtherFileIdentity {
+  return {
+    birthtimeNs: stats.birthtimeNs,
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size
+  };
+}
+
+function assertRegularStats(filePath: string, stats: BigIntStats): void {
   if (!stats.isFile()) {
     throw new EtherDocumentError(
       "NOT_A_REGULAR_FILE",
       `Ether document must be a regular file: ${filePath}`
     );
   }
+  if (stats.nlink > 1n) {
+    throw new EtherDocumentError(
+      "HARD_LINK_ALIAS",
+      `Ether document has ${String(stats.nlink)} hard-link aliases and cannot be opened safely.`
+    );
+  }
+}
 
+function readStats(filePath: string, changed: boolean): BigIntStats {
+  try {
+    return lstatSync(filePath, { bigint: true });
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "EACCES" || code === "EPERM") {
+      throw new EtherDocumentError(
+        "PERMISSION_DENIED",
+        `Ether document is not accessible: ${filePath}`,
+        { cause: error }
+      );
+    }
+    throw new EtherDocumentError(
+      changed ? "PATH_CHANGED" : "NOT_A_REGULAR_FILE",
+      changed
+        ? `Ether document path changed while it was being opened: ${filePath}`
+        : `Ether document does not exist or is not accessible: ${filePath}`,
+      { cause: error }
+    );
+  }
+}
+
+export function readEtherFileIdentity(filePath: string, changed = false): EtherFileIdentity {
+  const stats = readStats(filePath, changed);
+  assertRegularStats(filePath, stats);
+  return identityFromStats(stats);
+}
+
+export function assertEtherFileIdentity(
+  filePath: string,
+  expected: EtherFileIdentity
+): EtherFileIdentity {
+  const actual = readEtherFileIdentity(filePath, true);
+  if (
+    actual.dev !== expected.dev ||
+    actual.ino !== expected.ino ||
+    actual.birthtimeNs !== expected.birthtimeNs ||
+    actual.size !== expected.size
+  ) {
+    throw new EtherDocumentError(
+      "PATH_CHANGED",
+      `Ether document path changed while it was being opened: ${filePath}`
+    );
+  }
+  return actual;
+}
+
+function readSqliteHeader(filePath: string): Buffer {
   const header = Buffer.alloc(SQLITE_HEADER_SIZE);
-  const file = openSync(filePath, "r");
+  let file: number;
+  try {
+    file = openSync(filePath, "r");
+  } catch (error) {
+    throw mapEtherDocumentError(
+      error,
+      "NOT_A_REGULAR_FILE",
+      `Ether document header cannot be read: ${filePath}`
+    );
+  }
   const bytesRead = (() => {
     try {
       return readSync(file, header, 0, header.length, 0);
@@ -163,6 +300,13 @@ function assertRegularSqliteFile(filePath: string): void {
       `Ether document has an invalid SQLite header: ${filePath}`
     );
   }
+  return header;
+}
+
+export function inspectEtherFileHeader(filePath: string): EtherFileIdentity {
+  const identity = readEtherFileIdentity(filePath);
+  const header = readSqliteHeader(filePath);
+  assertEtherFileIdentity(filePath, identity);
 
   const writeVersion = header[SQLITE_WRITE_VERSION_OFFSET];
   const readVersion = header[SQLITE_READ_VERSION_OFFSET];
@@ -181,6 +325,7 @@ function assertRegularSqliteFile(filePath: string): void {
       `Ether document has unsupported SQLite read/write versions ${readVersion}/${writeVersion}.`
     );
   }
+  return identity;
 }
 
 function parseFeatureFlags(serialized: string): Record<string, boolean> {
@@ -279,85 +424,146 @@ function parseDocumentRow(row: DocumentRow): DocumentHeader {
   return parsed.data;
 }
 
-export function inspectEtherDocument(filePath: string): EtherDocumentInspection {
-  assertRegularSqliteFile(filePath);
+function normalizeSchemaSql(sql: string | null): string | null {
+  return sql === null ? null : sql.replace(/\s+/g, " ").trim();
+}
 
-  let database: DatabaseSync;
+function readSchemaObjects(database: DatabaseSync): SchemaObject[] {
+  const rows = database
+    .prepare(
+      `SELECT type, name, sql
+       FROM sqlite_schema
+       WHERE name NOT LIKE 'sqlite_%'
+       ORDER BY type, name`
+    )
+    .all() as unknown as SchemaObject[];
+  return rows.map((row) => ({ ...row, sql: normalizeSchemaSql(row.sql) }));
+}
+
+function getExpectedSchemaObjects(): SchemaObject[] {
+  if (expectedSchemaObjects !== undefined) {
+    return expectedSchemaObjects;
+  }
+  const database = new DatabaseSync(":memory:", {
+    allowExtension: false,
+    enableDoubleQuotedStringLiterals: false,
+    enableForeignKeyConstraints: true
+  });
   try {
-    database = new DatabaseSync(filePath, {
+    database.exec(ETHER_SCHEMA_SQL);
+    expectedSchemaObjects = readSchemaObjects(database);
+    return expectedSchemaObjects;
+  } finally {
+    database.close();
+  }
+}
+
+function assertSchema(database: DatabaseSync): void {
+  const expected = getExpectedSchemaObjects();
+  const actual = readSchemaObjects(database);
+  if (JSON.stringify(actual) === JSON.stringify(expected)) {
+    return;
+  }
+
+  const actualByKey = new Map(actual.map((object) => [`${object.type}:${object.name}`, object]));
+  const expectedByKey = new Map(expected.map((object) => [`${object.type}:${object.name}`, object]));
+  const missing = [...expectedByKey.keys()].filter((key) => !actualByKey.has(key));
+  const unexpected = [...actualByKey.keys()].filter((key) => !expectedByKey.has(key));
+  const changed = [...expectedByKey.entries()]
+    .filter(([key, object]) => {
+      const actualObject = actualByKey.get(key);
+      return actualObject !== undefined && actualObject.sql !== object.sql;
+    })
+    .map(([key]) => key);
+  const details = [
+    missing.length > 0 ? `missing ${missing.join(", ")}` : undefined,
+    unexpected.length > 0 ? `unexpected ${unexpected.join(", ")}` : undefined,
+    changed.length > 0 ? `changed ${changed.join(", ")}` : undefined
+  ].filter((value): value is string => value !== undefined);
+  throw new EtherDocumentError(
+    "SCHEMA_MISMATCH",
+    `Ether document schema does not match schema ${ETHER_SCHEMA_VERSION}: ${details.join("; ")}.`
+  );
+}
+
+export function validateEtherDocumentConnection(
+  database: DatabaseSync,
+  filePath: string
+): EtherDocumentInspection {
+  const applicationId = numberPragma(database, "application_id");
+  if (applicationId !== ETHER_SQLITE_APPLICATION_ID) {
+    throw new EtherDocumentError(
+      "WRONG_APPLICATION_ID",
+      `SQLite application ID ${applicationId} is not an Ether application ID.`
+    );
+  }
+
+  const tableCount = database
+    .prepare("SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'document'")
+    .get() as { count: number };
+  if (tableCount.count !== 1) {
+    throw new EtherDocumentError(
+      "INVALID_DOCUMENT_METADATA",
+      "Ether document metadata table is missing."
+    );
+  }
+  const rows = database
+    .prepare(
+      `SELECT document_id, format_marker, format_version, schema_version, title,
+              created_at, updated_at, app_version, feature_flags_json
+       FROM document`
+    )
+    .all() as unknown as DocumentRow[];
+  if (rows.length !== 1) {
+    throw new EtherDocumentError(
+      "INVALID_DOCUMENT_METADATA",
+      `Ether document must contain exactly one document row; found ${rows.length}.`
+    );
+  }
+  const document = parseDocumentRow(rows[0]);
+
+  const pragmas = readPragmas(database);
+  assertPragmas(pragmas);
+  assertSchema(database);
+
+  const quickCheckRows = database.prepare("PRAGMA quick_check").all() as Record<string, unknown>[];
+  const quickCheckValues = quickCheckRows.flatMap((row) => Object.values(row));
+  if (quickCheckValues.length !== 1 || quickCheckValues[0] !== "ok") {
+    throw new EtherDocumentError(
+      "INTEGRITY_CHECK_FAILED",
+      `Ether document quick_check failed: ${quickCheckValues.join(", ")}`
+    );
+  }
+
+  const foreignKeyFailures = database.prepare("PRAGMA foreign_key_check").all();
+  if (foreignKeyFailures.length > 0) {
+    throw new EtherDocumentError(
+      "FOREIGN_KEY_CHECK_FAILED",
+      `Ether document foreign key check found ${foreignKeyFailures.length} violation(s).`
+    );
+  }
+
+  return { document, path: filePath, pragmas, quickCheck: "ok" };
+}
+
+export function inspectEtherDocument(filePath: string): EtherDocumentInspection {
+  const absolutePath = path.resolve(filePath);
+  let database: DatabaseSync | undefined;
+  try {
+    const identity = inspectEtherFileHeader(absolutePath);
+    database = new DatabaseSync(absolutePath, {
       allowExtension: false,
       enableDoubleQuotedStringLiterals: false,
       enableForeignKeyConstraints: true,
       readOnly: true
     });
+    assertEtherFileIdentity(absolutePath, identity);
+    const inspection = validateEtherDocumentConnection(database, absolutePath);
+    assertEtherFileIdentity(absolutePath, identity);
+    return inspection;
   } catch (error) {
-    throw new EtherDocumentError("INVALID_SQLITE", "Ether document is not a valid SQLite file.", {
-      cause: error
-    });
-  }
-
-  try {
-    const applicationId = numberPragma(database, "application_id");
-    if (applicationId !== ETHER_SQLITE_APPLICATION_ID) {
-      throw new EtherDocumentError(
-        "WRONG_APPLICATION_ID",
-        `SQLite application ID ${applicationId} is not an Ether application ID.`
-      );
-    }
-
-    const tableCount = database
-      .prepare("SELECT count(*) AS count FROM sqlite_schema WHERE type = 'table' AND name = 'document'")
-      .get() as { count: number };
-    if (tableCount.count !== 1) {
-      throw new EtherDocumentError(
-        "INVALID_DOCUMENT_METADATA",
-        "Ether document metadata table is missing."
-      );
-    }
-    const rows = database
-      .prepare(
-        `SELECT document_id, format_marker, format_version, schema_version, title,
-                created_at, updated_at, app_version, feature_flags_json
-         FROM document`
-      )
-      .all() as unknown as DocumentRow[];
-    if (rows.length !== 1) {
-      throw new EtherDocumentError(
-        "INVALID_DOCUMENT_METADATA",
-        `Ether document must contain exactly one document row; found ${rows.length}.`
-      );
-    }
-    const document = parseDocumentRow(rows[0]);
-
-    const pragmas = readPragmas(database);
-    assertPragmas(pragmas);
-
-    const quickCheckRows = database.prepare("PRAGMA quick_check").all() as Record<string, unknown>[];
-    const quickCheckValues = quickCheckRows.flatMap((row) => Object.values(row));
-    if (quickCheckValues.length !== 1 || quickCheckValues[0] !== "ok") {
-      throw new EtherDocumentError(
-        "INTEGRITY_CHECK_FAILED",
-        `Ether document quick_check failed: ${quickCheckValues.join(", ")}`
-      );
-    }
-
-    const foreignKeyFailures = database.prepare("PRAGMA foreign_key_check").all();
-    if (foreignKeyFailures.length > 0) {
-      throw new EtherDocumentError(
-        "FOREIGN_KEY_CHECK_FAILED",
-        `Ether document foreign key check found ${foreignKeyFailures.length} violation(s).`
-      );
-    }
-
-    return { document, path: filePath, pragmas, quickCheck: "ok" };
-  } catch (error) {
-    if (error instanceof EtherDocumentError) {
-      throw error;
-    }
-    throw new EtherDocumentError("INVALID_SQLITE", "Ether document validation failed.", {
-      cause: error
-    });
+    throw mapEtherDocumentError(error, "INVALID_SQLITE", "Ether document validation failed.");
   } finally {
-    database.close();
+    database?.close();
   }
 }

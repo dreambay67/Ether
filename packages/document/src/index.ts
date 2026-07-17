@@ -1,3 +1,13 @@
-export * from "./database.js";
+export {
+  assertEtherDocumentWritable,
+  createEtherDocument,
+  type CreateEtherDocumentOptions
+} from "./database.js";
 export * from "./format.js";
-export * from "./validation.js";
+export {
+  EtherDocumentError,
+  inspectEtherDocument,
+  type EtherDocumentErrorCode,
+  type EtherDocumentInspection,
+  type EtherDocumentPragmas
+} from "./validation.js";
