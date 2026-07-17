@@ -81,6 +81,26 @@ interface ViewRow {
   viewport_json: string;
 }
 
+type EntityKind = "edge" | "group" | "module" | "node";
+
+interface EntityOwnerRow {
+  entity_id: string;
+  entity_kind: EntityKind;
+  graph_id: string;
+}
+
+export class GraphRepositoryError extends Error {
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "GraphRepositoryError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
 function parseJson(serialized: string): unknown {
   return JSON.parse(serialized) as unknown;
 }
@@ -198,6 +218,7 @@ export class GraphRepository {
 
   persistMany(input: EtherGraph[]): EtherGraph[] {
     const graphs = input.map((value) => EtherGraphSchema.parse(value));
+    this.validateEntityOwnership(graphs);
     const now = this.context.now();
     for (const graph of graphs) {
       this.context.database
@@ -222,6 +243,57 @@ export class GraphRepository {
       this.persistGraphEntities(graph);
     }
     return graphs;
+  }
+
+  private validateEntityOwnership(graphs: EtherGraph[]): void {
+    const proposed = new Map<string, { graphId: string; kind: EntityKind }>();
+    const add = (entityId: string, graphId: string, kind: EntityKind): void => {
+      const prior = proposed.get(entityId);
+      if (prior !== undefined) {
+        throw new GraphRepositoryError(
+          "ENTITY_ID_CONFLICT",
+          `Entity ID ${entityId} appears more than once in the prepared graph snapshots.`,
+          { entityId, first: prior, second: { graphId, kind } }
+        );
+      }
+      proposed.set(entityId, { graphId, kind });
+    };
+
+    for (const graph of graphs) {
+      for (const node of graph.nodes) add(node.id, graph.id, "node");
+      for (const edge of graph.edges) add(edge.id, graph.id, "edge");
+      for (const group of graph.groups) add(group.id, graph.id, "group");
+      for (const module of graph.modules) add(module.id, graph.id, "module");
+    }
+
+    const existing = this.context.database
+      .prepare(
+        `SELECT node_id AS entity_id, graph_id, 'node' AS entity_kind FROM nodes
+         UNION ALL
+         SELECT edge_id, graph_id, 'edge' FROM edges
+         UNION ALL
+         SELECT group_id, graph_id, 'group' FROM groups
+         UNION ALL
+         SELECT module_id, parent_graph_id, 'module' FROM modules`
+      )
+      .all() as unknown as EntityOwnerRow[];
+    for (const owner of existing) {
+      const candidate = proposed.get(owner.entity_id);
+      if (
+        candidate !== undefined &&
+        (candidate.graphId !== owner.graph_id || candidate.kind !== owner.entity_kind)
+      ) {
+        throw new GraphRepositoryError(
+          "ENTITY_ID_CONFLICT",
+          `Entity ID ${owner.entity_id} cannot move between graphs or entity kinds.`,
+          {
+            entityId: owner.entity_id,
+            existing: { graphId: owner.graph_id, kind: owner.entity_kind },
+            proposed: candidate
+          }
+        );
+      }
+    }
   }
 
   markDeleted(graphId: string): void {

@@ -10,6 +10,7 @@ import type {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 type StoreMode =
@@ -73,6 +74,21 @@ interface RepositoryContext {
   };
 }
 
+interface ReadRepositoryContext {
+  graphs: RepositoryContext["graphs"];
+  outputs: Pick<RepositoryContext["outputs"], "getPayload" | "getVersion">;
+  revisions: Pick<
+    RepositoryContext["revisions"],
+    | "canRedo"
+    | "canUndo"
+    | "getDocumentRevision"
+    | "getOperations"
+    | "head"
+    | "listMilestones"
+  >;
+  settings: Pick<RepositoryContext["settings"], "getHeader" | "getLiveOutput">;
+}
+
 interface DocumentStoreInstance {
   readonly dirty: boolean;
   readonly documentId: string;
@@ -84,7 +100,7 @@ interface DocumentStoreInstance {
     milestone: { id: string; members: Record<string, string> };
   }>;
   manualSave(name: string): Promise<{ id: string; members: Record<string, string> }>;
-  read<T>(callback: (repositories: RepositoryContext) => T): Promise<T>;
+  read<T>(callback: (repositories: ReadRepositoryContext) => T): Promise<T>;
   transaction<T>(callback: (repositories: RepositoryContext) => T): Promise<T>;
 }
 
@@ -219,20 +235,16 @@ describe("transactional Ether document repositories", () => {
       }))
     ).resolves.toEqual({
       graphKeys: ["get", "list"],
-      outputKeys: ["getPayload", "getVersion", "insert"],
+      outputKeys: ["getPayload", "getVersion"],
       revisionKeys: [
         "canRedo",
         "canUndo",
-        "commit",
-        "createMilestone",
         "getDocumentRevision",
         "getOperations",
         "head",
-        "listMilestones",
-        "redo",
-        "undo"
+        "listMilestones"
       ],
-      settingKeys: ["getHeader", "getLiveOutput", "setFeatureFlag", "setLiveOutput", "setTitle"]
+      settingKeys: ["getHeader", "getLiveOutput"]
     });
     let escapedGraphs: RepositoryContext["graphs"] | undefined;
     await store.read((repositories) => {
@@ -312,6 +324,140 @@ describe("transactional Ether document repositories", () => {
     ).rejects.toThrow("injected transaction failure");
     expect(await store.read(({ revisions }) => revisions.head())).toEqual(beforeRollback);
     expect(await store.read(({ graphs }) => graphs.get(parent.id))).toEqual(parent);
+
+    const undoAudit = await store.transaction(({ revisions }) => revisions.undo());
+    const undoOperations = await store.read(({ revisions }) =>
+      revisions.getOperations(undoAudit.documentRevisionId)
+    );
+    expect(
+      undoOperations
+        .filter((entry) => entry.direction === "forward")
+        .map((entry) => entry.operation.graphId)
+    ).toEqual([internal.id, parent.id]);
+    expect(
+      undoOperations
+        .filter((entry) => entry.direction === "inverse")
+        .map((entry) => entry.operation.graphId)
+    ).toEqual([internal.id, parent.id]);
+
+    const redoAudit = await store.transaction(({ revisions }) => revisions.redo());
+    const redoOperations = await store.read(({ revisions }) =>
+      revisions.getOperations(redoAudit.documentRevisionId)
+    );
+    expect(
+      redoOperations
+        .filter((entry) => entry.direction === "forward")
+        .map((entry) => entry.operation.graphId)
+    ).toEqual([parent.id, internal.id]);
+    await store.close();
+  });
+
+  it("keeps runtime read facades pure and prevents sync or async mutation exploits", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-read-facade",
+      initialGraph: initial,
+      title: "Original title"
+    });
+
+    let syncMutatorWasExposed = false;
+    await store.read((repositories) => {
+      const mutators = [
+        Reflect.get(repositories.revisions, "commit"),
+        Reflect.get(repositories.revisions, "undo"),
+        Reflect.get(repositories.revisions, "redo"),
+        Reflect.get(repositories.revisions, "createMilestone"),
+        Reflect.get(repositories.outputs, "insert"),
+        Reflect.get(repositories.settings, "setTitle"),
+        Reflect.get(repositories.settings, "setFeatureFlag"),
+        Reflect.get(repositories.settings, "setLiveOutput")
+      ];
+      syncMutatorWasExposed = mutators.some((candidate) => typeof candidate === "function");
+      const setTitle = Reflect.get(repositories.settings, "setTitle");
+      if (typeof setTitle === "function") {
+        Reflect.apply(setTitle, repositories.settings, ["Synchronous exploit"]);
+      }
+    });
+    expect(syncMutatorWasExposed).toBe(false);
+    expect((await store.read(({ settings }) => settings.getHeader())).title).toBe("Original title");
+
+    await expect(
+      store.read(async (repositories) => {
+        const setTitle = Reflect.get(repositories.settings, "setTitle");
+        if (typeof setTitle === "function") {
+          Reflect.apply(setTitle, repositories.settings, ["Async exploit"]);
+        }
+        await Promise.resolve();
+      })
+    ).rejects.toMatchObject({ code: "ASYNC_TRANSACTION_CALLBACK" });
+    expect((await store.read(({ settings }) => settings.getHeader())).title).toBe("Original title");
+    await store.close();
+  });
+
+  it("rejects cross-graph entity ID theft before an unaffected graph can be mutated", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-id-ownership",
+      initialGraph: initial,
+      title: "Entity ownership"
+    });
+    const head = await store.read(({ revisions }) => revisions.head());
+    const stealingGraph = graph("graph-module", "module", [promptNode("prompt-1", "Stolen")]);
+
+    await expect(
+      store.transaction(({ revisions }) =>
+        revisions.commit(prepared(head, [stealingGraph], "steal-node"))
+      )
+    ).rejects.toMatchObject({ code: "ENTITY_ID_CONFLICT" });
+    expect(await store.read(({ graphs }) => graphs.get(initial.id))).toEqual(initial);
+    expect(await store.read(({ graphs }) => graphs.get(stealingGraph.id))).toBeUndefined();
+    expect(await store.read(({ revisions }) => revisions.head())).toEqual(head);
+    await store.close();
+  });
+
+  it("requires complete affected graph sets and graph-aligned operation pairs", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-affected-integrity",
+      initialGraph: initial,
+      title: "Affected integrity"
+    });
+    const head = await store.read(({ revisions }) => revisions.head());
+    const parent = renamed(initial, "Parent");
+    const internal = graph("graph-module", "module", [promptNode("module-prompt", "Inside")]);
+    const forward = [
+      graphPropertyOperation(parent.id, parent.title),
+      graphPropertyOperation(internal.id, internal.title)
+    ];
+
+    await expect(
+      store.transaction(({ revisions }) =>
+        revisions.commit(
+          prepared(head, [parent, internal], "misaligned", forward, [
+            graphPropertyOperation(internal.id, "before module"),
+            graphPropertyOperation(parent.id, "before parent")
+          ])
+        )
+      )
+    ).rejects.toThrow();
+    await expect(
+      store.transaction(({ revisions }) =>
+        revisions.commit(
+          prepared(
+            head,
+            [parent, internal],
+            "incomplete",
+            [graphPropertyOperation(parent.id, parent.title)],
+            [graphPropertyOperation(parent.id, "before parent")]
+          )
+        )
+      )
+    ).rejects.toThrow();
+    expect(await store.read(({ revisions }) => revisions.head())).toEqual(head);
+    expect(await store.read(({ graphs }) => graphs.list())).toEqual([initial]);
     await store.close();
   });
 
@@ -413,6 +559,49 @@ describe("transactional Ether document repositories", () => {
       code: "NOTHING_TO_REDO"
     });
     await store.close();
+  });
+
+  it("fails undo atomically when stored inverse history is missing or schema-invalid", async () => {
+    for (const corruption of ["missing", "invalid"] as const) {
+      const corruptionPath = path.join(root, `History-${corruption}.ether`);
+      const initial = graph();
+      let store = await storeClass().create(corruptionPath, {
+        appVersion: "4.0.0",
+        documentId: `document-history-${corruption}`,
+        initialGraph: initial,
+        title: "Corrupt history"
+      });
+      const genesis = await store.read(({ revisions }) => revisions.head());
+      const changed = renamed(initial, "Changed");
+      const committed = await store.transaction(({ revisions }) =>
+        revisions.commit(prepared(genesis, [changed], corruption))
+      );
+      await store.close();
+
+      const database = new DatabaseSync(corruptionPath);
+      if (corruption === "missing") {
+        database
+          .prepare("DELETE FROM graph_operations WHERE document_revision_id = ?")
+          .run(committed.documentRevisionId);
+      } else {
+        database
+          .prepare(
+            "UPDATE graph_operations SET inverse_json = '{}' WHERE document_revision_id = ?"
+          )
+          .run(committed.documentRevisionId);
+      }
+      database.close();
+
+      store = await storeClass().open(corruptionPath, { access: "require-write" });
+      const beforeUndo = await store.read(({ revisions }) => revisions.head());
+      await expect(store.transaction(({ revisions }) => revisions.undo())).rejects.toMatchObject({
+        code: "CORRUPT_REVISION_HISTORY"
+      });
+      expect(await store.read(({ revisions }) => revisions.head())).toEqual(beforeUndo);
+      expect(await store.read(({ graphs }) => graphs.get(initial.id))).toEqual(changed);
+      expect(await store.read(({ revisions }) => revisions.canUndo())).toBe(true);
+      await store.close();
+    }
   });
 
   it("stores autosave and manual milestones at document and all graph heads without empty graph revisions", async () => {

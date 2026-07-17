@@ -16,9 +16,10 @@ import path from "node:path";
 import { backup, type DatabaseSync } from "node:sqlite";
 
 import {
-  createEtherDocument,
+  createInitializedEtherDocument,
   openEtherDocumentConnection,
-  publishOwnedTemporaryDatabase
+  publishOwnedTemporaryDatabase,
+  replaceWithOwnedTemporaryDatabase
 } from "./database.js";
 import {
   type DocumentStoreEnvironment,
@@ -62,8 +63,22 @@ export interface OpenDocumentStoreOptions {
   environment?: DocumentStoreEnvironment;
 }
 
-export interface DocumentRepositories {
+export interface ReadDocumentRepositories {
   graphs: Pick<GraphRepository, "get" | "list">;
+  outputs: Pick<OutputRepository, "getPayload" | "getVersion">;
+  revisions: Pick<
+    RevisionRepository,
+    | "canRedo"
+    | "canUndo"
+    | "getDocumentRevision"
+    | "getOperations"
+    | "head"
+    | "listMilestones"
+  >;
+  settings: Pick<SettingsRepository, "getHeader" | "getLiveOutput">;
+}
+
+export interface DocumentRepositories extends ReadDocumentRepositories {
   outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert">;
   revisions: Pick<
     RevisionRepository,
@@ -91,9 +106,9 @@ interface InternalDocumentRepositories {
   settings: SettingsRepository;
 }
 
-interface RepositoryScope {
+interface RepositoryScope<T> {
   close(): void;
-  repositories: DocumentRepositories;
+  repositories: T;
 }
 
 export class DocumentStoreError extends Error {
@@ -139,11 +154,12 @@ function removeOwnedFile(filePath: string, identity: EtherFileIdentity | undefin
   }
 }
 
-function destinationAvailable(destinationPath: string): void {
+function prepareDestination(destinationPath: string, allowExisting: boolean): boolean {
   if (path.extname(destinationPath).toLowerCase() !== ".ether") {
     throw new EtherDocumentError("INVALID_DESTINATION", "Ether destinations must end in .ether.");
   }
-  if (lstatSync(destinationPath, { throwIfNoEntry: false }) !== undefined) {
+  const exists = lstatSync(destinationPath, { throwIfNoEntry: false }) !== undefined;
+  if (exists && !allowExisting) {
     throw new EtherDocumentError(
       "DESTINATION_EXISTS",
       `Ether document destination already exists: ${destinationPath}`
@@ -152,6 +168,7 @@ function destinationAvailable(destinationPath: string): void {
   if (!statSync(path.dirname(destinationPath)).isDirectory()) {
     throw new EtherDocumentError("INVALID_DESTINATION", "Ether destination directory is invalid.");
   }
+  return exists;
 }
 
 export class DocumentStore {
@@ -192,12 +209,37 @@ export class DocumentStore {
     }
     const absolutePath = path.resolve(filePath);
     const documentId = options.documentId ?? randomUUID();
-    createEtherDocument(absolutePath, {
-      appVersion: options.appVersion,
-      documentId,
-      featureFlags: options.featureFlags,
-      title: options.title
-    });
+    const runtime = resolveDocumentStoreEnvironment(options.environment);
+    createInitializedEtherDocument(
+      absolutePath,
+      {
+        appVersion: options.appVersion,
+        documentId,
+        featureFlags: options.featureFlags,
+        title: options.title
+      },
+      (database) => {
+        runtime.onCreateStage?.("format-initialized");
+        const context = createRepositoryContext(database);
+        const graphs = new GraphRepository(context);
+        const revisions = new RevisionRepository(context, graphs);
+        revisions.initializeGenesis(initialGraph);
+        const head = revisions.head();
+        const genesis = revisions.getDocumentRevision(head.documentRevisionId);
+        if (
+          head.graphRevisions[initialGraph.id] === undefined ||
+          genesis.kind !== "genesis" ||
+          JSON.stringify(genesis.graphRevisions) !== JSON.stringify(head.graphRevisions) ||
+          JSON.stringify(graphs.get(initialGraph.id)) !== JSON.stringify(initialGraph)
+        ) {
+          throw new DocumentStoreError(
+            "INVALID_GENESIS",
+            "New Ether document genesis state did not validate before publication."
+          );
+        }
+        runtime.onCreateStage?.("genesis-initialized");
+      }
+    );
     const createdIdentity = readEtherFileIdentity(absolutePath);
     let store: DocumentStore | undefined;
     try {
@@ -205,7 +247,6 @@ export class DocumentStore {
         access: "require-write",
         environment: options.environment
       });
-      store.initializeGenesis(initialGraph);
       return store;
     } catch (error) {
       await store?.close();
@@ -297,10 +338,10 @@ export class DocumentStore {
     return this.currentPath;
   }
 
-  read<T>(callback: (repositories: DocumentRepositories) => T): Promise<T> {
+  read<T>(callback: (repositories: ReadDocumentRepositories) => T): Promise<T> {
     return this.enqueue(() => {
       this.assertOpen();
-      const scope = this.repositories();
+      const scope = this.readRepositories();
       try {
         const result = callback(scope.repositories);
         if (isPromiseLike(result)) {
@@ -372,7 +413,49 @@ export class DocumentStore {
     };
   }
 
-  private repositories(): RepositoryScope {
+  private readRepositories(): RepositoryScope<ReadDocumentRepositories> {
+    const repositories = this.internalRepositories();
+    let active = true;
+    const invoke = <T>(operation: () => T): T => {
+      if (!active) {
+        throw new DocumentStoreError(
+          "TRANSACTION_CONTEXT_CLOSED",
+          "This document repository context is no longer active."
+        );
+      }
+      return operation();
+    };
+    return {
+      close: () => {
+        active = false;
+      },
+      repositories: {
+        graphs: {
+          get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
+          list: () => invoke(() => repositories.graphs.list())
+        },
+        outputs: {
+          getPayload: (id) => invoke(() => repositories.outputs.getPayload(id)),
+          getVersion: (id) => invoke(() => repositories.outputs.getVersion(id))
+        },
+        revisions: {
+          canRedo: () => invoke(() => repositories.revisions.canRedo()),
+          canUndo: () => invoke(() => repositories.revisions.canUndo()),
+          getDocumentRevision: (id) =>
+            invoke(() => repositories.revisions.getDocumentRevision(id)),
+          getOperations: (id) => invoke(() => repositories.revisions.getOperations(id)),
+          head: () => invoke(() => repositories.revisions.head()),
+          listMilestones: () => invoke(() => repositories.revisions.listMilestones())
+        },
+        settings: {
+          getHeader: () => invoke(() => repositories.settings.getHeader()),
+          getLiveOutput: () => invoke(() => repositories.settings.getLiveOutput())
+        }
+      }
+    };
+  }
+
+  private writeRepositories(): RepositoryScope<DocumentRepositories> {
     const repositories = this.internalRepositories();
     let active = true;
     const invoke = <T>(operation: () => T): T => {
@@ -425,29 +508,13 @@ export class DocumentStore {
     };
   }
 
-  private initializeGenesis(initialGraph: EtherGraph): void {
-    this.assertOpen();
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      this.internalRepositories().revisions.initializeGenesis(initialGraph);
-      this.database.exec("COMMIT");
-    } catch (error) {
-      try {
-        this.database.exec("ROLLBACK");
-      } catch {
-        // Preserve the genesis initialization failure.
-      }
-      throw error;
-    }
-  }
-
   private runTransaction<T>(callback: (repositories: DocumentRepositories) => T): T {
     this.assertOpen();
     if (this.currentMode.kind !== "writable") {
       throw new DocumentStoreError("READ_ONLY", "This Ether document is open read-only.");
     }
     this.database.exec("BEGIN IMMEDIATE");
-    const scope = this.repositories();
+    const scope = this.writeRepositories();
     try {
       const result = callback(scope.repositories);
       if (isPromiseLike(result)) {
@@ -509,7 +576,7 @@ export class DocumentStore {
   ): Promise<{ documentId: string; path: string }> {
     this.assertOpen();
     const absoluteDestination = path.resolve(destinationPath);
-    destinationAvailable(absoluteDestination);
+    const destinationExisted = prepareDestination(absoluteDestination, switchActive);
     if (switchActive && !locationSupportsWriting(absoluteDestination, this.runtime)) {
       throw new DocumentStoreError(
         "WRITER_LEASE_UNAVAILABLE",
@@ -586,7 +653,11 @@ export class DocumentStore {
 
       this.runtime.onSaveStage?.("publication");
       publishedIdentity = temporaryIdentity;
-      publishOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
+      if (switchActive) {
+        replaceWithOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
+      } else {
+        publishOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
+      }
       temporaryIdentity = undefined;
 
       if (switchActive) {
@@ -616,7 +687,9 @@ export class DocumentStore {
         // Reopening the active source below is the recovery authority.
       }
       removeOwnedFile(temporaryPath, temporaryIdentity);
-      removeOwnedFile(absoluteDestination, publishedIdentity);
+      if (!switchActive || !destinationExisted) {
+        removeOwnedFile(absoluteDestination, publishedIdentity);
+      }
       if (!connectionOnSource) {
         const source = openEtherDocumentConnection(sourcePath, sourceMode.kind === "read-only");
         this.database = source.database;
@@ -630,4 +703,10 @@ export class DocumentStore {
 }
 
 export { DocumentRepositoryError };
-export type { DocumentStoreEnvironment, ReadOnlyReason } from "./locking.js";
+export type {
+  CreateStage,
+  DocumentStoreEnvironment,
+  ReadOnlyReason,
+  WritableLocationCapabilityAdapter,
+  WritableLocationKind
+} from "./locking.js";

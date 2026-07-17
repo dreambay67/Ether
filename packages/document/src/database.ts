@@ -12,6 +12,7 @@ import {
   linkSync,
   lstatSync,
   openSync,
+  renameSync,
   statSync,
   unlinkSync
 } from "node:fs";
@@ -191,6 +192,22 @@ function publicationError(error: unknown): EtherDocumentError {
   return mapEtherDocumentError(error, "PUBLICATION_FAILED", "Ether document publication failed.");
 }
 
+function replacementError(error: unknown): EtherDocumentError {
+  const code = nodeErrorCode(error);
+  if (["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV"].includes(code ?? "")) {
+    return new EtherDocumentError(
+      "ATOMIC_REPLACE_UNSUPPORTED",
+      "This filesystem cannot atomically replace an Ether document.",
+      { cause: error }
+    );
+  }
+  return mapEtherDocumentError(
+    error,
+    "PUBLICATION_FAILED",
+    "Ether document replacement failed."
+  );
+}
+
 function creationError(error: unknown, destinationPath: string): EtherDocumentError {
   if (error instanceof EtherDocumentError) {
     return error;
@@ -335,6 +352,21 @@ export function publishOwnedTemporaryDatabase(
   }
 }
 
+export function replaceWithOwnedTemporaryDatabase(
+  temporaryPath: string,
+  destinationPath: string,
+  temporaryIdentity: EtherFileIdentity
+): void {
+  const absoluteDestination = path.resolve(destinationPath);
+  assertSameOwnedFile(temporaryPath, temporaryIdentity);
+  try {
+    renameSync(temporaryPath, absoluteDestination);
+    assertSameOwnedFile(absoluteDestination, temporaryIdentity);
+  } catch (error) {
+    throw replacementError(error);
+  }
+}
+
 function runWritableProbe(database: DatabaseSync): void {
   database.exec("BEGIN IMMEDIATE");
   try {
@@ -424,6 +456,14 @@ export function createEtherDocument(
   destinationPath: string,
   options: CreateEtherDocumentOptions
 ): EtherDocumentInspection {
+  return createInitializedEtherDocument(destinationPath, options, () => undefined);
+}
+
+export function createInitializedEtherDocument(
+  destinationPath: string,
+  options: CreateEtherDocumentOptions,
+  initialize: (database: DatabaseSync) => void
+): EtherDocumentInspection {
   const absoluteDestination = path.resolve(destinationPath);
   if (path.extname(absoluteDestination).toLowerCase() !== ETHER_FILE_EXTENSION) {
     throw new EtherDocumentError(
@@ -496,6 +536,16 @@ export function createEtherDocument(
           document.appVersion,
           JSON.stringify(document.featureFlags)
         );
+      try {
+        initialize(database);
+      } catch (error) {
+        const detail = error instanceof Error ? `: ${error.message}` : "";
+        throw new EtherDocumentError(
+          "PUBLICATION_FAILED",
+          `Ether document initialization failed${detail}`,
+          { cause: error }
+        );
+      }
       database.exec("COMMIT");
     } catch (error) {
       try {

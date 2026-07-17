@@ -7,13 +7,17 @@ export * from "./format.js";
 export {
   DocumentStore,
   DocumentStoreError,
+  type CreateStage,
   type CreateDocumentStoreOptions,
   type DocumentAccessMode,
   type DocumentRepositories,
+  type ReadDocumentRepositories,
   type DocumentStoreEnvironment,
   type DocumentStoreMode,
   type OpenDocumentStoreOptions,
-  type ReadOnlyReason
+  type ReadOnlyReason,
+  type WritableLocationCapabilityAdapter,
+  type WritableLocationKind
 } from "./documentStore.js";
 export {
   EtherDocumentError,

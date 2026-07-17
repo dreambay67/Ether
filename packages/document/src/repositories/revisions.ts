@@ -60,6 +60,12 @@ interface HistoryRow {
   history_order: number;
 }
 
+interface StoredOperationRow {
+  global_order: number;
+  inverse_json: string;
+  operation_json: string;
+}
+
 function record(rows: MemberRow[]): Record<string, string> {
   return Object.fromEntries(rows.map((row) => [row.graph_id, row.graph_revision_id]));
 }
@@ -358,6 +364,14 @@ export class RevisionRepository {
          WHERE drm.document_revision_id = ? ORDER BY gr.graph_id`
       )
       .all(targetDocumentRevisionId) as unknown as RevisionSnapshotRow[];
+    const storedOperations = this.loadReplayOperations(
+      targetDocumentRevisionId,
+      snapshots.map((snapshot) => snapshot.graph_id)
+    );
+    const replayForward =
+      kind === "undo" ? storedOperations.inverse.slice().reverse() : storedOperations.forward;
+    const replayInverse =
+      kind === "undo" ? storedOperations.forward.slice().reverse() : storedOperations.inverse;
     const desired = snapshots.map((row) => ({
       graphId: row.graph_id,
       snapshot: parseSnapshot(kind === "undo" ? row.previous_snapshot_json : row.snapshot_json)
@@ -397,7 +411,7 @@ export class RevisionRepository {
              revision_id, graph_id, parent_revision_id, actor, title, created_at,
              operation_count, metadata_json, kind, transaction_id,
              snapshot_json, previous_snapshot_json
-           ) VALUES (?, ?, ?, 'system', ?, ?, 0, '{}', ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, 'system', ?, ?, ?, '{}', ?, ?, ?, ?)`
         )
         .run(
           revisionId,
@@ -405,6 +419,7 @@ export class RevisionRepository {
           current.graphRevisions[graphId] ?? null,
           kind === "undo" ? "Undo" : "Redo",
           createdAt,
+          replayForward.filter((operation) => operation.graphId === graphId).length,
           kind,
           `${kind}:${targetDocumentRevisionId}`,
           snapshot === undefined ? null : JSON.stringify(snapshot),
@@ -421,8 +436,65 @@ export class RevisionRepository {
         .run(graphId, revisionId);
       return { graphId, revisionId };
     });
+    this.insertOperations(documentRevisionId, created, replayForward, replayInverse);
     this.setDocumentHead(documentRevisionId);
     return this.result(documentRevisionId, kind, created);
+  }
+
+  private loadReplayOperations(
+    documentRevisionId: string,
+    affectedGraphIds: string[]
+  ): { forward: GraphOperation[]; inverse: GraphOperation[] } {
+    try {
+      const expected = this.context.database
+        .prepare(
+          `SELECT coalesce(sum(gr.operation_count), 0) AS operation_count
+           FROM document_revision_members drm
+           JOIN graph_revisions gr ON gr.revision_id = drm.graph_revision_id
+           WHERE drm.document_revision_id = ?`
+        )
+        .get(documentRevisionId) as { operation_count: number };
+      const rows = this.context.database
+        .prepare(
+          `SELECT global_order, operation_json, inverse_json
+           FROM graph_operations WHERE document_revision_id = ? ORDER BY global_order`
+        )
+        .all(documentRevisionId) as unknown as StoredOperationRow[];
+      if (rows.length === 0 || rows.length !== expected.operation_count) {
+        throw new Error("Stored operation count does not match the affected graph revisions.");
+      }
+
+      const affected = new Set(affectedGraphIds);
+      const represented = new Set<string>();
+      const forward: GraphOperation[] = [];
+      const inverse: GraphOperation[] = [];
+      for (const [index, row] of rows.entries()) {
+        if (row.global_order !== index) {
+          throw new Error("Stored global operation order is not contiguous.");
+        }
+        const operation = GraphOperationSchema.parse(JSON.parse(row.operation_json));
+        const inverseOperation = GraphOperationSchema.parse(JSON.parse(row.inverse_json));
+        if (
+          operation.graphId !== inverseOperation.graphId ||
+          !affected.has(operation.graphId)
+        ) {
+          throw new Error("Stored operation pairs do not match the affected graph set.");
+        }
+        represented.add(operation.graphId);
+        forward.push(operation);
+        inverse.push(inverseOperation);
+      }
+      if (represented.size !== affected.size || [...affected].some((id) => !represented.has(id))) {
+        throw new Error("Stored operations do not completely represent the affected graph set.");
+      }
+      return { forward, inverse };
+    } catch (error) {
+      throw new DocumentRepositoryError(
+        "CORRUPT_REVISION_HISTORY",
+        `Document revision ${documentRevisionId} has missing or invalid replay operations.`,
+        { details: { documentRevisionId, cause: error } }
+      );
+    }
   }
 
   private history(state: "applied" | "undone", direction: "ASC" | "DESC"): HistoryRow | undefined {

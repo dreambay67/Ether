@@ -447,6 +447,16 @@ export const PreparedGraphCommitSchema = z
         message: "Forward and inverse operation arrays must preserve matching global order"
       });
     }
+    for (const [index, operation] of commit.forwardOperations.entries()) {
+      const inverse = commit.inverseOperations[index];
+      if (inverse !== undefined && operation.graphId !== inverse.graphId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["inverseOperations", index, "graphId"],
+          message: "Forward and inverse operation pairs must target the same graph"
+        });
+      }
+    }
     for (const graphId of Object.keys(commit.baseGraphRevisions)) {
       if (!snapshotIdSet.has(graphId)) {
         context.addIssue({
@@ -468,6 +478,24 @@ export const PreparedGraphCommitSchema = z
             message: "Prepared operations must target an affected graph snapshot"
           });
         }
+      }
+    }
+    const forwardGraphIds = new Set(commit.forwardOperations.map((operation) => operation.graphId));
+    const inverseGraphIds = new Set(commit.inverseOperations.map((operation) => operation.graphId));
+    for (const [index, graphId] of snapshotIds.entries()) {
+      if (!forwardGraphIds.has(graphId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["graphSnapshots", index, "id"],
+          message: "Every affected graph snapshot requires a forward operation"
+        });
+      }
+      if (!inverseGraphIds.has(graphId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["graphSnapshots", index, "id"],
+          message: "Every affected graph snapshot requires an inverse operation"
+        });
       }
     }
   });

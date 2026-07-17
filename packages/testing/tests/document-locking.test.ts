@@ -23,19 +23,22 @@ type SaveStage =
   | "validation"
   | "fsync"
   | "publication";
+type CreateStage = "format-initialized" | "genesis-initialized";
+type WritableLocationKind = "cloud-placeholder" | "local-fixed" | "mapped-network" | "unknown";
 
 interface StoreEnvironment {
   appInstanceId: string;
   heartbeatMs?: number;
   leaseRoot: string;
+  locationCapability?: { classify(filePath: string): WritableLocationKind };
   machineId: string;
   now?: () => number;
+  onCreateStage?: (stage: CreateStage) => void;
   onHeartbeat?: () => void;
   onSaveStage?: (stage: SaveStage) => void;
   pid?: number;
   processIsAlive?: (pid: number, machineId: string) => boolean;
   staleMs?: number;
-  writableLocation?: (filePath: string) => boolean;
 }
 
 interface StoreInstance {
@@ -160,6 +163,33 @@ describe("Ether document writer leases and backup lifecycle", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("does not publish a destination when creation fails between format initialization and genesis", async () => {
+    const failure = new Error("injected pre-genesis failure");
+    let created: StoreInstance | undefined;
+    let caught: unknown;
+    try {
+      created = await storeClass().create(sourcePath, {
+        appVersion: "4.0.0",
+        documentId: "document-pre-genesis",
+        environment: environment(leaseRoot, "creator", {
+          onCreateStage: (stage) => {
+            if (stage === "format-initialized") {
+              throw failure;
+            }
+          }
+        }),
+        initialGraph: initialGraph(),
+        title: "Pre-genesis"
+      });
+    } catch (error) {
+      caught = error;
+    }
+    await created?.close();
+    expect(caught).toMatchObject({ message: expect.stringContaining(failure.message) });
+    expect(statSync(sourcePath, { throwIfNoEntry: false })).toBeUndefined();
+    expect(readdirSync(root)).toEqual([]);
+  });
+
   it("allows one writer, downgrades prefer-write competitors, and rejects require-write with a typed error", async () => {
     const writer = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
@@ -240,6 +270,46 @@ describe("Ether document writer leases and backup lifecycle", () => {
     await reclaimed.close();
   });
 
+  it("rereads freshness and liveness after the SQLite reclaim probe", async () => {
+    let now = 100_000;
+    const owner = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-refresh-during-probe",
+      environment: environment(leaseRoot, "owner", {
+        heartbeatMs: 60_000,
+        now: () => now
+      }),
+      initialGraph: initialGraph(),
+      title: "Refresh during probe"
+    });
+    const leasePath = onlyLeasePath(leaseRoot);
+    const stale = { ...readLease(leaseRoot), heartbeatAt: 1 };
+    await owner.close();
+    writeFileSync(leasePath, JSON.stringify(stale));
+    now = 200_000;
+    let livenessChecks = 0;
+
+    const competitor = await storeClass().open(sourcePath, {
+      access: "prefer-write",
+      environment: environment(leaseRoot, "competitor", {
+        now: () => now,
+        processIsAlive: () => {
+          livenessChecks += 1;
+          if (livenessChecks === 1) {
+            writeFileSync(leasePath, JSON.stringify({ ...stale, heartbeatAt: now }));
+          }
+          return false;
+        }
+      })
+    });
+
+    expect(livenessChecks).toBeGreaterThanOrEqual(2);
+    expect(competitor.mode).toEqual({ kind: "read-only", reason: "writer-active" });
+    expect(readLease(leaseRoot)).toMatchObject({ appInstanceId: "owner", heartbeatAt: now });
+    await competitor.close();
+    rmSync(leasePath);
+  });
+
   it("does not reclaim a dead stale lease while SQLite is busy", async () => {
     const creator = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
@@ -281,7 +351,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(readFileSync(leasePath, "utf8")).toBe(JSON.stringify(stale));
   });
 
-  it("defaults unsupported network/cloud capability to read-only and allows an approved adapter", async () => {
+  it("blocks mapped drives and cloud placeholders unless capability classification proves local fixed storage", async () => {
     const creator = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
       documentId: "document-location",
@@ -291,16 +361,22 @@ describe("Ether document writer leases and backup lifecycle", () => {
     });
     await creator.close();
 
-    const blocked = await storeClass().open(sourcePath, {
-      access: "prefer-write",
-      environment: environment(leaseRoot, "blocked", { writableLocation: () => false })
-    });
-    expect(blocked.mode).toEqual({ kind: "read-only", reason: "location-unsupported" });
-    await blocked.close();
+    for (const classification of ["mapped-network", "cloud-placeholder", "unknown"] as const) {
+      const blocked = await storeClass().open(sourcePath, {
+        access: "prefer-write",
+        environment: environment(leaseRoot, `blocked-${classification}`, {
+          locationCapability: { classify: () => classification }
+        })
+      });
+      expect(blocked.mode).toEqual({ kind: "read-only", reason: "location-unsupported" });
+      await blocked.close();
+    }
 
     const approved = await storeClass().open(sourcePath, {
       access: "require-write",
-      environment: environment(leaseRoot, "approved", { writableLocation: () => true })
+      environment: environment(leaseRoot, "approved", {
+        locationCapability: { classify: () => "local-fixed" }
+      })
     });
     expect(approved.mode).toEqual({ kind: "writable" });
     await approved.close();
@@ -368,6 +444,93 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(sourceWriter.mode).toEqual({ kind: "writable" });
     await sourceWriter.close();
     await store.close();
+  });
+
+  it("atomically replaces a real existing Save As destination on Windows", async () => {
+    const destination = path.join(root, "Existing.ether");
+    const existing = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId: "document-existing-destination",
+      environment: environment(leaseRoot, "existing"),
+      initialGraph: initialGraph(),
+      title: "Existing destination"
+    });
+    await existing.close();
+
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-replacement-source",
+      environment: environment(leaseRoot, "source"),
+      initialGraph: initialGraph(),
+      title: "Replacement source"
+    });
+    await source.saveAs(destination);
+
+    expect(source.path).toBe(path.resolve(destination));
+    expect(source.documentId).not.toBe("document-existing-destination");
+    expect(source.documentId).not.toBe("document-replacement-source");
+    const reader = await storeClass().open(destination, {
+      access: "read-only",
+      environment: environment(leaseRoot, "reader")
+    });
+    expect(reader.documentId).toBe(source.documentId);
+    await reader.close();
+    expect(statSync(sourcePath).isFile()).toBe(true);
+    await source.close();
+  });
+
+  it("preserves an existing Save As destination through every injected pre-publication failure", async () => {
+    const stages: SaveStage[] = [
+      "reservation",
+      "backup",
+      "identity-rewrite",
+      "validation",
+      "fsync",
+      "publication"
+    ];
+    for (const stage of stages) {
+      const caseRoot = path.join(root, `replace-${stage}`);
+      mkdirSync(caseRoot);
+      const caseLeaseRoot = path.join(caseRoot, "leases");
+      const caseSource = path.join(caseRoot, "Source.ether");
+      const destination = path.join(caseRoot, "Destination.ether");
+      const existingId = `document-existing-${stage}`;
+      const existing = await storeClass().create(destination, {
+        appVersion: "4.0.0",
+        documentId: existingId,
+        environment: environment(caseLeaseRoot, `existing-${stage}`),
+        initialGraph: initialGraph(),
+        title: "Existing destination"
+      });
+      await existing.close();
+
+      const failure = new Error(`injected replacement ${stage} failure`);
+      const source = await storeClass().create(caseSource, {
+        appVersion: "4.0.0",
+        documentId: `document-source-${stage}`,
+        environment: environment(caseLeaseRoot, `source-${stage}`, {
+          onSaveStage: (current) => {
+            if (current === stage) {
+              throw failure;
+            }
+          }
+        }),
+        initialGraph: initialGraph(),
+        title: "Replacement source"
+      });
+
+      await expect(source.saveAs(destination)).rejects.toThrow(failure.message);
+      const preserved = await storeClass().open(destination, {
+        access: "read-only",
+        environment: environment(caseLeaseRoot, `reader-${stage}`)
+      });
+      expect(preserved.documentId).toBe(existingId);
+      await preserved.close();
+      expect(source.path).toBe(path.resolve(caseSource));
+      expect(source.documentId).toBe(`document-source-${stage}`);
+      expect(readdirSync(caseRoot).sort()).toEqual(["Destination.ether", "Source.ether", "leases"]);
+      await source.close();
+    }
   });
 
   it("Save As from read-only acquires the destination lease and switches only after validation", async () => {

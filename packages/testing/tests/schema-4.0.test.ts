@@ -570,6 +570,42 @@ describe("Ether 4.0 schema", () => {
         ]
       }).success
     ).toBe(false);
+    expect(
+      PreparedGraphCommitSchema.safeParse({
+        ...commit,
+        graphSnapshots: [
+          validGraph,
+          { ...validGraph, id: "graph-module", kind: "module", nodes: [] }
+        ],
+        forwardOperations: commit.forwardOperations,
+        inverseOperations: commit.inverseOperations
+      }).success
+    ).toBe(false);
+    expect(
+      PreparedGraphCommitSchema.safeParse({
+        ...commit,
+        graphSnapshots: [
+          validGraph,
+          { ...validGraph, id: "graph-module", kind: "module", nodes: [] }
+        ],
+        forwardOperations: [
+          ...commit.forwardOperations,
+          {
+            type: "updateGraphProperties",
+            graphId: "graph-module",
+            title: "Module"
+          }
+        ],
+        inverseOperations: [
+          {
+            type: "updateGraphProperties",
+            graphId: "graph-module",
+            title: "Before module"
+          },
+          ...commit.inverseOperations
+        ]
+      }).success
+    ).toBe(false);
 
     const liveOutput = {
       enabled: true,
