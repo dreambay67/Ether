@@ -858,6 +858,35 @@ describe("transactional Ether document repositories", () => {
     await store.close();
   });
 
+  it("persists dirty state across reopen until a valid milestone clears it", async () => {
+    const initial = graph();
+    let store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-dirty-state",
+      initialGraph: initial,
+      title: "Dirty state"
+    });
+    const head = await store.read(({ revisions }) => revisions.head());
+    await store.transaction(({ revisions }) =>
+      revisions.commit(prepared(head, [renamed(initial, "Unsaved change")], "dirty-state"))
+    );
+    const dirtyAfterCommit = store.dirty;
+    await store.close();
+    expect(dirtyAfterCommit).toBe(true);
+
+    store = await storeClass().open(filePath, { access: "require-write" });
+    const dirtyAfterReopen = store.dirty;
+    await store.manualSave("Reviewed change");
+    const dirtyAfterMilestone = store.dirty;
+    await store.close();
+    expect(dirtyAfterReopen).toBe(true);
+    expect(dirtyAfterMilestone).toBe(false);
+
+    const reopened = await storeClass().open(filePath, { access: "read-only" });
+    expect(reopened.dirty).toBe(false);
+    await reopened.close();
+  });
+
   it("validates immutable outputs, requires same-node manual ancestry, and retains provenance after graph content removal", async () => {
     const initial = graph();
     const store = await storeClass().create(filePath, {

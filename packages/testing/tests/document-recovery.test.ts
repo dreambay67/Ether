@@ -26,7 +26,9 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 interface Task6Store {
   close(): Promise<void>;
+  readonly dirty: boolean;
   documentId: string;
+  manualSave(name: string): Promise<unknown>;
   read<T>(callback: (repositories: {
     artifacts: { get(id: string): Artifact | undefined };
     blobs: { get(contentKey: string): unknown };
@@ -58,12 +60,14 @@ interface RecoveryApi {
   repairDocument(sourcePath: string, destinationPath: string, options: {
     appDataRoot: string;
     allowLossy?: boolean;
+    checkpoint?: (name: string) => void;
     environment: object;
   }): Promise<{
     destinationPath: string;
     losses: Array<{ entityId: string; reason: string; type: string }>;
     recovered: { artifacts: number; blobs: number };
   }>;
+  removeOwnedStagingPath(filePath: string, appDataRoot: string): void;
   writeRecoveryJournal(options: {
     appDataRoot: string;
     entry: {
@@ -236,6 +240,7 @@ describe("Ether AppData recovery and logical repair", () => {
     const first = await api().reconcileStaging(store, { appDataRoot });
     const second = await api().reconcileStaging(store, { appDataRoot });
     expect(first.recovered).toEqual(["provider-attempt-1"]);
+    expect(store.dirty).toBe(true);
     await expect(
       store.read(({ artifacts }) => artifacts.get("artifact-provider-recovered"))
     ).resolves.toMatchObject({
@@ -249,6 +254,8 @@ describe("Ether AppData recovery and logical repair", () => {
       }
     });
     expect(second).toEqual({ attention: [], recovered: [], quarantined: [], removed: [] });
+    await store.manualSave("Reviewed recovery");
+    expect(store.dirty).toBe(false);
     mkdirSync(providerDirectory, { recursive: true });
     writeFileSync(stagedPath, pngBytes(8192, 0x41), { flag: "wx" });
     api().writeRecoveryJournal({ appDataRoot, entry: recoveryEntry });
@@ -471,6 +478,107 @@ describe("Ether AppData recovery and logical repair", () => {
     expect(existsSync(junction)).toBe(true);
   });
 
+  it("rejects a staging-root junction before recursive cleanup can reach outside AppData", () => {
+    if (process.platform !== "win32") return;
+    const outside = path.join(root, "outside-staging-root");
+    const victim = path.join(outside, "imports", "owned", "keep.txt");
+    mkdirSync(path.dirname(victim), { recursive: true });
+    writeFileSync(victim, "keep");
+    mkdirSync(appDataRoot, { recursive: true });
+    const stagingRoot = path.join(appDataRoot, "staging");
+    symlinkSync(outside, stagingRoot, "junction");
+
+    expect(() =>
+      api().removeOwnedStagingPath(path.join(stagingRoot, "imports", "owned"), appDataRoot)
+    ).toThrow(/reparse|canonical|owned/i);
+    expect(readFileSync(victim, "utf8")).toBe("keep");
+  });
+
+  it.each(["journal-created", "staging-created", "destination-created"])(
+    "reclaims journal-owned repair staging interrupted at %s",
+    async (checkpoint) => {
+      const created = await createStore(sourcePath, appDataRoot);
+      await created.close();
+      const destinationPath = path.join(root, `Interrupted-${checkpoint}.ether`);
+
+      await expect(
+        api().repairDocument(sourcePath, destinationPath, {
+          appDataRoot,
+          checkpoint: (name) => {
+            if (name === checkpoint) throw new Error(`stop repair at ${checkpoint}`);
+          },
+          environment: environment(appDataRoot)
+        })
+      ).rejects.toThrow(`stop repair at ${checkpoint}`);
+      expect(existsSync(destinationPath)).toBe(false);
+      expect(readdirSync(path.join(appDataRoot, "recovery"))).toHaveLength(1);
+
+      const reopened = (await documentPackage.DocumentStore.open(sourcePath, {
+        access: "require-write",
+        environment: environment(appDataRoot)
+      })) as Task6Store;
+      stores.push(reopened);
+      expect(readdirSync(path.join(appDataRoot, "recovery"))).toEqual([]);
+      const repairRoot = path.join(appDataRoot, "staging", "repair");
+      expect(existsSync(repairRoot) ? readdirSync(repairRoot) : []).toEqual([]);
+    }
+  );
+
+  it("refuses repair when the staging root is redirected outside AppData", async () => {
+    if (process.platform !== "win32") return;
+    const created = await createStore(sourcePath, appDataRoot);
+    await created.close();
+    const outside = path.join(root, "outside-repair-root");
+    const sentinel = path.join(outside, "keep.txt");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(sentinel, "keep");
+    const stagingRoot = path.join(appDataRoot, "staging");
+    api().removeOwnedStagingPath(stagingRoot, appDataRoot);
+    symlinkSync(outside, stagingRoot, "junction");
+    const destinationPath = path.join(root, "Redirected-repair.ether");
+
+    await expect(
+      api().repairDocument(sourcePath, destinationPath, {
+        appDataRoot,
+        environment: environment(appDataRoot)
+      })
+    ).rejects.toThrow(/reparse|canonical|owned/i);
+    expect(existsSync(destinationPath)).toBe(false);
+    expect(readFileSync(sentinel, "utf8")).toBe("keep");
+    expect(readdirSync(outside)).toEqual(["keep.txt"]);
+  });
+
+  it("recognizes a published repair after interruption before journal cleanup", async () => {
+    const created = await createStore(sourcePath, appDataRoot);
+    await created.close();
+    const destinationPath = path.join(root, "Published-before-cleanup.ether");
+
+    await expect(
+      api().repairDocument(sourcePath, destinationPath, {
+        appDataRoot,
+        checkpoint: (name) => {
+          if (name === "committed") throw new Error("stop after repair publication");
+        },
+        environment: environment(appDataRoot)
+      })
+    ).rejects.toThrow("stop after repair publication");
+    expect(existsSync(destinationPath)).toBe(true);
+
+    const source = (await documentPackage.DocumentStore.open(sourcePath, {
+      access: "read-only"
+    })) as Task6Store;
+    stores.push(source);
+    await expect(api().reconcileStaging(source, { appDataRoot })).resolves.toMatchObject({
+      recovered: [expect.stringMatching(/^repair-/)],
+      removed: []
+    });
+    const published = (await documentPackage.DocumentStore.open(destinationPath, {
+      access: "read-only"
+    })) as Task6Store;
+    stores.push(published);
+    expect(published.dirty).toBe(true);
+  });
+
   it("repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses", async () => {
     const store = await createStore(sourcePath, appDataRoot);
     stores.push(store);
@@ -582,6 +690,7 @@ describe("Ether AppData recovery and logical repair", () => {
     headerDatabase.close();
     const repaired = (await documentPackage.DocumentStore.open(destinationPath, { access: "read-only" })) as Task6Store;
     stores.push(repaired);
+    expect(repaired.dirty).toBe(true);
     await expect(repaired.read(({ artifacts }) => artifacts.get("artifact-good"))).resolves.toMatchObject({ id: "artifact-good" });
     await expect(repaired.read(({ artifacts }) => artifacts.get("artifact-bad"))).resolves.toBeUndefined();
     await expect(repaired.read(({ graphs }) => graphs.list())).resolves.toEqual([

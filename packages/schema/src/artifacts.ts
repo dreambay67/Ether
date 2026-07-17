@@ -64,11 +64,12 @@ export type LinkedReference = z.infer<typeof LinkedReferenceSchema>;
 export const RecoveryJournalEntrySchema = z
   .object({
     id: z.string().min(1),
-    kind: z.enum(["blob-import", "provider-output"]),
+    kind: z.enum(["blob-import", "document-repair", "provider-output"]),
     state: z.enum(["staged", "validated", "publishing", "committed", "failed"]),
     documentId: z.string().min(1),
     documentPath: z.string().min(1),
     stagedPath: z.string().min(1),
+    destinationPath: z.string().min(1).optional(),
     sourceName: z.string().min(1),
     mediaType: z.string().min(1),
     artifact: ArtifactSchema.omit({ contentKey: true, byteLength: true }).optional(),
@@ -84,6 +85,13 @@ export const RecoveryJournalEntrySchema = z
         code: "custom",
         message: "Provider recovery requires catalog artifact metadata.",
         path: ["artifact"]
+      });
+    }
+    if (entry.kind === "document-repair" && entry.destinationPath === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Document repair recovery requires its publication destination.",
+        path: ["destinationPath"]
       });
     }
   });

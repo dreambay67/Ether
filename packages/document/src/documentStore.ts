@@ -170,6 +170,33 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
+function readPersistedDirtyState(database: DatabaseSync): boolean {
+  const ownsTransaction = !database.isTransaction;
+  if (ownsTransaction) database.exec("BEGIN DEFERRED");
+  try {
+    const row = database
+      .prepare("SELECT dirty FROM document_state WHERE singleton = 1")
+      .get() as { dirty: number } | undefined;
+    if (row === undefined || (row.dirty !== 0 && row.dirty !== 1)) {
+      throw new DocumentStoreError(
+        "MISSING_DOCUMENT_STATE",
+        "Document dirty state is missing or invalid."
+      );
+    }
+    if (ownsTransaction) database.exec("COMMIT");
+    return row.dirty === 1;
+  } catch (error) {
+    if (ownsTransaction) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Preserve the state read error.
+      }
+    }
+    throw error;
+  }
+}
+
 function sqliteProbe(database: DatabaseSync): void {
   database.exec("BEGIN IMMEDIATE");
   database.exec("ROLLBACK");
@@ -217,6 +244,7 @@ export class DocumentStore {
   private closePromise: Promise<void> | undefined;
   private closed = false;
   private currentDocumentId: string;
+  private currentDirty: boolean;
   private currentMode: DocumentStoreMode;
   private currentPath: string;
 
@@ -229,6 +257,7 @@ export class DocumentStore {
     runtime: DocumentStoreRuntime;
   }) {
     this.database = options.database;
+    this.currentDirty = readPersistedDirtyState(options.database);
     this.currentDocumentId = options.documentId;
     this.writerLease = options.lease;
     this.currentMode = options.mode;
@@ -387,7 +416,7 @@ export class DocumentStore {
   }
 
   get dirty(): boolean {
-    return false;
+    return this.currentDirty;
   }
 
   get documentId(): string {
@@ -713,7 +742,9 @@ export class DocumentStore {
           "Document repository callbacks must complete synchronously."
         );
       }
+      const dirty = readPersistedDirtyState(this.database);
       this.database.exec("COMMIT");
+      this.currentDirty = dirty;
       return result;
     } catch (error) {
       try {
@@ -761,7 +792,9 @@ export class DocumentStore {
           "Internal repository callbacks must complete synchronously."
         );
       }
+      const dirty = readPersistedDirtyState(this.database);
       this.database.exec("COMMIT");
+      this.currentDirty = dirty;
       return result;
     } catch (error) {
       try {
@@ -808,6 +841,7 @@ export class DocumentStore {
     this.database.close();
     const connection = openEtherDocumentConnection(this.currentPath, true);
     this.database = connection.database;
+    this.currentDirty = readPersistedDirtyState(this.database);
     this.currentMode = { kind: "read-only", reason };
   }
 

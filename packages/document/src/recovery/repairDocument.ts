@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { open, rename } from "node:fs/promises";
 import path from "node:path";
 import type {
   Artifact,
@@ -7,7 +8,8 @@ import type {
   GraphOperation,
   NodeOutputVersion,
   PayloadEnvelope,
-  PreparedGraphCommit
+  PreparedGraphCommit,
+  RecoveryJournalEntry
 } from "@ether/schema";
 
 import { importBlob } from "../blob/importBlob.js";
@@ -18,7 +20,13 @@ import {
   DOCUMENT_STORE_RECOVERY_OPEN,
   type DocumentStoreEnvironment
 } from "../documentStore.js";
-import { resolveRecoveryRoots } from "./recoveryJournal.js";
+import {
+  ensureOwnedRecoveryDirectory,
+  removeOwnedStagingPath,
+  removeRecoveryJournal,
+  resolveRecoveryRoots,
+  writeRecoveryJournal
+} from "./recoveryJournal.js";
 import { BLOB_CHUNK_SIZE } from "../repositories/blobs.js";
 import type { ArtifactRepairMetadata } from "../repositories/artifacts.js";
 
@@ -198,24 +206,55 @@ export async function repairDocument(
   options: {
     allowLossy?: boolean;
     appDataRoot?: string;
+    checkpoint?: (name: string) => void;
     environment?: DocumentStoreEnvironment;
   } = {}
 ): Promise<RepairReport> {
   const absoluteSource = path.resolve(sourcePath);
   const absoluteDestination = path.resolve(destinationPath);
+  if (absoluteSource === absoluteDestination) {
+    throw new RepairDocumentError("INVALID_REPAIR_DESTINATION", "Repair requires a new file path.");
+  }
+  if (existsSync(absoluteDestination)) {
+    throw new RepairDocumentError(
+      "REPAIR_DESTINATION_EXISTS",
+      "Repair never replaces an existing destination."
+    );
+  }
   const roots = resolveRecoveryRoots(options.appDataRoot);
   const repairId = `repair-${randomUUID()}`;
   const stagingDirectory = path.join(roots.stagingRoot, "repair", repairId);
-  await mkdir(stagingDirectory, { recursive: true });
+  const stagedDestination = path.join(stagingDirectory, "repaired.ether");
   const losses: RepairLoss[] = [];
   const recovered = { artifacts: 0, blobs: 0, graphs: 0, references: 0 };
   const source = await DocumentStore[DOCUMENT_STORE_RECOVERY_OPEN](
     absoluteSource,
     options.environment
   );
+  const timestamp = new Date().toISOString();
+  let journalEntry: RecoveryJournalEntry = {
+    id: repairId,
+    kind: "document-repair" as const,
+    state: "staged" as const,
+    documentId: source.documentId,
+    documentPath: absoluteSource,
+    stagedPath: stagingDirectory,
+    destinationPath: absoluteDestination,
+    sourceName: path.basename(absoluteSource),
+    mediaType: "application/vnd.dreambay.ether",
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+  let journalPath: string | undefined;
   let destination: DocumentStore | undefined;
-  let destinationCreated = false;
   try {
+    journalPath = writeRecoveryJournal({
+      appDataRoot: roots.appDataRoot,
+      entry: journalEntry
+    });
+    options.checkpoint?.("journal-created");
+    ensureOwnedRecoveryDirectory(stagingDirectory, roots.appDataRoot);
+    options.checkpoint?.("staging-created");
     const snapshot = await source[DOCUMENT_STORE_INTERNAL]("read", (repositories) => {
       const artifacts = repositories.artifacts.list();
       return {
@@ -229,7 +268,7 @@ export async function repairDocument(
       };
     });
     const graphPlan = planGraphRecovery(snapshot.graphs, losses);
-    destination = await DocumentStore.create(absoluteDestination, {
+    destination = await DocumentStore.create(stagedDestination, {
       appVersion: "4.0.0",
       documentId: randomUUID(),
       environment: options.environment,
@@ -237,7 +276,7 @@ export async function repairDocument(
       initialGraph: graphPlan.initialGraph,
       title: snapshot.header.title
     });
-    destinationCreated = true;
+    options.checkpoint?.("destination-created");
     if (graphPlan.forward.length > 0) {
       const head = await destination.read(({ revisions }) => revisions.head());
       const commit: PreparedGraphCommit = {
@@ -339,7 +378,7 @@ export async function repairDocument(
           reason: error instanceof Error ? error.message : "Blob validation failed."
         });
       } finally {
-        await rm(stagedPath, { force: true });
+        removeOwnedStagingPath(stagedPath, roots.appDataRoot);
       }
     }
 
@@ -479,8 +518,34 @@ export async function repairDocument(
         `Repair found ${losses.length} logical row loss(es); pass allowLossy to create a partial copy.`
       );
     }
+    await destination[DOCUMENT_STORE_INTERNAL]("write", ({ revisions }) =>
+      revisions.markDirty()
+    );
     await destination.close();
     destination = undefined;
+    journalEntry = {
+      ...journalEntry,
+      state: "publishing",
+      updatedAt: new Date().toISOString()
+    };
+    writeRecoveryJournal({ appDataRoot: roots.appDataRoot, entry: journalEntry });
+    options.checkpoint?.("publishing");
+    if (existsSync(absoluteDestination)) {
+      throw new RepairDocumentError(
+        "REPAIR_DESTINATION_EXISTS",
+        "Repair destination appeared before publication."
+      );
+    }
+    await rename(stagedDestination, absoluteDestination);
+    journalEntry = {
+      ...journalEntry,
+      state: "committed",
+      updatedAt: new Date().toISOString()
+    };
+    writeRecoveryJournal({ appDataRoot: roots.appDataRoot, entry: journalEntry });
+    options.checkpoint?.("committed");
+    removeOwnedStagingPath(stagingDirectory, roots.appDataRoot);
+    removeRecoveryJournal(journalPath, roots.appDataRoot);
     return {
       destinationPath: absoluteDestination,
       losses,
@@ -489,10 +554,20 @@ export async function repairDocument(
     };
   } catch (error) {
     await destination?.close();
-    if (destinationCreated) await rm(absoluteDestination, { force: true });
+    if (journalPath !== undefined) {
+      journalEntry = {
+        ...journalEntry,
+        state: "failed",
+        updatedAt: new Date().toISOString()
+      };
+      try {
+        writeRecoveryJournal({ appDataRoot: roots.appDataRoot, entry: journalEntry });
+      } catch {
+        // Preserve the original repair failure and any durable journal already present.
+      }
+    }
     throw error;
   } finally {
     await source.close();
-    await rm(stagingDirectory, { recursive: true, force: true });
   }
 }

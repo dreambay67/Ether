@@ -382,6 +382,37 @@ describe("Ether embedded blobs and linked references", () => {
     expect([first.deduplicated, second.deduplicated].sort()).toEqual([false, true]);
   });
 
+  it("rejects incompatible media metadata while an identical blob import is pending", async () => {
+    const store = await createStore(filePath, appDataRoot);
+    stores.push(store);
+    const sourcePath = path.join(root, "pending-media.png");
+    const bytes = pngBytes(CHUNK_SIZE * 2 + 17, 0x3a);
+    writeFileSync(sourcePath, bytes);
+
+    const [png, octetStream] = await Promise.allSettled([
+      api().importBlob(store, { sourcePath, mediaType: "image/png" }, { appDataRoot }),
+      api().importBlob(
+        store,
+        { sourcePath, mediaType: "application/octet-stream" },
+        { appDataRoot }
+      )
+    ]);
+
+    const fulfilled = [png, octetStream].filter(
+      (result): result is PromiseFulfilledResult<BlobImportResult> => result.status === "fulfilled"
+    );
+    const rejected = [png, octetStream].filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(fulfilled[0]?.value).toMatchObject({ contentKey: sha256(bytes) });
+    expect(fulfilled[0]?.value.mediaType).toBe(
+      png.status === "fulfilled" ? "image/png" : "application/octet-stream"
+    );
+    expect(rejected[0]?.reason).toMatchObject({ code: "CORRUPT_DEDUPLICATE" });
+  });
+
   it("keeps a partially published chunk import invisible and safely reclaimable", async () => {
     const store = await createStore(filePath, appDataRoot);
     stores.push(store);

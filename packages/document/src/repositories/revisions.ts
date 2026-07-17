@@ -422,7 +422,16 @@ export class RevisionRepository {
     for (const [graphId, graphRevisionId] of Object.entries(head.graphRevisions)) {
       statement.run(id, graphId, graphRevisionId);
     }
+    this.context.database
+      .prepare("UPDATE document_state SET dirty = 0 WHERE singleton = 1")
+      .run();
     return { id, members: head.graphRevisions };
+  }
+
+  markDirty(): void {
+    this.context.database
+      .prepare("UPDATE document_state SET dirty = 1 WHERE singleton = 1")
+      .run();
   }
 
   listMilestones(): Array<{
@@ -722,7 +731,7 @@ export class RevisionRepository {
   private setDocumentHead(documentRevisionId: string): void {
     this.context.database
       .prepare(
-        "UPDATE document_state SET current_document_revision_id = ?, dirty = 0 WHERE singleton = 1"
+        "UPDATE document_state SET current_document_revision_id = ?, dirty = 1 WHERE singleton = 1"
       )
       .run(documentRevisionId);
   }

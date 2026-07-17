@@ -146,8 +146,8 @@ export class BlobRepository {
   }): "owner" | "pending" | "ready" {
     const contentKey = ContentKeySchema.parse(input.contentKey).toLowerCase();
     const existing = this.context.database
-      .prepare("SELECT status FROM blobs WHERE content_key = ?")
-      .get(contentKey) as { status: BlobRow["status"] } | undefined;
+      .prepare("SELECT status, byte_length, media_type FROM blobs WHERE content_key = ?")
+      .get(contentKey) as Pick<BlobRow, "byte_length" | "media_type" | "status"> | undefined;
     if (existing?.status === "ready") {
       this.verifyReady(contentKey, {
         byteLength: input.byteLength,
@@ -155,7 +155,18 @@ export class BlobRepository {
       });
       return "ready";
     }
-    if (existing?.status === "importing") return "pending";
+    if (existing?.status === "importing") {
+      if (
+        existing.byte_length !== input.byteLength ||
+        existing.media_type !== input.mediaType
+      ) {
+        throw new BlobRepositoryError(
+          "CORRUPT_DEDUPLICATE",
+          "Pending deduplication metadata does not match the staged content."
+        );
+      }
+      return "pending";
+    }
     const now = this.context.now();
     if (existing === undefined) {
       this.context.database

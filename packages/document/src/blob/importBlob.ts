@@ -179,10 +179,18 @@ function artifactFor(input: ImportBlobInput, staged: StagedBlob): Artifact | und
   });
 }
 
-async function waitForReadyBlob(store: DocumentStore, contentKey: string): Promise<BlobRecord> {
+async function waitForReadyBlob(
+  store: DocumentStore,
+  contentKey: string,
+  expected: { byteLength: number; mediaType: string }
+): Promise<BlobRecord> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
     const record = await store.read(({ blobs }) => blobs.get(contentKey));
-    if (record !== undefined) return record;
+    if (record !== undefined) {
+      return store[DOCUMENT_STORE_INTERNAL]("read", ({ blobs }) =>
+        blobs.verifyReady(contentKey, expected)
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new BlobImportError("IMPORT_BUSY", "Another import did not finish in time.");
@@ -233,7 +241,10 @@ export async function importBlob(
             mediaType: staged.mediaType
           })
         )
-      : await waitForReadyBlob(store, staged.contentKey);
+      : await waitForReadyBlob(store, staged.contentKey, {
+          byteLength: staged.byteLength,
+          mediaType: staged.mediaType
+        });
     if (ready === undefined) {
       throw new BlobImportError("IMPORT_NOT_VISIBLE", "Deduplicated blob is not ready.");
     }

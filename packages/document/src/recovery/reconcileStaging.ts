@@ -1,10 +1,13 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 
 import { importBlob } from "../blob/importBlob.js";
+import { openEtherDocumentConnection } from "../database.js";
 import { DOCUMENT_STORE_INTERNAL, type DocumentStore } from "../documentStore.js";
 import {
   assertAppDataOwnedPath,
   assertDestructiveRecoveryPath,
+  ensureOwnedRecoveryDirectory,
   listRecoveryJournalPaths,
   quarantineRecoveryPath,
   readRecoveryJournal,
@@ -33,6 +36,7 @@ export async function reconcileStaging(
   options: { appDataRoot?: string } = {}
 ): Promise<ReconcileStagingResult> {
   const roots = resolveRecoveryRoots(options.appDataRoot);
+  ensureOwnedRecoveryDirectory(roots.stagingRoot, roots.appDataRoot);
   const result: ReconcileStagingResult = {
     attention: [],
     quarantined: [],
@@ -64,7 +68,11 @@ export async function reconcileStaging(
     }
 
     try {
-      assertDestructiveRecoveryPath(entry.stagedPath, roots.stagingRoot);
+      assertDestructiveRecoveryPath(
+        entry.stagedPath,
+        roots.stagingRoot,
+        roots.appDataRoot
+      );
     } catch {
       result.attention.push(entry.id);
       continue;
@@ -80,6 +88,35 @@ export async function reconcileStaging(
         removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
         removeRecoveryJournal(journalPath, roots.appDataRoot);
         result.removed.push(entry.id);
+      } catch {
+        writeRecoveryJournal({
+          appDataRoot: roots.appDataRoot,
+          entry: { ...entry, state: "failed", updatedAt: new Date().toISOString() }
+        });
+        result.attention.push(entry.id);
+      }
+      continue;
+    }
+
+    if (entry.kind === "document-repair") {
+      try {
+        if (
+          entry.destinationPath !== undefined &&
+          existsSync(entry.destinationPath)
+        ) {
+          const published = openEtherDocumentConnection(entry.destinationPath, true);
+          published.database.close();
+          if (existsSync(entry.stagedPath)) {
+            removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
+          }
+          result.recovered.push(entry.id);
+        } else if (existsSync(entry.stagedPath)) {
+          removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
+          result.removed.push(entry.id);
+        } else {
+          result.removed.push(entry.id);
+        }
+        removeRecoveryJournal(journalPath, roots.appDataRoot);
       } catch {
         writeRecoveryJournal({
           appDataRoot: roots.appDataRoot,
@@ -119,6 +156,7 @@ export async function reconcileStaging(
         },
         { appDataRoot: roots.appDataRoot }
       );
+      await store[DOCUMENT_STORE_INTERNAL]("write", ({ revisions }) => revisions.markDirty());
       removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
       removeRecoveryJournal(journalPath, roots.appDataRoot);
       result.recovered.push(entry.id);
