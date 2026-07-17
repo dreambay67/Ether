@@ -41,8 +41,12 @@ import {
   recordReplacementRollback,
   type ReplacementRecoveryJournal
 } from "./recovery.js";
+import { reconcileStaging } from "./recovery/reconcileStaging.js";
 import { createRepositoryContext, GraphRepository } from "./repositories/graphs.js";
+import { ArtifactRepository } from "./repositories/artifacts.js";
+import { BlobRepository } from "./repositories/blobs.js";
 import { OutputRepository } from "./repositories/outputs.js";
+import { ReferenceRepository } from "./repositories/references.js";
 import {
   type CommitResult,
   DocumentRepositoryError,
@@ -76,6 +80,8 @@ export interface OpenDocumentStoreOptions {
 }
 
 export interface ReadDocumentRepositories {
+  artifacts: Pick<ArtifactRepository, "get" | "list">;
+  blobs: Pick<BlobRepository, "get" | "list" | "readParts">;
   graphs: Pick<GraphRepository, "get" | "list">;
   outputs: Pick<OutputRepository, "getPayload" | "getVersion">;
   revisions: Pick<
@@ -88,9 +94,15 @@ export interface ReadDocumentRepositories {
     | "listMilestones"
   >;
   settings: Pick<SettingsRepository, "getHeader" | "getLiveOutput">;
+  references: Pick<ReferenceRepository, "get" | "list">;
 }
 
 export interface DocumentRepositories extends ReadDocumentRepositories {
+  artifacts: Pick<ArtifactRepository, "attach" | "get" | "list">;
+  blobs: Pick<
+    BlobRepository,
+    "beginImport" | "finalize" | "get" | "list" | "readParts" | "removeIncomplete" | "writeChunk" | "writeInline"
+  >;
   outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert">;
   revisions: Pick<
     RevisionRepository,
@@ -109,13 +121,17 @@ export interface DocumentRepositories extends ReadDocumentRepositories {
     SettingsRepository,
     "getHeader" | "getLiveOutput" | "setFeatureFlag" | "setLiveOutput" | "setTitle"
   >;
+  references: Pick<ReferenceRepository, "get" | "list" | "put">;
 }
 
 interface InternalDocumentRepositories {
+  artifacts: ArtifactRepository;
+  blobs: BlobRepository;
   graphs: GraphRepository;
   outputs: OutputRepository;
   revisions: RevisionRepository;
   settings: SettingsRepository;
+  references: ReferenceRepository;
 }
 
 interface RepositoryScope<T> {
@@ -325,7 +341,7 @@ export class DocumentStore {
         runtime
       });
     }
-    return new DocumentStore({
+    const store = new DocumentStore({
       database: connection.database,
       documentId: connection.inspection.document.documentId,
       lease: acquisition.lease,
@@ -333,6 +349,13 @@ export class DocumentStore {
       path: absolutePath,
       runtime
     });
+    try {
+      await reconcileStaging(store, { appDataRoot: path.dirname(runtime.recoveryRoot) });
+      return store;
+    } catch (error) {
+      await store.close();
+      throw error;
+    }
   }
 
   get dirty(): boolean {
@@ -405,6 +428,21 @@ export class DocumentStore {
     });
   }
 
+  rebuildDerivedIndexes(): Promise<void> {
+    return this.transaction(() => {
+      this.database.exec("REINDEX");
+      for (const table of [
+        "prompt_output_fts",
+        "artifact_fts",
+        "tag_fts",
+        "run_fts",
+        "metadata_fts"
+      ]) {
+        this.database.exec(`INSERT INTO ${table}(${table}) VALUES('optimize')`);
+      }
+    });
+  }
+
   saveCopy(destinationPath: string): Promise<{ documentId: string; path: string }> {
     return this.enqueue(() => this.saveBackup(destinationPath, false));
   }
@@ -439,10 +477,13 @@ export class DocumentStore {
     const context = createRepositoryContext(this.database);
     const graphs = new GraphRepository(context);
     return {
+      artifacts: new ArtifactRepository(context),
+      blobs: new BlobRepository(context),
       graphs,
       outputs: new OutputRepository(context),
       revisions: new RevisionRepository(context, graphs),
-      settings: new SettingsRepository(context)
+      settings: new SettingsRepository(context),
+      references: new ReferenceRepository(context)
     };
   }
 
@@ -463,6 +504,16 @@ export class DocumentStore {
         active = false;
       },
       repositories: {
+        artifacts: {
+          get: (id) => invoke(() => repositories.artifacts.get(id)),
+          list: () => invoke(() => repositories.artifacts.list())
+        },
+        blobs: {
+          get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
+          list: () => invoke(() => repositories.blobs.list()),
+          readParts: (contentKey, start, endExclusive) =>
+            invoke(() => repositories.blobs.readParts(contentKey, start, endExclusive))
+        },
         graphs: {
           get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
           list: () => invoke(() => repositories.graphs.list())
@@ -483,6 +534,10 @@ export class DocumentStore {
         settings: {
           getHeader: () => invoke(() => repositories.settings.getHeader()),
           getLiveOutput: () => invoke(() => repositories.settings.getLiveOutput())
+        },
+        references: {
+          get: (id) => invoke(() => repositories.references.get(id)),
+          list: () => invoke(() => repositories.references.list())
         }
       }
     };
@@ -501,6 +556,26 @@ export class DocumentStore {
       return operation();
     };
     const facade: DocumentRepositories = {
+      artifacts: {
+        get: (id) => invoke(() => repositories.artifacts.get(id)),
+        list: () => invoke(() => repositories.artifacts.list()),
+        attach: (artifact) => invoke(() => repositories.artifacts.attach(artifact))
+      },
+      blobs: {
+        beginImport: (input) => invoke(() => repositories.blobs.beginImport(input)),
+        finalize: (importId, contentKey, chunkCount) =>
+          invoke(() => repositories.blobs.finalize(importId, contentKey, chunkCount)),
+        get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
+        list: () => invoke(() => repositories.blobs.list()),
+        readParts: (contentKey, start, endExclusive) =>
+          invoke(() => repositories.blobs.readParts(contentKey, start, endExclusive)),
+        removeIncomplete: (contentKey) =>
+          invoke(() => repositories.blobs.removeIncomplete(contentKey)),
+        writeChunk: (importId, contentKey, chunk, data) =>
+          invoke(() => repositories.blobs.writeChunk(importId, contentKey, chunk, data)),
+        writeInline: (importId, contentKey, data) =>
+          invoke(() => repositories.blobs.writeInline(importId, contentKey, data))
+      },
       graphs: {
         get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
         list: () => invoke(() => repositories.graphs.list())
@@ -531,6 +606,11 @@ export class DocumentStore {
           invoke(() => repositories.settings.setFeatureFlag(name, enabled)),
         setLiveOutput: (settings) => invoke(() => repositories.settings.setLiveOutput(settings)),
         setTitle: (title) => invoke(() => repositories.settings.setTitle(title))
+      },
+      references: {
+        get: (id) => invoke(() => repositories.references.get(id)),
+        list: () => invoke(() => repositories.references.list()),
+        put: (reference) => invoke(() => repositories.references.put(reference))
       }
     };
     return {

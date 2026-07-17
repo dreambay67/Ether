@@ -366,12 +366,15 @@ CREATE TABLE blob_imports (
 CREATE TABLE linked_references (
   reference_id TEXT PRIMARY KEY,
   content_key TEXT REFERENCES blobs(content_key) ON DELETE SET NULL,
+  preview_content_key TEXT REFERENCES blobs(content_key) ON DELETE SET NULL,
   display_name TEXT NOT NULL,
   original_path TEXT,
   path_grant_id TEXT,
   expected_hash TEXT,
   media_type TEXT NOT NULL,
   state TEXT NOT NULL CHECK (state IN ('linked', 'embedded', 'missing', 'relinking')),
+  identity_json TEXT CHECK (identity_json IS NULL OR json_valid(identity_json)),
+  fingerprint_json TEXT NOT NULL CHECK (json_valid(fingerprint_json)),
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -381,7 +384,11 @@ CREATE TABLE artifacts (
   artifact_id TEXT PRIMARY KEY,
   content_key TEXT REFERENCES blobs(content_key) ON DELETE RESTRICT,
   kind TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT 'data',
   media_type TEXT NOT NULL,
+  byte_length INTEGER NOT NULL DEFAULT 0 CHECK (byte_length >= 0),
+  source_output_version_id TEXT NOT NULL DEFAULT '',
+  source_payload_id TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
@@ -633,6 +640,7 @@ CREATE INDEX attempts_provider_run_ownership_idx
   ON attempts(provider_run_id, work_item_id, attempt_id);
 CREATE INDEX blob_imports_content_key_idx ON blob_imports(content_key);
 CREATE INDEX linked_references_content_key_idx ON linked_references(content_key);
+CREATE INDEX linked_references_preview_content_key_idx ON linked_references(preview_content_key);
 CREATE INDEX artifacts_content_key_idx ON artifacts(content_key);
 CREATE INDEX artifact_lineage_parent_idx ON artifact_lineage(parent_artifact_id);
 CREATE INDEX artifact_lineage_output_version_idx ON artifact_lineage(source_output_version_id);

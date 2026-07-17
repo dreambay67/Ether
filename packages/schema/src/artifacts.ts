@@ -25,6 +25,61 @@ export const ArtifactSchema = z
   .strict();
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
+export const ReferenceFileIdentitySchema = z
+  .object({
+    platform: z.string().min(1),
+    device: z.string().min(1),
+    fileId: z.string().min(1)
+  })
+  .strict();
+export type ReferenceFileIdentity = z.infer<typeof ReferenceFileIdentitySchema>;
+
+export const ReferenceFingerprintSchema = z
+  .object({
+    byteLength: z.number().int().nonnegative(),
+    modifiedAt: z.number().nonnegative(),
+    sampleSha256: ContentKeySchema
+  })
+  .strict();
+export type ReferenceFingerprint = z.infer<typeof ReferenceFingerprintSchema>;
+
+export const LinkedReferenceSchema = z
+  .object({
+    id: z.string().min(1),
+    displayName: z.string().min(1),
+    mediaType: z.string().min(1),
+    state: z.enum(["linked", "embedded", "missing", "relinking"]),
+    originalPath: z.string().min(1).nullable(),
+    pathGrantId: z.string().min(1).nullable(),
+    contentKey: ContentKeySchema.nullable(),
+    previewContentKey: ContentKeySchema.nullable(),
+    identity: ReferenceFileIdentitySchema.nullable(),
+    fingerprint: ReferenceFingerprintSchema,
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema
+  })
+  .strict();
+export type LinkedReference = z.infer<typeof LinkedReferenceSchema>;
+
+export const RecoveryJournalEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(["blob-import", "provider-output"]),
+    state: z.enum(["staged", "validated", "publishing", "committed", "failed"]),
+    documentId: z.string().min(1),
+    documentPath: z.string().min(1),
+    stagedPath: z.string().min(1),
+    sourceName: z.string().min(1),
+    mediaType: z.string().min(1),
+    artifact: ArtifactSchema.omit({ contentKey: true, byteLength: true }).optional(),
+    contentKey: ContentKeySchema.optional(),
+    byteLength: z.number().int().nonnegative().optional(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema
+  })
+  .strict();
+export type RecoveryJournalEntry = z.infer<typeof RecoveryJournalEntrySchema>;
+
 export const ArtifactLineageSchema = z
   .object({
     id: z.string().min(1),
