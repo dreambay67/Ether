@@ -12,7 +12,8 @@ import {
   nodeDefinitions,
   payloadChannels,
   connectionRoles,
-  resolveAdapter
+  resolveAdapter,
+  validateConnection
 } from "../../graph-kernel/src/index.js";
 
 function matrixPayload(row: { key: string; targetChannel: PayloadEnvelope["channel"]; role: PayloadEnvelope["role"] }): PayloadEnvelope {
@@ -102,6 +103,46 @@ describe("Ether 4.0 exhaustive connection matrix", () => {
     }
     expect(connectionMatrixHash(rows)).toBe("ether-matrix-v1:603a2c5521278897");
     expect(connectionMatrixHash(rows)).toBe(connectionMatrixHash(enumerateExplicitAdapterMatrix()));
+  }, 30_000);
+
+  it("rejects every supported channel pairing outside each adapter's declared pair", () => {
+    const sourceByChannel = new Map(payloadChannels.map((channel) => [
+      channel,
+      nodeDefinitions.find((definition) => definition.library.outputChannels.includes(channel))!
+    ]));
+    const targetByChannel = new Map(payloadChannels.map((channel) => [
+      channel,
+      nodeDefinitions.find((definition) => definition.library.inputChannels.includes(channel))!
+    ]));
+    const rows: Array<{ key: string; decision: ReturnType<typeof validateConnection> }> = [];
+
+    for (const adapter of adapterDefinitions) {
+      for (const sourceChannel of payloadChannels) {
+        for (const targetChannel of payloadChannels) {
+          if (sourceChannel === adapter.fromChannel && targetChannel === adapter.toChannel) continue;
+          const source = sourceByChannel.get(sourceChannel)!;
+          const target = targetByChannel.get(targetChannel)!;
+          for (const role of connectionRoles) {
+            rows.push({
+              key: `${adapter.id}|${source.id}|${sourceChannel}|${target.id}|${targetChannel}|${role}`,
+              decision: validateConnection({
+                sourceDefinitionId: source.id,
+                sourceChannel,
+                targetDefinitionId: target.id,
+                targetChannel,
+                role,
+                adapter: { kind: "explicit", adapterId: adapter.id },
+                capabilities: FULL_ADAPTER_CAPABILITIES
+              })
+            });
+          }
+        }
+      }
+    }
+
+    expect(rows).toHaveLength(adapterDefinitions.length * (payloadChannels.length ** 2 - 1) * connectionRoles.length);
+    expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
+    expect(rows.every((row) => !row.decision.allowed && row.decision.code === "ADAPTER_UNAVAILABLE")).toBe(true);
   }, 30_000);
 
   it("contains only the bounded adapter graph and never invents generation or masking", () => {

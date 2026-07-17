@@ -381,7 +381,7 @@ describe("registry-backed recipe semantics", () => {
 describe("connections and typed remedies", () => {
   it("accepts valid lanes, rejects exact canonical duplicates, and permits distinct selectors", () => {
     const first = edge("edge-1", "source", "target", "subject");
-    const duplicate = { ...first, id: "edge-2", order: 99, enabled: false, adapter: { kind: "explicit" as const, adapterId: "local.data-to-text" } };
+    const duplicate = { ...first, id: "edge-2", order: 99, enabled: false, adapter: { kind: "auto" as const } };
     expect(canonicalConnectionIdentity(first)).toBe(canonicalConnectionIdentity(duplicate));
 
     const rejected = validateConnection({
@@ -413,6 +413,41 @@ describe("connections and typed remedies", () => {
     }))).not.toThrow();
   });
 
+  it("rejects an explicit adapter declared for another channel pair", () => {
+    const decision = validateConnection({
+      sourceDefinitionId: "prompt.text",
+      sourceChannel: "text",
+      targetDefinitionId: "prompt.worker",
+      targetChannel: "text",
+      role: "subject",
+      adapter: { kind: "explicit", adapterId: "codex.image-to-text" },
+      capabilities: FULL_ADAPTER_CAPABILITIES
+    });
+
+    expect(decision).toEqual(expect.objectContaining({
+      allowed: false,
+      code: "ADAPTER_UNAVAILABLE"
+    }));
+    expect(() => ConnectionDecisionSchema.parse(decision)).not.toThrow();
+  });
+
+  it("rejects an unknown explicit adapter id", () => {
+    const decision = validateConnection({
+      sourceDefinitionId: "prompt.text",
+      sourceChannel: "text",
+      targetDefinitionId: "prompt.worker",
+      targetChannel: "text",
+      role: "subject",
+      adapter: { kind: "explicit", adapterId: "missing.adapter" },
+      capabilities: FULL_ADAPTER_CAPABILITIES
+    });
+
+    expect(decision).toEqual(expect.objectContaining({
+      allowed: false,
+      code: "ADAPTER_UNAVAILABLE"
+    }));
+    expect(() => ConnectionDecisionSchema.parse(decision)).not.toThrow();
+  });
   it("returns operational remedies when a declared capability is absent", () => {
     const decision = validateConnection({
       sourceDefinitionId: "reference.set", sourceChannel: "image",

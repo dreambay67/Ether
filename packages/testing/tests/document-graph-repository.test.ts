@@ -326,6 +326,48 @@ describe("transactional Ether document repositories", () => {
     }
   });
 
+  it("rejects an invalid explicit adapter before persistence and reopens the unchanged graph", async () => {
+    const initial = graph("explicit-adapter", "root", [promptNode("source", "Source"), promptNode("target", "Target")]);
+    const file = path.join(root, "Explicit-adapter.ether");
+    const store = await storeClass().create(file, {
+      appVersion: "4.0.0", documentId: "explicit-adapter", initialGraph: initial, title: "Explicit adapter"
+    });
+    const invalidEdge: EtherGraph["edges"][number] = {
+      id: "invalid-explicit-adapter",
+      from: { kind: "node", nodeId: "source", channel: "text" },
+      to: { kind: "node", nodeId: "target", channel: "text" },
+      role: "general",
+      order: 0,
+      selector: { kind: "latest" },
+      adapter: { kind: "explicit", adapterId: "codex.image-to-text" },
+      enabled: true
+    };
+
+    try {
+      const head = await store.read(({ revisions }) => revisions.head());
+      const invalid = { ...initial, edges: [invalidEdge] };
+      await expect(store.transaction(({ revisions }) => revisions.commit({
+        id: "invalid-explicit-adapter-commit",
+        baseDocumentRevisionId: head.documentRevisionId,
+        baseGraphRevisions: head.graphRevisions,
+        title: "Invalid explicit adapter",
+        actor: "user",
+        graphSnapshots: [invalid],
+        forwardOperations: [{ type: "addEdge", graphId: initial.id, edge: invalidEdge }],
+        inverseOperations: [{ type: "removeEdge", graphId: initial.id, edgeId: invalidEdge.id }]
+      }))).rejects.toMatchObject({
+        code: "INVALID_GRAPH_SEMANTICS",
+        message: expect.stringContaining("ADAPTER_UNAVAILABLE")
+      });
+    } finally {
+      await store.close();
+    }
+
+    const reopened = await storeClass().open(file, { access: "read-only" });
+    await expect(reopened.read(({ graphs }) => graphs.get(initial.id))).resolves.toEqual(initial);
+    await reopened.close();
+  });
+
   it("persists temporary-looking authored text but rejects reserved tokens in typed graph references", async () => {
     const authoredInitial = graph("graph-authored", "root", [
       promptNode("prompt-literal", "$temp: keep this literal"),

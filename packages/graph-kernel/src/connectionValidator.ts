@@ -11,7 +11,7 @@ import {
   type OutputSelector,
   type PayloadChannel
 } from "@ether/schema";
-import { adapterCandidates, resolveAdapter } from "./adapters.js";
+import { adapterCandidates, adapterDefinitions, resolveAdapter } from "./adapters.js";
 import { nodeRegistry } from "./registry.js";
 
 export type ConnectionValidationInput = {
@@ -101,11 +101,33 @@ export function validateConnection(input: ConnectionValidationInput): Connection
     if (path !== null) return reject("CYCLE_NOT_ALLOWED", "The proposed connection would create an execution cycle.", [{ kind: "remove-cycle-edges", edgeIds: path.length > 0 ? path : [input.candidate.id] }]);
   }
   const capabilities = new Set(input.capabilities ?? []);
+  const selection = input.adapter ?? input.candidate?.adapter ?? { kind: "auto" as const };
+  if (selection.kind === "explicit") {
+    const explicit = adapterDefinitions.find((candidate) => candidate.id === selection.adapterId);
+    const candidates = adapterCandidates(sourceChannel, targetChannel);
+    if (explicit === undefined) {
+      return reject(
+        "ADAPTER_UNAVAILABLE",
+        `Unknown adapter ${selection.adapterId}.`,
+        candidates.length > 0
+          ? [{ kind: "choose-adapter", adapterIds: candidates.map((candidate) => candidate.id) }]
+          : [{ kind: "select-channel", endpoint: "target", channels: targetDefinition.library.inputChannels }]
+      );
+    }
+    if (explicit.fromChannel !== sourceChannel || explicit.toChannel !== targetChannel) {
+      return reject(
+        "ADAPTER_UNAVAILABLE",
+        `Adapter ${selection.adapterId} is not declared for this channel pair.`,
+        candidates.length > 0
+          ? [{ kind: "choose-adapter", adapterIds: candidates.map((candidate) => candidate.id) }]
+          : [{ kind: "select-channel", endpoint: "target", channels: targetDefinition.library.inputChannels }]
+      );
+    }
+  }
   let adapter = null;
   if (sourceChannel !== targetChannel) {
     const candidates = adapterCandidates(sourceChannel, targetChannel);
     if (candidates.length === 0) return reject("ADAPTER_UNAVAILABLE", `No declared adapter converts ${sourceChannel} to ${targetChannel}.`, [{ kind: "select-channel", endpoint: "target", channels: targetDefinition.library.inputChannels }]);
-    const selection = input.adapter ?? input.candidate?.adapter ?? { kind: "auto" as const };
     adapter = resolveAdapter(sourceChannel, targetChannel, selection, capabilities);
     if (adapter === null) {
       const explicit = selection.kind === "explicit" ? candidates.find((candidate) => candidate.id === selection.adapterId) : undefined;
