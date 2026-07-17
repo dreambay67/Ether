@@ -1,4 +1,5 @@
 import type { ConnectionRole, PayloadEnvelope } from "@ether/schema";
+import { canonicalEncodeStringList, sha256Hex } from "./lineageIdentity.js";
 
 export const roleCaptions: Record<ConnectionRole, string> = {
   general: "General", negative: "Negative", subject: "Subject", product: "Product", face: "Face",
@@ -6,20 +7,22 @@ export const roleCaptions: Record<ConnectionRole, string> = {
   lighting: "Lighting", colourPalette: "Colour Palette", typography: "Typography", motion: "Motion", timing: "Timing"
 };
 
-function shortHash(values: readonly string[]): string {
-  let hash = 2_166_136_261;
-  for (const character of values.join("\u001f")) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16_777_619) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+const LINEAGE_KEY_VERSION = "v2";
+
+function derivedLineageKey(kind: "empty" | "fanin", values: readonly string[]): string {
+  return `${kind}:${LINEAGE_KEY_VERSION}:sha256:${sha256Hex(canonicalEncodeStringList(values))}`;
 }
 
+/**
+ * Derived identities use `fanin:v2:sha256:<64 lowercase hex>` or
+ * `empty:v2:sha256:<64 lowercase hex>`. A single non-empty source lineage key
+ * remains unchanged so source identity preservation continues to work.
+ */
 export function deriveLineageKey(lanes: readonly { edgeId: string; payloads: readonly PayloadEnvelope[] }[]): string {
   const keys = [...new Set(lanes.flatMap((lane) => lane.payloads.map((payload) => payload.source.lineageKey)))].sort();
-  if (lanes.length === 1 && keys.length === 1) return keys[0]!;
-  if (keys.length === 0) return `empty:${shortHash(lanes.map((lane) => lane.edgeId).sort())}`;
-  return `fanin:${shortHash(keys)}`;
+  if (lanes.length === 1 && keys.length === 1 && keys[0]!.length > 0) return keys[0]!;
+  if (keys.length === 0) return derivedLineageKey("empty", lanes.map((lane) => lane.edgeId).sort());
+  return derivedLineageKey("fanin", keys);
 }
 
 export function numberDirectRoles<T extends { role: ConnectionRole; edgeId: string; order: number }>(lanes: readonly T[]): Array<T & { caption: string; ordinal: number }> {

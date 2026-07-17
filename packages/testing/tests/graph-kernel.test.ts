@@ -145,6 +145,13 @@ function payload(id: string, nodeId: string, versionId: string, value: string, l
   };
 }
 
+function lineageLanes(keys: readonly string[], prefix = "lineage") {
+  return keys.map((lineageKey, index) => ({
+    edgeId: `${prefix}-edge-${index}`,
+    payloads: [payload(`${prefix}-payload-${index}`, `${prefix}-source-${index}`, `${prefix}-version-${index}`, `value-${index}`, lineageKey)]
+  }));
+}
+
 function semanticRecipeFixture(): RecipeManifest {
   const source = promptNode("recipe-source");
   const target = workerNode("recipe-target");
@@ -179,6 +186,11 @@ describe("Ether 4.0 graph kernel registry", () => {
     const packageJson = JSON.parse(readFileSync(`${workspaceRoot}/packages/graph-kernel/package.json`, "utf8")) as { dependencies: Record<string, string> };
     expect(packageJson.dependencies).toEqual({ "@ether/schema": "workspace:*" });
     expect(execFileSync(process.execPath, ["--input-type=module", "--eval", "import('@ether/graph-kernel').then(m => console.log(m.nodeDefinitions.length))"], { cwd: `${workspaceRoot}/packages/testing`, encoding: "utf8" }).trim()).toBe("17");
+  });
+
+  it("imports the versioned lineage identity through the built package", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "--eval", "import('@ether/graph-kernel').then(m => console.log(m.deriveLineageKey([{ edgeId: 'runtime-edge', payloads: [] }])))"], { cwd: `${workspaceRoot}/packages/testing`, encoding: "utf8" }).trim();
+    expect(output).toMatch(/^empty:v2:sha256:[0-9a-f]{64}$/);
   });
 
   it("is the complete semantic source for exactly seventeen canonical definitions", () => {
@@ -567,6 +579,34 @@ describe("immutable selectors and context assembly", () => {
     expect(deriveLineageKey([{ edgeId: "empty-a", payloads: [] }])).not.toBe(
       deriveLineageKey([{ edgeId: "empty-b", payloads: [] }])
     );
+  });
+
+  it("separates lineage values that collide under delimiter joining", () => {
+    expect(deriveLineageKey(lineageLanes(["a", "b"]))).not.toBe(
+      deriveLineageKey(lineageLanes(["a\u001fb", "a\u001fb"]))
+    );
+  });
+
+  it("canonicalizes lineage fan-in ordering before deriving identity", () => {
+    expect(deriveLineageKey(lineageLanes(["b", "a"]))).toBe(
+      deriveLineageKey(lineageLanes(["a", "b"]))
+    );
+  });
+
+  it("encodes empty lineage values as non-empty versioned identities", () => {
+    const emptyValue = deriveLineageKey(lineageLanes([""]));
+    const absentValue = deriveLineageKey([{ edgeId: "empty-value-absent", payloads: [] }]);
+
+    expect(emptyValue).toMatch(/^fanin:v2:sha256:[0-9a-f]{64}$/);
+    expect(emptyValue).not.toBe(absentValue);
+  });
+
+  it("keeps Unicode lineage identities deterministic across repeated calls", () => {
+    const lanes = lineageLanes(["caf\u00e9", "\u65e5\u672c\u8a9e", "\ud83d\ude00"]);
+    const first = deriveLineageKey(lanes);
+
+    expect(first).toMatch(/^fanin:v2:sha256:[0-9a-f]{64}$/);
+    expect(deriveLineageKey(lanes)).toBe(first);
   });
 
   it("keeps captions attached to their payload when non-text inputs are omitted from prompt bodies", () => {
