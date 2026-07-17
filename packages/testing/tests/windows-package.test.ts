@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,8 +37,33 @@ async function createFakePackageRoot() {
   );
   await createFile(path.join(root, "packages/engine/dist/index.js"), "module.exports = {};");
   await createFile(
+    path.join(root, "packages/engine/dist/browser.mjs"),
+    'export const LATEST_GRAPH_VERSION = "2.5";\n'
+  );
+  await createFile(
+    path.join(root, "packages/engine/dist/browser.d.mts"),
+    'export declare const LATEST_GRAPH_VERSION: "2.5";\n'
+  );
+  await createFile(
     path.join(root, "packages/engine/package.json"),
-    JSON.stringify({ name: "@ether/engine", main: "dist/index.js", type: "commonjs" })
+    JSON.stringify({
+      name: "@ether/engine",
+      main: "dist/index.js",
+      types: "dist/index.d.ts",
+      type: "commonjs",
+      exports: {
+        ".": {
+          types: "./dist/index.d.ts",
+          browser: {
+            types: "./dist/browser.d.mts",
+            default: "./dist/browser.mjs"
+          },
+          import: "./dist/index.js",
+          require: "./dist/index.js",
+          default: "./dist/index.js"
+        }
+      }
+    })
   );
   await createFile(path.join(root, "packages/providers/dist/index.js"), "module.exports = {};");
   await createFile(
@@ -120,45 +145,40 @@ describe("Windows desktop package", () => {
   });
 
   it("ships the engine browser entry and declarations across the copied package boundary", async () => {
-    const stagingRoot = await mkdtemp(path.join(os.tmpdir(), "ether-package-browser-"));
+    const root = await createFakePackageRoot();
+    const result = await packageWindowsApp({
+      rootDir: root,
+      outputDir: path.join(root, "release/ether-windows-unpacked")
+    });
+    const appRoot = path.join(result.outputDir, "resources", "app");
+    const engineRoot = path.join(appRoot, "node_modules", "@ether", "engine");
+    const packageJson = JSON.parse(
+      await readFile(path.join(engineRoot, "package.json"), "utf8")
+    ) as {
+      exports: { ".": { browser: { types: string; default: string } } };
+    };
 
-    try {
-      const result = await packageWindowsApp({
-        rootDir: repoRoot,
-        outputDir: path.join(stagingRoot, "ether-windows-unpacked")
-      });
-      const appRoot = path.join(result.outputDir, "resources", "app");
-      const engineRoot = path.join(appRoot, "node_modules", "@ether", "engine");
-      const packageJson = JSON.parse(
-        await readFile(path.join(engineRoot, "package.json"), "utf8")
-      ) as {
-        exports: { ".": { browser: { types: string; default: string } } };
-      };
-
-      expect(packageJson.exports["."]).toMatchObject({
-        browser: {
-          types: "./dist/browser.d.mts",
-          default: "./dist/browser.mjs"
-        }
-      });
-      await expect(readFile(path.join(engineRoot, "dist/browser.mjs"), "utf8"))
-        .resolves.toContain("LATEST_GRAPH_VERSION");
-      await expect(readFile(path.join(engineRoot, "dist/browser.d.mts"), "utf8"))
-        .resolves.toContain("LATEST_GRAPH_VERSION");
-      expect(
-        execFileSync(
-          process.execPath,
-          [
-            "--conditions=browser",
-            "--input-type=module",
-            "--eval",
-            "import(\"@ether/engine\").then((engine) => console.log(engine.LATEST_GRAPH_VERSION))"
-          ],
-          { cwd: appRoot, encoding: "utf8" }
-        ).trim()
-      ).toBe("2.5");
-    } finally {
-      await rm(stagingRoot, { recursive: true, force: true });
-    }
+    expect(packageJson.exports["."]).toMatchObject({
+      browser: {
+        types: "./dist/browser.d.mts",
+        default: "./dist/browser.mjs"
+      }
+    });
+    await expect(readFile(path.join(engineRoot, "dist/browser.mjs"), "utf8"))
+      .resolves.toContain("LATEST_GRAPH_VERSION");
+    await expect(readFile(path.join(engineRoot, "dist/browser.d.mts"), "utf8"))
+      .resolves.toContain("LATEST_GRAPH_VERSION");
+    expect(
+      execFileSync(
+        process.execPath,
+        [
+          "--conditions=browser",
+          "--input-type=module",
+          "--eval",
+          "import(\"@ether/engine\").then((engine) => console.log(engine.LATEST_GRAPH_VERSION))"
+        ],
+        { cwd: appRoot, encoding: "utf8" }
+      ).trim()
+    ).toBe("2.5");
   });
 });
