@@ -384,6 +384,30 @@ describe("Ether 4.0 document format", () => {
     }
   });
 
+  it("refuses WAL-mode candidates without creating adjacent files or changing the document", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-wal-candidate",
+      title: "WAL candidate"
+    });
+    const walDatabase = new DatabaseSync(documentPath);
+    try {
+      expect(String(scalar(walDatabase, "PRAGMA journal_mode = WAL")).toLowerCase()).toBe("wal");
+    } finally {
+      walDatabase.close();
+    }
+
+    const directoryBefore = readdirSync(root).sort();
+    const fileBefore = snapshotFile(documentPath);
+    expect(directoryBefore).toEqual(["Campaign.ether"]);
+
+    for (const operation of [inspectEtherDocument, openEtherDocument]) {
+      expect(() => operation(documentPath)).toThrow(/WAL|journal mode/i);
+      expect(readdirSync(root).sort()).toEqual(directoryBefore);
+      expectFileUnchanged(documentPath, fileBefore);
+    }
+  });
+
   it("refuses malformed, future, and unsupported Ether metadata without changing the file", () => {
     createEtherDocument(documentPath, {
       appVersion: "4.0.0",

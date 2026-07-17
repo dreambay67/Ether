@@ -15,12 +15,18 @@ import {
   ETHER_SUPPORTED_REQUIRED_FEATURES
 } from "./format.js";
 
-const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "binary");
+const SQLITE_HEADER_MAGIC = Buffer.from("SQLite format 3\0", "binary");
+const SQLITE_HEADER_SIZE = 100;
+const SQLITE_WRITE_VERSION_OFFSET = 18;
+const SQLITE_READ_VERSION_OFFSET = 19;
+const SQLITE_ROLLBACK_JOURNAL_VERSION = 1;
+const SQLITE_WAL_VERSION = 2;
 const SUPPORTED_FORMAT_MAJOR = 4;
 
 export type EtherDocumentErrorCode =
   | "NOT_A_REGULAR_FILE"
   | "INVALID_SQLITE_HEADER"
+  | "UNSUPPORTED_JOURNAL_MODE"
   | "INVALID_SQLITE"
   | "WRONG_APPLICATION_ID"
   | "INVALID_DOCUMENT_METADATA"
@@ -139,7 +145,7 @@ function assertRegularSqliteFile(filePath: string): void {
     );
   }
 
-  const header = Buffer.alloc(SQLITE_HEADER.length);
+  const header = Buffer.alloc(SQLITE_HEADER_SIZE);
   const file = openSync(filePath, "r");
   const bytesRead = (() => {
     try {
@@ -148,10 +154,31 @@ function assertRegularSqliteFile(filePath: string): void {
       closeSync(file);
     }
   })();
-  if (bytesRead !== SQLITE_HEADER.length || !header.equals(SQLITE_HEADER)) {
+  if (
+    bytesRead !== SQLITE_HEADER_SIZE ||
+    !header.subarray(0, SQLITE_HEADER_MAGIC.length).equals(SQLITE_HEADER_MAGIC)
+  ) {
     throw new EtherDocumentError(
       "INVALID_SQLITE_HEADER",
       `Ether document has an invalid SQLite header: ${filePath}`
+    );
+  }
+
+  const writeVersion = header[SQLITE_WRITE_VERSION_OFFSET];
+  const readVersion = header[SQLITE_READ_VERSION_OFFSET];
+  if (writeVersion === SQLITE_WAL_VERSION || readVersion === SQLITE_WAL_VERSION) {
+    throw new EtherDocumentError(
+      "UNSUPPORTED_JOURNAL_MODE",
+      "Ether document uses WAL journal mode, which is not supported."
+    );
+  }
+  if (
+    writeVersion !== SQLITE_ROLLBACK_JOURNAL_VERSION ||
+    readVersion !== SQLITE_ROLLBACK_JOURNAL_VERSION
+  ) {
+    throw new EtherDocumentError(
+      "INVALID_SQLITE_HEADER",
+      `Ether document has unsupported SQLite read/write versions ${readVersion}/${writeVersion}.`
     );
   }
 }
