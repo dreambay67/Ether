@@ -1,4 +1,5 @@
-import { lstat, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -116,5 +117,48 @@ describe("Windows desktop package", () => {
     expect(
       (await lstat(path.join(result.outputDir, "resources/app/node_modules/zod"))).isSymbolicLink()
     ).toBe(false);
+  });
+
+  it("ships the engine browser entry and declarations across the copied package boundary", async () => {
+    const stagingRoot = await mkdtemp(path.join(os.tmpdir(), "ether-package-browser-"));
+
+    try {
+      const result = await packageWindowsApp({
+        rootDir: repoRoot,
+        outputDir: path.join(stagingRoot, "ether-windows-unpacked")
+      });
+      const appRoot = path.join(result.outputDir, "resources", "app");
+      const engineRoot = path.join(appRoot, "node_modules", "@ether", "engine");
+      const packageJson = JSON.parse(
+        await readFile(path.join(engineRoot, "package.json"), "utf8")
+      ) as {
+        exports: { ".": { browser: { types: string; default: string } } };
+      };
+
+      expect(packageJson.exports["."]).toMatchObject({
+        browser: {
+          types: "./dist/browser.d.mts",
+          default: "./dist/browser.mjs"
+        }
+      });
+      await expect(readFile(path.join(engineRoot, "dist/browser.mjs"), "utf8"))
+        .resolves.toContain("LATEST_GRAPH_VERSION");
+      await expect(readFile(path.join(engineRoot, "dist/browser.d.mts"), "utf8"))
+        .resolves.toContain("LATEST_GRAPH_VERSION");
+      expect(
+        execFileSync(
+          process.execPath,
+          [
+            "--conditions=browser",
+            "--input-type=module",
+            "--eval",
+            "import(\"@ether/engine\").then((engine) => console.log(engine.LATEST_GRAPH_VERSION))"
+          ],
+          { cwd: appRoot, encoding: "utf8" }
+        ).trim()
+      ).toBe("2.5");
+    } finally {
+      await rm(stagingRoot, { recursive: true, force: true });
+    }
   });
 });
