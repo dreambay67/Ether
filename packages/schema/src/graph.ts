@@ -418,10 +418,69 @@ export const GraphTransactionSchema = z
   });
 export type GraphTransaction = z.infer<typeof GraphTransactionSchema>;
 
+export const PreparedGraphCommitSchema = z
+  .object({
+    id: z.string().min(1),
+    baseDocumentRevisionId: z.string().min(1),
+    baseGraphRevisions: z.record(z.string().min(1), z.string().min(1)),
+    title: z.string(),
+    actor: RevisionActorSchema,
+    graphSnapshots: z.array(EtherGraphSchema).min(1),
+    forwardOperations: z.array(GraphOperationSchema).min(1),
+    inverseOperations: z.array(GraphOperationSchema).min(1)
+  })
+  .strict()
+  .superRefine((commit, context) => {
+    const snapshotIds = commit.graphSnapshots.map((snapshot) => snapshot.id);
+    const snapshotIdSet = new Set(snapshotIds);
+    if (snapshotIdSet.size !== snapshotIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["graphSnapshots"],
+        message: "Prepared commits must contain one resulting snapshot per affected graph"
+      });
+    }
+    if (commit.forwardOperations.length !== commit.inverseOperations.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["inverseOperations"],
+        message: "Forward and inverse operation arrays must preserve matching global order"
+      });
+    }
+    for (const graphId of Object.keys(commit.baseGraphRevisions)) {
+      if (!snapshotIdSet.has(graphId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["baseGraphRevisions", graphId],
+          message: "Base graph revisions may only name affected graph snapshots"
+        });
+      }
+    }
+    for (const [field, operations] of [
+      ["forwardOperations", commit.forwardOperations],
+      ["inverseOperations", commit.inverseOperations]
+    ] as const) {
+      for (const [index, operation] of operations.entries()) {
+        if (!snapshotIdSet.has(operation.graphId)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [field, index, "graphId"],
+            message: "Prepared operations must target an affected graph snapshot"
+          });
+        }
+      }
+    }
+  });
+export type PreparedGraphCommit = z.infer<typeof PreparedGraphCommitSchema>;
+
 export function parseEtherGraph(input: unknown): EtherGraph {
   return EtherGraphSchema.parse(input);
 }
 
 export function parseGraphTransaction(input: unknown): GraphTransaction {
   return GraphTransactionSchema.parse(input);
+}
+
+export function parsePreparedGraphCommit(input: unknown): PreparedGraphCommit {
+  return PreparedGraphCommitSchema.parse(input);
 }

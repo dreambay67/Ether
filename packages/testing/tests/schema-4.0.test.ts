@@ -16,6 +16,7 @@ import {
   ExecutionWorkItemSchema,
   GraphTransactionSchema,
   GraphBlueprintSchema,
+  LiveOutputSettingsSchema,
   NodeConfigSchemas,
   NodeDefinitionSchema,
   NodeDefinitionIdSchema,
@@ -23,6 +24,7 @@ import {
   OutputSelectorSchema,
   PayloadChannelSchema,
   PayloadEnvelopeSchema,
+  PreparedGraphCommitSchema,
   ProviderCapabilitySchema,
   RecipeManifestSchema,
   applicationCommandNames,
@@ -527,6 +529,63 @@ describe("Ether 4.0 schema", () => {
     expect(() => parseEtherGraph({ ...validGraph, directoryStore: "C:/legacy" })).toThrow(
       /Unrecognized key|directoryStore/
     );
+  });
+
+  it("validates prepared persistence commits and typed live output settings", () => {
+    const commit = {
+      id: "prepared-1",
+      baseDocumentRevisionId: "document-revision-1",
+      baseGraphRevisions: { "graph-root": "graph-revision-1" },
+      title: "Persist validated result",
+      actor: "user",
+      graphSnapshots: [validGraph],
+      forwardOperations: [
+        { type: "updateGraphProperties", graphId: "graph-root", title: "Product campaign" }
+      ],
+      inverseOperations: [
+        { type: "updateGraphProperties", graphId: "graph-root", title: "Previous title" }
+      ]
+    } as const;
+    expect(PreparedGraphCommitSchema.parse(commit)).toEqual(commit);
+    expect(
+      PreparedGraphCommitSchema.safeParse({
+        ...commit,
+        graphSnapshots: [validGraph, validGraph]
+      }).success
+    ).toBe(false);
+    expect(
+      PreparedGraphCommitSchema.safeParse({
+        ...commit,
+        inverseOperations: [
+          ...commit.inverseOperations,
+          { type: "updateGraphProperties", graphId: "graph-root", title: "Extra inverse" }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      PreparedGraphCommitSchema.safeParse({
+        ...commit,
+        forwardOperations: [
+          { type: "updateGraphProperties", graphId: "missing", title: "Missing" }
+        ]
+      }).success
+    ).toBe(false);
+
+    const liveOutput = {
+      enabled: true,
+      pathGrantId: "grant-1",
+      namingPolicy: { template: "{node}-{version}" },
+      collisionPolicy: "suffix",
+      transferPolicy: "copy",
+      lastReconciledAt: null
+    } as const;
+    expect(LiveOutputSettingsSchema.parse(liveOutput)).toEqual(liveOutput);
+    expect(
+      LiveOutputSettingsSchema.safeParse({ ...liveOutput, pathGrantId: null }).success
+    ).toBe(false);
+    expect(
+      LiveOutputSettingsSchema.safeParse({ ...liveOutput, collisionPolicy: "overwrite" }).success
+    ).toBe(false);
   });
 
   it("validates output selectors, payload envelopes, and immutable output versions", () => {

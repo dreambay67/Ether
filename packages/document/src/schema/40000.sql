@@ -11,12 +11,19 @@ CREATE TABLE document (
   feature_flags_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(feature_flags_json))
 ) STRICT;
 
+CREATE TABLE document_state (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  current_document_revision_id TEXT NOT NULL REFERENCES document_revisions(document_revision_id) ON DELETE RESTRICT,
+  dirty INTEGER NOT NULL DEFAULT 0 CHECK (dirty IN (0, 1))
+) STRICT;
+
 CREATE TABLE graphs (
   graph_id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('root', 'module')),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 ) STRICT;
 
 CREATE TABLE nodes (
@@ -30,8 +37,10 @@ CREATE TABLE nodes (
   height REAL NOT NULL CHECK (height > 0),
   config_json TEXT NOT NULL CHECK (json_valid(config_json)),
   presentation_json TEXT NOT NULL CHECK (json_valid(presentation_json)),
+  node_order INTEGER NOT NULL DEFAULT 0 CHECK (node_order >= 0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  deleted_at TEXT,
   UNIQUE (graph_id, node_id)
 ) STRICT;
 
@@ -47,6 +56,8 @@ CREATE TABLE edges (
   selector_json TEXT NOT NULL CHECK (json_valid(selector_json)),
   adapter_json TEXT NOT NULL CHECK (json_valid(adapter_json)),
   enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+  edge_order INTEGER NOT NULL DEFAULT 0 CHECK (edge_order >= 0),
+  deleted_at TEXT,
   UNIQUE (source_node_id, source_channel, target_node_id, target_channel, role, selector_json),
   FOREIGN KEY (graph_id, source_node_id) REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE,
   FOREIGN KEY (graph_id, target_node_id) REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE
@@ -61,6 +72,10 @@ CREATE TABLE graph_revisions (
   created_at TEXT NOT NULL,
   operation_count INTEGER NOT NULL CHECK (operation_count >= 0),
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+  kind TEXT NOT NULL DEFAULT 'edit' CHECK (kind IN ('genesis', 'edit', 'undo', 'redo')),
+  transaction_id TEXT,
+  snapshot_json TEXT CHECK (snapshot_json IS NULL OR json_valid(snapshot_json)),
+  previous_snapshot_json TEXT CHECK (previous_snapshot_json IS NULL OR json_valid(previous_snapshot_json)),
   UNIQUE (graph_id, revision_id),
   FOREIGN KEY (graph_id, parent_revision_id)
     REFERENCES graph_revisions(graph_id, revision_id) ON DELETE RESTRICT
@@ -72,7 +87,18 @@ CREATE TABLE document_revisions (
   actor TEXT NOT NULL CHECK (actor IN ('user', 'codex', 'recipe', 'system')),
   title TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json))
+  metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+  kind TEXT NOT NULL DEFAULT 'edit' CHECK (kind IN ('genesis', 'edit', 'undo', 'redo')),
+  transaction_id TEXT,
+  target_document_revision_id TEXT REFERENCES document_revisions(document_revision_id) ON DELETE RESTRICT,
+  revision_order INTEGER NOT NULL DEFAULT 0 CHECK (revision_order >= 0)
+) STRICT;
+
+CREATE TABLE graph_heads (
+  graph_id TEXT PRIMARY KEY REFERENCES graphs(graph_id) ON DELETE RESTRICT,
+  graph_revision_id TEXT NOT NULL,
+  FOREIGN KEY (graph_id, graph_revision_id)
+    REFERENCES graph_revisions(graph_id, revision_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE document_revision_members (
@@ -89,7 +115,34 @@ CREATE TABLE graph_operations (
   operation_index INTEGER NOT NULL CHECK (operation_index >= 0),
   operation_json TEXT NOT NULL CHECK (json_valid(operation_json)),
   inverse_json TEXT NOT NULL CHECK (json_valid(inverse_json)),
+  document_revision_id TEXT REFERENCES document_revisions(document_revision_id) ON DELETE CASCADE,
+  graph_id TEXT REFERENCES graphs(graph_id) ON DELETE RESTRICT,
+  global_order INTEGER NOT NULL DEFAULT 0 CHECK (global_order >= 0),
   PRIMARY KEY (revision_id, operation_index)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE history_entries (
+  history_order INTEGER PRIMARY KEY CHECK (history_order >= 0),
+  document_revision_id TEXT NOT NULL UNIQUE REFERENCES document_revisions(document_revision_id) ON DELETE RESTRICT,
+  state TEXT NOT NULL CHECK (state IN ('applied', 'undone', 'cleared')),
+  created_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE revision_milestones (
+  milestone_id TEXT PRIMARY KEY,
+  document_revision_id TEXT NOT NULL REFERENCES document_revisions(document_revision_id) ON DELETE RESTRICT,
+  kind TEXT NOT NULL CHECK (kind IN ('autosave', 'manual')),
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE revision_milestone_members (
+  milestone_id TEXT NOT NULL REFERENCES revision_milestones(milestone_id) ON DELETE CASCADE,
+  graph_id TEXT NOT NULL REFERENCES graphs(graph_id) ON DELETE RESTRICT,
+  graph_revision_id TEXT NOT NULL,
+  PRIMARY KEY (milestone_id, graph_id),
+  FOREIGN KEY (graph_id, graph_revision_id)
+    REFERENCES graph_revisions(graph_id, revision_id) ON DELETE RESTRICT
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE groups (
@@ -102,19 +155,29 @@ CREATE TABLE groups (
   width REAL NOT NULL CHECK (width > 0),
   height REAL NOT NULL CHECK (height > 0),
   color TEXT NOT NULL,
+  group_order INTEGER NOT NULL DEFAULT 0 CHECK (group_order >= 0),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
 ) STRICT;
 
 CREATE TABLE modules (
   module_id TEXT PRIMARY KEY,
   parent_graph_id TEXT NOT NULL REFERENCES graphs(graph_id) ON DELETE CASCADE,
   internal_graph_id TEXT NOT NULL UNIQUE REFERENCES graphs(graph_id) ON DELETE CASCADE,
-  node_id TEXT NOT NULL UNIQUE,
+  node_id TEXT UNIQUE,
   title TEXT NOT NULL,
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+  position_x REAL NOT NULL DEFAULT 0,
+  position_y REAL NOT NULL DEFAULT 0,
+  width REAL NOT NULL DEFAULT 1 CHECK (width > 0),
+  height REAL NOT NULL DEFAULT 1 CHECK (height > 0),
+  interface_json TEXT NOT NULL DEFAULT '{"inputs":[],"outputs":[],"parameters":[]}' CHECK (json_valid(interface_json)),
+  collapsed INTEGER NOT NULL DEFAULT 0 CHECK (collapsed IN (0, 1)),
+  module_order INTEGER NOT NULL DEFAULT 0 CHECK (module_order >= 0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  deleted_at TEXT,
   CHECK (parent_graph_id <> internal_graph_id),
   FOREIGN KEY (parent_graph_id, node_id)
     REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE
@@ -139,8 +202,10 @@ CREATE TABLE workspace_views (
   viewport_json TEXT NOT NULL CHECK (json_valid(viewport_json)),
   selection_json TEXT NOT NULL CHECK (json_valid(selection_json)),
   inspector_json TEXT NOT NULL CHECK (json_valid(inspector_json)),
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active = 1),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE (graph_id)
 ) STRICT;
 
 CREATE TABLE node_output_versions (
@@ -152,7 +217,9 @@ CREATE TABLE node_output_versions (
   producer_json TEXT NOT NULL CHECK (json_valid(producer_json)),
   input_payload_ids_json TEXT NOT NULL CHECK (json_valid(input_payload_ids_json)),
   selected_output_version_ids_json TEXT NOT NULL CHECK (json_valid(selected_output_version_ids_json)),
+  output_payload_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(output_payload_ids_json)),
   compiled_context_hash TEXT NOT NULL,
+  approval_json TEXT NOT NULL DEFAULT '{"state":"unreviewed"}' CHECK (json_valid(approval_json)),
   run_id TEXT,
   step_id TEXT,
   work_item_id TEXT,
@@ -180,6 +247,7 @@ CREATE TABLE node_output_payloads (
   role TEXT NOT NULL,
   content_text TEXT,
   content_json TEXT NOT NULL CHECK (json_valid(content_json)),
+  source_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_json)),
   artifact_id TEXT REFERENCES artifacts(artifact_id) ON DELETE SET NULL,
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
   created_at TEXT NOT NULL
@@ -188,7 +256,7 @@ CREATE TABLE node_output_payloads (
 CREATE TABLE approvals (
   approval_id TEXT PRIMARY KEY,
   output_version_id TEXT NOT NULL REFERENCES node_output_versions(output_version_id) ON DELETE CASCADE,
-  state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'rejected')),
+  state TEXT NOT NULL CHECK (state IN ('unreviewed', 'approved', 'rejected')),
   actor TEXT NOT NULL,
   reason TEXT,
   created_at TEXT NOT NULL
@@ -437,11 +505,18 @@ CREATE TABLE live_output_settings (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
   path_grant_id TEXT,
-  naming_policy_json TEXT NOT NULL CHECK (json_valid(naming_policy_json)),
-  collision_policy TEXT NOT NULL,
-  transfer_policy TEXT NOT NULL,
+  naming_policy_json TEXT NOT NULL DEFAULT '{"template":"{node}-{version}"}' CHECK (json_valid(naming_policy_json)),
+  collision_policy TEXT NOT NULL DEFAULT 'no-clobber' CHECK (collision_policy IN ('no-clobber', 'suffix')),
+  transfer_policy TEXT NOT NULL DEFAULT 'copy' CHECK (transfer_policy IN ('copy', 'move')),
   last_reconciled_at TEXT
 ) STRICT;
+
+INSERT INTO live_output_settings (
+  singleton, enabled, path_grant_id, naming_policy_json,
+  collision_policy, transfer_policy, last_reconciled_at
+) VALUES (
+  1, 0, NULL, '{"template":"{node}-{version}"}', 'no-clobber', 'copy', NULL
+);
 
 CREATE TABLE live_output_entries (
   entry_id TEXT PRIMARY KEY,
@@ -488,6 +563,31 @@ BEGIN
   SELECT RAISE(ABORT, 'module internal graph kind constraint failed');
 END;
 
+CREATE TRIGGER node_output_versions_immutable_update
+BEFORE UPDATE ON node_output_versions BEGIN
+  SELECT RAISE(ABORT, 'immutable output version');
+END;
+CREATE TRIGGER node_output_versions_immutable_delete
+BEFORE DELETE ON node_output_versions BEGIN
+  SELECT RAISE(ABORT, 'immutable output version');
+END;
+CREATE TRIGGER node_output_payloads_immutable_update
+BEFORE UPDATE ON node_output_payloads BEGIN
+  SELECT RAISE(ABORT, 'immutable output payload');
+END;
+CREATE TRIGGER node_output_payloads_immutable_delete
+BEFORE DELETE ON node_output_payloads BEGIN
+  SELECT RAISE(ABORT, 'immutable output payload');
+END;
+CREATE TRIGGER approvals_immutable_update
+BEFORE UPDATE ON approvals BEGIN
+  SELECT RAISE(ABORT, 'immutable approval');
+END;
+CREATE TRIGGER approvals_immutable_delete
+BEFORE DELETE ON approvals BEGIN
+  SELECT RAISE(ABORT, 'immutable approval');
+END;
+
 CREATE INDEX nodes_graph_id_idx ON nodes(graph_id);
 CREATE INDEX edges_graph_id_idx ON edges(graph_id);
 CREATE INDEX edges_graph_source_idx ON edges(graph_id, source_node_id);
@@ -495,9 +595,21 @@ CREATE INDEX edges_graph_target_idx ON edges(graph_id, target_node_id);
 CREATE INDEX graph_revisions_graph_id_idx ON graph_revisions(graph_id);
 CREATE INDEX graph_revisions_parent_idx ON graph_revisions(graph_id, parent_revision_id);
 CREATE INDEX document_revisions_parent_idx ON document_revisions(parent_document_revision_id);
+CREATE INDEX document_revisions_target_idx ON document_revisions(target_document_revision_id);
+CREATE INDEX document_state_revision_idx ON document_state(current_document_revision_id);
+CREATE INDEX graph_heads_revision_idx ON graph_heads(graph_id, graph_revision_id);
 CREATE INDEX document_revision_members_graph_idx ON document_revision_members(graph_id);
 CREATE INDEX document_revision_members_graph_revision_idx
   ON document_revision_members(graph_id, graph_revision_id);
+CREATE INDEX graph_operations_document_idx ON graph_operations(document_revision_id, global_order);
+CREATE UNIQUE INDEX graph_operations_global_order_idx
+  ON graph_operations(document_revision_id, global_order)
+  WHERE document_revision_id IS NOT NULL;
+CREATE INDEX graph_operations_graph_idx ON graph_operations(graph_id);
+CREATE INDEX history_entries_revision_idx ON history_entries(document_revision_id);
+CREATE INDEX revision_milestones_revision_idx ON revision_milestones(document_revision_id);
+CREATE INDEX revision_milestone_members_graph_idx
+  ON revision_milestone_members(graph_id, graph_revision_id);
 CREATE INDEX groups_graph_id_idx ON groups(graph_id);
 CREATE INDEX modules_parent_graph_node_idx ON modules(parent_graph_id, node_id);
 CREATE INDEX workspace_views_graph_id_idx ON workspace_views(graph_id);

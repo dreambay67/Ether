@@ -258,6 +258,83 @@ function writableDatabaseUrl(filePath: string, readOnly: boolean): URL {
   return url;
 }
 
+export interface InternalEtherDocumentConnection {
+  database: DatabaseSync;
+  inspection: EtherDocumentInspection;
+}
+
+export function openEtherDocumentConnection(
+  filePath: string,
+  readOnly: boolean
+): InternalEtherDocumentConnection {
+  const absolutePath = path.resolve(filePath);
+  const identity = inspectEtherFileHeader(absolutePath);
+  const database = new DatabaseSync(writableDatabaseUrl(absolutePath, readOnly), {
+    allowExtension: false,
+    enableDoubleQuotedStringLiterals: false,
+    enableForeignKeyConstraints: true,
+    open: false,
+    timeout: 0
+  });
+  let opened = false;
+  try {
+    database.open();
+    opened = true;
+    const location = database.location();
+    if (location === null || canonicalPath(location) !== canonicalPath(absolutePath)) {
+      throw new EtherDocumentError(
+        "PATH_CHANGED",
+        `SQLite opened a different location than the requested Ether document: ${absolutePath}`
+      );
+    }
+    assertEtherFileIdentity(absolutePath, identity);
+    const inspection = validateEtherDocumentConnection(database, absolutePath);
+    assertEtherFileIdentity(absolutePath, identity);
+    return { database, inspection };
+  } catch (error) {
+    if (opened) {
+      database.close();
+    }
+    throw mapEtherDocumentError(
+      error,
+      "INVALID_SQLITE",
+      `Ether document could not be opened safely: ${absolutePath}`
+    );
+  }
+}
+
+export function publishOwnedTemporaryDatabase(
+  temporaryPath: string,
+  destinationPath: string,
+  temporaryIdentity: EtherFileIdentity
+): void {
+  const absoluteDestination = path.resolve(destinationPath);
+  if (destinationExists(absoluteDestination)) {
+    throw new EtherDocumentError(
+      "DESTINATION_EXISTS",
+      `Ether document destination already exists: ${absoluteDestination}`
+    );
+  }
+  assertSameOwnedFile(temporaryPath, temporaryIdentity);
+  let destinationOwned = false;
+  try {
+    linkSync(temporaryPath, absoluteDestination);
+    destinationOwned = true;
+    if (!unlinkFileIfOwned(temporaryPath, temporaryIdentity)) {
+      throw new EtherDocumentError(
+        "PATH_CHANGED",
+        `Ether document temporary path changed during publication: ${temporaryPath}`
+      );
+    }
+    destinationOwned = false;
+  } catch (error) {
+    if (destinationOwned) {
+      removePublishedLinkIfOwned(absoluteDestination, temporaryIdentity);
+    }
+    throw publicationError(error);
+  }
+}
+
 function runWritableProbe(database: DatabaseSync): void {
   database.exec("BEGIN IMMEDIATE");
   try {

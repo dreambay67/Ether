@@ -89,3 +89,41 @@ export const DocumentRevisionSchema = z
   })
   .strict();
 export type DocumentRevision = z.infer<typeof DocumentRevisionSchema>;
+
+export const LiveOutputSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    pathGrantId: z.string().min(1).nullable(),
+    namingPolicy: z
+      .object({
+        template: z.string().min(1)
+      })
+      .strict(),
+    collisionPolicy: z.enum(["no-clobber", "suffix"]),
+    transferPolicy: z.enum(["copy", "move"]),
+    lastReconciledAt: TimestampSchema.nullable()
+  })
+  .strict()
+  .superRefine((settings, context) => {
+    if (settings.enabled && settings.pathGrantId === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pathGrantId"],
+        message: "Enabled Live Output requires a revocable path grant"
+      });
+    }
+  });
+export type LiveOutputSettings = z.infer<typeof LiveOutputSettingsSchema>;
+
+export const WriterLeaseRecordSchema = z
+  .object({
+    pid: z.number().int().positive(),
+    machineId: z.string().min(1),
+    appInstanceId: z.string().min(1),
+    pathHash: z.string().regex(/^[a-f0-9]{64}$/),
+    documentId: z.string().min(1),
+    ownerToken: z.string().min(1),
+    heartbeatAt: z.number().int().nonnegative()
+  })
+  .strict();
+export type WriterLeaseRecord = z.infer<typeof WriterLeaseRecordSchema>;
