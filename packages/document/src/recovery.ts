@@ -174,6 +174,21 @@ function ownedRollback(record: ReplacementRecoveryRecord): OwnedReplacementRollb
   return { identity, path: record.rollback.path };
 }
 
+function rollbackPathStatus(
+  record: ReplacementRecoveryRecord
+): "absent" | "indeterminate" | "present" {
+  if (record.rollback === undefined) {
+    return "absent";
+  }
+  try {
+    return lstatSync(record.rollback.path, { throwIfNoEntry: false }) === undefined
+      ? "absent"
+      : "present";
+  } catch {
+    return "indeterminate";
+  }
+}
+
 function documentIdAt(filePath: string): string | undefined {
   try {
     const connection = openEtherDocumentConnection(filePath, true);
@@ -245,22 +260,16 @@ export function reconcileReplacementRecovery(destinationPath: string, recoveryRo
     }
     const journal = { filePath, record };
     const currentDocumentId = documentIdAt(record.destinationPath);
-    const rollback = ownedRollback(record);
-    if (record.phase === "published" && currentDocumentId === record.newDocumentId) {
-      const rollbackPathStillExists =
-        record.rollback !== undefined &&
-        lstatSync(record.rollback.path, { throwIfNoEntry: false }) !== undefined;
-      if (rollbackPathStillExists && rollback === undefined) {
-        continue;
-      }
-      if (rollback !== undefined) {
-        removeOwnedReplacementRollback(rollback);
-      }
-      removeJournal(journal);
-      continue;
-    }
-    if (currentDocumentId === record.previousDocumentId) {
-      if (record.rollback !== undefined && rollback === undefined) {
+    const rollbackStatus = rollbackPathStatus(record);
+    const rollback = rollbackStatus === "present" ? ownedRollback(record) : undefined;
+    const expectedDocumentIsCurrent =
+      (record.phase === "published" && currentDocumentId === record.newDocumentId) ||
+      currentDocumentId === record.previousDocumentId;
+    if (expectedDocumentIsCurrent) {
+      if (
+        rollbackStatus === "indeterminate" ||
+        (rollbackStatus === "present" && rollback === undefined)
+      ) {
         continue;
       }
       if (rollback !== undefined) {

@@ -815,6 +815,90 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(statSync(journalPath, { throwIfNoEntry: false })).toBeUndefined();
   });
 
+  it("removes a recovery journal when the previous destination was already restored", async () => {
+    const destination = path.join(root, "Previous-restored.ether");
+    const recoveryRoot = path.join(root, "recovery");
+    const previousDocumentId = "document-previous-restored";
+    const destinationStore = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId: previousDocumentId,
+      environment: environment(leaseRoot, "previous-restored-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Previous restored"
+    });
+    await destinationStore.close();
+    mkdirSync(recoveryRoot, { recursive: true });
+    const journalPath = path.join(recoveryRoot, `${randomUUID()}.json`);
+    writeFileSync(
+      journalPath,
+      JSON.stringify({
+        version: 1,
+        journalId: path.basename(journalPath, ".json"),
+        destinationPath: destination,
+        sourcePath,
+        sourceDocumentId: "document-previous-source",
+        newDocumentId: "document-previous-replacement",
+        previousDocumentId,
+        phase: "published",
+        rollback: {
+          path: path.join(root, `.Previous-restored.ether.ether-rollback-${randomUUID()}`),
+          sha256: "0".repeat(64),
+          identity: { birthtimeNs: "0", dev: "0", ino: "0", size: "0" }
+        }
+      })
+    );
+
+    const reopened = await storeClass().open(destination, {
+      access: "read-only",
+      environment: environment(leaseRoot, "previous-restored-open", { recoveryRoot })
+    });
+    await reopened.close();
+    expect(statSync(journalPath, { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it("preserves a recovery journal without aborting open when rollback status is indeterminate", async () => {
+    const destination = path.join(root, "Indeterminate-rollback.ether");
+    const recoveryRoot = path.join(root, "recovery");
+    const documentId = "document-indeterminate-rollback";
+    const destinationStore = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId,
+      environment: environment(leaseRoot, "indeterminate-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Indeterminate rollback"
+    });
+    await destinationStore.close();
+    mkdirSync(recoveryRoot, { recursive: true });
+    const journalPath = path.join(recoveryRoot, `${randomUUID()}.json`);
+    const invalidRollbackPath =
+      path.join(root, `.Indeterminate-rollback.ether.ether-rollback-${randomUUID()}`) + "\0";
+    writeFileSync(
+      journalPath,
+      JSON.stringify({
+        version: 1,
+        journalId: path.basename(journalPath, ".json"),
+        destinationPath: destination,
+        sourcePath,
+        sourceDocumentId: "document-indeterminate-source",
+        newDocumentId: documentId,
+        previousDocumentId: "document-indeterminate-previous",
+        phase: "published",
+        rollback: {
+          path: invalidRollbackPath,
+          sha256: "0".repeat(64),
+          identity: { birthtimeNs: "0", dev: "0", ino: "0", size: "0" }
+        }
+      })
+    );
+
+    const reopened = await storeClass().open(destination, {
+      access: "read-only",
+      environment: environment(leaseRoot, "indeterminate-open", { recoveryRoot })
+    });
+    await reopened.close();
+    expect(statSync(journalPath)).toBeDefined();
+  });
+
   it("never leaves two writable stores when releasing the source lease times out during Save As", async () => {
     const destination = path.join(root, "Held-source-lease.ether");
     let now = 1;
