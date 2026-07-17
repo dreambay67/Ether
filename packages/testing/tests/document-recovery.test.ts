@@ -572,11 +572,104 @@ describe("Ether AppData recovery and logical repair", () => {
       recovered: [expect.stringMatching(/^repair-/)],
       removed: []
     });
+    await expect(api().reconcileStaging(source, { appDataRoot })).resolves.toEqual({
+      attention: [],
+      quarantined: [],
+      recovered: [],
+      removed: []
+    });
     const published = (await documentPackage.DocumentStore.open(destinationPath, {
       access: "read-only"
     })) as Task6Store;
     stores.push(published);
     expect(published.dirty).toBe(true);
+  });
+
+  it("retains repair evidence when an unrelated valid document replaces the destination", async () => {
+    const created = await createStore(sourcePath, appDataRoot);
+    await created.close();
+    const destinationPath = path.join(root, "Substituted-repair.ether");
+
+    await expect(
+      api().repairDocument(sourcePath, destinationPath, {
+        appDataRoot,
+        checkpoint: (name) => {
+          if (name === "destination-created") throw new Error("stop before repair publication");
+        },
+        environment: environment(appDataRoot)
+      })
+    ).rejects.toThrow("stop before repair publication");
+    const journalPath = path.join(
+      appDataRoot,
+      "recovery",
+      readdirSync(path.join(appDataRoot, "recovery"))[0]!
+    );
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      expectedDocumentId?: string;
+      stagedPath: string;
+    };
+    const stagedDatabase = new DatabaseSync(path.join(journal.stagedPath, "repaired.ether"), {
+      readOnly: true
+    });
+    const stagedIdentity = stagedDatabase
+      .prepare("SELECT document_id FROM document WHERE singleton = 1")
+      .get() as { document_id: string };
+    stagedDatabase.close();
+    expect(journal.expectedDocumentId).toBe(stagedIdentity.document_id);
+
+    const unrelated = await createStore(destinationPath, appDataRoot);
+    const unrelatedDocumentId = unrelated.documentId;
+    await unrelated.close();
+    expect(unrelatedDocumentId).not.toBe(journal.expectedDocumentId);
+    const source = (await documentPackage.DocumentStore.open(sourcePath, {
+      access: "read-only"
+    })) as Task6Store;
+    stores.push(source);
+
+    await expect(api().reconcileStaging(source, { appDataRoot })).resolves.toMatchObject({
+      attention: [expect.stringMatching(/^repair-/)],
+      recovered: [],
+      removed: []
+    });
+    expect(existsSync(journalPath)).toBe(true);
+    expect(existsSync(journal.stagedPath)).toBe(true);
+    const substituted = (await documentPackage.DocumentStore.open(destinationPath, {
+      access: "read-only"
+    })) as Task6Store;
+    stores.push(substituted);
+    expect(substituted.documentId).toBe(unrelatedDocumentId);
+  });
+
+  it("reclaims a missing repair destination once and makes replay idempotent", async () => {
+    const created = await createStore(sourcePath, appDataRoot);
+    await created.close();
+    const destinationPath = path.join(root, "Missing-repair.ether");
+
+    await expect(
+      api().repairDocument(sourcePath, destinationPath, {
+        appDataRoot,
+        checkpoint: (name) => {
+          if (name === "destination-created") throw new Error("stop with missing destination");
+        },
+        environment: environment(appDataRoot)
+      })
+    ).rejects.toThrow("stop with missing destination");
+    expect(existsSync(destinationPath)).toBe(false);
+    const source = (await documentPackage.DocumentStore.open(sourcePath, {
+      access: "read-only"
+    })) as Task6Store;
+    stores.push(source);
+
+    await expect(api().reconcileStaging(source, { appDataRoot })).resolves.toMatchObject({
+      recovered: [],
+      removed: [expect.stringMatching(/^repair-/)]
+    });
+    await expect(api().reconcileStaging(source, { appDataRoot })).resolves.toEqual({
+      attention: [],
+      quarantined: [],
+      recovered: [],
+      removed: []
+    });
   });
 
   it("repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses", async () => {

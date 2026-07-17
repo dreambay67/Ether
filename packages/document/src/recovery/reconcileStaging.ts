@@ -105,7 +105,16 @@ export async function reconcileStaging(
           existsSync(entry.destinationPath)
         ) {
           const published = openEtherDocumentConnection(entry.destinationPath, true);
-          published.database.close();
+          try {
+            if (
+              entry.expectedDocumentId === undefined ||
+              published.inspection.document.documentId !== entry.expectedDocumentId
+            ) {
+              throw new Error("Published repair document identity does not match its journal.");
+            }
+          } finally {
+            published.database.close();
+          }
           if (existsSync(entry.stagedPath)) {
             removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
           }

@@ -223,6 +223,7 @@ export async function repairDocument(
   }
   const roots = resolveRecoveryRoots(options.appDataRoot);
   const repairId = `repair-${randomUUID()}`;
+  const repairedDocumentId = randomUUID();
   const stagingDirectory = path.join(roots.stagingRoot, "repair", repairId);
   const stagedDestination = path.join(stagingDirectory, "repaired.ether");
   const losses: RepairLoss[] = [];
@@ -240,6 +241,7 @@ export async function repairDocument(
     documentPath: absoluteSource,
     stagedPath: stagingDirectory,
     destinationPath: absoluteDestination,
+    expectedDocumentId: repairedDocumentId,
     sourceName: path.basename(absoluteSource),
     mediaType: "application/vnd.dreambay.ether",
     createdAt: timestamp,
@@ -270,7 +272,7 @@ export async function repairDocument(
     const graphPlan = planGraphRecovery(snapshot.graphs, losses);
     destination = await DocumentStore.create(stagedDestination, {
       appVersion: "4.0.0",
-      documentId: randomUUID(),
+      documentId: repairedDocumentId,
       environment: options.environment,
       featureFlags: snapshot.header.featureFlags,
       initialGraph: graphPlan.initialGraph,

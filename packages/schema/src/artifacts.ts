@@ -70,6 +70,7 @@ export const RecoveryJournalEntrySchema = z
     documentPath: z.string().min(1),
     stagedPath: z.string().min(1),
     destinationPath: z.string().min(1).optional(),
+    expectedDocumentId: z.string().min(1).optional(),
     sourceName: z.string().min(1),
     mediaType: z.string().min(1),
     artifact: ArtifactSchema.omit({ contentKey: true, byteLength: true }).optional(),
@@ -92,6 +93,13 @@ export const RecoveryJournalEntrySchema = z
         code: "custom",
         message: "Document repair recovery requires its publication destination.",
         path: ["destinationPath"]
+      });
+    }
+    if (entry.kind === "document-repair" && entry.expectedDocumentId === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Document repair recovery requires its expected document identity.",
+        path: ["expectedDocumentId"]
       });
     }
   });
