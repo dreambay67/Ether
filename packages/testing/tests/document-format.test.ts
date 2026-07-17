@@ -506,6 +506,12 @@ describe("Ether 4.0 document format", () => {
           })
         ])
       );
+      expect(foreignKeys.get("modules")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ from: "parent_graph_id", table: "nodes", to: "graph_id" }),
+          expect.objectContaining({ from: "node_id", table: "nodes", to: "node_id" })
+        ])
+      );
       expect(foreignKeys.get("work_items")).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ from: "batch_id", table: "batches", to: "batch_id" }),
@@ -783,6 +789,93 @@ describe("Ether 4.0 document format", () => {
     } finally {
       database.close();
     }
+  });
+
+  it("enforces module parent-node ownership and module-kind internal graphs", () => {
+    createEtherDocument(documentPath, {
+      appVersion: "4.0.0",
+      documentId: "document-module-ownership",
+      title: "Module ownership"
+    });
+    const database = openTestDatabase(documentPath);
+
+    try {
+      database.exec(`
+        INSERT INTO graphs (graph_id, title, kind, created_at, updated_at) VALUES
+          ('graph-parent', 'Parent', 'root', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('graph-other', 'Other', 'root', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('graph-internal', 'Internal', 'module', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('graph-shared', 'Shared', 'module', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('graph-root-internal', 'Root internal', 'root', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        INSERT INTO nodes (
+          node_id, graph_id, definition_id, title, position_x, position_y, width, height,
+          config_json, presentation_json, created_at, updated_at
+        ) VALUES
+          ('node-host', 'graph-parent', 'module', 'Host', 0, 0, 220, 140, '{}', '{}',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('node-other', 'graph-other', 'module', 'Other host', 0, 0, 220, 140, '{}', '{}',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('node-shared', 'graph-shared', 'module', 'Shared host', 0, 0, 220, 140, '{}', '{}',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+      `);
+
+      expectConstraintViolation(
+        database,
+        `INSERT INTO modules (
+           module_id, parent_graph_id, internal_graph_id, node_id, title, metadata_json, created_at, updated_at
+         ) VALUES ('module-cross-parent', 'graph-parent', 'graph-internal', 'node-other',
+                   'Cross parent', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z')`
+      );
+      expectConstraintViolation(
+        database,
+        `INSERT INTO modules (
+           module_id, parent_graph_id, internal_graph_id, node_id, title, metadata_json, created_at, updated_at
+         ) VALUES ('module-same-graph', 'graph-shared', 'graph-shared', 'node-shared',
+                   'Same graph', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z')`
+      );
+      expectConstraintViolation(
+        database,
+        `INSERT INTO modules (
+           module_id, parent_graph_id, internal_graph_id, node_id, title, metadata_json, created_at, updated_at
+         ) VALUES ('module-root-internal', 'graph-parent', 'graph-root-internal', 'node-host',
+                   'Root internal', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z')`
+      );
+
+      database.exec(`
+        INSERT INTO modules (
+          module_id, parent_graph_id, internal_graph_id, node_id, title, metadata_json, created_at, updated_at
+        ) VALUES ('module-valid', 'graph-parent', 'graph-internal', 'node-host',
+                  'Valid module', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+      `);
+      expectConstraintViolation(
+        database,
+        "UPDATE modules SET internal_graph_id = 'graph-root-internal' WHERE module_id = 'module-valid'"
+      );
+      expectConstraintViolation(
+        database,
+        "UPDATE graphs SET kind = 'root' WHERE graph_id = 'graph-internal'"
+      );
+
+      expect(
+        database
+          .prepare(
+            `SELECT parent_graph_id, internal_graph_id, node_id
+             FROM modules WHERE module_id = 'module-valid'`
+          )
+          .get()
+      ).toEqual({
+        internal_graph_id: "graph-internal",
+        node_id: "node-host",
+        parent_graph_id: "graph-parent"
+      });
+      expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      database.close();
+    }
+
+    expect(inspectEtherDocument(documentPath).document.documentId).toBe(
+      "document-module-ownership"
+    );
   });
 
   it("keeps prompt, output, artifact, tag, run, and metadata FTS indexes synchronized", () => {

@@ -110,11 +110,14 @@ CREATE TABLE modules (
   module_id TEXT PRIMARY KEY,
   parent_graph_id TEXT NOT NULL REFERENCES graphs(graph_id) ON DELETE CASCADE,
   internal_graph_id TEXT NOT NULL UNIQUE REFERENCES graphs(graph_id) ON DELETE CASCADE,
-  node_id TEXT NOT NULL UNIQUE REFERENCES nodes(node_id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  CHECK (parent_graph_id <> internal_graph_id),
+  FOREIGN KEY (parent_graph_id, node_id)
+    REFERENCES nodes(graph_id, node_id) ON DELETE CASCADE
 ) STRICT;
 
 CREATE TABLE module_interfaces (
@@ -463,6 +466,28 @@ CREATE TABLE live_output_operations (
   updated_at TEXT NOT NULL
 ) STRICT;
 
+CREATE TRIGGER modules_internal_graph_kind_insert
+BEFORE INSERT ON modules
+WHEN coalesce((SELECT kind FROM graphs WHERE graph_id = NEW.internal_graph_id), '') <> 'module'
+BEGIN
+  SELECT RAISE(ABORT, 'module internal graph kind constraint failed');
+END;
+
+CREATE TRIGGER modules_internal_graph_kind_update
+BEFORE UPDATE ON modules
+WHEN coalesce((SELECT kind FROM graphs WHERE graph_id = NEW.internal_graph_id), '') <> 'module'
+BEGIN
+  SELECT RAISE(ABORT, 'module internal graph kind constraint failed');
+END;
+
+CREATE TRIGGER graphs_module_kind_update
+BEFORE UPDATE OF kind ON graphs
+WHEN NEW.kind <> 'module'
+  AND EXISTS (SELECT 1 FROM modules WHERE internal_graph_id = OLD.graph_id)
+BEGIN
+  SELECT RAISE(ABORT, 'module internal graph kind constraint failed');
+END;
+
 CREATE INDEX nodes_graph_id_idx ON nodes(graph_id);
 CREATE INDEX edges_graph_id_idx ON edges(graph_id);
 CREATE INDEX edges_graph_source_idx ON edges(graph_id, source_node_id);
@@ -474,7 +499,7 @@ CREATE INDEX document_revision_members_graph_idx ON document_revision_members(gr
 CREATE INDEX document_revision_members_graph_revision_idx
   ON document_revision_members(graph_id, graph_revision_id);
 CREATE INDEX groups_graph_id_idx ON groups(graph_id);
-CREATE INDEX modules_parent_graph_id_idx ON modules(parent_graph_id);
+CREATE INDEX modules_parent_graph_node_idx ON modules(parent_graph_id, node_id);
 CREATE INDEX workspace_views_graph_id_idx ON workspace_views(graph_id);
 CREATE INDEX node_output_versions_graph_node_parent_idx
   ON node_output_versions(graph_id, node_id, parent_output_version_id);
