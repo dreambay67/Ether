@@ -394,14 +394,18 @@ export class DocumentStore {
     if (this.closePromise !== undefined) {
       return this.closePromise;
     }
-    this.closePromise = this.enqueue(() => {
+    this.closePromise = this.enqueue(async () => {
       if (this.closed) {
         return;
       }
       this.closed = true;
-      this.writerLease?.release();
+      const lease = this.writerLease;
       this.writerLease = undefined;
-      this.database.close();
+      try {
+        await lease?.release();
+      } finally {
+        this.database.close();
+      }
     });
     return this.closePromise;
   }
@@ -562,12 +566,17 @@ export class DocumentStore {
     });
   }
 
-  private transitionToReadOnly(reason: ReadOnlyReason): void {
+  private async transitionToReadOnly(reason: ReadOnlyReason): Promise<void> {
     if (this.closed || this.currentMode.kind === "read-only") {
       return;
     }
-    this.writerLease?.release();
+    const lease = this.writerLease;
     this.writerLease = undefined;
+    try {
+      await lease?.release();
+    } catch {
+      // The store still transitions read-only if lease cleanup cannot be confirmed.
+    }
     this.database.close();
     const connection = openEtherDocumentConnection(this.currentPath, true);
     this.database = connection.database;
@@ -639,23 +648,20 @@ export class DocumentStore {
       if (switchActive) {
         staging = openEtherDocumentConnection(temporaryPath, false);
         this.database = staging.database;
+        const probeExistingDestination = (): void => {
+          const existing = openEtherDocumentConnection(absoluteDestination, false);
+          try {
+            sqliteProbe(existing.database);
+          } finally {
+            existing.database.close();
+          }
+        };
         const acquisition = WriterLease.acquire(
           absoluteDestination,
           nextDocumentId,
           this.runtime,
-          () => sqliteProbe(this.database),
-          () => {
-            if (!destinationExisted) {
-              sqliteProbe(this.database);
-              return;
-            }
-            const existing = openEtherDocumentConnection(absoluteDestination, false);
-            try {
-              sqliteProbe(existing.database);
-            } finally {
-              existing.database.close();
-            }
-          }
+          destinationExisted ? probeExistingDestination : () => sqliteProbe(this.database),
+          destinationExisted ? probeExistingDestination : () => sqliteProbe(this.database)
         );
         if (acquisition.lease === undefined) {
           throw new DocumentStoreError(
@@ -684,7 +690,7 @@ export class DocumentStore {
         this.runtime.onSaveStage?.("post-publication");
         const destination = openEtherDocumentConnection(absoluteDestination, false);
         this.database = destination.database;
-        this.writerLease?.release();
+        await this.writerLease?.release();
         this.writerLease = destinationLease;
         destinationLease = undefined;
         this.currentPath = absoluteDestination;
@@ -703,7 +709,12 @@ export class DocumentStore {
       publishedIdentity = undefined;
       return { documentId: nextDocumentId, path: absoluteDestination };
     } catch (error) {
-      destinationLease?.release();
+      let destinationLeaseReleaseError: unknown;
+      try {
+        await destinationLease?.release();
+      } catch (releaseError) {
+        destinationLeaseReleaseError = releaseError;
+      }
       try {
         if (!connectionOnSource) {
           this.database.close();
@@ -736,6 +747,14 @@ export class DocumentStore {
           "Save As failed and the owned destination rollback could not be restored.",
           undefined,
           { cause: restorationError }
+        );
+      }
+      if (destinationLeaseReleaseError !== undefined) {
+        throw new DocumentStoreError(
+          "WRITER_LEASE_RELEASE_FAILED",
+          "Save As failed and the destination writer lease could not be released.",
+          undefined,
+          { cause: destinationLeaseReleaseError }
         );
       }
       throw error;

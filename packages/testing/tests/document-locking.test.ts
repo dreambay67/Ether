@@ -36,6 +36,7 @@ interface StoreEnvironment {
   now?: () => number;
   onCreateStage?: (stage: CreateStage) => void;
   onHeartbeat?: () => void;
+  onLeaseMutexAcquired?: () => void;
   onSaveStage?: (stage: SaveStage) => void;
   pid?: number;
   processIsAlive?: (pid: number, machineId: string) => boolean;
@@ -127,9 +128,15 @@ function environment(
 }
 
 function onlyLeasePath(leaseRoot: string): string {
-  const files = readdirSync(leaseRoot).filter((file) => !file.includes(".mutex."));
+  const files = leaseRecordPaths(leaseRoot);
   expect(files).toHaveLength(1);
-  return path.join(leaseRoot, files[0]);
+  return files[0];
+}
+
+function leaseRecordPaths(leaseRoot: string): string[] {
+  return readdirSync(leaseRoot)
+    .filter((file) => /^[a-f0-9]{64}\.json$/.test(file))
+    .map((file) => path.join(leaseRoot, file));
 }
 
 function leasePathFor(leaseRoot: string, filePath: string): string {
@@ -137,6 +144,10 @@ function leasePathFor(leaseRoot: string, filePath: string): string {
   const canonical = process.platform === "win32" ? resolved.toLowerCase() : resolved;
   const hash = createHash("sha256").update(canonical).digest("hex");
   return path.join(leaseRoot, `${hash}.json`);
+}
+
+function mutexDatabasePathFor(leaseRoot: string, filePath: string): string {
+  return leasePathFor(leaseRoot, filePath).replace(/\.json$/, ".mutex.sqlite");
 }
 
 function readLease(leaseRoot: string): LeaseRecord {
@@ -230,7 +241,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
 
     await competitor.close();
     await writer.close();
-    expect(readdirSync(leaseRoot)).toEqual([]);
+    expect(leaseRecordPaths(leaseRoot)).toEqual([]);
   });
 
   it("keeps a stale-heartbeat lease when its PID is live and reclaims a dead owner only after a SQLite probe", async () => {
@@ -318,45 +329,77 @@ describe("Ether document writer leases and backup lifecycle", () => {
     rmSync(leasePath);
   });
 
-  it("honors a live lease mutex and reclaims the same mutex after its owner is stale and dead", async () => {
+  it("serializes simultaneous stale reclaimers so exactly one becomes the writer", async () => {
     const creator = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
-      documentId: "document-mutex-recovery",
-      environment: environment(leaseRoot, "mutex-creator"),
+      documentId: "document-simultaneous-reclaim",
+      environment: environment(leaseRoot, "reclaim-creator"),
       initialGraph: initialGraph(),
-      title: "Mutex recovery"
+      title: "Simultaneous reclaim"
     });
+    const stale = { ...readLease(leaseRoot), heartbeatAt: 1, pid: 999_999 };
+    const leasePath = onlyLeasePath(leaseRoot);
     await creator.close();
-    const mutexPath = leasePathFor(leaseRoot, sourcePath).replace(/\.json$/, ".mutex.json");
-    const liveMutex = {
-      acquiredAt: 100_000,
-      machineId: "test-machine",
-      ownerToken: randomUUID(),
-      pid: process.pid
-    };
-    writeFileSync(mutexPath, JSON.stringify(liveMutex));
+    writeFileSync(leasePath, JSON.stringify(stale));
+    let nestedOpen: Promise<StoreInstance> | undefined;
+    let launched = false;
 
-    const blocked = await storeClass().open(sourcePath, {
-      access: "prefer-write",
-      environment: environment(leaseRoot, "mutex-blocked", {
-        now: () => 100_001,
-        processIsAlive: (pid) => pid === process.pid
-      })
-    });
-    expect(blocked.mode).toEqual({ kind: "read-only", reason: "writer-active" });
-    await blocked.close();
-
-    writeFileSync(mutexPath, JSON.stringify({ ...liveMutex, acquiredAt: 1, pid: 999_999 }));
-    const recovered = await storeClass().open(sourcePath, {
+    const winner = await storeClass().open(sourcePath, {
       access: "require-write",
-      environment: environment(leaseRoot, "mutex-recovered", {
+      environment: environment(leaseRoot, "reclaimer-one", {
         now: () => 100_000,
+        onLeaseMutexAcquired: () => {
+          if (!launched) {
+            launched = true;
+            nestedOpen = storeClass().open(sourcePath, {
+              access: "prefer-write",
+              environment: environment(leaseRoot, "reclaimer-two", {
+                now: () => 100_000,
+                processIsAlive: () => false
+              })
+            });
+          }
+        },
         processIsAlive: () => false
       })
     });
-    expect(recovered.mode).toEqual({ kind: "writable" });
-    expect(statSync(mutexPath, { throwIfNoEntry: false })).toBeUndefined();
-    await recovered.close();
+    expect(nestedOpen).toBeDefined();
+    const competitor = await nestedOpen!;
+    expect(winner.mode).toEqual({ kind: "writable" });
+    expect(competitor.mode).toEqual({ kind: "read-only", reason: "writer-active" });
+    expect(readLease(leaseRoot).appInstanceId).toBe("reclaimer-one");
+    await competitor.close();
+    await winner.close();
+  });
+
+  it("waits for a held lease mutex during close and removes its owned lease afterward", async () => {
+    const writer = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-close-mutex",
+      environment: environment(leaseRoot, "close-mutex-writer"),
+      initialGraph: initialGraph(),
+      title: "Close mutex"
+    });
+    const leasePath = onlyLeasePath(leaseRoot);
+    const mutexPath = mutexDatabasePathFor(leaseRoot, sourcePath);
+    const mutex = new DatabaseSync(mutexPath);
+    mutex.exec("CREATE TABLE IF NOT EXISTS lease_mutex (singleton INTEGER PRIMARY KEY)");
+    mutex.exec("BEGIN IMMEDIATE");
+
+    const closing = writer.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(statSync(leasePath, { throwIfNoEntry: false })).toBeDefined();
+    mutex.exec("ROLLBACK");
+    mutex.close();
+    await closing;
+    expect(statSync(leasePath, { throwIfNoEntry: false })).toBeUndefined();
+
+    const nextWriter = await storeClass().open(sourcePath, {
+      access: "require-write",
+      environment: environment(leaseRoot, "writer-after-close")
+    });
+    expect(nextWriter.mode).toEqual({ kind: "writable" });
+    await nextWriter.close();
   });
 
   it("does not reclaim a dead stale lease while SQLite is busy", async () => {
@@ -450,7 +493,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
     await waitFor(() => writer.mode.kind === "read-only");
     expect(heartbeatCount).toBeGreaterThan(0);
     expect(writer.mode).toEqual({ kind: "read-only", reason: "heartbeat-failed" });
-    expect(readdirSync(leaseRoot)).toEqual([]);
+    expect(leaseRecordPaths(leaseRoot)).toEqual([]);
     await writer.close();
   });
 
@@ -528,6 +571,66 @@ describe("Ether document writer leases and backup lifecycle", () => {
     await source.close();
   });
 
+  it("refuses an unleased busy existing Save As destination after probing that file directly", async () => {
+    const destination = path.join(root, "Busy-unleased-existing.ether");
+    const existingId = "document-busy-unleased-destination";
+    const existing = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId: existingId,
+      environment: environment(leaseRoot, "busy-unleased-existing"),
+      initialGraph: initialGraph(),
+      title: "Busy unleased existing"
+    });
+    await existing.close();
+    expect(statSync(leasePathFor(leaseRoot, destination), { throwIfNoEntry: false })).toBeUndefined();
+    const oldBytes = readFileSync(destination);
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-busy-unleased-source",
+      environment: environment(leaseRoot, "busy-unleased-source"),
+      initialGraph: initialGraph(),
+      title: "Busy unleased source"
+    });
+    const blocker = new DatabaseSync(destination);
+    blocker.exec("BEGIN IMMEDIATE");
+    try {
+      await expect(source.saveAs(destination)).rejects.toMatchObject({
+        code: "WRITER_LEASE_UNAVAILABLE",
+        reason: "sqlite-busy"
+      });
+    } finally {
+      blocker.exec("ROLLBACK");
+      blocker.close();
+    }
+
+    expect(Buffer.compare(readFileSync(destination), oldBytes)).toBe(0);
+    expect(source.path).toBe(path.resolve(sourcePath));
+    expect(source.documentId).toBe("document-busy-unleased-source");
+    await source.close();
+  });
+
+  it("refuses an arbitrary existing Save As destination without an overwrite confirmation contract", async () => {
+    const destination = path.join(root, "Arbitrary-existing.ether");
+    const original = Buffer.from("not an Ether SQLite document", "utf8");
+    writeFileSync(destination, original);
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-arbitrary-destination-source",
+      environment: environment(leaseRoot, "arbitrary-destination-source"),
+      initialGraph: initialGraph(),
+      title: "Arbitrary destination source"
+    });
+
+    await expect(source.saveAs(destination)).rejects.toMatchObject({
+      code: "WRITER_LEASE_UNAVAILABLE",
+      reason: "sqlite-busy"
+    });
+    expect(Buffer.compare(readFileSync(destination), original)).toBe(0);
+    expect(source.path).toBe(path.resolve(sourcePath));
+    expect(source.documentId).toBe("document-arbitrary-destination-source");
+    await source.close();
+  });
+
   it("restores an existing Save As destination when switching fails after publication", async () => {
     const destination = path.join(root, "Existing-after-publication.ether");
     const existingId = "document-existing-after-publication";
@@ -573,7 +676,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
     ]);
     expect(readLease(leaseRoot).documentId).toBe("document-post-publication-source");
     await source.close();
-    expect(readdirSync(leaseRoot)).toEqual([]);
+    expect(leaseRecordPaths(leaseRoot)).toEqual([]);
   });
 
   it("probes a stale leased existing Save As destination and refuses replacement while it is busy", async () => {
@@ -745,12 +848,12 @@ describe("Ether document writer leases and backup lifecycle", () => {
         ).rejects.toThrow(fail.message);
         expect(statSync(destination, { throwIfNoEntry: false })).toBeUndefined();
         expect(readdirSync(caseRoot).sort()).toEqual(["Source.ether", "leases"]);
-        expect(readdirSync(caseLeaseRoot)).toHaveLength(1);
+        expect(leaseRecordPaths(caseLeaseRoot)).toHaveLength(1);
         expect(store.path).toBe(path.resolve(caseSource));
         expect(store.documentId).toBe(`document-${operation}-${stage}`);
         expect(store.mode).toEqual({ kind: "writable" });
         await store.close();
-        expect(readdirSync(caseLeaseRoot)).toEqual([]);
+        expect(leaseRecordPaths(caseLeaseRoot)).toEqual([]);
       }
     }
   });
