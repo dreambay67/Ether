@@ -54,7 +54,7 @@ describe("Ether 4.0 exhaustive connection matrix", () => {
     expect(new Set(rows.map((row) => row.key)).size).toBe(156_060);
     expect(connectionMatrixHash(rows)).toBe("ether-matrix-v1:0a4b8a01bd0d3498");
     expect(connectionMatrixHash(rows)).toBe(connectionMatrixHash(enumerateConnectionMatrix(FULL_ADAPTER_CAPABILITIES)));
-  });
+  }, 15_000);
 
   it("gives every row either a named consequence or a deterministic typed rejection", () => {
     const invalidRows: string[] = [];

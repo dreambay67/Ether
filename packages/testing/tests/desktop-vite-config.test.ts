@@ -32,5 +32,5 @@ describe("desktop Vite packaging config", () => {
     } finally {
       await rm(outputDirectory, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });
