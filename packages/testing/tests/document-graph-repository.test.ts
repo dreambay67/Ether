@@ -182,7 +182,7 @@ function prepared(
   snapshots: EtherGraph[],
   suffix: string,
   operations = snapshots.map((snapshot) => graphPropertyOperation(snapshot.id, snapshot.title)),
-  inverses = snapshots.map((snapshot) => graphPropertyOperation(snapshot.id, "previous"))
+  inverses = snapshots.map((snapshot) => graphPropertyOperation(snapshot.id, snapshot.id))
 ): PreparedGraphCommit {
   return {
     id: `transaction-${suffix}`,
@@ -322,7 +322,15 @@ describe("transactional Ether document repositories", () => {
     const beforeRollback = await store.read(({ revisions }) => revisions.head());
     await expect(
       store.transaction(({ revisions }) => {
-        revisions.commit(prepared(beforeRollback, [renamed(parent, "Rolled back")], "rollback"));
+        revisions.commit(
+          prepared(
+            beforeRollback,
+            [renamed(parent, "Rolled back")],
+            "rollback",
+            [graphPropertyOperation(parent.id, "Rolled back")],
+            [graphPropertyOperation(parent.id, parent.title)]
+          )
+        );
         throw new Error("injected transaction failure");
       })
     ).rejects.toThrow("injected transaction failure");
@@ -354,6 +362,113 @@ describe("transactional Ether document repositories", () => {
         .map((entry) => entry.operation.graphId)
     ).toEqual([parent.id, parent.id, internal.id]);
     await store.close();
+  });
+
+  it("rejects declared snapshots and inverses that do not exactly replay before writing", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-prepared-integrity",
+      initialGraph: initial,
+      title: "Prepared integrity"
+    });
+    const head = await store.read(({ revisions }) => revisions.head());
+    const declared = renamed(initial, "Declared result");
+    const falseSnapshot = prepared(
+      head,
+      [declared],
+      "false-snapshot",
+      [graphPropertyOperation(initial.id, "Different replay result")],
+      [graphPropertyOperation(initial.id, initial.title)]
+    );
+    await expect(
+      store.transaction(({ revisions }) => revisions.commit(falseSnapshot))
+    ).rejects.toMatchObject({ code: "INVALID_PREPARED_COMMIT" });
+    expect(await store.read(({ revisions }) => revisions.head())).toEqual(head);
+    expect(await store.read(({ graphs }) => graphs.get(initial.id))).toEqual(initial);
+
+    const falseInverse = prepared(
+      head,
+      [declared],
+      "false-inverse",
+      [graphPropertyOperation(initial.id, declared.title)],
+      [graphPropertyOperation(initial.id, "Wrong original")]
+    );
+    await expect(
+      store.transaction(({ revisions }) => revisions.commit(falseInverse))
+    ).rejects.toMatchObject({ code: "INVALID_PREPARED_COMMIT" });
+    expect(await store.read(({ revisions }) => revisions.head())).toEqual(head);
+    expect(await store.read(({ graphs }) => graphs.get(initial.id))).toEqual(initial);
+    await store.close();
+  });
+
+  it("tombstones a removed module graph and restores it through undo, redo, and reopen", async () => {
+    const initial = graph();
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-module-removal",
+      initialGraph: initial,
+      title: "Module removal"
+    });
+    const internal = graph("graph-module-remove", "module", [
+      promptNode("module-remove-prompt", "Inside")
+    ]);
+    const module = {
+      id: "module-remove",
+      title: "Removable module",
+      graphId: internal.id,
+      position: { x: 320, y: 80 },
+      size: { width: 240, height: 160 },
+      interface: { inputs: [], outputs: [], parameters: [] },
+      collapsed: false
+    };
+    const parent = { ...initial, modules: [module] };
+    const genesis = await store.read(({ revisions }) => revisions.head());
+    await store.transaction(({ revisions }) =>
+      revisions.commit(
+        prepared(
+          genesis,
+          [parent, internal],
+          "create-removable-module",
+          [{ type: "createModule", graphId: initial.id, module, internalGraph: internal }],
+          [{ type: "removeModule", graphId: initial.id, moduleId: module.id }]
+        )
+      )
+    );
+    const created = await store.read(({ revisions }) => revisions.head());
+    const removal = {
+      id: "transaction-remove-module",
+      baseDocumentRevisionId: created.documentRevisionId,
+      baseGraphRevisions: {
+        [initial.id]: created.graphRevisions[initial.id],
+        [internal.id]: created.graphRevisions[internal.id]
+      },
+      title: "Remove module",
+      actor: "user",
+      graphSnapshots: [initial],
+      deletedGraphIds: [internal.id],
+      forwardOperations: [
+        { type: "removeModule", graphId: initial.id, moduleId: module.id }
+      ],
+      inverseOperations: [
+        { type: "createModule", graphId: initial.id, module, internalGraph: internal }
+      ]
+    } as unknown as PreparedGraphCommit;
+    const removed = await store.transaction(({ revisions }) => revisions.commit(removal));
+    expect(removed.graphRevisionsCreated.map(({ graphId }) => graphId).sort()).toEqual(
+      [initial.id, internal.id].sort()
+    );
+    expect(await store.read(({ graphs }) => graphs.list())).toEqual([initial]);
+
+    await store.transaction(({ revisions }) => revisions.undo());
+    expect(await store.read(({ graphs }) => graphs.list())).toEqual([internal, parent]);
+    await store.transaction(({ revisions }) => revisions.redo());
+    expect(await store.read(({ graphs }) => graphs.list())).toEqual([initial]);
+    await store.close();
+
+    const reopened = await storeClass().open(filePath, { access: "read-only" });
+    expect(await reopened.read(({ graphs }) => graphs.list())).toEqual([initial]);
+    await reopened.close();
   });
 
   it("keeps runtime read facades pure and prevents sync or async mutation exploits", async () => {
@@ -460,6 +575,19 @@ describe("transactional Ether document repositories", () => {
         )
       )
     ).rejects.toThrow();
+    await expect(
+      store.transaction(({ revisions }) =>
+        revisions.commit(
+          prepared(
+            head,
+            [parent, internal],
+            "unproduced-snapshot",
+            [graphPropertyOperation(parent.id, parent.title)],
+            [graphPropertyOperation(parent.id, initial.title)]
+          )
+        )
+      )
+    ).rejects.toMatchObject({ code: "INVALID_PREPARED_COMMIT" });
     expect(await store.read(({ revisions }) => revisions.head())).toEqual(head);
     expect(await store.read(({ graphs }) => graphs.list())).toEqual([initial]);
     await store.close();
@@ -564,7 +692,15 @@ describe("transactional Ether document repositories", () => {
     await store.transaction(({ revisions }) => revisions.undo());
     head = await store.read(({ revisions }) => revisions.head());
     await store.transaction(({ revisions }) =>
-      revisions.commit(prepared(head, [renamed(second, "Branch")], "branch"))
+      revisions.commit(
+        prepared(
+          head,
+          [renamed(second, "Branch")],
+          "branch",
+          [graphPropertyOperation(initial.id, "Branch")],
+          [graphPropertyOperation(initial.id, second.title)]
+        )
+      )
     );
     expect(await store.read(({ revisions }) => revisions.canRedo())).toBe(false);
     await expect(store.transaction(({ revisions }) => revisions.redo())).rejects.toMatchObject({
@@ -695,9 +831,36 @@ describe("transactional Ether document repositories", () => {
     };
     await store.transaction(({ outputs }) => outputs.insert(baseVersion, [payload]));
 
+    const provenanceCases: Array<[
+      string,
+      Partial<Pick<NodeOutputVersion, "inputPayloadIds" | "selectedOutputVersionIds">>
+    ]> = [
+      ["output-dangling-payload", { inputPayloadIds: ["payload-missing"] }],
+      ["output-dangling-version", { selectedOutputVersionIds: ["output-missing"] }]
+    ];
+    for (const [id, provenance] of provenanceCases) {
+      const danglingVersion: NodeOutputVersion = {
+        ...baseVersion,
+        ...provenance,
+        id,
+        outputPayloadIds: [`payload-${id}`]
+      };
+      const danglingPayload: PayloadEnvelope = {
+        ...payload,
+        id: `payload-${id}`,
+        source: { ...payload.source, outputVersionId: id, lineageKey: `lineage-${id}` }
+      };
+      await expect(
+        store.transaction(({ outputs }) => outputs.insert(danglingVersion, [danglingPayload]))
+      ).rejects.toMatchObject({ code: "INVALID_OUTPUT_PROVENANCE" });
+      expect(await store.read(({ outputs }) => outputs.getVersion(id))).toBeUndefined();
+    }
+
     const manualVersion: NodeOutputVersion = {
       ...baseVersion,
       id: "output-2",
+      inputPayloadIds: [payload.id],
+      selectedOutputVersionIds: [baseVersion.id],
       outputPayloadIds: ["payload-2"],
       parentOutputVersionId: baseVersion.id,
       producer: { kind: "manual", actor: "user" },
@@ -738,7 +901,15 @@ describe("transactional Ether document repositories", () => {
     const current = await store.read(({ revisions }) => revisions.head());
     const emptied = { ...initial, nodes: [], updatedAt: "2026-07-17T08:05:00.000Z" };
     await store.transaction(({ revisions }) =>
-      revisions.commit(prepared(current, [emptied], "remove-content"))
+      revisions.commit(
+        prepared(
+          current,
+          [emptied],
+          "remove-content",
+          [{ type: "removeNode", graphId: initial.id, nodeId: initial.nodes[0].id }],
+          [{ type: "addNode", graphId: initial.id, node: initial.nodes[0] }]
+        )
+      )
     );
     expect(await store.read(({ outputs }) => outputs.getVersion(manualVersion.id))).toEqual(manualVersion);
     expect(await store.read(({ outputs }) => outputs.getPayload(manualPayload.id))).toEqual(manualPayload);

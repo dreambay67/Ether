@@ -1,5 +1,6 @@
 import * as documentPackage from "@ether/document";
 import type { EtherGraph } from "@ether/schema";
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdtempSync,
@@ -13,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 type AccessMode = "prefer-write" | "read-only" | "require-write";
@@ -40,6 +42,7 @@ interface StoreEnvironment {
   onSaveStage?: (stage: SaveStage) => void;
   pid?: number;
   processIsAlive?: (pid: number, machineId: string) => boolean;
+  recoveryRoot?: string;
   staleMs?: number;
 }
 
@@ -443,6 +446,48 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(readFileSync(leasePath, "utf8")).toBe(JSON.stringify(stale));
   });
 
+  it("distinguishes malformed leases and only replaces one after the document probe succeeds", async () => {
+    const creator = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-malformed-lease",
+      environment: environment(leaseRoot, "malformed-creator"),
+      initialGraph: initialGraph(),
+      title: "Malformed lease"
+    });
+    await creator.close();
+    const leasePath = leasePathFor(leaseRoot, sourcePath);
+    writeFileSync(leasePath, "{ malformed lease", "utf8");
+    const blocker = new DatabaseSync(sourcePath);
+    blocker.exec("BEGIN IMMEDIATE");
+    try {
+      const blocked = await storeClass().open(sourcePath, {
+        access: "prefer-write",
+        environment: environment(leaseRoot, "malformed-blocked", {
+          now: () => 100_000,
+          processIsAlive: () => false
+        })
+      });
+      expect(blocked.mode).toEqual({ kind: "read-only", reason: "sqlite-busy" });
+      expect(readFileSync(leasePath, "utf8")).toBe("{ malformed lease");
+      await blocked.close();
+    } finally {
+      blocker.exec("ROLLBACK");
+      blocker.close();
+    }
+
+    const writer = await storeClass().open(sourcePath, {
+      access: "require-write",
+      environment: environment(leaseRoot, "malformed-reclaimer", {
+        now: () => 100_000,
+        processIsAlive: () => false
+      })
+    });
+    expect(writer.mode).toEqual({ kind: "writable" });
+    expect(() => JSON.parse(readFileSync(leasePath, "utf8"))).not.toThrow();
+    expect(readdirSync(leaseRoot).filter((name) => name.includes("malformed"))).toEqual([]);
+    await writer.close();
+  });
+
   it("blocks mapped drives and cloud placeholders unless capability classification proves local fixed storage", async () => {
     const creator = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
@@ -678,6 +723,124 @@ describe("Ether document writer leases and backup lifecycle", () => {
     await source.close();
     expect(leaseRecordPaths(leaseRoot)).toEqual([]);
   });
+
+  it("never leaves two writable stores when releasing the source lease times out during Save As", async () => {
+    const destination = path.join(root, "Held-source-lease.ether");
+    let now = 1;
+    let sourceMutex: DatabaseSync | undefined;
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-held-source-lease",
+      environment: environment(leaseRoot, "held-source", {
+        heartbeatMs: 10,
+        now: () => now,
+        onSaveStage: (stage) => {
+          if (stage !== "post-publication") {
+            return;
+          }
+          sourceMutex = new DatabaseSync(mutexDatabasePathFor(leaseRoot, sourcePath));
+          sourceMutex.exec("BEGIN IMMEDIATE");
+          setTimeout(() => {
+            sourceMutex?.exec("ROLLBACK");
+            sourceMutex?.close();
+            sourceMutex = undefined;
+          }, 2_100);
+        }
+      }),
+      initialGraph: initialGraph(),
+      title: "Held source lease"
+    });
+
+    await expect(source.saveAs(destination)).rejects.toBeDefined();
+    now = 100_000;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const competitor = await storeClass().open(sourcePath, {
+      access: "prefer-write",
+      environment: environment(leaseRoot, "held-source-competitor", {
+        now: () => now,
+        processIsAlive: () => false,
+        staleMs: 1
+      })
+    });
+    expect([source.mode.kind, competitor.mode.kind].filter((kind) => kind === "writable")).toHaveLength(1);
+    await competitor.close();
+    await source.close();
+  }, 10_000);
+
+  it("reconciles a killed Save As replacement from its AppData recovery journal", async () => {
+    const destination = path.join(root, "Killed-replacement.ether");
+    const recoveryRoot = path.join(root, "recovery");
+    const existing = await storeClass().create(destination, {
+      appVersion: "4.0.0",
+      documentId: "document-killed-existing",
+      environment: environment(leaseRoot, "killed-existing", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Killed existing"
+    });
+    await existing.close();
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-killed-source",
+      environment: environment(leaseRoot, "killed-source-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Killed source"
+    });
+    await source.close();
+
+    const documentEntry = pathToFileURL(
+      path.resolve(import.meta.dirname, "../../document/dist/index.js")
+    ).href;
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { DocumentStore } from ${JSON.stringify(documentEntry)};
+         const store = await DocumentStore.open(${JSON.stringify(sourcePath)}, {
+           access: "require-write",
+           environment: {
+             appInstanceId: "killed-child",
+             leaseRoot: ${JSON.stringify(leaseRoot)},
+             recoveryRoot: ${JSON.stringify(recoveryRoot)},
+             machineId: "test-machine",
+             processIsAlive: () => false,
+             onSaveStage: (stage) => {
+               if (stage === "post-publication") process.kill(process.pid, "SIGKILL");
+             }
+           }
+         });
+         await store.saveAs(${JSON.stringify(destination)});`
+      ],
+      { encoding: "utf8", timeout: 10_000 }
+    );
+    expect(child.status).not.toBe(0);
+
+    const recovered = await storeClass().open(destination, {
+      access: "require-write",
+      environment: environment(leaseRoot, "killed-recovery", {
+        now: () => Date.now() + 60_000,
+        processIsAlive: () => false,
+        recoveryRoot,
+        staleMs: 1
+      })
+    });
+    expect(recovered.documentId).not.toBe("document-killed-existing");
+    expect(recovered.documentId).not.toBe("document-killed-source");
+    await recovered.close();
+    expect(readdirSync(root).filter((name) => name.includes("ether-rollback"))).toEqual([]);
+    expect(readdirSync(recoveryRoot, { recursive: true })).toEqual([]);
+    const reclaimedSource = await storeClass().open(sourcePath, {
+      access: "require-write",
+      environment: environment(leaseRoot, "killed-source-recovery", {
+        now: () => Date.now() + 60_000,
+        processIsAlive: () => false,
+        recoveryRoot,
+        staleMs: 1
+      })
+    });
+    await reclaimedSource.close();
+    expect(leaseRecordPaths(leaseRoot)).toEqual([]);
+  }, 20_000);
 
   it("probes a stale leased existing Save As destination and refuses replacement while it is busy", async () => {
     const destination = path.join(root, "Busy-existing.ether");

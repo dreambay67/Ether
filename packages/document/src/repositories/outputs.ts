@@ -82,6 +82,28 @@ export class OutputRepository {
         );
       }
     }
+    for (const payloadId of new Set(version.inputPayloadIds)) {
+      const payload = this.context.database
+        .prepare("SELECT 1 AS found FROM node_output_payloads WHERE payload_id = ?")
+        .get(payloadId);
+      if (payload === undefined) {
+        throw new DocumentRepositoryError(
+          "INVALID_OUTPUT_PROVENANCE",
+          `Input payload ${payloadId} does not exist.`
+        );
+      }
+    }
+    for (const outputVersionId of new Set(version.selectedOutputVersionIds)) {
+      const selected = this.context.database
+        .prepare("SELECT 1 AS found FROM node_output_versions WHERE output_version_id = ?")
+        .get(outputVersionId);
+      if (selected === undefined) {
+        throw new DocumentRepositoryError(
+          "INVALID_OUTPUT_PROVENANCE",
+          `Selected output version ${outputVersionId} does not exist.`
+        );
+      }
+    }
     const node = this.context.database
       .prepare("SELECT graph_id FROM nodes WHERE node_id = ? AND deleted_at IS NULL")
       .get(version.nodeId) as { graph_id: string } | undefined;

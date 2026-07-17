@@ -547,6 +547,21 @@ describe("Ether 4.0 schema", () => {
       ]
     } as const;
     expect(PreparedGraphCommitSchema.parse(commit)).toEqual(commit);
+    const deletionCommit = {
+      ...commit,
+      baseGraphRevisions: {
+        "graph-root": "graph-revision-1",
+        "graph-module": "graph-revision-module"
+      },
+      deletedGraphIds: ["graph-module"]
+    } as const;
+    expect(PreparedGraphCommitSchema.parse(deletionCommit)).toEqual(deletionCommit);
+    expect(
+      PreparedGraphCommitSchema.safeParse({
+        ...deletionCommit,
+        graphSnapshots: [...deletionCommit.graphSnapshots, { ...validGraph, id: "graph-module" }]
+      }).success
+    ).toBe(false);
     expect(
       PreparedGraphCommitSchema.safeParse({
         ...commit,
@@ -580,7 +595,7 @@ describe("Ether 4.0 schema", () => {
         forwardOperations: commit.forwardOperations,
         inverseOperations: commit.inverseOperations
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       PreparedGraphCommitSchema.safeParse({
         ...commit,

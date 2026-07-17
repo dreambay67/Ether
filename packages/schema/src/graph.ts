@@ -425,7 +425,8 @@ export const PreparedGraphCommitSchema = z
     baseGraphRevisions: z.record(z.string().min(1), z.string().min(1)),
     title: z.string(),
     actor: RevisionActorSchema,
-    graphSnapshots: z.array(EtherGraphSchema).min(1),
+    graphSnapshots: z.array(EtherGraphSchema),
+    deletedGraphIds: z.array(z.string().min(1)).optional(),
     forwardOperations: z.array(GraphOperationSchema).min(1),
     inverseOperations: z.array(GraphOperationSchema).min(1)
   })
@@ -433,11 +434,37 @@ export const PreparedGraphCommitSchema = z
   .superRefine((commit, context) => {
     const snapshotIds = commit.graphSnapshots.map((snapshot) => snapshot.id);
     const snapshotIdSet = new Set(snapshotIds);
+    const deletedGraphIds = commit.deletedGraphIds ?? [];
+    const deletedGraphIdSet = new Set(deletedGraphIds);
+    const affectedGraphIds = new Set([...snapshotIds, ...deletedGraphIds]);
     if (snapshotIdSet.size !== snapshotIds.length) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["graphSnapshots"],
         message: "Prepared commits must contain one resulting snapshot per affected graph"
+      });
+    }
+    if (deletedGraphIdSet.size !== deletedGraphIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["deletedGraphIds"],
+        message: "Prepared commits must contain each deleted graph exactly once"
+      });
+    }
+    for (const [index, graphId] of deletedGraphIds.entries()) {
+      if (snapshotIdSet.has(graphId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["deletedGraphIds", index],
+          message: "Deleted graph IDs must be disjoint from resulting graph snapshots"
+        });
+      }
+    }
+    if (affectedGraphIds.size === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["graphSnapshots"],
+        message: "Prepared commits must affect at least one graph"
       });
     }
     if (commit.forwardOperations.length !== commit.inverseOperations.length) {
@@ -458,11 +485,11 @@ export const PreparedGraphCommitSchema = z
       }
     }
     for (const graphId of Object.keys(commit.baseGraphRevisions)) {
-      if (!snapshotIdSet.has(graphId)) {
+      if (!affectedGraphIds.has(graphId)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["baseGraphRevisions", graphId],
-          message: "Base graph revisions may only name affected graph snapshots"
+          message: "Base graph revisions may only name affected graphs"
         });
       }
     }
@@ -471,31 +498,13 @@ export const PreparedGraphCommitSchema = z
       ["inverseOperations", commit.inverseOperations]
     ] as const) {
       for (const [index, operation] of operations.entries()) {
-        if (!snapshotIdSet.has(operation.graphId)) {
+        if (!affectedGraphIds.has(operation.graphId)) {
           context.addIssue({
             code: z.ZodIssueCode.custom,
             path: [field, index, "graphId"],
-            message: "Prepared operations must target an affected graph snapshot"
+            message: "Prepared operations must target an affected graph"
           });
         }
-      }
-    }
-    const forwardGraphIds = new Set(commit.forwardOperations.map((operation) => operation.graphId));
-    const inverseGraphIds = new Set(commit.inverseOperations.map((operation) => operation.graphId));
-    for (const [index, graphId] of snapshotIds.entries()) {
-      if (!forwardGraphIds.has(graphId)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["graphSnapshots", index, "id"],
-          message: "Every affected graph snapshot requires a forward operation"
-        });
-      }
-      if (!inverseGraphIds.has(graphId)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["graphSnapshots", index, "id"],
-          message: "Every affected graph snapshot requires an inverse operation"
-        });
       }
     }
   });

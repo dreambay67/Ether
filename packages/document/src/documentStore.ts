@@ -33,6 +33,14 @@ import {
   locationSupportsWriting,
   resolveDocumentStoreEnvironment
 } from "./locking.js";
+import {
+  beginReplacementRecovery,
+  completeReplacementRecovery,
+  markReplacementPublished,
+  reconcileReplacementRecovery,
+  recordReplacementRollback,
+  type ReplacementRecoveryJournal
+} from "./recovery.js";
 import { createRepositoryContext, GraphRepository } from "./repositories/graphs.js";
 import { OutputRepository } from "./repositories/outputs.js";
 import {
@@ -262,6 +270,7 @@ export class DocumentStore {
   static async open(filePath: string, options: OpenDocumentStoreOptions): Promise<DocumentStore> {
     const absolutePath = path.resolve(filePath);
     const runtime = resolveDocumentStoreEnvironment(options.environment);
+    reconcileReplacementRecovery(absolutePath, runtime.recoveryRoot);
     if (options.access === "read-only") {
       const connection = openEtherDocumentConnection(absolutePath, true);
       return new DocumentStore({
@@ -607,7 +616,9 @@ export class DocumentStore {
     let temporaryIdentity: EtherFileIdentity | undefined;
     let publishedIdentity: EtherFileIdentity | undefined;
     let replacementRollback: OwnedReplacementRollback | undefined;
+    let replacementRecovery: ReplacementRecoveryJournal | undefined;
     let destinationLease: WriterLease | undefined;
+    let existingDestinationDocumentId: string | undefined;
     let connectionOnSource = true;
     const nextDocumentId = randomUUID();
 
@@ -651,6 +662,7 @@ export class DocumentStore {
         const probeExistingDestination = (): void => {
           const existing = openEtherDocumentConnection(absoluteDestination, false);
           try {
+            existingDestinationDocumentId = existing.inspection.document.documentId;
             sqliteProbe(existing.database);
           } finally {
             existing.database.close();
@@ -678,9 +690,26 @@ export class DocumentStore {
       publishedIdentity = temporaryIdentity;
       if (switchActive) {
         if (destinationExisted) {
+          if (existingDestinationDocumentId === undefined) {
+            throw new DocumentStoreError(
+              "INVALID_DESTINATION",
+              "The existing Save As destination identity was not validated."
+            );
+          }
+          replacementRecovery = beginReplacementRecovery(this.runtime.recoveryRoot, {
+            destinationPath: absoluteDestination,
+            newDocumentId: nextDocumentId,
+            previousDocumentId: existingDestinationDocumentId,
+            sourceDocumentId,
+            sourcePath
+          });
           replacementRollback = createOwnedReplacementRollback(absoluteDestination);
+          recordReplacementRollback(replacementRecovery, replacementRollback);
         }
         replaceWithOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
+        if (replacementRecovery !== undefined) {
+          markReplacementPublished(replacementRecovery);
+        }
       } else {
         publishOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
       }
@@ -700,6 +729,10 @@ export class DocumentStore {
         if (replacementRollback !== undefined) {
           removeOwnedReplacementRollback(replacementRollback);
           replacementRollback = undefined;
+        }
+        if (replacementRecovery !== undefined) {
+          completeReplacementRecovery(replacementRecovery);
+          replacementRecovery = undefined;
         }
       } else {
         const source = openEtherDocumentConnection(sourcePath, sourceMode.kind === "read-only");
@@ -728,6 +761,10 @@ export class DocumentStore {
         try {
           restoreOwnedReplacementRollback(replacementRollback, absoluteDestination);
           replacementRollback = undefined;
+          if (replacementRecovery !== undefined) {
+            completeReplacementRecovery(replacementRecovery);
+            replacementRecovery = undefined;
+          }
         } catch (restoreError) {
           restorationError = restoreError;
         }
@@ -741,6 +778,37 @@ export class DocumentStore {
       this.currentPath = sourcePath;
       this.currentDocumentId = sourceDocumentId;
       this.currentMode = sourceMode;
+      if (sourceMode.kind === "writable") {
+        const sourceLease = this.writerLease;
+        const sourceLeaseOwned = (await sourceLease?.owns()) ?? false;
+        if (!sourceLeaseOwned) {
+          try {
+            await sourceLease?.release();
+          } catch {
+            // A still-contended lease remains attached so close can retry its release.
+          }
+          const reacquired = WriterLease.acquire(
+            sourcePath,
+            sourceDocumentId,
+            this.runtime,
+            () => sqliteProbe(this.database)
+          );
+          if (reacquired.lease !== undefined) {
+            this.writerLease = reacquired.lease;
+            this.currentMode = { kind: "writable" };
+            this.startHeartbeat();
+          } else {
+            this.database.close();
+            const readOnly = openEtherDocumentConnection(sourcePath, true);
+            this.database = readOnly.database;
+            this.writerLease = sourceLease;
+            this.currentMode = {
+              kind: "read-only",
+              reason: reacquired.reason ?? "writer-active"
+            };
+          }
+        }
+      }
       if (restorationError !== undefined) {
         throw new DocumentStoreError(
           "REPLACEMENT_ROLLBACK_FAILED",

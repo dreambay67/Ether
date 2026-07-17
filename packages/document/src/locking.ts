@@ -2,9 +2,11 @@ import { WriterLeaseRecordSchema, type WriterLeaseRecord } from "@ether/schema";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync
@@ -44,6 +46,7 @@ export interface DocumentStoreEnvironment {
   onSaveStage?: (stage: SaveStage) => void;
   pid?: number;
   processIsAlive?: (pid: number, machineId: string) => boolean;
+  recoveryRoot?: string;
   staleMs?: number;
 }
 
@@ -69,6 +72,7 @@ interface ResolvedEnvironment {
   onSaveStage?: (stage: SaveStage) => void;
   pid: number;
   processIsAlive: (pid: number, machineId: string) => boolean;
+  recoveryRoot: string;
   staleMs: number;
 }
 
@@ -83,6 +87,10 @@ function defaultLeaseRoot(): string {
     return path.join(localAppData, "DreamBay", "Ether", "leases");
   }
   return path.join(os.homedir(), "AppData", "Local", "DreamBay", "Ether", "leases");
+}
+
+function defaultRecoveryRoot(): string {
+  return path.join(path.dirname(defaultLeaseRoot()), "recovery");
 }
 
 function canonicalPath(filePath: string): string {
@@ -149,6 +157,7 @@ export function resolveDocumentStoreEnvironment(
     processIsAlive:
       environment.processIsAlive ??
       ((pid, ownerMachineId) => ownerMachineId === machineId && localProcessIsAlive(pid)),
+    recoveryRoot: path.resolve(environment.recoveryRoot ?? defaultRecoveryRoot()),
     staleMs: environment.staleMs ?? 15_000
   };
 }
@@ -230,18 +239,57 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function readLease(filePath: string): WriterLeaseRecord | undefined {
+type LeaseReadResult =
+  | { kind: "malformed" }
+  | { kind: "missing" }
+  | { kind: "valid"; record: WriterLeaseRecord };
+
+function readLease(filePath: string): LeaseReadResult {
+  let serialized: string;
   try {
-    return WriterLeaseRecordSchema.parse(JSON.parse(readFileSync(filePath, "utf8")));
+    serialized = readFileSync(filePath, "utf8");
   } catch (error) {
     const missing =
       typeof error === "object" && error !== null && "code" in error
         ? (error as { code?: unknown }).code === "ENOENT"
         : false;
     if (missing) {
-      return undefined;
+      return { kind: "missing" };
     }
-    return undefined;
+    throw error;
+  }
+  try {
+    return { kind: "valid", record: WriterLeaseRecordSchema.parse(JSON.parse(serialized)) };
+  } catch {
+    return { kind: "malformed" };
+  }
+}
+
+function removeMalformedLease(filePath: string): void {
+  const quarantinePath = `${filePath}.malformed-${randomUUID()}`;
+  renameSync(filePath, quarantinePath);
+  unlinkSync(quarantinePath);
+}
+
+function replaceLeaseAtomically(filePath: string, record: WriterLeaseRecord): void {
+  const temporaryPath = `${filePath}.tmp-${randomUUID()}`;
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(temporaryPath, "wx", 0o600);
+    writeFileSync(descriptor, JSON.stringify(WriterLeaseRecordSchema.parse(record)), "utf8");
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporaryPath, filePath);
+  } finally {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
+    try {
+      unlinkSync(temporaryPath);
+    } catch {
+      // The owned temporary was either published or already absent.
+    }
   }
 }
 
@@ -308,8 +356,9 @@ export class WriterLease {
       return { reason: "writer-active" };
     }
     try {
-      const existing = readLease(targetPath);
-      if (existing !== undefined) {
+      const existingRead = readLease(targetPath);
+      if (existingRead.kind === "valid") {
+        const existing = existingRead.record;
         const heartbeatFresh = runtime.now() - existing.heartbeatAt <= runtime.staleMs;
         const ownerAlive = runtime.processIsAlive(existing.pid, existing.machineId);
         if (heartbeatFresh || ownerAlive) {
@@ -318,23 +367,29 @@ export class WriterLease {
         if (!probeAvailable(staleReclaimProbe)) {
           return { reason: "sqlite-busy" };
         }
-        const current = readLease(targetPath);
-        if (current === undefined || current.ownerToken !== existing.ownerToken) {
+        const currentRead = readLease(targetPath);
+        if (currentRead.kind !== "valid" || currentRead.record.ownerToken !== existing.ownerToken) {
           return { reason: "writer-active" };
         }
+        const current = currentRead.record;
         const refreshedHeartbeatFresh = runtime.now() - current.heartbeatAt <= runtime.staleMs;
         const refreshedOwnerAlive = runtime.processIsAlive(current.pid, current.machineId);
-        const finalRecord = readLease(targetPath);
+        const finalRead = readLease(targetPath);
         if (
           refreshedHeartbeatFresh ||
           refreshedOwnerAlive ||
-          finalRecord === undefined ||
-          finalRecord.ownerToken !== current.ownerToken ||
-          runtime.now() - finalRecord.heartbeatAt <= runtime.staleMs
+          finalRead.kind !== "valid" ||
+          finalRead.record.ownerToken !== current.ownerToken ||
+          runtime.now() - finalRead.record.heartbeatAt <= runtime.staleMs
         ) {
           return { reason: "writer-active" };
         }
         unlinkSync(targetPath);
+      } else if (existingRead.kind === "malformed") {
+        if (!probeAvailable(sqliteProbe)) {
+          return { reason: "sqlite-busy" };
+        }
+        removeMalformedLease(targetPath);
       } else if (!probeAvailable(sqliteProbe)) {
         return { reason: "sqlite-busy" };
       }
@@ -376,15 +431,11 @@ export class WriterLease {
       try {
         this.runtime.onHeartbeat?.();
         const current = readLease(this.filePath);
-        if (current?.ownerToken !== this.record.ownerToken) {
+        if (current.kind !== "valid" || current.record.ownerToken !== this.record.ownerToken) {
           throw new Error("Writer lease ownership changed.");
         }
         this.record.heartbeatAt = this.runtime.now();
-        writeFileSync(
-          this.filePath,
-          JSON.stringify(WriterLeaseRecordSchema.parse(this.record)),
-          "utf8"
-        );
+        replaceLeaseAtomically(this.filePath, this.record);
       } catch {
         failed = true;
       } finally {
@@ -398,21 +449,25 @@ export class WriterLease {
   }
 
   release(): Promise<void> {
+    if (this.released) {
+      return Promise.resolve();
+    }
     if (this.releasePromise !== undefined) {
       return this.releasePromise;
     }
-    if (this.heartbeatTimer !== undefined) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = undefined;
-    }
-    this.releasePromise = (async () => {
+    const attempt = (async () => {
       const deadline = Date.now() + 2_000;
       while (true) {
         const mutex = acquireMutex(this.filePath, this.runtime);
         if (mutex !== undefined) {
           try {
-            if (readLease(this.filePath)?.ownerToken === this.record.ownerToken) {
+            const current = readLease(this.filePath);
+            if (current.kind === "valid" && current.record.ownerToken === this.record.ownerToken) {
               unlinkSync(this.filePath);
+            }
+            if (this.heartbeatTimer !== undefined) {
+              clearInterval(this.heartbeatTimer);
+              this.heartbeatTimer = undefined;
             }
             this.released = true;
             return;
@@ -426,7 +481,32 @@ export class WriterLease {
         await delay(10);
       }
     })();
-    return this.releasePromise;
+    this.releasePromise = attempt;
+    void attempt.catch(() => {
+      if (this.releasePromise === attempt) {
+        this.releasePromise = undefined;
+      }
+    });
+    return attempt;
+  }
+
+  async owns(): Promise<boolean> {
+    const deadline = Date.now() + 2_000;
+    while (true) {
+      const mutex = acquireMutex(this.filePath, this.runtime);
+      if (mutex !== undefined) {
+        try {
+          const current = readLease(this.filePath);
+          return current.kind === "valid" && current.record.ownerToken === this.record.ownerToken;
+        } finally {
+          releaseMutex(mutex);
+        }
+      }
+      if (Date.now() >= deadline) {
+        return false;
+      }
+      await delay(10);
+    }
   }
 }
 

@@ -79,6 +79,20 @@ function sameSnapshot(left: EtherGraph | undefined, right: EtherGraph | undefine
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function normalizeTimestamps(
+  actual: EtherGraph | undefined,
+  expected: EtherGraph | undefined
+): EtherGraph | undefined {
+  if (actual === undefined || expected === undefined) {
+    return actual;
+  }
+  return EtherGraphSchema.parse({
+    ...actual,
+    createdAt: expected.createdAt,
+    updatedAt: expected.updatedAt
+  });
+}
+
 export class RevisionRepository {
   constructor(
     private readonly context: RepositoryTransactionContext,
@@ -137,11 +151,16 @@ export class RevisionRepository {
   commit(input: PreparedGraphCommit): CommitResult {
     const commit = PreparedGraphCommitSchema.parse(input);
     const current = this.head();
-    const graphConflicts = commit.graphSnapshots.flatMap((snapshot) => {
-      const actualRevisionId = current.graphRevisions[snapshot.id];
-      const expectedRevisionId = commit.baseGraphRevisions[snapshot.id];
+    const deletedGraphIds = commit.deletedGraphIds ?? [];
+    const affectedGraphIds = [
+      ...commit.graphSnapshots.map((snapshot) => snapshot.id),
+      ...deletedGraphIds
+    ];
+    const graphConflicts = affectedGraphIds.flatMap((graphId) => {
+      const actualRevisionId = current.graphRevisions[graphId];
+      const expectedRevisionId = commit.baseGraphRevisions[graphId];
       return actualRevisionId !== expectedRevisionId
-        ? [{ graphId: snapshot.id, actualRevisionId, expectedRevisionId }]
+        ? [{ graphId, actualRevisionId, expectedRevisionId }]
         : [];
     });
     if (current.documentRevisionId !== commit.baseDocumentRevisionId || graphConflicts.length > 0) {
@@ -158,13 +177,75 @@ export class RevisionRepository {
       );
     }
 
+    this.graphs.validateMany(commit.graphSnapshots);
+    const currentGraphs = this.graphs.list();
+    const currentById = new Map(currentGraphs.map((graph) => [graph.id, graph]));
+    const declaredById = new Map(commit.graphSnapshots.map((graph) => [graph.id, graph]));
+    const affected = new Set(affectedGraphIds);
+    try {
+      for (const graphId of affected) {
+        const exists = currentById.has(graphId);
+        const hasRevision = current.graphRevisions[graphId] !== undefined;
+        const hasBase = Object.hasOwn(commit.baseGraphRevisions, graphId);
+        if (hasRevision !== hasBase || (deletedGraphIds.includes(graphId) && !exists)) {
+          throw new Error(`Affected graph ${graphId} has an invalid base revision declaration.`);
+        }
+      }
+
+      const replayedForward = replayGraphOperations(currentGraphs, commit.forwardOperations);
+      const forwardById = new Map(replayedForward.map((graph) => [graph.id, graph]));
+      const allForwardIds = new Set([
+        ...currentById.keys(),
+        ...forwardById.keys(),
+        ...affected
+      ]);
+      for (const graphId of allForwardIds) {
+        const expected = affected.has(graphId) ? declaredById.get(graphId) : currentById.get(graphId);
+        const actual = normalizeTimestamps(forwardById.get(graphId), expected);
+        if (!sameSnapshot(actual, expected)) {
+          throw new Error(`Forward operations do not produce declared graph ${graphId}.`);
+        }
+      }
+
+      const declaredResult = [
+        ...currentGraphs.filter((graph) => !affected.has(graph.id)),
+        ...commit.graphSnapshots
+      ];
+      const replayedInverse = replayGraphOperations(
+        declaredResult,
+        commit.inverseOperations.slice().reverse()
+      );
+      const inverseById = new Map(replayedInverse.map((graph) => [graph.id, graph]));
+      const allInverseIds = new Set([
+        ...currentById.keys(),
+        ...inverseById.keys(),
+        ...affected
+      ]);
+      for (const graphId of allInverseIds) {
+        const expected = currentById.get(graphId);
+        const actual = normalizeTimestamps(inverseById.get(graphId), expected);
+        if (!sameSnapshot(actual, expected)) {
+          throw new Error(`Inverse operations do not restore original graph ${graphId}.`);
+        }
+      }
+    } catch (error) {
+      throw new DocumentRepositoryError(
+        "INVALID_PREPARED_COMMIT",
+        "Prepared graph snapshots and operations do not describe an exact reversible commit.",
+        { details: { cause: error } }
+      );
+    }
+
     this.context.database
       .prepare("UPDATE history_entries SET state = 'cleared' WHERE state = 'undone'")
       .run();
     const before = new Map(
-      commit.graphSnapshots.map((snapshot) => [snapshot.id, this.graphs.get(snapshot.id)])
+      affectedGraphIds.map((graphId) => [graphId, currentById.get(graphId)])
     );
     const snapshots = this.graphs.persistMany(commit.graphSnapshots);
+    for (const graphId of deletedGraphIds) {
+      this.graphs.markDeleted(graphId);
+    }
     const createdAt = this.context.now();
     const documentRevisionId = this.context.createId("document-revision");
     const revisionOrder = this.nextRevisionOrder();
@@ -184,10 +265,11 @@ export class RevisionRepository {
         commit.id,
         revisionOrder
       );
-    const graphRevisionsCreated = snapshots
-      .slice()
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((snapshot) => {
+    const desired = [
+      ...snapshots.map((snapshot) => ({ graphId: snapshot.id, snapshot })),
+      ...deletedGraphIds.map((graphId) => ({ graphId, snapshot: undefined }))
+    ].sort((left, right) => left.graphId.localeCompare(right.graphId));
+    const graphRevisionsCreated = desired.map(({ graphId, snapshot }) => {
         const revisionId = this.context.createId("graph-revision");
         this.context.database
           .prepare(
@@ -199,24 +281,24 @@ export class RevisionRepository {
           )
           .run(
             revisionId,
-            snapshot.id,
-            current.graphRevisions[snapshot.id] ?? null,
+            graphId,
+            current.graphRevisions[graphId] ?? null,
             commit.actor,
             commit.title,
             createdAt,
-            commit.forwardOperations.filter((operation) => operation.graphId === snapshot.id).length,
+            commit.forwardOperations.filter((operation) => operation.graphId === graphId).length,
             commit.id,
-            JSON.stringify(snapshot),
-            before.get(snapshot.id) === undefined ? null : JSON.stringify(before.get(snapshot.id))
+            snapshot === undefined ? null : JSON.stringify(snapshot),
+            before.get(graphId) === undefined ? null : JSON.stringify(before.get(graphId))
           );
-        this.insertMember(documentRevisionId, snapshot.id, revisionId);
+        this.insertMember(documentRevisionId, graphId, revisionId);
         this.context.database
           .prepare(
             `INSERT INTO graph_heads (graph_id, graph_revision_id) VALUES (?, ?)
              ON CONFLICT(graph_id) DO UPDATE SET graph_revision_id = excluded.graph_revision_id`
           )
-          .run(snapshot.id, revisionId);
-        return { graphId: snapshot.id, revisionId };
+          .run(graphId, revisionId);
+        return { graphId, revisionId };
       });
     this.insertOperations(documentRevisionId, graphRevisionsCreated, commit.forwardOperations, commit.inverseOperations);
     this.context.database
@@ -512,7 +594,6 @@ export class RevisionRepository {
       }
 
       const affected = new Set(affectedGraphIds);
-      const represented = new Set<string>();
       const forward: GraphOperation[] = [];
       const inverse: GraphOperation[] = [];
       for (const [index, row] of rows.entries()) {
@@ -527,12 +608,8 @@ export class RevisionRepository {
         ) {
           throw new Error("Stored operation pairs do not match the affected graph set.");
         }
-        represented.add(operation.graphId);
         forward.push(operation);
         inverse.push(inverseOperation);
-      }
-      if (represented.size !== affected.size || [...affected].some((id) => !represented.has(id))) {
-        throw new Error("Stored operations do not completely represent the affected graph set.");
       }
       return { forward, inverse };
     } catch (error) {

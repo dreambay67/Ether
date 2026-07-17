@@ -216,9 +216,14 @@ export class GraphRepository {
     return rows.map(({ graph_id }) => this.get(graph_id)).filter((value): value is EtherGraph => value !== undefined);
   }
 
-  persistMany(input: EtherGraph[]): EtherGraph[] {
+  validateMany(input: EtherGraph[]): EtherGraph[] {
     const graphs = input.map((value) => EtherGraphSchema.parse(value));
     this.validateEntityOwnership(graphs);
+    return graphs;
+  }
+
+  persistMany(input: EtherGraph[]): EtherGraph[] {
+    const graphs = this.validateMany(input);
     const now = this.context.now();
     for (const graph of graphs) {
       this.context.database
