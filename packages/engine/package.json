@@ -8,6 +8,9 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": "./src/browser.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./graph/artifacts": {

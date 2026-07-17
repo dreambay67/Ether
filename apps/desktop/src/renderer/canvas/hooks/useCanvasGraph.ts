@@ -15,7 +15,8 @@ import {
   type ReactFlowInstance,
   type Viewport
 } from "@xyflow/react";
-import { LATEST_GRAPH_VERSION, type EtherGraph } from "@ether/engine";
+import * as engine from "@ether/engine";
+import type { EtherGraph } from "@ether/engine";
 import {
   coerceCanvasNodeData,
   type CanvasNodeData
@@ -154,7 +155,7 @@ export function useCanvasGraph({
   const dragBaselineRef = useRef<CanvasSnapshot | null>(null);
   const textEditBaselineRef = useRef<CanvasSnapshot | null>(null);
   const currentGraphRef = useRef<EtherGraph>({
-    graphVersion: graph?.graphVersion ?? LATEST_GRAPH_VERSION,
+    graphVersion: graph?.graphVersion ?? engine.LATEST_GRAPH_VERSION,
     nodes: normalizeNodes(graph?.nodes ?? []),
     edges: normalizeEdges(graph?.edges ?? []),
     viewport: graph?.viewport ?? defaultViewport,
@@ -174,7 +175,7 @@ export function useCanvasGraph({
   const isDirty = history.past.length > 0;
   const assemblyGraph = useMemo<EtherGraph>(
     () => ({
-      graphVersion: graph?.graphVersion ?? LATEST_GRAPH_VERSION,
+      graphVersion: graph?.graphVersion ?? engine.LATEST_GRAPH_VERSION,
       nodes,
       edges,
       viewport,
