@@ -19,7 +19,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { EtherApplication } from "@ether/application";
-import { DocumentStore, importBlob, linkReference } from "@ether/document";
+import { DocumentStore, importBlob, linkReference, revokeReferenceGrant } from "@ether/document";
 import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,6 +38,8 @@ import {
   createEtherAssetProtocolHandler,
   type EtherAssetSource
 } from "../../../../apps/desktop/src/main/protocol/etherAssetProtocol";
+import { registerDocumentHandlers } from "../../../../apps/desktop/src/main/ipc/registerDocumentHandlers";
+import { desktopIpcChannels } from "../../../../apps/desktop/src/shared/ipc/channels";
 import { reduceDocumentSession } from "../../../../apps/desktop/src/renderer/project/useDocumentSession";
 
 const roots: string[] = [];
@@ -843,18 +845,16 @@ describe("desktop document lifecycle", () => {
       dialogs: dialogs({ saveDocument: async (kind) => kind === "save-as" ? renamedPath : copyPath })
     });
     const original = await reopened.openPath(originalPath);
-    armRenameFailure(1);
     await expect(reopened.actOnReference(original.documentId, "reference-reopen", "embed-available-copy"))
-      .rejects.toMatchObject({ code: "ENOSPC" });
+      .resolves.toBeDefined();
     await expect(reopened.listReferences(original.documentId))
       .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "reference-reopen", state: "embedded" })]));
     const bindingsAfterEmbed = JSON.parse(
       await readFile(path.join(appDataRoot, "reference-grants.json"), "utf8")
     ) as Array<{ grantId: string }>;
     expect(bindingsAfterEmbed.some(({ grantId }) => grantId === grantIds.get("reference-reopen"))).toBe(false);
-    armRenameFailure(1);
     await expect(reopened.actOnReference(original.documentId, "reference-remove", "remove"))
-      .rejects.toMatchObject({ code: "ENOSPC" });
+      .resolves.toBeDefined();
     await expect(reopened.listReferences(original.documentId))
       .resolves.toEqual(expect.not.arrayContaining([expect.objectContaining({ id: "reference-remove" })]));
     const bindingsAfterRemove = JSON.parse(
@@ -883,6 +883,115 @@ describe("desktop document lifecycle", () => {
       .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "reference-save-as", state: "embedded" })]));
     await sourceAgain.close();
   });
+
+  it.each(["embed", "remove", "portable"] as const)(
+    "publishes %s with attention and durably denies its grant when grant cleanup stays unavailable",
+    async (operation) => {
+      const root = await tempRoot(`ether-grant-revocation-${operation}-`);
+      const appDataRoot = path.join(root, "appdata");
+      const sourcePath = path.join(root, `${operation}.png`);
+      await writeFile(sourcePath, pngBytes(512, 0x44));
+      let failGrantRename = false;
+      const service = new DesktopApplicationService({
+        appDataRoot,
+        appVersion: "4.0.0-test",
+        dialogs: dialogs(),
+        provider: new FakeImageProvider(),
+        pathGrantPersistenceCheckpoint: (
+          stage: "write" | "fsync" | "rename",
+          scope?: "grants" | "rebinds" | "revocations"
+        ) => {
+          if (
+            failGrantRename &&
+            stage === "rename" &&
+            (scope === undefined || scope === "grants")
+          ) {
+            throw Object.assign(new Error("persistent grant publication failure"), { code: "ENOSPC" });
+          }
+        }
+      } as unknown as ConstructorParameters<typeof DesktopApplicationService>[0]);
+      let serviceOpen = true;
+      try {
+        const snapshot = await service.bootstrap();
+        const application = (service as unknown as { application: EtherApplication }).application;
+        const store = (application as unknown as { store: DocumentStore }).store;
+        const authority = (service as unknown as { pathGrants: DesktopPathGrantAuthority }).pathGrants;
+        const preview = await importBlob(
+          store,
+          { sourcePath, mediaType: "image/png" },
+          { appDataRoot }
+        );
+        const grantId = authority.grant(snapshot.documentId, "link", sourcePath);
+        await linkReference(store, {
+          id: `reference-${operation}`,
+          displayName: path.basename(sourcePath),
+          sourcePath,
+          mediaType: "image/png",
+          pathGrantId: grantId,
+          previewContentKey: preview.contentKey
+        });
+        authority.allowResolve(grantId, snapshot.documentId);
+        const documentPath = service.activePath()!;
+        failGrantRename = true;
+
+        if (operation === "portable") {
+          await expect(service.makePortable(snapshot.documentId)).resolves.toMatchObject({
+            cancelled: false,
+            embeddedCount: 1
+          });
+        } else {
+          await expect(service.actOnReference(
+            snapshot.documentId,
+            `reference-${operation}`,
+            operation === "embed" ? "embed-available-copy" : "remove"
+          )).resolves.toBeDefined();
+        }
+        expect(service.snapshot().saveState).toBe("needs-attention");
+        expect(authority.authorizePath({
+          documentId: snapshot.documentId,
+          grantId,
+          operation: "resolve",
+          path: sourcePath
+        })).toBe(false);
+        await expect(readFile(path.join(appDataRoot, "reference-grants.revocations.json"), "utf8"))
+          .resolves.toContain(grantId);
+
+        await service.close();
+        serviceOpen = false;
+        failGrantRename = false;
+        const reopened = new DesktopApplicationService({
+          appDataRoot,
+          appVersion: "4.0.0-test",
+          dialogs: dialogs(),
+          provider: new FakeImageProvider()
+        });
+        try {
+          const active = await reopened.openPath(documentPath);
+          const references = await reopened.listReferences(active.documentId);
+          if (operation === "remove") {
+            expect(references).toEqual([]);
+          } else {
+            expect(references).toEqual([
+              expect.objectContaining({ id: `reference-${operation}`, state: "embedded" })
+            ]);
+          }
+          const grants = JSON.parse(
+            await readFile(path.join(appDataRoot, "reference-grants.json"), "utf8")
+          ) as Array<{ grantId: string }>;
+          expect(grants.some((grant) => grant.grantId === grantId)).toBe(false);
+          await expect(stat(path.join(appDataRoot, "reference-grants.revocations.json")))
+            .rejects.toMatchObject({ code: "ENOENT" });
+        } finally {
+          await reopened.close();
+        }
+      } finally {
+        if (serviceOpen) {
+          failGrantRename = false;
+          await service.close();
+        }
+      }
+    }
+  );
 
   it("returns Save As success when durable grant rebind succeeds on its internal retry", async () => {
     const root = await tempRoot("ether-save-as-grant-recovery-");
@@ -1630,6 +1739,7 @@ describe("autosave and event ordering", () => {
     vi.spyOn(application, "removeDocumentReference").mockImplementation(async () => {
       referenceAnnounce();
       await referenceGate;
+      return { grantRevocationPending: false };
     });
     const referenceMutation = service.actOnReference(snapshot.documentId, "reference-1", "remove");
     await referenceStarted;
@@ -1893,12 +2003,15 @@ describe("desktop reference path grants", () => {
 
       armed = true;
       expect(() => authority.revoke(grantId, "document-1")).toThrow(/failed/);
-      expect(authority.authorizePath(request)).toBe(false);
+      expect(authority.authorizePath(request)).toBe(true);
 
       const reopened = new DesktopPathGrantAuthority({ storagePath });
       reopened.activateDocument("document-1", documentPath);
       expect(reopened.authorizePath(request)).toBe(true);
       expect((await readdir(path.dirname(storagePath))).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+      armed = false;
+      expect(authority.revoke(grantId, "document-1")).toBe("revoked");
+      expect(authority.authorizePath(request)).toBe(false);
     }
   );
 });
@@ -2189,7 +2302,7 @@ describe("incremental reference folder search", () => {
     }
   });
 
-  it("continues after post-grant disappearance and retries durable revoke without leaking authority", async () => {
+  it("continues through the real repository after post-grant disappearance without reviving authority", async () => {
     const root = await tempRoot("ether-reference-search-post-grant-");
     const folder = path.join(root, "search");
     const firstPath = path.join(folder, "first.png");
@@ -2206,8 +2319,15 @@ describe("incremental reference folder search", () => {
       appVersion: "4.0.0-test",
       dialogs: dialogs({ searchReferenceFolder: async () => folder }),
       provider: new FakeImageProvider(),
-      pathGrantPersistenceCheckpoint: (stage: "write" | "fsync" | "rename") => {
-        if (failRevokeRename && stage === "rename") {
+      pathGrantPersistenceCheckpoint: (
+        stage: "write" | "fsync" | "rename",
+        scope?: "grants" | "rebinds" | "revocations"
+      ) => {
+        if (
+          failRevokeRename &&
+          stage === "rename" &&
+          (scope === undefined || scope === "grants")
+        ) {
           failRevokeRename = false;
           throw Object.assign(new Error("injected revoke publication failure"), { code: "ENOSPC" });
         }
@@ -2221,37 +2341,46 @@ describe("incremental reference folder search", () => {
       }
     } as unknown as ConstructorParameters<typeof DesktopApplicationService>[0]);
     const snapshot = await service.bootstrap();
-    const application = (service as unknown as { application: {
-      queryReferences(): Promise<Array<Record<string, unknown>>>;
-      relinkDocumentReference(input: { sourcePath: string }): Promise<void>;
-    } }).application;
-    vi.spyOn(service, "listReferences").mockResolvedValue([{
+    const application = (service as unknown as { application: EtherApplication }).application;
+    const store = (application as unknown as { store: DocumentStore }).store;
+    const authority = (service as unknown as { pathGrants: DesktopPathGrantAuthority }).pathGrants;
+    const seedPath = path.join(root, "seed.png");
+    await writeFile(seedPath, pngBytes(64, 0x20));
+    const preview = await importBlob(
+      store,
+      { sourcePath: seedPath, mediaType: "image/png" },
+      { appDataRoot: path.join(root, "appdata") }
+    );
+    const seedGrantId = authority.grant(snapshot.documentId, "link", seedPath);
+    await linkReference(store, {
       id: "reference-1",
       displayName: "match.png",
+      sourcePath: seedPath,
       mediaType: "image/png",
-      state: "missing",
-      actions: ["search-folder"]
-    }]);
-    vi.spyOn(application, "queryReferences").mockResolvedValue([{
-      id: "reference-1",
-      displayName: "match.png",
-      mediaType: "image/png",
-      state: "missing"
-    }]);
-    const attempted: string[] = [];
-    vi.spyOn(application, "relinkDocumentReference").mockImplementation(async ({ sourcePath }) => {
-      attempted.push(path.basename(sourcePath));
-      await stat(sourcePath);
-      if (path.basename(sourcePath) !== "match.png") {
-        throw Object.assign(new Error("identity mismatch"), { code: "REFERENCE_IDENTITY_MISMATCH" });
-      }
+      pathGrantId: seedGrantId,
+      previewContentKey: preview.contentKey
     });
+    authority.allowResolve(seedGrantId, snapshot.documentId);
+    await revokeReferenceGrant(store, "reference-1");
 
     try {
       await expect(service.actOnReference(snapshot.documentId, "reference-1", "search-folder"))
         .resolves.toBeDefined();
       expect(sawAfterGrant).toBe(true);
-      expect(attempted).toEqual(["first.png", "match.png"]);
+      expect(await application.queryReferences()).toEqual([
+        expect.objectContaining({ id: "reference-1", state: "linked", originalPath: await realpath(matchPath) })
+      ]);
+      await writeFile(firstPath, pngBytes(64, 0x20));
+      const revocations = JSON.parse(
+        await readFile(path.join(root, "appdata", "reference-grants.revocations.json"), "utf8")
+      ) as Array<{ documentId: string; grantId: string }>;
+      expect(revocations).toHaveLength(1);
+      expect(authority.authorizePath({
+        documentId: snapshot.documentId,
+        grantId: revocations[0]!.grantId,
+        operation: "relink",
+        path: firstPath
+      })).toBe(false);
       const grants = JSON.parse(
         await readFile(path.join(root, "appdata", "reference-grants.json"), "utf8")
       ) as Array<{ operation: string; path: string }>;
@@ -2264,6 +2393,59 @@ describe("incremental reference folder search", () => {
       expect((service as unknown as { referenceSearchController: AbortController | null }).referenceSearchController)
         .toBeNull();
     } finally {
+      await service.close();
+    }
+  });
+});
+
+describe("document IPC lifecycle", () => {
+  it("uses reusable document close so IPC can create and open another document", async () => {
+    const root = await tempRoot("ether-ipc-reusable-close-");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    const handlers = new Map<string, (event: unknown, input: unknown) => Promise<unknown>>();
+    const mainFrame = { url: "http://127.0.0.1:5173/" };
+    const webContents = { id: 7, mainFrame, send: vi.fn() };
+    const dispose = registerDocumentHandlers({
+      ipcMain: {
+        handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => {
+          handlers.set(channel, handler);
+        },
+        removeHandler: (channel: string) => handlers.delete(channel)
+      } as never,
+      mainWindow: {
+        isDestroyed: () => false,
+        webContents
+      } as never,
+      rendererUrl: "http://127.0.0.1:5173/",
+      service,
+      openDocument: () => service.open(),
+      openPath: (filePath) => service.openPath(filePath)
+    });
+    const event = { sender: webContents, senderFrame: mainFrame };
+    const invoke = (channel: string, input: unknown) => handlers.get(channel)!(event, input) as Promise<{
+      ok: boolean;
+      value?: unknown;
+      error?: { code: string };
+    }>;
+    try {
+      const initial = await service.bootstrap();
+      const originalPath = service.activePath()!;
+      await expect(invoke(desktopIpcChannels.document.close, { documentId: initial.documentId }))
+        .resolves.toMatchObject({ ok: true, value: null });
+      const created = await invoke(desktopIpcChannels.document.new, {});
+      expect(created).toMatchObject({ ok: true, value: { displayName: "Untitled" } });
+      const createdId = (created.value as { documentId: string }).documentId;
+      await expect(invoke(desktopIpcChannels.document.close, { documentId: createdId }))
+        .resolves.toMatchObject({ ok: true, value: null });
+      await expect(invoke(desktopIpcChannels.document.openDropped, { path: originalPath }))
+        .resolves.toMatchObject({ ok: true, value: { documentId: initial.documentId } });
+    } finally {
+      dispose();
       await service.close();
     }
   });

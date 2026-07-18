@@ -38,7 +38,7 @@ export function registerDocumentHandlers(options: {
     [desktopIpcChannels.document.makePortable, (request) => service.makePortable(scopedId(request))],
     [desktopIpcChannels.document.close, async (request) => {
       if (service.snapshot().documentId !== scopedId(request)) scopeError();
-      await service.close();
+      await service.closeDocument();
       return null;
     }],
     [desktopIpcChannels.artifacts.search, (request) => {

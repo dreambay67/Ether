@@ -60,9 +60,17 @@ export interface ReferenceGrantFingerprintRequest extends ReferenceGrantPathRequ
 
 export type ReferenceGrantRequest = ReferenceGrantFingerprintRequest;
 
+export type ReferenceGrantRevocationStatus = "pending" | "revoked";
+
 export interface ReferenceGrantAuthority {
   authorizePath(request: ReferenceGrantPathRequest): boolean;
-  revoke?(grantId: string, documentId: string): void;
+  cancelRevocation?(grantId: string, documentId: string): ReferenceGrantRevocationStatus;
+  prepareRevocation?(grantId: string, documentId: string): void;
+  reconcileRevocations?(
+    documentId: string,
+    activeGrantIds: readonly string[]
+  ): ReferenceGrantRevocationStatus;
+  revoke?(grantId: string, documentId: string): ReferenceGrantRevocationStatus | void;
   validateFingerprint(request: ReferenceGrantFingerprintRequest): boolean;
 }
 

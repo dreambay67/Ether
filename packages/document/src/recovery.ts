@@ -22,6 +22,7 @@ import {
 import type { EtherFileIdentity } from "./validation.js";
 
 type RecoveryPhase = "published" | "rollback-created" | "rollback-planned";
+type CompactStagingPhase = "handoff-planned" | "staging-planned";
 
 interface SerializedIdentity {
   birthtimeNs: string;
@@ -53,6 +54,18 @@ interface ReplacementRecoveryRecord {
   version: 2;
 }
 
+interface CompactStagingRecoveryRecord {
+  destination: SerializedFileFact;
+  destinationPath: string;
+  journalId: string;
+  kind: "compact-staging";
+  phase: CompactStagingPhase;
+  replacementJournalId: string;
+  sourceDocumentId: string;
+  stagingPath: string;
+  version: 1;
+}
+
 export interface ReplacementRecoveryResult {
   attention: boolean;
 }
@@ -64,6 +77,11 @@ export interface ReplacementRecoveryInspection extends ReplacementRecoveryResult
 export interface ReplacementRecoveryJournal {
   filePath: string;
   record: ReplacementRecoveryRecord;
+}
+
+export interface CompactStagingRecoveryJournal {
+  filePath: string;
+  record: CompactStagingRecoveryRecord;
 }
 
 function canonicalPath(filePath: string): string {
@@ -154,7 +172,7 @@ function matchesFileFact(
 
 function atomicWrite(
   filePath: string,
-  value: ReplacementRecoveryRecord,
+  value: unknown,
   hooks: { beforeRename?: () => void; afterRename?: () => void } = {}
 ): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
@@ -185,6 +203,23 @@ function atomicWrite(
       // The owned temporary was published or is already absent.
     }
   }
+}
+
+function parseCompactStagingRecord(input: unknown): CompactStagingRecoveryRecord | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const value = input as Partial<CompactStagingRecoveryRecord>;
+  if (
+    value.version !== 1 ||
+    value.kind !== "compact-staging" ||
+    typeof value.journalId !== "string" ||
+    typeof value.replacementJournalId !== "string" ||
+    typeof value.destinationPath !== "string" ||
+    typeof value.sourceDocumentId !== "string" ||
+    typeof value.stagingPath !== "string" ||
+    !["handoff-planned", "staging-planned"].includes(value.phase ?? "") ||
+    !isSerializedFileFact(value.destination)
+  ) return undefined;
+  return value as CompactStagingRecoveryRecord;
 }
 
 function isSerializedFileFact(input: unknown): input is SerializedFileFact {
@@ -249,6 +284,16 @@ function recoveryPathsAreOwned(record: ReplacementRecoveryRecord): boolean {
   );
 }
 
+function compactStagingPathIsOwned(record: CompactStagingRecoveryRecord): boolean {
+  const prefix = `.${path.basename(record.destinationPath)}.ether-compact-`;
+  const name = path.basename(record.stagingPath);
+  return (
+    path.dirname(path.resolve(record.stagingPath)) === path.dirname(path.resolve(record.destinationPath)) &&
+    name.startsWith(prefix) &&
+    /^[a-f0-9-]{36}$/i.test(name.slice(prefix.length))
+  );
+}
+
 type InspectedFileState =
   | { kind: "absent" }
   | { kind: "indeterminate" }
@@ -272,11 +317,12 @@ export async function beginReplacementRecovery(
     ReplacementRecoveryRecord,
     "destination" | "journalId" | "phase" | "rollback" | "staging" | "version"
   > & {
+    journalId?: string;
     staging: OwnedReplacementRollback;
   }
 ): Promise<ReplacementRecoveryJournal> {
-  const { staging, ...recordInput } = input;
-  const journalId = randomUUID();
+  const { journalId: requestedJournalId, staging, ...recordInput } = input;
+  const journalId = requestedJournalId ?? randomUUID();
   const destinationPath = path.resolve(input.destinationPath);
   const destinationFact = await readFileFact(destinationPath);
   const stagingFact = await readFileFact(staging.path);
@@ -305,6 +351,63 @@ export async function beginReplacementRecovery(
   };
   atomicWrite(journal.filePath, journal.record);
   return journal;
+}
+
+export async function beginCompactStagingRecovery(
+  recoveryRoot: string,
+  input: {
+    destinationPath: string;
+    sourceDocumentId: string;
+    stagingPath: string;
+  }
+): Promise<CompactStagingRecoveryJournal> {
+  const destinationPath = path.resolve(input.destinationPath);
+  const journalId = randomUUID();
+  const record: CompactStagingRecoveryRecord = {
+    destination: serializeFileFact(await readFileFact(destinationPath)),
+    destinationPath,
+    journalId,
+    kind: "compact-staging",
+    phase: "staging-planned",
+    replacementJournalId: randomUUID(),
+    sourceDocumentId: input.sourceDocumentId,
+    stagingPath: path.resolve(input.stagingPath),
+    version: 1
+  };
+  if (!compactStagingPathIsOwned(record)) {
+    throw new Error("Compact staging path is outside its durable ownership boundary.");
+  }
+  const journal = { filePath: path.join(recoveryRoot, `${journalId}.json`), record };
+  atomicWrite(journal.filePath, record);
+  return journal;
+}
+
+export function markCompactStagingHandoff(journal: CompactStagingRecoveryJournal): void {
+  journal.record = { ...journal.record, phase: "handoff-planned" };
+  atomicWrite(journal.filePath, journal.record);
+}
+
+export function compactReplacementJournalId(journal: CompactStagingRecoveryJournal): string {
+  return journal.record.replacementJournalId;
+}
+
+export function completeCompactStagingRecovery(journal: CompactStagingRecoveryJournal): void {
+  const current = parseCompactStagingRecord(JSON.parse(readFileSync(journal.filePath, "utf8")));
+  if (current?.journalId === journal.record.journalId) unlinkSync(journal.filePath);
+  try {
+    unlinkSync(`${journal.filePath}.tmp`);
+  } catch {
+    // The deterministic journal temporary is already absent.
+  }
+}
+
+export function discardCompactStagingRecovery(journal: CompactStagingRecoveryJournal): void {
+  const staging = lstatSync(journal.record.stagingPath, { bigint: true, throwIfNoEntry: false });
+  if (staging !== undefined) {
+    if (!staging.isFile()) throw new Error("Compact staging path is no longer a regular file.");
+    unlinkSync(journal.record.stagingPath);
+  }
+  completeCompactStagingRecovery(journal);
 }
 
 export function plannedReplacementRollback(
@@ -394,6 +497,59 @@ async function processReplacementRecovery(
     let record: ReplacementRecoveryRecord | undefined;
     try {
       input = JSON.parse(readFileSync(filePath, "utf8"));
+      const compact = parseCompactStagingRecord(input);
+      if (compact !== undefined) {
+        if (canonicalPath(compact.destinationPath) !== canonicalPath(destinationPath)) continue;
+        pending = true;
+        if (!compactStagingPathIsOwned(compact)) {
+          attention = true;
+          continue;
+        }
+        const destination = await inspectFileState(compact.destinationPath);
+        const stagingStats = lstatSync(compact.stagingPath, { bigint: true, throwIfNoEntry: false });
+        if (stagingStats === undefined) {
+          if (apply) completeCompactStagingRecovery({ filePath, record: compact });
+          continue;
+        }
+        if (!stagingStats.isFile()) {
+          attention = true;
+          continue;
+        }
+        if (compact.phase === "handoff-planned") {
+          const replacementPath = path.join(recoveryRoot, `${compact.replacementJournalId}.json`);
+          const replacementInput = (() => {
+            try {
+              return JSON.parse(readFileSync(replacementPath, "utf8"));
+            } catch {
+              return undefined;
+            }
+          })();
+          const replacement = parseRecord(replacementInput);
+          if (replacement !== undefined) {
+            if (
+              replacement.journalId !== compact.replacementJournalId ||
+              canonicalPath(replacement.destinationPath) !== canonicalPath(compact.destinationPath) ||
+              canonicalPath(replacement.staging.path) !== canonicalPath(compact.stagingPath)
+            ) {
+              attention = true;
+              continue;
+            }
+            if (apply) completeCompactStagingRecovery({ filePath, record: compact });
+            continue;
+          }
+        }
+        const destinationMatches = destination.kind === "present" &&
+          matchesFileFact(destination.fact, compact.destination);
+        if (!destinationMatches) {
+          attention = true;
+          continue;
+        }
+        if (apply) {
+          removeOwnedPath(compact.stagingPath, readAliasIdentity(compact.stagingPath));
+          completeCompactStagingRecovery({ filePath, record: compact });
+        }
+        continue;
+      }
       record = parseRecord(input);
     } catch {
       continue;

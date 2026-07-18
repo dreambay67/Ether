@@ -631,6 +631,9 @@ describe("Ether document writer leases and backup lifecycle", () => {
   }, 15_000);
 
   it.each([
+    "vacuum",
+    "validation",
+    "fsync",
     "rollback-planned",
     "rollback-linked",
     "rollback-hash-chunk",

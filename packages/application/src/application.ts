@@ -366,6 +366,7 @@ export class EtherApplication {
 
   async embedAvailableReference(referenceId: string) {
     const store = this.requireWritableStore();
+    store.takeReferenceGrantAttention();
     const reference = await resolveReference(store, referenceId);
     if (reference.state !== "linked" || reference.originalPath === null) {
       throw new ApplicationServiceError(
@@ -378,24 +379,36 @@ export class EtherApplication {
       { mediaType: reference.mediaType, sourcePath: reference.originalPath },
       { appDataRoot: this.options.appDataRoot }
     );
-    return embedReference(store, referenceId, blob.contentKey);
+    const embedded = await embedReference(store, referenceId, blob.contentKey);
+    return { grantRevocationPending: store.takeReferenceGrantAttention(), reference: embedded };
   }
 
-  async removeDocumentReference(referenceId: string): Promise<void> {
+  async removeDocumentReference(referenceId: string): Promise<{ grantRevocationPending: boolean }> {
     const store = this.requireWritableStore();
+    store.takeReferenceGrantAttention();
     const reference = await store.read(({ references }) => references.get(referenceId));
     if (reference === undefined) {
       throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
     }
-    const removed = await store.transaction(({ references }) =>
-      references.remove(referenceId)
-    );
-    if (!removed) throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+    if (reference.pathGrantId !== null) store.prepareReferenceGrantRevocation(reference.pathGrantId);
+    let removed: boolean;
+    try {
+      removed = await store.transaction(({ references }) => references.remove(referenceId));
+    } catch (error) {
+      if (reference.pathGrantId !== null) store.cancelReferenceGrantRevocation(reference.pathGrantId);
+      throw error;
+    }
+    if (!removed) {
+      if (reference.pathGrantId !== null) store.cancelReferenceGrantRevocation(reference.pathGrantId);
+      throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+    }
     if (reference.pathGrantId !== null) store.revokeReferenceGrantAuthority(reference.pathGrantId);
+    return { grantRevocationPending: store.takeReferenceGrantAttention() };
   }
 
   async makeDocumentPortable() {
     const store = this.requireWritableStore();
+    store.takeReferenceGrantAttention();
     const references = await this.queryReferences();
     const existingContentKeys = new Set(
       await store.read(({ blobs }) => blobs.list().map(({ contentKey }) => contentKey))
@@ -429,7 +442,12 @@ export class EtherApplication {
         }
       }
       await embedReferences(store, prepared);
-      return { embeddedBytes, embeddedCount: prepared.length, missingReferenceIds };
+      return {
+        embeddedBytes,
+        embeddedCount: prepared.length,
+        grantRevocationPending: store.takeReferenceGrantAttention(),
+        missingReferenceIds
+      };
     } catch (error) {
       try {
         const operationContentKeys = await store.read(({ blobs }) => blobs.list()

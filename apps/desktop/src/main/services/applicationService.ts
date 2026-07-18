@@ -232,18 +232,30 @@ interface PendingGrantRebind {
   version: 1;
 }
 
+interface PendingGrantRevocation {
+  documentId: string;
+  grantId: string;
+  version: 1;
+}
+
+type GrantPersistenceScope = "grants" | "rebinds" | "revocations";
+
 export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   private grants = new Map<string, GrantBinding>();
   private pendingRebinds = new Map<string, PendingGrantRebind>();
+  private pendingRevocations = new Map<string, PendingGrantRevocation>();
   private readonly activeDocuments = new Map<string, string>();
-  private persistenceDirty = false;
 
   constructor(private readonly options: {
     storagePath?: string;
-    persistenceCheckpoint?: (stage: "write" | "fsync" | "rename") => void;
+    persistenceCheckpoint?: (
+      stage: "write" | "fsync" | "rename",
+      scope: GrantPersistenceScope
+    ) => void;
   } = {}) {
     this.load();
     this.loadPendingRebinds();
+    this.loadPendingRevocations();
   }
 
   activateDocument(documentId: string, documentPath: string): void {
@@ -276,7 +288,9 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }
 
   authorizePath(request: ReferenceGrantPathRequest): boolean {
-    const grant = this.grants.get(grantKey(request.grantId, request.documentId));
+    const key = grantKey(request.grantId, request.documentId);
+    if (this.pendingRevocations.has(key)) return false;
+    const grant = this.grants.get(key);
     return grant !== undefined &&
       grant.documentPath === this.activeDocuments.get(request.documentId) &&
       grant.operation === request.operation &&
@@ -284,7 +298,9 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }
 
   validateFingerprint(request: ReferenceGrantFingerprintRequest): boolean {
-    const grant = this.grants.get(grantKey(request.grantId, request.documentId));
+    const key = grantKey(request.grantId, request.documentId);
+    if (this.pendingRevocations.has(key)) return false;
+    const grant = this.grants.get(key);
     if (
       grant === undefined ||
       grant.documentPath !== this.activeDocuments.get(request.documentId) ||
@@ -309,17 +325,66 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     }
   }
 
-  revoke(grantId: string, documentId: string): void {
+  prepareRevocation(grantId: string, documentId: string): void {
     const key = grantKey(grantId, documentId);
-    if (this.grants.has(key)) {
-      const next = new Map(this.grants);
-      next.delete(key);
-      this.grants = next;
-      this.persistenceDirty = true;
+    if (!this.grants.has(key) || this.pendingRevocations.has(key)) return;
+    const next = new Map(this.pendingRevocations);
+    next.set(key, { documentId, grantId, version: 1 });
+    this.persistPendingRevocations(next);
+    this.pendingRevocations = next;
+  }
+
+  cancelRevocation(grantId: string, documentId: string): "pending" | "revoked" {
+    const key = grantKey(grantId, documentId);
+    if (!this.pendingRevocations.has(key)) return "revoked";
+    const next = new Map(this.pendingRevocations);
+    next.delete(key);
+    try {
+      this.persistPendingRevocations(next);
+      this.pendingRevocations = next;
+      return "revoked";
+    } catch {
+      return "pending";
     }
-    if (!this.persistenceDirty) return;
-    this.persist(this.grants);
-    this.persistenceDirty = false;
+  }
+
+  revoke(grantId: string, documentId: string): "pending" | "revoked" {
+    const key = grantKey(grantId, documentId);
+    if (!this.pendingRevocations.has(key)) this.prepareRevocation(grantId, documentId);
+    if (!this.pendingRevocations.has(key)) return "revoked";
+    const nextGrants = new Map(this.grants);
+    nextGrants.delete(key);
+    try {
+      this.persist(nextGrants);
+      this.grants = nextGrants;
+    } catch {
+      return "pending";
+    }
+    const nextRevocations = new Map(this.pendingRevocations);
+    nextRevocations.delete(key);
+    try {
+      this.persistPendingRevocations(nextRevocations);
+      this.pendingRevocations = nextRevocations;
+      return "revoked";
+    } catch {
+      return "pending";
+    }
+  }
+
+  reconcileRevocations(
+    documentId: string,
+    activeGrantIds: readonly string[]
+  ): "pending" | "revoked" {
+    const active = new Set(activeGrantIds);
+    let pending = false;
+    for (const revocation of [...this.pendingRevocations.values()]) {
+      if (revocation.documentId !== documentId) continue;
+      const status = active.has(revocation.grantId)
+        ? this.cancelRevocation(revocation.grantId, documentId)
+        : this.revoke(revocation.grantId, documentId);
+      if (status === "pending") pending = true;
+    }
+    return pending ? "pending" : "revoked";
   }
 
   revokeDocument(documentId: string): void {
@@ -345,7 +410,9 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
       throw codedError("DOCUMENT_SCOPE_REJECTED", "Reference grants are not active for the source document identity.");
     }
     const bindings = [...this.grants.values()].filter((grant) =>
-      grant.documentId === input.sourceDocumentId && grant.documentPath === sourcePath
+      grant.documentId === input.sourceDocumentId &&
+      grant.documentPath === sourcePath &&
+      !this.pendingRevocations.has(grantKey(grant.grantId, grant.documentId))
     );
     const next = new Map(this.grants);
     for (const binding of bindings) {
@@ -467,6 +534,25 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     }
   }
 
+  private loadPendingRevocations(): void {
+    const storagePath = this.revocationStoragePath();
+    if (storagePath === undefined) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(storagePath, "utf8"));
+    } catch {
+      return;
+    }
+    if (!Array.isArray(parsed)) return;
+    for (const candidate of parsed) {
+      if (!isPendingGrantRevocation(candidate)) continue;
+      this.pendingRevocations.set(
+        grantKey(candidate.grantId, candidate.documentId),
+        candidate
+      );
+    }
+  }
+
   private applyRebind(input: {
     sourceDocumentId: string;
     sourceDocumentPath: string;
@@ -478,7 +564,8 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     for (const binding of this.grants.values()) {
       if (
         binding.documentId !== input.sourceDocumentId ||
-        binding.documentPath !== input.sourceDocumentPath
+        binding.documentPath !== input.sourceDocumentPath ||
+        this.pendingRevocations.has(grantKey(binding.grantId, binding.documentId))
       ) continue;
       next.set(grantKey(binding.grantId, input.destinationDocumentId), {
         ...binding,
@@ -491,9 +578,9 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }
 
   private commit(next: Map<string, GrantBinding>): void {
-    this.persist(next);
-    this.grants = next;
-    this.persistenceDirty = false;
+    const publishable = new Map([...next].filter(([key]) => !this.pendingRevocations.has(key)));
+    this.persist(publishable);
+    this.grants = publishable;
   }
 
   private persist(grants: typeof this.grants): void {
@@ -504,13 +591,13 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     let descriptor: number | undefined;
     try {
       descriptor = openSync(temporaryPath, "wx", 0o600);
-      this.options.persistenceCheckpoint?.("write");
+      this.options.persistenceCheckpoint?.("write", "grants");
       writeFileSync(descriptor, `${JSON.stringify([...grants.values()], null, 2)}\n`, "utf8");
-      this.options.persistenceCheckpoint?.("fsync");
+      this.options.persistenceCheckpoint?.("fsync", "grants");
       fsyncSync(descriptor);
       closeSync(descriptor);
       descriptor = undefined;
-      this.options.persistenceCheckpoint?.("rename");
+      this.options.persistenceCheckpoint?.("rename", "grants");
       renameSync(temporaryPath, storagePath);
     } finally {
       if (descriptor !== undefined) closeSync(descriptor);
@@ -529,10 +616,17 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
       : path.join(path.dirname(storagePath), "reference-grants.pending.json");
   }
 
+  private revocationStoragePath(): string | undefined {
+    const storagePath = this.options.storagePath;
+    return storagePath === undefined
+      ? undefined
+      : path.join(path.dirname(storagePath), "reference-grants.revocations.json");
+  }
+
   private persistPendingRebinds(pending: Map<string, PendingGrantRebind>): void {
     const storagePath = this.pendingStoragePath();
     if (storagePath === undefined) return;
-    this.persistJson(storagePath, [...pending.values()]);
+    this.persistJson(storagePath, [...pending.values()], "rebinds");
     if (pending.size === 0) {
       try {
         unlinkSync(storagePath);
@@ -542,19 +636,32 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     }
   }
 
-  private persistJson(storagePath: string, value: unknown): void {
+  private persistPendingRevocations(pending: Map<string, PendingGrantRevocation>): void {
+    const storagePath = this.revocationStoragePath();
+    if (storagePath === undefined) return;
+    this.persistJson(storagePath, [...pending.values()], "revocations");
+    if (pending.size === 0) {
+      try {
+        unlinkSync(storagePath);
+      } catch (error) {
+        if ((error as { code?: unknown } | null)?.code !== "ENOENT") throw error;
+      }
+    }
+  }
+
+  private persistJson(storagePath: string, value: unknown, scope: GrantPersistenceScope): void {
     mkdirSync(path.dirname(storagePath), { recursive: true });
     const temporaryPath = `${storagePath}.${randomUUID()}.tmp`;
     let descriptor: number | undefined;
     try {
       descriptor = openSync(temporaryPath, "wx", 0o600);
-      this.options.persistenceCheckpoint?.("write");
+      this.options.persistenceCheckpoint?.("write", scope);
       writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-      this.options.persistenceCheckpoint?.("fsync");
+      this.options.persistenceCheckpoint?.("fsync", scope);
       fsyncSync(descriptor);
       closeSync(descriptor);
       descriptor = undefined;
-      this.options.persistenceCheckpoint?.("rename");
+      this.options.persistenceCheckpoint?.("rename", scope);
       renameSync(temporaryPath, storagePath);
     } finally {
       if (descriptor !== undefined) closeSync(descriptor);
@@ -579,7 +686,10 @@ export interface DesktopApplicationServiceOptions {
   >;
   simulationMode?: boolean;
   autosaveOperation?: (application: EtherApplication) => Promise<void>;
-  pathGrantPersistenceCheckpoint?: (stage: "write" | "fsync" | "rename") => void;
+  pathGrantPersistenceCheckpoint?: (
+    stage: "write" | "fsync" | "rename",
+    scope: GrantPersistenceScope
+  ) => void;
   bootstrapOperation?: () => Promise<void>;
   referenceCandidateCheckpoint?: (
     candidatePath: string,
@@ -845,7 +955,10 @@ export class DesktopApplicationService {
       return cancelled;
     }
     const result = await application.makeDocumentPortable();
-    await this.refresh("references", "saving");
+    const revocationAttention = result.grantRevocationPending
+      ? grantRevocationAttentionError()
+      : undefined;
+    await this.refresh("references", revocationAttention === undefined ? "saving" : "needs-attention");
     const completed: PortableResult = {
       cancelled: false,
       embeddedCount: result.embeddedCount,
@@ -856,6 +969,10 @@ export class DesktopApplicationService {
     };
     await this.emitCommandResult({ kind: "portable", ...completed });
     this.autosaveCoordinator?.markDirty();
+    if (revocationAttention !== undefined) {
+      this.emitAttention(revocationAttention);
+      await this.refreshTail;
+    }
     return completed;
   }
 
@@ -1022,6 +1139,7 @@ export class DesktopApplicationService {
     if (!reference.actions.includes(action as ReferenceAction)) {
       throw codedError("REFERENCE_ACTION_UNAVAILABLE", "That recovery action is not currently available.");
     }
+    let revocationAttention: unknown;
     try {
     if (action === "locate") {
       const selected = await this.options.dialogs.locateReference(referenceId);
@@ -1069,9 +1187,9 @@ export class DesktopApplicationService {
               } catch (error) {
                 if (grantId !== undefined) {
                   const revokeError = this.revokePathGrant(grantId, documentId);
-                  if (revokeError !== undefined) this.emitAttention(revokeError);
+                  if (revokeError !== undefined) revocationAttention ??= revokeError;
                 }
-                if (!isSkippableReferenceCandidateError(error)) throw error;
+                if (!await isSkippableReferenceCandidateError(error, candidate)) throw error;
               }
             }
           }
@@ -1082,9 +1200,11 @@ export class DesktopApplicationService {
     } else if (action === "use-embedded-preview") {
       await application.useEmbeddedReferencePreview(referenceId);
     } else if (action === "embed-available-copy") {
-      await application.embedAvailableReference(referenceId);
+      const result = await application.embedAvailableReference(referenceId);
+      if (result?.grantRevocationPending) revocationAttention = grantRevocationAttentionError();
     } else if (action === "remove") {
-      await application.removeDocumentReference(referenceId);
+      const result = await application.removeDocumentReference(referenceId);
+      if (result?.grantRevocationPending) revocationAttention = grantRevocationAttentionError();
     } else {
       throw codedError("INVALID_REFERENCE_ACTION", `Unsupported reference action: ${action}`);
     }
@@ -1096,18 +1216,25 @@ export class DesktopApplicationService {
         (persistedAfter === undefined || persistedAfter.pathGrantId === null)
       ) {
         try {
-          this.pathGrants.revoke(persistedBefore.pathGrantId, documentId);
+          const revokeError = this.revokePathGrant(persistedBefore.pathGrantId, documentId);
+          revocationAttention = revokeError ?? error;
         } catch {
-          // The original sidecar publication error remains visible and retryable on reopen.
+          revocationAttention = error;
         }
         await this.refresh("references", "needs-attention");
-        this.emitAttention(error);
+        this.autosaveCoordinator?.markDirty();
+        this.emitAttention(revocationAttention);
         await this.refreshTail;
+        return this.listReferences(documentId);
       }
       throw error;
     }
-    await this.refresh("references", "saving");
+    await this.refresh("references", revocationAttention === undefined ? "saving" : "needs-attention");
     this.autosaveCoordinator?.markDirty();
+    if (revocationAttention !== undefined) {
+      this.emitAttention(revocationAttention);
+      await this.refreshTail;
+    }
     return this.listReferences(documentId);
   }
 
@@ -1185,18 +1312,12 @@ export class DesktopApplicationService {
   }
 
   private revokePathGrant(grantId: string, documentId: string): unknown | undefined {
-    let firstError: unknown;
     try {
-      this.pathGrants.revoke(grantId, documentId);
-      return undefined;
+      return this.pathGrants.revoke(grantId, documentId) === "pending"
+        ? grantRevocationAttentionError()
+        : undefined;
     } catch (error) {
-      firstError = error;
-    }
-    try {
-      this.pathGrants.revoke(grantId, documentId);
-      return undefined;
-    } catch {
-      return firstError;
+      return error;
     }
   }
 
@@ -1419,6 +1540,14 @@ function isPendingGrantRebind(value: unknown): value is PendingGrantRebind {
     typeof pending.destinationDocumentPath === "string" &&
     typeof pending.retainSource === "boolean" &&
     typeof pending.switchActive === "boolean";
+}
+
+function isPendingGrantRevocation(value: unknown): value is PendingGrantRevocation {
+  if (value === null || typeof value !== "object") return false;
+  const pending = value as Record<string, unknown>;
+  return pending.version === 1 &&
+    typeof pending.documentId === "string" &&
+    typeof pending.grantId === "string";
 }
 
 function sameCanonicalPath(left: string, right: string): boolean {
@@ -1745,9 +1874,12 @@ function referenceExtensions(reference: Pick<LinkedReference, "displayName" | "m
   return extension === "" ? [] : [extension];
 }
 
-function isSkippableReferenceCandidateError(error: unknown): boolean {
+async function isSkippableReferenceCandidateError(
+  error: unknown,
+  candidatePath: string
+): Promise<boolean> {
   const code = (error as { code?: unknown } | null)?.code;
-  return [
+  if ([
     "EACCES",
     "ENOENT",
     "EPERM",
@@ -1755,7 +1887,23 @@ function isSkippableReferenceCandidateError(error: unknown): boolean {
     "REFERENCE_CHANGED",
     "REFERENCE_IDENTITY_MISMATCH",
     "REFERENCE_MISSING"
-  ].includes(String(code));
+  ].includes(String(code))) return true;
+  if (code !== "REFERENCE_GRANT_DENIED") return false;
+  try {
+    await lstat(candidatePath);
+    return false;
+  } catch (fileError) {
+    return ["EACCES", "ENOENT", "EPERM"].includes(
+      String((fileError as { code?: unknown } | null)?.code)
+    );
+  }
+}
+
+function grantRevocationAttentionError(): Error & { code: string } {
+  return codedError(
+    "GRANT_REVOCATION_PENDING",
+    "The document change was saved, but Ether is still finalizing linked-file authorization cleanup."
+  );
 }
 
 function isSkippableFileSystemError(error: unknown): boolean {

@@ -38,13 +38,19 @@ import {
   resolveDocumentStoreEnvironment
 } from "./locking.js";
 import {
+  beginCompactStagingRecovery,
   beginReplacementRecovery,
+  compactReplacementJournalId,
+  completeCompactStagingRecovery,
   completeReplacementRecovery,
+  discardCompactStagingRecovery,
   markReplacementPublished,
+  markCompactStagingHandoff,
   plannedReplacementRollback,
   reconcileReplacementRecovery,
   inspectReplacementRecovery,
   recordReplacementRollback,
+  type CompactStagingRecoveryJournal,
   type ReplacementRecoveryJournal
 } from "./recovery.js";
 import { reconcileStaging } from "./recovery/reconcileStaging.js";
@@ -289,6 +295,7 @@ export class DocumentStore {
   private currentDirty: boolean;
   private currentMode: DocumentStoreMode;
   private currentPath: string;
+  private referenceGrantAttention = false;
   private stagingRecovered: boolean;
 
   private constructor(options: {
@@ -464,6 +471,7 @@ export class DocumentStore {
       if (options.deferRecovery !== true) {
         await reconcileStaging(store, { appDataRoot: path.dirname(runtime.recoveryRoot) });
       }
+      store.reconcileReferenceGrantRevocations();
       return store;
     } catch (error) {
       await store.close();
@@ -559,8 +567,36 @@ export class DocumentStore {
     if (!authorized) this.throwReferenceGrantDenied();
   }
 
+  prepareReferenceGrantRevocation(grantId: string): void {
+    this.runtime.referenceGrantAuthority.prepareRevocation?.(grantId, this.documentId);
+  }
+
+  cancelReferenceGrantRevocation(grantId: string): void {
+    const status = this.runtime.referenceGrantAuthority.cancelRevocation?.(grantId, this.documentId);
+    if (status === "pending") this.referenceGrantAttention = true;
+  }
+
   revokeReferenceGrantAuthority(grantId: string): void {
-    this.runtime.referenceGrantAuthority.revoke?.(grantId, this.documentId);
+    const status = this.runtime.referenceGrantAuthority.revoke?.(grantId, this.documentId);
+    if (status === "pending") this.referenceGrantAttention = true;
+  }
+
+  takeReferenceGrantAttention(): boolean {
+    const attention = this.referenceGrantAttention;
+    this.referenceGrantAttention = false;
+    return attention;
+  }
+
+  private reconcileReferenceGrantRevocations(): void {
+    const references = new ReferenceRepository(createRepositoryContext(this.database)).list();
+    const activeGrantIds = references.flatMap((reference) =>
+      reference.pathGrantId === null ? [] : [reference.pathGrantId]
+    );
+    const status = this.runtime.referenceGrantAuthority.reconcileRevocations?.(
+      this.documentId,
+      activeGrantIds
+    );
+    if (status === "pending") this.referenceGrantAttention = true;
   }
 
   private throwReferenceGrantDenied(): never {
@@ -708,8 +744,14 @@ export class DocumentStore {
     let temporaryIdentity: EtherFileIdentity | undefined;
     let rollback: OwnedReplacementRollback | undefined;
     let recovery: ReplacementRecoveryJournal | undefined;
+    let stagingRecovery: CompactStagingRecoveryJournal | undefined;
     let connectionOpen = true;
     try {
+      stagingRecovery = await beginCompactStagingRecovery(this.runtime.recoveryRoot, {
+        destinationPath: this.currentPath,
+        sourceDocumentId: this.currentDocumentId,
+        stagingPath: temporaryPath
+      });
       this.database.prepare("VACUUM INTO ?").run(temporaryPath);
       temporaryIdentity = readEtherFileIdentity(temporaryPath);
       this.runtime.onCompactStage?.("vacuum");
@@ -735,6 +777,7 @@ export class DocumentStore {
         closeSync(descriptor);
       }
       this.runtime.onCompactStage?.("fsync");
+      markCompactStagingHandoff(stagingRecovery);
 
       this.database.close();
       connectionOpen = false;
@@ -742,10 +785,13 @@ export class DocumentStore {
         destinationPath: this.currentPath,
         newDocumentId: this.currentDocumentId,
         previousDocumentId: this.currentDocumentId,
+        journalId: compactReplacementJournalId(stagingRecovery),
         staging: { identity: temporaryIdentity, path: temporaryPath },
         sourceDocumentId: this.currentDocumentId,
         sourcePath: this.currentPath
       });
+      completeCompactStagingRecovery(stagingRecovery);
+      stagingRecovery = undefined;
       this.runtime.onCompactStage?.("rollback-planned");
       rollback = createOwnedReplacementRollback(this.currentPath, plannedReplacementRollback(recovery));
       this.runtime.onCompactStage?.("rollback-linked");
@@ -798,6 +844,14 @@ export class DocumentStore {
           recovery = undefined;
         } catch {
           // Reconciliation can safely remove a prepared journal on the next open.
+        }
+      }
+      if (stagingRecovery !== undefined) {
+        try {
+          discardCompactStagingRecovery(stagingRecovery);
+          stagingRecovery = undefined;
+        } catch (candidate) {
+          if (restorationError === undefined) restorationError = candidate;
         }
       }
       try {
