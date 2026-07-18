@@ -26,9 +26,9 @@ export function compileBehaviorInstruction(behavior: WorkerBehavior, authoredIns
 }
 
 export function instructionRequestsContrast(instruction: string): boolean {
-  const intentPattern = /\b(compare|comparison|contrast|contrasting|versus|vs\.?|before\s+and\s+after)\b/gi;
-  const negationPattern = /\b(?:do\s+not|don't|never|without|avoid|avoiding|must\s+not|mustn't|should\s+not|shouldn't|cannot|can't|no)\b/i;
-  return instruction.split(/[.!?;,\n]+/).some((clause) =>
-    [...clause.matchAll(intentPattern)].some((match) => !negationPattern.test(clause.slice(0, match.index)))
+  const intentPattern = /\b(?:compare|comparison|contrast|contrasting|versus|vs\.?|before\s+and\s+after)\b/i;
+  const negationPattern = /\b(?:do\s+not|don't|never|without|avoid|avoiding|must\s+not|mustn't|should\s+not|shouldn't|cannot|can't|no|not)\b/i;
+  return instruction.split(/[.!?;\n]+/).some((clause) =>
+    intentPattern.test(clause) && !negationPattern.test(clause)
   );
 }

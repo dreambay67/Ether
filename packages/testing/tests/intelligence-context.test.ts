@@ -843,7 +843,9 @@ describe("worker output validation and transformation guard", () => {
     "Do not compare or contrast the old and new content.",
     "Never compare the pineapple with the watermelon.",
     "Rewrite the prompt without a comparison to the prior fruit.",
-    "Avoid contrasting the revised content with the original."
+    "Avoid contrasting the revised content with the original.",
+    "Rewrite the result and not compare it with the original.",
+    "A comparison with the original is not requested."
   ])("does not grant the contrast exception for negated intent: %s", (instruction) => {
     expect(validateWorkerOutput({
       config: workerConfig({ instruction }),
@@ -863,6 +865,17 @@ describe("worker output validation and transformation guard", () => {
   ])("grants the contrast exception for affirmative intent: %s", (instruction) => {
     expect(validateWorkerOutput({
       config: workerConfig({ instruction }),
+      output: "A pineapple instead of a watermelon creates a tropical silhouette.",
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({ accepted: true });
+  });
+
+  it("allows a genuinely affirmative contrast cue in a separate clause", () => {
+    expect(validateWorkerOutput({
+      config: workerConfig({
+        instruction: "Do not narrate the rewrite or mention editing steps. Compare the pineapple with the watermelon."
+      }),
       output: "A pineapple instead of a watermelon creates a tropical silhouette.",
       schemaCatalog: [],
       attempt: 0
