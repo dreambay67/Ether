@@ -6,17 +6,25 @@ const rootFromScript = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const runtimeDependencies = [
   {
     packageName: "zod",
-    sourceRelativePath: "packages/engine/node_modules/zod"
+    sourceRelativePath: "packages/schema/node_modules/zod"
   }
+];
+const workspacePackages = [
+  ["@ether/application", "packages/application"],
+  ["@ether/document", "packages/document"],
+  ["@ether/execution", "packages/execution"],
+  ["@ether/graph-kernel", "packages/graph-kernel"],
+  ["@ether/providers", "packages/providers"],
+  ["@ether/schema", "packages/schema"]
 ];
 
 export function requiredPackageInputs(rootDir = rootFromScript) {
   const buildInputs = [
     "node_modules/electron/dist/electron.exe",
     "apps/desktop/dist/index.html",
+    "apps/desktop/dist-electron/main/bootstrap.js",
     "apps/desktop/dist-electron/main/main.js",
-    "packages/engine/dist/index.js",
-    "packages/providers/dist/index.js"
+    ...workspacePackages.map(([, sourceRelativePath]) => `${sourceRelativePath}/dist/index.js`)
   ];
   const dependencyInputs = runtimeDependencies.map(
     (dependency) => `${dependency.sourceRelativePath}/package.json`
@@ -53,8 +61,8 @@ export async function packageWindowsApp(options = {}) {
         name: "ether-desktop-package",
         version: "0.0.0",
         private: true,
-        type: "commonjs",
-        main: "dist-electron/main/main.js"
+        type: "module",
+        main: "dist-electron/main/bootstrap.js"
       },
       null,
       2
@@ -62,8 +70,9 @@ export async function packageWindowsApp(options = {}) {
     "utf8"
   );
 
-  await copyWorkspacePackage(rootDir, appRoot, "@ether/engine", "packages/engine");
-  await copyWorkspacePackage(rootDir, appRoot, "@ether/providers", "packages/providers");
+  for (const [packageName, sourceRelativePath] of workspacePackages) {
+    await copyWorkspacePackage(rootDir, appRoot, packageName, sourceRelativePath);
+  }
   for (const dependency of runtimeDependencies) {
     await copyRuntimeDependency(rootDir, appRoot, dependency);
   }

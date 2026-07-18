@@ -164,7 +164,7 @@ export interface DocumentRepositories extends ReadDocumentRepositories {
     SettingsRepository,
     "getHeader" | "getLiveOutput" | "setFeatureFlag" | "setLiveOutput" | "setTitle"
   >;
-  references: Pick<ReferenceRepository, "get" | "list">;
+  references: Pick<ReferenceRepository, "get" | "list" | "remove">;
 }
 
 interface InternalDocumentRepositories {
@@ -624,6 +624,25 @@ export class DocumentStore {
     });
   }
 
+  compact(): Promise<{ beforeBytes: number; afterBytes: number }> {
+    return this.enqueue(() => {
+      this.assertOpen();
+      if (this.currentMode.kind !== "writable") {
+        throw new DocumentStoreError("READ_ONLY", "This Ether document is open read-only.");
+      }
+      const beforeBytes = statSync(this.currentPath).size;
+      this.database.exec("VACUUM");
+      validateEtherDocumentConnection(this.database, this.currentPath);
+      const descriptor = openSync(this.currentPath, "r+");
+      try {
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      return { beforeBytes, afterBytes: statSync(this.currentPath).size };
+    });
+  }
+
   close(): Promise<void> {
     if (this.closePromise !== undefined) {
       return this.closePromise;
@@ -812,7 +831,8 @@ export class DocumentStore {
       },
       references: {
         get: (id) => invoke(() => repositories.references.get(id)),
-        list: () => invoke(() => repositories.references.list())
+        list: () => invoke(() => repositories.references.list()),
+        remove: (id) => invoke(() => repositories.references.remove(id))
       }
     };
     return {

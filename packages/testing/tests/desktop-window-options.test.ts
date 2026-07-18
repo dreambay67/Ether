@@ -8,7 +8,7 @@ describe("desktop BrowserWindow options", () => {
 
     expect(options.webPreferences).toMatchObject({
       preload: path.resolve("dist-electron/preload/preload.js"),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     });

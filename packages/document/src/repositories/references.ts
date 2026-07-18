@@ -130,6 +130,12 @@ export class ReferenceRepository {
     return reference;
   }
 
+  remove(id: string): boolean {
+    return this.context.database
+      .prepare("DELETE FROM linked_references WHERE reference_id = ?")
+      .run(id).changes === 1;
+  }
+
   private parse(row: ReferenceRow): LinkedReference {
     return LinkedReferenceSchema.parse({
       id: row.reference_id,

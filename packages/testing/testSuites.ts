@@ -5,6 +5,7 @@ export const testSuites = {
     "tests/brand-tokens.test.ts",
     "tests/canvas-history.test.ts",
     "tests/desktop-vite-config.test.ts",
+    "tests/desktop-ipc-contract.test.ts",
     "tests/desktop-window-options.test.ts",
     "tests/document-operation-replay.test.ts",
     "tests/graph-kernel.test.ts",
@@ -29,6 +30,7 @@ export const testSuites = {
     "tests/document-graph-repository.test.ts",
     "tests/document-locking.test.ts",
     "tests/document-recovery.test.ts",
+    "tests/desktop/document-lifecycle.spec.ts",
     "tests/execution-engine.test.ts",
     "tests/job-coordinator.test.ts",
     "tests/migration.test.ts",
@@ -52,5 +54,6 @@ export const testSuites = {
   "conformance:codex": ["tests/codex.conformance.test.ts"],
   "conformance:antigravity": ["tests/antigravity.conformance.test.ts"],
   smoke: ["tests/smoke.spec.ts"],
-  packaged: ["tests/packaged-electron.packaged.ts"]
+  desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
+  packaged: ["tests/desktop/document-lifecycle.packaged.ts"]
 } as const;

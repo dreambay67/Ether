@@ -2,56 +2,50 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  createDesktopSettingsStore,
-  defaultDesktopSettings
-} from "../../../apps/desktop/src/main/settingsStore";
+
+import { createDesktopSettingsStore, defaultDesktopSettings } from "../../../apps/desktop/src/main/settingsStore";
 
 async function tempSettingsPath() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ether-settings-"));
-
   return path.join(root, "settings.json");
 }
 
 describe("desktop settings store", () => {
-  it("loads defaults before any settings file exists", async () => {
-    const settingsPath = await tempSettingsPath();
-    const store = createDesktopSettingsStore(() => settingsPath);
-
+  it("contains no folder-era defaults", async () => {
+    const store = createDesktopSettingsStore(() => awaitPath);
+    const awaitPath = await tempSettingsPath();
     await expect(store.load()).resolves.toEqual(defaultDesktopSettings);
+    expect(defaultDesktopSettings).toEqual({ recentDocuments: [] });
   });
 
-  it("persists sanitized project convenience fields", async () => {
+  it("persists canonical document identities and deduplicates paths", async () => {
     const settingsPath = await tempSettingsPath();
     const store = createDesktopSettingsStore(() => settingsPath);
-
-    const saved = await store.save({
-      parentDirectory: " C:\\Ether ",
-      projectName: " Campaign ",
-      projectPath: " C:\\Ether\\Campaign.ether ",
-      recentProjects: [
-        " C:\\Ether\\Campaign.ether ",
-        "C:\\Ether\\Campaign.ether",
-        "C:\\Ether\\Second.ether",
-        ""
-      ]
+    await store.remember({
+      documentId: "document-1",
+      displayName: "Campaign.ether",
+      canonicalPath: "C:\\Ether\\Campaign.ether"
+    });
+    await store.remember({
+      documentId: "document-1",
+      displayName: "Campaign renamed.ether",
+      canonicalPath: "c:\\ether\\campaign.ether"
     });
 
-    expect(saved).toEqual({
-      parentDirectory: "C:\\Ether",
-      projectName: "Campaign",
-      projectPath: "C:\\Ether\\Campaign.ether",
-      recentProjects: ["C:\\Ether\\Campaign.ether", "C:\\Ether\\Second.ether"]
+    const settings = await store.load();
+    expect(settings.recentDocuments).toHaveLength(1);
+    expect(settings.recentDocuments[0]).toMatchObject({
+      documentId: "document-1",
+      displayName: "Campaign renamed.ether",
+      canonicalPath: "c:\\ether\\campaign.ether"
     });
-    await expect(store.load()).resolves.toEqual(saved);
+    expect(settings.recentDocuments[0]?.id).toMatch(/^[a-f0-9]{32}$/);
   });
 
-  it("recovers from corrupted settings without throwing", async () => {
+  it("recovers corrupted settings without reviving legacy project fields", async () => {
     const settingsPath = await tempSettingsPath();
     const store = createDesktopSettingsStore(() => settingsPath);
-
     await writeFile(settingsPath, "{not-json", "utf8");
-
     await expect(store.load()).resolves.toEqual(defaultDesktopSettings);
     await expect(readFile(`${settingsPath}.corrupt`, "utf8")).resolves.toBe("{not-json");
   });

@@ -79,13 +79,16 @@ describe("workspace command surface", () => {
     const manifest = await readManifest("apps/desktop/package.json");
 
     expect(manifest.scripts?.typecheck).toBe(
-      "tsc -p tsconfig.electron.json && tsc -p tsconfig.renderer.json"
+      "tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.renderer.json"
     );
     await expect(
       access(path.join(repositoryRoot, "apps/desktop/tsconfig.electron.json"))
     ).resolves.toBeUndefined();
     await expect(
       access(path.join(repositoryRoot, "apps/desktop/tsconfig.renderer.json"))
+    ).resolves.toBeUndefined();
+    await expect(
+      access(path.join(repositoryRoot, "apps/desktop/tsconfig.preload.json"))
     ).resolves.toBeUndefined();
   });
 
@@ -127,9 +130,11 @@ describe("workspace command surface", () => {
       }
     }
 
-    const runnableSources = (await readdir(path.join(repositoryRoot, "packages/testing/tests")))
+    const runnableSources = (await readdir(path.join(repositoryRoot, "packages/testing/tests"), {
+      recursive: true
+    }))
       .filter((entry) => /\.(?:test|spec|packaged)\.ts$/.test(entry))
-      .map((entry) => `tests/${entry}`)
+      .map((entry) => `tests/${entry.replaceAll("\\", "/")}`)
       .sort();
 
     expect([...assignments.keys()].sort()).toEqual(runnableSources);

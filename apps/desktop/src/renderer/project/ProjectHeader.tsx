@@ -1,194 +1,97 @@
-import type {
-  CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent
-} from "react";
 import {
-  Activity,
-  Command,
-  Eye,
-  EyeOff,
+  ArchiveRestore,
+  Copy,
+  FilePlus2,
+  FolderOpen,
   Images,
-  PanelLeft,
-  PanelRight,
-  RotateCcw,
+  PackageCheck,
   Save,
-  ShieldCheck
+  SaveAll
 } from "lucide-react";
+import type { ReactNode } from "react";
+
+import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import etherLogo from "../../../../../packages/brand/src/assets/Ether_logo.png";
 
-type ProjectHeaderProps = {
-  projectName: string;
-  projectPath: string;
-  saveMessage: string;
-  providerMessage: string;
-  healthIssueCount: number;
-  healthStatus: "unknown" | "checking" | "clear" | "warning" | "error";
-  healthMessage: string;
-  showProjectTools: boolean;
-  showHealthPanel: boolean;
-  showTraceTools: boolean;
-  showArtifactBrowser: boolean;
-  onSave(): void;
-  onLoadGraph(): void;
-  onHealthCheck(): void;
-  onProviderCheck(): void;
-  onCommandPalette(): void;
-  onToggleProjectTools(): void;
-  onToggleTraceTools(): void;
-  onToggleArtifactBrowser(): void;
-  onHideHeader(): void;
-  onResizeStart(event: ReactPointerEvent<HTMLDivElement>): void;
-  onResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void;
-  resizeMin: number;
-  resizeMax: number;
-  resizeValue: number;
-  style?: CSSProperties;
-};
-
 export function ProjectHeader({
-  projectName,
-  projectPath,
-  saveMessage,
-  providerMessage,
-  healthIssueCount,
-  healthStatus,
-  healthMessage,
-  showProjectTools,
-  showHealthPanel,
-  showTraceTools,
-  showArtifactBrowser,
+  document,
+  artifactsOpen,
+  onNew,
+  onOpen,
   onSave,
-  onLoadGraph,
-  onHealthCheck,
-  onProviderCheck,
-  onCommandPalette,
-  onToggleProjectTools,
-  onToggleTraceTools,
-  onToggleArtifactBrowser,
-  onHideHeader,
-  onResizeStart,
-  onResizeKeyDown,
-  resizeMin,
-  resizeMax,
-  resizeValue,
-  style
-}: ProjectHeaderProps) {
+  onSaveAs,
+  onSaveCopy,
+  onCompact,
+  onMakePortable,
+  onToggleArtifacts
+}: {
+  document: DocumentDescriptor;
+  artifactsOpen: boolean;
+  onNew(): void;
+  onOpen(): void;
+  onSave(): void;
+  onSaveAs(): void;
+  onSaveCopy(): void;
+  onCompact(): void;
+  onMakePortable(): void;
+  onToggleArtifacts(): void;
+}) {
   return (
-    <header className="project-header" data-testid="project-header" style={style}>
+    <header className="project-header task-nine-header" data-testid="project-header">
       <div className="project-header-brand">
-        <img src={etherLogo} alt="Ether logo" className="ether-logo compact-logo" />
+        <img src={etherLogo} alt="Ether" className="ether-logo compact-logo" />
         <div>
-          <p>ETHER</p>
-          <h1 title={projectPath}>{projectName}</h1>
+          <p>ETHER <span>by DreamBay</span></p>
+          <h1>{document.displayName}</h1>
         </div>
       </div>
-
-      <div className="project-header-state" aria-live="polite">
-        <span>{saveMessage}</span>
-        <em>{providerMessage}</em>
-        <small className={`project-header-health health-${healthStatus}`}>
-          Health: {healthStatusLabel(healthStatus, healthIssueCount, healthMessage)}
-        </small>
+      <div className={`document-save-state state-${document.saveState}`} aria-live="polite">
+        <i aria-hidden="true" />
+        <span>{saveStateLabel(document.saveState)}</span>
+        {document.mode === "read-only" ? <em>Read-only: {readOnlyLabel(document.readOnlyReason)}</em> : null}
       </div>
-
-      <div className="project-header-actions" aria-label="Project commands">
-        <button type="button" onClick={onCommandPalette} title="Open command palette">
-          <Command size={15} aria-hidden="true" />
-          Command Palette
-        </button>
-        <button
-          type="button"
-          onClick={onHealthCheck}
-          title={showHealthPanel ? "Refresh project health" : "Open project health"}
-          aria-pressed={showHealthPanel}
-        >
-          <Activity size={15} aria-hidden="true" />
-          Check Health
-          {healthIssueCount > 0 ? (
-            <span className={`header-health-badge health-${healthStatus}`} aria-hidden="true">
-              {healthIssueCount}
-            </span>
-          ) : null}
-        </button>
-        <button type="button" onClick={onProviderCheck} title="Open provider diagnostics and refresh real/simulation provider readiness">
-          <ShieldCheck size={15} aria-hidden="true" />
-          Providers
-        </button>
-        <button type="button" onClick={onSave} title="Save graph (Ctrl+S)">
-          <Save size={15} aria-hidden="true" />
-          Save Graph
-        </button>
-        <button type="button" onClick={onLoadGraph} title="Reload the saved graph from this local project bundle">
-          <RotateCcw size={15} aria-hidden="true" />
-          Load Graph
-        </button>
-        <button
-          type="button"
-          onClick={onToggleProjectTools}
-          title={showProjectTools ? "Hide provider tools" : "Show provider tools"}
-        >
-          {showProjectTools ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-          <PanelLeft size={15} aria-hidden="true" />
-          Tools
-        </button>
-        <button
-          type="button"
-          onClick={onToggleTraceTools}
-          title={showTraceTools ? "Hide run trace" : "Show run trace"}
-        >
-          {showTraceTools ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-          <PanelRight size={15} aria-hidden="true" />
-          Trace
-        </button>
-        <button
-          type="button"
-          onClick={onToggleArtifactBrowser}
-          title={showArtifactBrowser ? "Hide artifacts" : "Show artifacts"}
-        >
-          {showArtifactBrowser ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-          <Images size={15} aria-hidden="true" />
+      <nav className="project-header-actions" aria-label="Document commands">
+        <IconCommand label="New document" icon={<FilePlus2 size={16} />} onClick={onNew} />
+        <IconCommand label="Open document" icon={<FolderOpen size={16} />} onClick={onOpen} />
+        <IconCommand label="Save" icon={<Save size={16} />} onClick={onSave} disabled={document.mode === "read-only"} />
+        <IconCommand label="Save as" icon={<SaveAll size={16} />} onClick={onSaveAs} disabled={document.mode === "read-only"} />
+        <IconCommand label="Save a copy" icon={<Copy size={16} />} onClick={onSaveCopy} />
+        <IconCommand label="Compact document" icon={<ArchiveRestore size={16} />} onClick={onCompact} disabled={document.mode === "read-only"} />
+        <IconCommand label="Make document portable" icon={<PackageCheck size={16} />} onClick={onMakePortable} disabled={document.mode === "read-only"} />
+        <button type="button" className={artifactsOpen ? "is-active" : ""} onClick={onToggleArtifacts} aria-pressed={artifactsOpen}>
+          <Images size={16} aria-hidden="true" />
           Artifacts
         </button>
-        <button type="button" onClick={onHideHeader} title="Hide top toolbox" data-testid="panel-project-header-toggle">
-          <EyeOff size={15} aria-hidden="true" />
-          Hide Top
-        </button>
-      </div>
-      <div
-        className="panel-resize-handle panel-resize-handle-bottom"
-        role="separator"
-        aria-label="Resize top toolbox"
-        aria-orientation="horizontal"
-        aria-valuemin={resizeMin}
-        aria-valuemax={Math.round(resizeMax)}
-        aria-valuenow={Math.round(resizeValue)}
-        data-testid="project-header-resize"
-        tabIndex={0}
-        title="Drag to resize top toolbox"
-        onPointerDown={onResizeStart}
-        onKeyDown={onResizeKeyDown}
-      />
+      </nav>
     </header>
   );
 }
 
-function healthStatusLabel(
-  status: ProjectHeaderProps["healthStatus"],
-  issueCount: number,
-  healthMessage: string
-) {
-  if (status === "checking") {
-    return "checking";
-  }
+function IconCommand({
+  label,
+  icon,
+  onClick,
+  disabled = false
+}: {
+  label: string;
+  icon: ReactNode;
+  onClick(): void;
+  disabled?: boolean;
+}) {
+  return (
+    <button type="button" title={label} aria-label={label} onClick={onClick} disabled={disabled}>
+      {icon}
+    </button>
+  );
+}
 
-  if (status === "unknown") {
-    return healthMessage;
-  }
+function saveStateLabel(state: DocumentDescriptor["saveState"]) {
+  if (state === "needs-attention") return "Needs attention";
+  return state === "saving" ? "Saving" : "Saved";
+}
 
-  if (status === "clear") {
-    return "clear";
-  }
-
-  return `${issueCount} issue${issueCount === 1 ? "" : "s"}`;
+function readOnlyLabel(reason: DocumentDescriptor["readOnlyReason"]) {
+  if (reason === "location-unsupported") return "this location cannot guarantee safe writes";
+  if (reason === "writer-active") return "open in another Ether window";
+  return "changes are disabled";
 }

@@ -2,6 +2,352 @@
   box-sizing: border-box;
 }
 
+/* Keep the active 4.0 shell isolated from the retained 2.5 presentation rules above. */
+main.ether-shell.task-nine-shell {
+  display: grid;
+  grid-template-rows: 68px minmax(0, 1fr) 34px;
+  flex: none;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  background: #070b12;
+}
+
+.task-nine-shell > .project-header.task-nine-header {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) auto minmax(420px, auto);
+  gap: 16px;
+  height: 68px;
+  min-height: 68px;
+  overflow: hidden;
+  padding: 8px 14px;
+}
+
+.task-nine-shell > .task-nine-workspace {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.task-nine-shell > .document-status {
+  height: 34px;
+  min-height: 34px;
+}
+
+@media (max-width: 980px) {
+  .task-nine-shell > .project-header.task-nine-header {
+    grid-template-columns: minmax(180px, 1fr) auto;
+    gap: 10px;
+  }
+}
+
+/* Ether 4.0 document lifecycle shell */
+.task-nine-shell {
+  display: grid;
+  grid-template-rows: 68px minmax(0, 1fr) 34px;
+  height: 100vh;
+  min-height: 0;
+  background: #070b12;
+}
+
+.task-nine-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) auto minmax(420px, auto);
+  align-items: center;
+  gap: 16px;
+  height: 68px;
+  min-height: 68px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #263241;
+  background: #0c121b;
+}
+
+.task-nine-header .project-header-brand p span {
+  color: #7f8b99;
+  font-weight: 500;
+}
+
+.task-nine-header .project-header-brand h1 {
+  max-width: 32vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.task-nine-header .project-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.task-nine-header .project-header-actions button {
+  min-width: 34px;
+  min-height: 32px;
+  padding: 7px 9px;
+  border-radius: 6px;
+}
+
+.task-nine-header .project-header-actions button[aria-label] {
+  width: 34px;
+  padding: 7px;
+}
+
+.task-nine-header button:focus-visible,
+.document-tool-rail button:focus-visible,
+.missing-reference-strip button:focus-visible {
+  outline: 2px solid #2f80ed;
+  outline-offset: 2px;
+}
+
+.document-save-state {
+  display: grid;
+  grid-template-columns: 8px auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 112px;
+  color: #aeb8c4;
+  font-size: 12px;
+}
+
+.document-save-state i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #37e6ea;
+}
+
+.document-save-state.state-saving i { background: #8b5cf6; }
+.document-save-state.state-needs-attention i { background: #f59e0b; }
+.document-save-state em {
+  grid-column: 1 / -1;
+  color: #f4b85f;
+  font-style: normal;
+}
+
+.task-nine-workspace {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.document-tool-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px 8px;
+  border-right: 1px solid #263241;
+  background: #0b1119;
+}
+
+.document-tool-rail button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  border: 1px solid #334154;
+  background: #101722;
+  color: #dce5ef;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.document-tool-rail button:hover {
+  border-color: #37e6ea;
+  background: #151f2c;
+}
+
+.document-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: #080d14;
+}
+
+.document-canvas .react-flow {
+  position: absolute;
+  inset: 0;
+}
+
+.document-canvas .react-flow__node {
+  letter-spacing: 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.document-canvas .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid #334154;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.document-canvas .react-flow__controls-button {
+  border: 0;
+  border-bottom: 1px solid #263241;
+  background: #101722;
+  color: #dce5ef;
+}
+
+.document-canvas .react-flow__controls-button:hover {
+  background: #182333;
+}
+
+.document-canvas .react-flow__minimap {
+  border: 1px solid #334154;
+  border-radius: 6px;
+  background: #101722;
+}
+
+.task-nine-artifacts {
+  width: clamp(280px, 27vw, 420px);
+  min-width: 0;
+  border-left: 1px solid #263241;
+  border-radius: 0;
+  background: #0b1119;
+}
+
+.task-nine-artifacts header,
+.task-nine-artifacts header > div,
+.artifact-search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-nine-artifacts header {
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #263241;
+}
+
+.artifact-search-field {
+  margin: 10px;
+  padding: 7px 9px;
+  border: 1px solid #334154;
+  border-radius: 6px;
+  background: #101722;
+}
+
+.artifact-search-field input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.artifact-browser-status {
+  margin: 8px 12px;
+  color: #7f8b99;
+  font-size: 11px;
+}
+
+.embedded-artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 10px 12px;
+  overflow: auto;
+}
+
+.embedded-artifact-grid figure {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #2b3747;
+  border-radius: 6px;
+  background: #101722;
+}
+
+.embedded-artifact-grid img,
+.artifact-media-fallback {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.embedded-artifact-grid figcaption {
+  overflow: hidden;
+  padding: 6px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.missing-reference-strip {
+  position: fixed;
+  right: 14px;
+  bottom: 44px;
+  left: 106px;
+  z-index: 20;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  border-radius: 6px;
+  background: #17130d;
+}
+
+.missing-reference-strip > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.missing-reference-strip button {
+  min-height: 28px;
+  border-color: #5d4930;
+  border-radius: 5px;
+}
+
+.document-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 12px;
+  border-top: 1px solid #263241;
+  background: #0c121b;
+  color: #94a0ae;
+  font-size: 11px;
+}
+
+.document-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-status.state-needs-attention { color: #f4b85f; }
+
+.task-nine-start {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  min-height: 100vh;
+  background: #070b12;
+}
+
+.task-nine-start img { width: 64px; }
+.task-nine-start h1 { margin: 0; letter-spacing: 0; }
+.task-nine-start > div { display: flex; gap: 8px; }
+
+@media (max-width: 980px) {
+  .task-nine-header {
+    grid-template-columns: minmax(180px, 1fr) auto;
+  }
+  .document-save-state { display: none; }
+  .task-nine-header .project-header-actions button:last-child { font-size: 0; }
+  .task-nine-workspace { grid-template-columns: 76px minmax(0, 1fr) auto; }
+  .document-tool-rail button { font-size: 0; justify-content: center; }
+  .task-nine-artifacts { width: 300px; }
+}
+
 html,
 body,
 #root {

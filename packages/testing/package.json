@@ -20,6 +20,7 @@
     "pretest:conformance:antigravity": "pnpm --filter @ether/schema build",
     "test:conformance:antigravity": "cross-env ETHER_TEST_SUITE=conformance:antigravity vitest run --config vitest.integration.config.ts",
     "test:smoke": "playwright test --config playwright.config.ts",
+    "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
     "test:acceptance": "pnpm run test:smoke && pnpm run test:packaged"
   },

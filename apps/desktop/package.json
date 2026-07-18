@@ -2,12 +2,12 @@
   "name": "@ether/desktop",
   "version": "0.0.0",
   "private": true,
-  "main": "dist-electron/main/main.js",
-  "type": "commonjs",
+  "main": "dist-electron/main/bootstrap.js",
+  "type": "module",
   "scripts": {
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "tsc -p tsconfig.electron.json && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload/preload.cjs",
     "pretypecheck": "pnpm --filter @ether/engine build",
-    "typecheck": "tsc -p tsconfig.electron.json && tsc -p tsconfig.renderer.json",
+    "typecheck": "tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.renderer.json",
     "lint": "eslint . --max-warnings=0",
     "test:unit": "pnpm --workspace-root test:unit",
     "test:smoke": "pnpm --workspace-root test:smoke",
@@ -18,9 +18,14 @@
     "package:win": "pnpm --workspace-root desktop:package:win"
   },
   "dependencies": {
+    "@ether/application": "workspace:*",
     "@ether/brand": "workspace:*",
+    "@ether/document": "workspace:*",
     "@ether/engine": "workspace:*",
+    "@ether/providers": "workspace:*",
+    "@ether/schema": "workspace:*",
     "@xyflow/react": "^12.11.0",
-    "lucide-react": "^1.18.0"
+    "lucide-react": "^1.18.0",
+    "zod": "^3.25.67"
   }
 }

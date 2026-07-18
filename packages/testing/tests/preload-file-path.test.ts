@@ -1,20 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
-import { createDroppedFilePathReader } from "../../../apps/desktop/src/preload/filePathBridge";
+import { describe, expect, it } from "vitest";
 
-describe("preload dropped file path bridge", () => {
-  it("maps a dropped File through Electron webUtils.getPathForFile", () => {
-    const file = new File(["image"], "reference.png", { type: "image/png" });
-    const getPathForFile = vi.fn(() => "C:\\References\\reference.png");
-    const readPath = createDroppedFilePathReader({ getPathForFile });
+import { createEtherBridge } from "../../../apps/desktop/src/preload/filePathBridge";
 
-    expect(readPath(file)).toBe("C:\\References\\reference.png");
-    expect(getPathForFile).toHaveBeenCalledWith(file);
-  });
+describe("preload filesystem boundary", () => {
+  it("does not expose Electron file paths, filesystem APIs, or unrestricted IPC", () => {
+    const bridge = createEtherBridge({
+      invoke: async () => ({ ok: true, value: undefined }),
+      subscribe: () => () => undefined,
+      openDroppedDocument: async () => ({ ok: true, value: undefined })
+    });
 
-  it("returns null when Electron cannot resolve a local path", () => {
-    const file = new File(["image"], "reference.png", { type: "image/png" });
-    const readPath = createDroppedFilePathReader({ getPathForFile: () => "" });
-
-    expect(readPath(file)).toBeNull();
+    expect(bridge).not.toHaveProperty("file");
+    expect(JSON.stringify(Object.keys(bridge))).not.toMatch(/path|filesystem|ipc|shell/i);
   });
 });

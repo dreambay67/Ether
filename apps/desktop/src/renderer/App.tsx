@@ -1,877 +1,270 @@
 import "@xyflow/react/dist/style.css";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState
-} from "react";
-import { Eye, EyeOff } from "lucide-react";
-import { brandTokens } from "@ether/brand";
-import type { EtherGraph, HealthIssue } from "@ether/engine";
-import type { DesktopSettings, ProjectSession, ProviderDiagnostics } from "./ether-env";
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  type Node,
+  type OnNodeDrag
+} from "@xyflow/react";
+import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink } from "lucide-react";
+import type { EtherGraph, EtherNode, GraphTransaction, LinkedReference } from "@ether/schema";
+
+import type { DocumentDescriptor } from "../shared/ipc/contracts";
 import { ArtifactBrowser } from "./artifacts/ArtifactBrowser";
-import { EtherCanvasWithProvider, type EtherCanvasHandle } from "./canvas/EtherCanvas";
-import { RunTracePanel } from "./canvas/RunTracePanel";
-import { ProjectHealthPanel } from "./project/ProjectHealthPanel";
 import { ProjectHeader } from "./project/ProjectHeader";
-import { ProviderStatusPanel } from "./project/ProviderStatusPanel";
 import { StartScreen } from "./project/StartScreen";
-
-const PROJECT_HEADER_DEFAULT_HEIGHT = 76;
-const PROJECT_HEADER_MIN_HEIGHT = 58;
-const PROJECT_HEADER_MAX_HEIGHT = 220;
-const PROJECT_HEADER_MAX_VIEWPORT_RATIO = 0.32;
-const RUN_TRACE_DEFAULT_HEIGHT = 118;
-const RUN_TRACE_MIN_HEIGHT = 98;
-const RUN_TRACE_MAX_HEIGHT = 380;
-const RUN_TRACE_MAX_VIEWPORT_RATIO = 0.56;
-const PANEL_KEYBOARD_RESIZE_STEP = 10;
-
-function clampPanelHeight(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function panelMaxHeight(limit: number, viewportRatio: number) {
-  return Math.min(limit, Math.max(0, window.innerHeight * viewportRatio));
-}
+import { useDocumentSession } from "./project/useDocumentSession";
 
 export function App() {
-  const canvasRef = useRef<EtherCanvasHandle>(null);
-  const settingsReadyRef = useRef(false);
-  const settingsSaveInFlightRef = useRef(false);
-  const pendingSettingsRef = useRef<DesktopSettings | null>(null);
-  const [parentDirectory, setParentDirectory] = useState("");
-  const [projectName, setProjectName] = useState("Untitled Ether Project");
-  const [projectPath, setProjectPath] = useState("");
-  const [recentProjects, setRecentProjects] = useState<string[]>([]);
-  const [activeGraph, setActiveGraph] = useState<EtherGraph | null>(null);
-  const [traceEntries, setTraceEntries] = useState<string[]>([]);
-  const [showProjectTools, setShowProjectTools] = useState(false);
-  const [showHealthPanel, setShowHealthPanel] = useState(false);
-  const [showProjectHeader, setShowProjectHeader] = useState(true);
-  const [showTraceTools, setShowTraceTools] = useState(true);
-  const [projectHeaderHeight, setProjectHeaderHeight] = useState(PROJECT_HEADER_DEFAULT_HEIGHT);
-  const [runTraceHeight, setRunTraceHeight] = useState(RUN_TRACE_DEFAULT_HEIGHT);
-  const projectHeaderResizeCleanupRef = useRef<(() => void) | null>(null);
-  const runTraceResizeCleanupRef = useRef<(() => void) | null>(null);
-  const [showArtifactBrowser, setShowArtifactBrowser] = useState(false);
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [providerDiagnostics, setProviderDiagnostics] = useState<ProviderDiagnostics | null>(null);
-  const [isProviderChecking, setIsProviderChecking] = useState(false);
-  const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
-  const [healthMessage, setHealthMessage] = useState("Health not checked");
-  const [isHealthChecking, setIsHealthChecking] = useState(false);
-  const [currentProject, setCurrentProject] = useState<{
-    id: string;
-    name: string;
-    path: string;
-    updatedAt: string;
-  } | null>(null);
-  const [projectMessage, setProjectMessage] = useState("No project open");
-  const [providerMessage, setProviderMessage] = useState(
-    "Simulation Mode ready; API disabled; Nano experimental unavailable"
-  );
+  const { state } = useDocumentSession();
+  const document = isDocumentDescriptor(state.snapshot) ? state.snapshot : null;
+  const [graph, setGraph] = useState<EtherGraph | null>(null);
+  const [message, setMessage] = useState("Preparing an untitled document...");
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [references, setReferences] = useState<LinkedReference[]>([]);
+  const [artifactRevision, setArtifactRevision] = useState(0);
 
-  const appendTrace = useCallback((message: string) => {
-    setTraceEntries((entries) => [message, ...entries].slice(0, 12));
-  }, []);
-
-  const focusCanvasNode = useCallback((nodeId: string) => {
-    canvasRef.current?.focusNode(nodeId);
+  const loadGraph = useCallback(async (active: DocumentDescriptor) => {
+    const result = await window.ether.graph.snapshot(active.documentId);
+    setGraph(result.graph);
+    setReferences(await window.ether.references.list(active.documentId));
+    setMessage("");
   }, []);
 
   useEffect(() => {
-    const clampVisiblePanels = () => {
-      setProjectHeaderHeight((height) =>
-        clampPanelHeight(
-          height,
-          PROJECT_HEADER_MIN_HEIGHT,
-          panelMaxHeight(PROJECT_HEADER_MAX_HEIGHT, PROJECT_HEADER_MAX_VIEWPORT_RATIO)
-        )
-      );
-      setRunTraceHeight((height) =>
-        clampPanelHeight(
-          height,
-          RUN_TRACE_MIN_HEIGHT,
-          panelMaxHeight(RUN_TRACE_MAX_HEIGHT, RUN_TRACE_MAX_VIEWPORT_RATIO)
-        )
-      );
-    };
-
-    window.addEventListener("resize", clampVisiblePanels);
-    return () => window.removeEventListener("resize", clampVisiblePanels);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      projectHeaderResizeCleanupRef.current?.();
-      runTraceResizeCleanupRef.current?.();
-    };
-  }, []);
-
-  const resizeProjectHeaderTo = useCallback((height: number) => {
-    setProjectHeaderHeight(
-      clampPanelHeight(
-        height,
-        PROJECT_HEADER_MIN_HEIGHT,
-        panelMaxHeight(PROJECT_HEADER_MAX_HEIGHT, PROJECT_HEADER_MAX_VIEWPORT_RATIO)
-      )
-    );
-  }, []);
-
-  const resizeRunTraceTo = useCallback((height: number) => {
-    setRunTraceHeight(
-      clampPanelHeight(
-        height,
-        RUN_TRACE_MIN_HEIGHT,
-        panelMaxHeight(RUN_TRACE_MAX_HEIGHT, RUN_TRACE_MAX_VIEWPORT_RATIO)
-      )
-    );
-  }, []);
-
-  const startProjectHeaderResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      projectHeaderResizeCleanupRef.current?.();
-      const activePointerId = event.pointerId;
-      const handle = event.currentTarget;
-      const startY = event.clientY;
-      const startHeight = projectHeaderHeight;
-
-      handle.setPointerCapture(activePointerId);
-
-      const resizeHeader = (moveEvent: PointerEvent) => {
-        if (moveEvent.pointerId !== activePointerId) {
-          return;
-        }
-
-        resizeProjectHeaderTo(startHeight + moveEvent.clientY - startY);
-      };
-
-      const cleanupResize = () => {
-        window.removeEventListener("pointermove", resizeHeader);
-        window.removeEventListener("pointerup", stopResize);
-        window.removeEventListener("pointercancel", stopResize);
-        handle.removeEventListener("lostpointercapture", stopResize);
-        if (handle.hasPointerCapture(activePointerId)) {
-          handle.releasePointerCapture(activePointerId);
-        }
-        projectHeaderResizeCleanupRef.current = null;
-      };
-
-      const stopResize = (stopEvent: PointerEvent) => {
-        if (stopEvent.pointerId !== activePointerId) {
-          return;
-        }
-
-        cleanupResize();
-      };
-
-      projectHeaderResizeCleanupRef.current = cleanupResize;
-      window.addEventListener("pointermove", resizeHeader);
-      window.addEventListener("pointerup", stopResize);
-      window.addEventListener("pointercancel", stopResize);
-      handle.addEventListener("lostpointercapture", stopResize);
-    },
-    [projectHeaderHeight, resizeProjectHeaderTo]
-  );
-
-  const startRunTraceResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      runTraceResizeCleanupRef.current?.();
-      const activePointerId = event.pointerId;
-      const handle = event.currentTarget;
-      const startY = event.clientY;
-      const startHeight = runTraceHeight;
-
-      handle.setPointerCapture(activePointerId);
-
-      const resizeTrace = (moveEvent: PointerEvent) => {
-        if (moveEvent.pointerId !== activePointerId) {
-          return;
-        }
-
-        resizeRunTraceTo(startHeight - (moveEvent.clientY - startY));
-      };
-
-      const cleanupResize = () => {
-        window.removeEventListener("pointermove", resizeTrace);
-        window.removeEventListener("pointerup", stopResize);
-        window.removeEventListener("pointercancel", stopResize);
-        handle.removeEventListener("lostpointercapture", stopResize);
-        if (handle.hasPointerCapture(activePointerId)) {
-          handle.releasePointerCapture(activePointerId);
-        }
-        runTraceResizeCleanupRef.current = null;
-      };
-
-      const stopResize = (stopEvent: PointerEvent) => {
-        if (stopEvent.pointerId !== activePointerId) {
-          return;
-        }
-
-        cleanupResize();
-      };
-
-      runTraceResizeCleanupRef.current = cleanupResize;
-      window.addEventListener("pointermove", resizeTrace);
-      window.addEventListener("pointerup", stopResize);
-      window.addEventListener("pointercancel", stopResize);
-      handle.addEventListener("lostpointercapture", stopResize);
-    },
-    [resizeRunTraceTo, runTraceHeight]
-  );
-
-  const handleProjectHeaderResizeKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        resizeProjectHeaderTo(projectHeaderHeight + PANEL_KEYBOARD_RESIZE_STEP);
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        resizeProjectHeaderTo(projectHeaderHeight - PANEL_KEYBOARD_RESIZE_STEP);
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        resizeProjectHeaderTo(PROJECT_HEADER_MIN_HEIGHT);
-      } else if (event.key === "End") {
-        event.preventDefault();
-        resizeProjectHeaderTo(PROJECT_HEADER_MAX_HEIGHT);
-      }
-    },
-    [projectHeaderHeight, resizeProjectHeaderTo]
-  );
-
-  const handleRunTraceResizeKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        resizeRunTraceTo(runTraceHeight + PANEL_KEYBOARD_RESIZE_STEP);
-      } else if (event.key === "ArrowDown") {
-        event.preventDefault();
-        resizeRunTraceTo(runTraceHeight - PANEL_KEYBOARD_RESIZE_STEP);
-      } else if (event.key === "Home") {
-        event.preventDefault();
-        resizeRunTraceTo(RUN_TRACE_MIN_HEIGHT);
-      } else if (event.key === "End") {
-        event.preventDefault();
-        resizeRunTraceTo(RUN_TRACE_MAX_HEIGHT);
-      }
-    },
-    [resizeRunTraceTo, runTraceHeight]
-  );
-
-  const refreshProviderDiagnostics = useCallback(async () => {
-    const providerBridge = window.ether?.provider;
-
-    if (!providerBridge) {
-      setProviderMessage("Simulation Mode ready; API disabled; Nano experimental unavailable");
-      return;
-    }
-
-    setIsProviderChecking(true);
-
-    try {
-      const diagnostics = await (providerBridge.health?.() ?? providerBridge.diagnostics());
-      setProviderDiagnostics(diagnostics);
-      setProviderMessage(formatProviderDiagnostics(diagnostics));
-    } catch {
-      setProviderMessage("Provider health check unavailable");
-    } finally {
-      setIsProviderChecking(false);
-    }
-  }, []);
-
-  const setProjectFromResult = (result: ProjectSession) => {
-    setCurrentProject({
-      id: result.projectId,
-      name: result.metadata.displayName,
-      path: result.path,
-      updatedAt: result.metadata.updatedAt
+    if (document === null) return;
+    void loadGraph(document).catch((error) => {
+      setMessage(error instanceof Error ? error.message : "The graph needs attention.");
     });
-    setProjectPath(result.path);
-    setRecentProjects((projects) => uniqueProjectPaths([result.path, ...projects]));
-    setActiveGraph(result.graph);
-    setHealthIssues([]);
-    setHealthMessage(
-      result.database.healthIssueCount > 0
-        ? `${result.database.healthIssueCount} stored health issue${result.database.healthIssueCount === 1 ? "" : "s"}`
-        : "Health not checked"
+  }, [document, loadGraph]);
+
+  const runDocumentCommand = async (command: (id: string) => Promise<unknown>) => {
+    if (document === null) return;
+    try {
+      await command(document.documentId);
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The document command failed.");
+    }
+  };
+
+  const apply = async (operations: GraphTransaction["operations"], title: string) => {
+    if (document === null || graph === null) return;
+    const transaction: GraphTransaction = {
+      id: crypto.randomUUID(),
+      baseDocumentRevisionId: document.documentRevisionId,
+      baseGraphRevisions: { [graph.id]: document.graphRevisionId },
+      title,
+      actor: "user",
+      layoutPolicy: "preserve",
+      operations
+    };
+    try {
+      const result = await window.ether.graph.applyTransaction(document.documentId, transaction);
+      setGraph(result.graph);
+      setMessage("Saving changes...");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The graph change could not be saved.");
+    }
+  };
+
+  const addNode = (kind: "prompt" | "generator") => {
+    if (graph === null) return;
+    const ordinal = graph.nodes.length + 1;
+    const node = kind === "prompt" ? promptNode(ordinal) : generatorNode(ordinal);
+    const operation = { type: "addNode", graphId: graph.id, node } as Extract<
+      GraphTransaction["operations"][number],
+      { type: "addNode" }
+    >;
+    void apply([operation], `Add ${node.title}`);
+  };
+
+  const nodes = useMemo<Node[]>(() => (graph?.nodes ?? []).map((node) => ({
+    id: node.id,
+    position: node.position,
+    data: { label: node.title, family: node.config.kind },
+    style: {
+      width: node.size.width,
+      minHeight: node.size.height,
+      borderRadius: 6,
+      border: "1px solid rgba(55, 230, 234, 0.45)",
+      background: "#101722",
+      color: "#f4f7fb"
+    }
+  })), [graph]);
+
+  const edges = useMemo(() => (graph?.edges ?? []).map((edge) => ({
+    id: edge.id,
+    source: edge.from.kind === "node" ? edge.from.nodeId : edge.from.moduleId,
+    target: edge.to.kind === "node" ? edge.to.nodeId : edge.to.moduleId,
+    label: edge.role,
+    style: { stroke: "#37e6ea" }
+  })), [graph]);
+
+  const onNodeDragStop: OnNodeDrag<Node> = (_event, node) => {
+    if (graph === null) return;
+    void apply([{
+      type: "moveNodes",
+      graphId: graph.id,
+      positions: [{ nodeId: node.id, position: node.position }]
+    }], "Move node");
+  };
+
+  const actOnReference = async (referenceId: string, action: string) => {
+    if (document === null) return;
+    try {
+      setReferences(await window.ether.references.act(document.documentId, referenceId, action));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Reference recovery failed.");
+    }
+  };
+
+  const generate = async () => {
+    if (document === null) return;
+    try {
+      setMessage("Generating with the local fake provider...");
+      await window.ether.artifacts.generateFake(document.documentId);
+      setArtifactsOpen(true);
+      setArtifactRevision((value) => value + 1);
+      setMessage("Generated artifact embedded in this document");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Generation failed.");
+    }
+  };
+
+  if (document === null) {
+    return (
+      <StartScreen
+        message={state.error ?? message}
+        onNew={() => void window.ether.document.new()}
+        onOpen={() => void window.ether.document.open()}
+      />
     );
-  };
-
-  const resolvedParentDirectory = useCallback(async () => {
-    const currentParentDirectory = parentDirectory.trim();
-
-    if (currentParentDirectory) {
-      return currentParentDirectory;
-    }
-
-    const defaultParentDirectory = window.ether?.project?.defaultParentDirectory;
-
-    if (!defaultParentDirectory) {
-      return "";
-    }
-
-    try {
-      return (await defaultParentDirectory()).trim();
-    } catch {
-      return "";
-    }
-  }, [parentDirectory]);
-
-  const flushSettingsSaveQueue = useCallback(() => {
-    if (settingsSaveInFlightRef.current || !pendingSettingsRef.current || !window.ether?.settings?.save) {
-      return;
-    }
-
-    const settings = pendingSettingsRef.current;
-    pendingSettingsRef.current = null;
-    settingsSaveInFlightRef.current = true;
-
-    void window.ether.settings.save(settings)
-      .catch(() => undefined)
-      .finally(() => {
-        settingsSaveInFlightRef.current = false;
-        flushSettingsSaveQueue();
-      });
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    refreshProviderDiagnostics()
-      .catch(() => {
-        if (!cancelled) {
-          setProviderMessage("Provider health check unavailable");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshProviderDiagnostics]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    window.ether?.settings?.load()
-      .then(async (settings) => {
-        if (cancelled) {
-          return;
-        }
-
-        setParentDirectory(settings.parentDirectory);
-        setProjectName(settings.projectName);
-        setProjectPath(settings.projectPath);
-        setRecentProjects(settings.recentProjects);
-
-        if (!settings.parentDirectory.trim()) {
-          const defaultParentDirectory = await window.ether?.project?.defaultParentDirectory?.();
-
-          if (!cancelled && defaultParentDirectory?.trim()) {
-            setParentDirectory((currentParentDirectory) =>
-              currentParentDirectory.trim() ? currentParentDirectory : defaultParentDirectory.trim()
-            );
-          }
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) {
-          settingsReadyRef.current = true;
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!settingsReadyRef.current || !window.ether?.settings?.save) {
-      return;
-    }
-
-    const settings: DesktopSettings = {
-      parentDirectory,
-      projectName,
-      projectPath,
-      recentProjects: uniqueProjectPaths([projectPath, ...recentProjects])
-    };
-
-    pendingSettingsRef.current = settings;
-    flushSettingsSaveQueue();
-  }, [flushSettingsSaveQueue, parentDirectory, projectName, projectPath, recentProjects]);
-
-  const chooseParentDirectory = async () => {
-    const selectParentDirectory = window.ether?.project?.selectParentDirectory;
-
-    if (!selectParentDirectory) {
-      setProjectMessage("Native folder picker is unavailable; using the default project location");
-      return;
-    }
-
-    try {
-      const selectedDirectory = await selectParentDirectory();
-
-      if (selectedDirectory) {
-        setParentDirectory(selectedDirectory);
-        setProjectMessage("Project location selected");
-      }
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Folder selection failed");
-    }
-  };
-
-  const createLocalProject = async () => {
-    const parent = await resolvedParentDirectory();
-    const name = projectName.trim() || "Untitled Ether Project";
-
-    if (!parent) {
-      setProjectMessage("Choose a parent folder before creating a project");
-      return;
-    }
-
-    setProjectMessage("Creating project...");
-
-    try {
-      const project = await window.ether.project.create({ parentDirectory: parent, name });
-      setParentDirectory(parent);
-      setProjectName(name);
-      setProjectFromResult(project);
-      setProjectMessage("Project created");
-      appendTrace("Project created");
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Project creation failed");
-    }
-  };
-
-  const openLocalProject = async (projectPathOverride?: string) => {
-    let pathToOpen = projectPathOverride?.trim() ?? "";
-    setProjectMessage("Opening project...");
-
-    try {
-      if (!pathToOpen) {
-        const selectedProjectPath = await window.ether.project.selectProjectBundle?.();
-
-        if (!selectedProjectPath) {
-          setProjectMessage(
-            window.ether.project.selectProjectBundle
-              ? "Project open canceled"
-              : "Native project picker is unavailable"
-          );
-          return;
-        }
-
-        pathToOpen = selectedProjectPath;
-      }
-
-      const project = await window.ether.project.open(pathToOpen);
-      setProjectFromResult(project);
-      setProjectMessage("Project opened");
-      appendTrace("Graph hydrated from project");
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Project open failed");
-    }
-  };
-
-  const loadCurrentGraph = async () => {
-    if (!currentProject) {
-      setProjectMessage("Open a project before loading graph state");
-      return;
-    }
-
-    try {
-      const graph = await canvasRef.current?.loadProjectGraph();
-      if (!graph) {
-        setProjectMessage("Canvas is not ready to load graph state");
-        return;
-      }
-
-      setActiveGraph(graph.graph);
-      setProjectMessage("Graph loaded");
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Graph load failed");
-    }
-  };
-
-  const saveCurrentGraph = useCallback(async () => {
-    if (!currentProject) {
-      setProjectMessage("Open a project before saving graph state");
-      return;
-    }
-
-    try {
-      const graph = await canvasRef.current?.saveProjectGraph();
-      if (!graph) {
-        setProjectMessage("Canvas is not ready to save graph state");
-        return;
-      }
-
-      if (graph.appliedToCanvas) {
-        setActiveGraph(graph.graph);
-      }
-      setCurrentProject((project) =>
-        project ? { ...project, updatedAt: graph.graph.updatedAt } : project
-      );
-      setProjectMessage("Graph saved");
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Graph save failed");
-    }
-  }, [currentProject]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void saveCurrentGraph();
-      }
-    };
-    const removeMenuSaveListener = window.ether?.menu?.onSave(() => {
-      void saveCurrentGraph();
-    });
-
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      removeMenuSaveListener?.();
-    };
-  }, [saveCurrentGraph]);
-
-  const runProjectHealthCheck = useCallback(async (options: { openPanel?: boolean } = {}) => {
-    if (!currentProject) {
-      setProjectMessage("Open a project before running health check");
-      return null;
-    }
-
-    if (options.openPanel) {
-      setShowHealthPanel(true);
-    }
-
-    setIsHealthChecking(true);
-
-    try {
-      const health = await window.ether.project.health(currentProject.id);
-      const message = formatHealthMessage(health.issues);
-      setHealthIssues(health.issues);
-      setHealthMessage(message);
-      setProjectMessage(message);
-      appendTrace("Health check complete");
-      return health;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Health check failed";
-      setHealthMessage(message);
-      setProjectMessage(message);
-      return null;
-    } finally {
-      setIsHealthChecking(false);
-    }
-  }, [appendTrace, currentProject]);
-
-  const clearProviderLogs = async () => {
-    if (!currentProject) {
-      setProjectMessage("Open a project before clearing provider logs");
-      return;
-    }
-
-    try {
-      const result = await window.ether.project.clearProviderLogs(currentProject.id);
-      const filePart = result.deletedProviderLogFiles
-        ? ` and ${result.deletedProviderLogFiles} file${result.deletedProviderLogFiles === 1 ? "" : "s"}`
-        : "";
-      setProjectMessage(`Cleared ${result.deletedProviderRuns} provider log record${result.deletedProviderRuns === 1 ? "" : "s"}${filePart}`);
-      appendTrace("Provider logs cleared");
-      await runProjectHealthCheck({ openPanel: true });
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Provider log cleanup failed");
-    }
-  };
-
-  const clearRunArtifacts = async () => {
-    if (!currentProject) {
-      setProjectMessage("Open a project before clearing run metadata");
-      return;
-    }
-
-    try {
-      const result = await window.ether.project.clearRunArtifacts(currentProject.id);
-      const deletedCount =
-        result.deletedRunRecords +
-        result.deletedRunArtifacts +
-        result.deletedArtifactVersions +
-        result.deletedAssetOperations +
-        result.deletedJobRecords +
-        result.deletedJobItems +
-        result.deletedJobEvents;
-      setProjectMessage(`Cleared ${deletedCount} run metadata record${deletedCount === 1 ? "" : "s"}`);
-      appendTrace("Run metadata cleared");
-      await runProjectHealthCheck({ openPanel: true });
-    } catch (error) {
-      setProjectMessage(error instanceof Error ? error.message : "Run metadata cleanup failed");
-    }
-  };
-
-  const providerPanel = (
-    <ProviderStatusPanel
-      diagnostics={providerDiagnostics}
-      message={providerMessage}
-      isChecking={isProviderChecking}
-      onHealthCheck={() => void refreshProviderDiagnostics()}
-    />
-  );
-  const projectHeaderMaxHeight = panelMaxHeight(
-    PROJECT_HEADER_MAX_HEIGHT,
-    PROJECT_HEADER_MAX_VIEWPORT_RATIO
-  );
-  const runTraceMaxHeight = panelMaxHeight(RUN_TRACE_MAX_HEIGHT, RUN_TRACE_MAX_VIEWPORT_RATIO);
+  }
 
   return (
-    <main className="ether-shell" aria-label="Ether desktop shell">
-      {!currentProject ? (
-        <StartScreen
-          projectName={projectName}
-          parentDirectory={parentDirectory}
-          recentProjects={recentProjects}
-          message={projectMessage}
-          providerPanel={providerPanel}
-          onProjectNameChange={setProjectName}
-          onChooseParentDirectory={() => void chooseParentDirectory()}
-          onCreateProject={() => void createLocalProject()}
-          onOpenProject={() => void openLocalProject()}
-          onOpenRecentProject={(recentProjectPath) => void openLocalProject(recentProjectPath)}
-          onCheckProviders={() => void refreshProviderDiagnostics()}
-        />
-      ) : (
-        <>
-          {showProjectHeader ? (
-            <ProjectHeader
-              projectName={currentProject.name}
-              projectPath={currentProject.path}
-              saveMessage={projectMessage}
-              providerMessage={providerMessage}
-              healthIssueCount={healthIssues.length}
-              healthStatus={healthStatusForIssues(healthIssues, isHealthChecking, healthMessage)}
-              healthMessage={healthMessage}
-              showProjectTools={showProjectTools}
-              showHealthPanel={showHealthPanel}
-              showTraceTools={showTraceTools}
-              showArtifactBrowser={showArtifactBrowser}
-              onSave={() => void saveCurrentGraph()}
-              onLoadGraph={() => void loadCurrentGraph()}
-              onHealthCheck={() => void runProjectHealthCheck({ openPanel: true })}
-              onProviderCheck={() => {
-                setShowProjectTools(true);
-                void refreshProviderDiagnostics();
-              }}
-              onCommandPalette={() => setShowCommandPalette(true)}
-              onToggleProjectTools={() => setShowProjectTools((current) => !current)}
-              onToggleTraceTools={() => setShowTraceTools((current) => !current)}
-              onToggleArtifactBrowser={() => setShowArtifactBrowser((current) => !current)}
-              onHideHeader={() => setShowProjectHeader(false)}
-              onResizeStart={startProjectHeaderResize}
-              onResizeKeyDown={handleProjectHeaderResizeKeyDown}
-              resizeMin={PROJECT_HEADER_MIN_HEIGHT}
-              resizeMax={projectHeaderMaxHeight}
-              resizeValue={projectHeaderHeight}
-              style={{ height: projectHeaderHeight }}
-            />
-          ) : (
-            <button
-              type="button"
-              className="project-header-restore"
-              data-testid="panel-project-header-toggle"
-              onClick={() => setShowProjectHeader(true)}
-              title="Show top toolbox"
-              aria-label="Show top toolbox"
-            >
-              <Eye size={15} aria-hidden="true" />
-              Show Top Bar
-            </button>
-          )}
-
-          {showHealthPanel ? (
-            <ProjectHealthPanel
-              issues={healthIssues}
-              message={healthMessage}
-              isChecking={isHealthChecking}
-              onRefresh={() => void runProjectHealthCheck({ openPanel: true })}
-              onClose={() => setShowHealthPanel(false)}
-              onClearProviderLogs={() => clearProviderLogs()}
-              onClearRunArtifacts={() => clearRunArtifacts()}
-            />
-          ) : null}
-
-          {showProjectTools ? <div className="project-tools-dock">{providerPanel}</div> : null}
-
-          <section
-            className="workspace"
-            aria-label={`${brandTokens.lockup} workspace`}
-            data-testid="canvas-workspace"
-          >
-            <section className="canvas-stage" aria-label="Canvas">
-              <EtherCanvasWithProvider
-                canvasRef={canvasRef}
-                graph={activeGraph}
-                projectId={currentProject.id}
-                isCommandPaletteOpen={showCommandPalette}
-                onStatus={setProjectMessage}
-                onTrace={appendTrace}
-                onCloseCommandPalette={() => setShowCommandPalette(false)}
-              />
-            </section>
-          </section>
-          {showArtifactBrowser ? (
-            <ArtifactBrowser projectId={currentProject.id} onStatus={setProjectMessage} />
-          ) : null}
-          {showTraceTools ? (
-            <section
-              className="trace-strip"
-              aria-label="Run Trace"
-              data-testid="panel-run-trace"
-              style={{ height: runTraceHeight }}
-            >
-              <div
-                className="panel-resize-handle panel-resize-handle-top"
-                role="separator"
-                aria-label="Resize run trace"
-                aria-orientation="horizontal"
-                aria-valuemin={RUN_TRACE_MIN_HEIGHT}
-                aria-valuemax={Math.round(runTraceMaxHeight)}
-                aria-valuenow={Math.round(runTraceHeight)}
-                data-testid="run-trace-resize"
-                tabIndex={0}
-                title="Drag to resize run trace"
-                onPointerDown={startRunTraceResize}
-                onKeyDown={handleRunTraceResizeKeyDown}
-              />
-              <div className="trace-strip-title">
-                <span>Trace</span>
-                <strong>Run Trace</strong>
-                <button
-                  type="button"
-                  className="trace-strip-toggle"
-                  data-testid="panel-run-trace-toggle"
-                  onClick={() => setShowTraceTools(false)}
-                  title="Hide run trace"
-                  aria-label="Hide run trace"
-                >
-                  <EyeOff size={14} aria-hidden="true" />
-                </button>
-              </div>
-              <RunTracePanel
-                entries={traceEntries}
-                queueCount={traceEntries.length}
-                projectId={currentProject.id}
-                onFocusNode={focusCanvasNode}
-              />
-            </section>
-          ) : (
-            <button
-              type="button"
-              className="trace-strip-restore"
-              data-testid="panel-run-trace-toggle"
-              onClick={() => setShowTraceTools(true)}
-              title="Show run trace"
-              aria-label="Show run trace"
-            >
-              <Eye size={15} aria-hidden="true" />
-              Show Trace
-            </button>
-          )}
-        </>
-      )}
+    <main
+      className="ether-shell task-nine-shell"
+      aria-label="Ether desktop workspace"
+      onDragOver={(event) => {
+        if ([...event.dataTransfer.files].some((file) => file.name.toLocaleLowerCase().endsWith(".ether"))) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={(event) => {
+        const file = [...event.dataTransfer.files].find(
+          (candidate) => candidate.name.toLocaleLowerCase().endsWith(".ether")
+        );
+        if (file !== undefined) {
+          event.preventDefault();
+          void window.ether.document.openDropped(file).catch((error) => {
+            setMessage(error instanceof Error ? error.message : "The dropped document could not be opened.");
+          });
+        }
+      }}
+    >
+      <ProjectHeader
+        document={{ ...document, saveState: state.saveState }}
+        artifactsOpen={artifactsOpen}
+        onNew={() => void window.ether.document.new()}
+        onOpen={() => void window.ether.document.open()}
+        onSave={() => void runDocumentCommand((id) => window.ether.document.save(id))}
+        onSaveAs={() => void runDocumentCommand((id) => window.ether.document.saveAs(id))}
+        onSaveCopy={() => void runDocumentCommand((id) => window.ether.document.saveCopy(id))}
+        onCompact={() => void runDocumentCommand((id) => window.ether.document.compact(id))}
+        onMakePortable={() => void runDocumentCommand((id) => window.ether.document.makePortable(id))}
+        onToggleArtifacts={() => setArtifactsOpen((value) => !value)}
+      />
+      <section className="task-nine-workspace">
+        <aside className="document-tool-rail" aria-label="Graph tools">
+          <button type="button" onClick={() => addNode("prompt")}>
+            <Plus size={16} aria-hidden="true" />Prompt
+          </button>
+          <button type="button" onClick={() => addNode("generator")}>
+            <ImagePlus size={16} aria-hidden="true" />Image
+          </button>
+          <button type="button" onClick={() => void generate()}>
+            <Sparkles size={16} aria-hidden="true" />Generate
+          </button>
+          <button type="button" title="Reload graph" onClick={() => void loadGraph(document)}>
+            <RefreshCcw size={16} aria-hidden="true" />Refresh
+          </button>
+        </aside>
+        <section className="document-canvas" data-testid="document-canvas" aria-label="Document canvas">
+          <ReactFlow nodes={nodes} edges={edges} onNodeDragStop={onNodeDragStop} fitView>
+            <Background color="#263241" gap={24} size={1} />
+            <Controls />
+            <MiniMap pannable zoomable />
+          </ReactFlow>
+        </section>
+        {artifactsOpen ? (
+          <ArtifactBrowser key={`${document.documentId}:${artifactRevision}`} documentId={document.documentId} />
+        ) : null}
+      </section>
+      {references.some((reference) => reference.state === "missing") ? (
+        <section className="missing-reference-strip" aria-label="Missing references">
+          {references.filter((reference) => reference.state === "missing").map((reference) => (
+            <div key={reference.id}>
+              <Unlink size={15} aria-hidden="true" />
+              <strong>{reference.displayName}</strong>
+              {referenceActions.map(([action, label]) => (
+                <button key={action} type="button" onClick={() => void actOnReference(reference.id, action)}>{label}</button>
+              ))}
+            </div>
+          ))}
+        </section>
+      ) : null}
+      <footer className={`document-status state-${state.saveState}`} aria-live="polite">
+        <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>
+        <small>{document.mode === "read-only" ? "Read-only" : "Local document"}</small>
+      </footer>
     </main>
   );
 }
 
-function formatHealthMessage(issues: HealthIssue[]) {
-  if (issues.length === 0) {
-    return "Health check clear";
-  }
+const referenceActions = [
+  ["locate", "Locate"],
+  ["search-folder", "Search Folder"],
+  ["relink-all", "Relink All"],
+  ["use-embedded-preview", "Use Embedded Preview"],
+  ["embed-available-copy", "Embed Available Copy"],
+  ["remove", "Remove"]
+] as const;
 
-  const errorCount = issues.filter((issue) => issue.severity === "error").length;
-  const warningCount = issues.filter((issue) => issue.severity === "warning").length;
-
-  return `${issues.length} health issue${issues.length === 1 ? "" : "s"} found (${errorCount} error${errorCount === 1 ? "" : "s"}, ${warningCount} warning${warningCount === 1 ? "" : "s"})`;
+function isDocumentDescriptor(value: unknown): value is DocumentDescriptor {
+  return value !== null && typeof value === "object" && "graphId" in value;
 }
 
-function healthStatusForIssues(
-  issues: HealthIssue[],
-  isChecking: boolean,
-  healthMessage: string
-): "unknown" | "checking" | "clear" | "warning" | "error" {
-  if (isChecking) {
-    return "checking";
-  }
-
-  if (issues.some((issue) => issue.severity === "error")) {
-    return "error";
-  }
-
-  if (issues.length > 0) {
-    return "warning";
-  }
-
-  return healthMessage === "Health check clear" ? "clear" : "unknown";
+function promptNode(ordinal: number): EtherNode {
+  return {
+    id: crypto.randomUUID(),
+    definitionId: "prompt.text",
+    title: `Prompt ${ordinal}`,
+    position: { x: 120 + ordinal * 24, y: 120 + ordinal * 18 },
+    size: { width: 240, height: 132 },
+    config: { kind: "prompt.text", body: "Describe the creative direction", assembly: "append" },
+    presentation: { collapsed: false, accent: "default", previewMode: "content" }
+  };
 }
 
-function formatProviderDiagnostics(diagnostics: ProviderDiagnostics) {
-  if (diagnostics.matrix?.length) {
-    const simulation = diagnostics.matrix.find((provider) => provider.mode === "simulation");
-    const codexReady = diagnostics.matrix.filter(
-      (provider) => provider.mode === "real" && provider.availability === "available"
-    ).length;
-    const apiDisabled = diagnostics.matrix.filter(
-      (provider) => provider.id.startsWith("api-") && provider.readiness === "disabled"
-    ).length;
-    const nanoUnavailable = diagnostics.matrix.filter(
-      (provider) => provider.id.startsWith("google-nano-banana") && provider.availability === "unavailable"
-    ).length;
-    const simulationText = simulation?.availability === "available"
-      ? "Simulation Mode ready"
-      : "Simulation Mode unavailable";
-
-    return `${simulationText}; Codex ready (${codexReady}); API disabled (${apiDisabled}); Nano experimental unavailable (${nanoUnavailable})`;
-  }
-
-  const fake = diagnostics.providers.find((provider) => provider.id === "ether-fake-local");
-  const codex = diagnostics.providers.find((provider) => provider.id === "codex-chatgpt-image-2");
-  const nanoUnavailable = diagnostics.providers.filter(
-    (provider) => provider.id.startsWith("google-nano-banana") && provider.availability === "unavailable"
-  ).length;
-  const fakeText = fake?.availability === "available" ? "Simulation Mode ready" : "Simulation Mode unavailable";
-  const codexText = codex?.availability === "available" ? "Codex ready" : "Codex unavailable";
-
-  return `${fakeText}; ${codexText}; Nano unavailable (${nanoUnavailable})`;
-}
-
-function uniqueProjectPaths(projects: string[]) {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const project of projects) {
-    const value = project.trim();
-    const key = value.toLowerCase();
-
-    if (!value || seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(value);
-  }
-
-  return result.slice(0, 12);
+function generatorNode(ordinal: number): EtherNode {
+  return {
+    id: crypto.randomUUID(),
+    definitionId: "generation.image",
+    title: `Image Generator ${ordinal}`,
+    position: { x: 420 + ordinal * 24, y: 180 + ordinal * 18 },
+    size: { width: 250, height: 142 },
+    config: {
+      kind: "generation.image",
+      providerId: "ether-fake-local",
+      profileId: "fake-image-default",
+      aspectRatio: "1:1",
+      resolution: { width: 512, height: 512 },
+      outputCount: 1
+    },
+    presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+  };
 }

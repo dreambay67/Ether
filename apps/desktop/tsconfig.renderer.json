@@ -4,5 +4,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx"]
+  "include": ["src/renderer/main.tsx", "src/renderer/ether-env.d.ts"]
 }

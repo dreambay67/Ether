@@ -11,7 +11,7 @@ export function createMainWindowOptions(preloadPath: string): BrowserWindowConst
     backgroundColor: "#070B12",
     webPreferences: {
       preload: path.resolve(preloadPath),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }

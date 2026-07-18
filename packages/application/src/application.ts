@@ -5,7 +5,11 @@ import {
   DocumentStore,
   DocumentStoreError,
   ExecutionRepositoryError,
+  embedReference,
+  importBlob,
   readBlobRange,
+  relinkReference,
+  resolveReference,
   type ArtifactLineageSnapshot,
   type DocumentStoreEnvironment
 } from "@ether/document";
@@ -110,6 +114,25 @@ export class EtherApplication {
       }]);
     });
     await this.drainEvents();
+  }
+
+  async autosaveDocument(): Promise<void> {
+    await this.requireWritableStore().transaction(({ revisions }) => {
+      revisions.createMilestone("Autosave", "autosave");
+    });
+  }
+
+  async saveAsDocument(input: { path: string }): Promise<DocumentSnapshot> {
+    await this.requireWritableStore().saveAs(input.path);
+    return this.queryDocument();
+  }
+
+  async saveCopyDocument(input: { path: string }): Promise<{ documentId: string; path: string }> {
+    return this.requireStore().saveCopy(input.path);
+  }
+
+  async compactDocument(): Promise<{ beforeBytes: number; afterBytes: number }> {
+    return this.requireWritableStore().compact();
   }
 
   async closeDocument(): Promise<void> {
@@ -268,6 +291,92 @@ export class EtherApplication {
       documentRevisionId: head.documentRevisionId,
       graphRevisions: head.graphRevisions
     });
+  }
+
+  async queryDocumentHeader() {
+    return deepFreezeSnapshot(await this.requireStore().read(({ settings }) => settings.getHeader()));
+  }
+
+  async queryReferences() {
+    return deepFreezeSnapshot(await this.requireStore().read(({ references }) => references.list()));
+  }
+
+  async relinkDocumentReference(input: { referenceId: string; sourcePath: string; pathGrantId: string }) {
+    return relinkReference(
+      this.requireWritableStore(),
+      input.referenceId,
+      input.sourcePath,
+      input.pathGrantId
+    );
+  }
+
+  async useEmbeddedReferencePreview(referenceId: string) {
+    const store = this.requireWritableStore();
+    const reference = await store.read(({ references }) => references.get(referenceId));
+    if (reference === undefined) {
+      throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+    }
+    if (reference.previewContentKey === null) {
+      throw new ApplicationServiceError(
+        "REFERENCE_PREVIEW_UNAVAILABLE",
+        "This reference has no embedded preview."
+      );
+    }
+    return embedReference(store, referenceId, reference.previewContentKey);
+  }
+
+  async embedAvailableReference(referenceId: string) {
+    const store = this.requireWritableStore();
+    const reference = await resolveReference(store, referenceId);
+    if (reference.state !== "linked" || reference.originalPath === null) {
+      throw new ApplicationServiceError(
+        "REFERENCE_SOURCE_UNAVAILABLE",
+        "The linked reference source is not currently available."
+      );
+    }
+    const blob = await importBlob(
+      store,
+      { mediaType: reference.mediaType, sourcePath: reference.originalPath },
+      { appDataRoot: this.options.appDataRoot }
+    );
+    return embedReference(store, referenceId, blob.contentKey);
+  }
+
+  async removeDocumentReference(referenceId: string): Promise<void> {
+    const removed = await this.requireWritableStore().transaction(({ references }) =>
+      references.remove(referenceId)
+    );
+    if (!removed) throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+  }
+
+  async makeDocumentPortable() {
+    const references = await this.queryReferences();
+    let embeddedCount = 0;
+    const missingReferenceIds: string[] = [];
+    for (const reference of references) {
+      if (reference.state === "embedded") continue;
+      try {
+        await this.embedAvailableReference(reference.id);
+        embeddedCount += 1;
+      } catch {
+        missingReferenceIds.push(reference.id);
+      }
+    }
+    return { embeddedCount, missingReferenceIds };
+  }
+
+  async queryArtifactDescriptor(artifactId: string) {
+    const artifact = await this.requireStore().read(({ artifacts }) => artifacts.get(artifactId));
+    if (artifact === undefined) {
+      throw new ApplicationServiceError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifactId}.`);
+    }
+    return deepFreezeSnapshot(artifact);
+  }
+
+  async readArtifactRange(artifactId: string, start: number, endExclusive: number): Promise<Buffer> {
+    const store = this.requireStore();
+    const artifact = await this.queryArtifactDescriptor(artifactId);
+    return readBlobRange(store, artifact.contentKey, start, endExclusive);
   }
 
   async queryGraph(graphId: string): Promise<EtherGraph> {
