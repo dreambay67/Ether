@@ -679,6 +679,9 @@ export interface DesktopApplicationServiceOptions {
   appVersion: string;
   dialogs: NativeDialogPort;
   provider: GenerationProvider;
+  providerLifecycle?: {
+    clearDocument(documentId: string): void;
+  };
   locationCapability?: WritableLocationCapabilityAdapter;
   documentEnvironment?: Omit<
     DocumentStoreEnvironment,
@@ -1299,6 +1302,7 @@ export class DesktopApplicationService {
     this.autosaveCoordinator = null;
     await this.refreshTail;
     if (this.application !== null) await this.application.closeDocument();
+    if (closingDocumentId !== undefined) this.options.providerLifecycle?.clearDocument(closingDocumentId);
     if (closingDocumentId !== undefined) this.pathGrants.deactivateDocument(closingDocumentId);
     this.application = null;
     this.current = null;

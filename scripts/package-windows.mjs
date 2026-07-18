@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootFromScript = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const codexProtocolManifest = "packages/providers/protocol/codex-0.144.2/manifest.json";
 const runtimeDependencies = [
   {
     packageName: "zod",
@@ -24,7 +25,8 @@ export function requiredPackageInputs(rootDir = rootFromScript) {
     "apps/desktop/dist/index.html",
     "apps/desktop/dist-electron/main/bootstrap.js",
     "apps/desktop/dist-electron/main/main.js",
-    ...workspacePackages.map(([, sourceRelativePath]) => `${sourceRelativePath}/dist/index.js`)
+    ...workspacePackages.map(([, sourceRelativePath]) => `${sourceRelativePath}/dist/index.js`),
+    codexProtocolManifest
   ];
   const dependencyInputs = runtimeDependencies.map(
     (dependency) => `${dependency.sourceRelativePath}/package.json`
@@ -106,6 +108,9 @@ async function copyWorkspacePackage(rootDir, appRoot, packageName, sourceRelativ
   await mkdir(targetRoot, { recursive: true });
   await cp(path.join(sourceRoot, "dist"), path.join(targetRoot, "dist"), { recursive: true });
   await cp(path.join(sourceRoot, "package.json"), path.join(targetRoot, "package.json"));
+  if (packageName === "@ether/providers") {
+    await cp(path.join(sourceRoot, "protocol"), path.join(targetRoot, "protocol"), { recursive: true });
+  }
 }
 
 async function copyRuntimeDependency(rootDir, appRoot, dependency) {

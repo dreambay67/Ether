@@ -12,11 +12,13 @@ export {
 } from "./api/generationApiProvider.js";
 export type {
   ApiAssistantAdapter,
+  ApiCredentialReference,
   ApiCredentialState,
   ApiCredentialStatus,
   ApiDataDisclosure,
   ApiGenerationAdapter,
   ApiProviderConfig,
+  ApiProviderActivation,
   ApiProviderDescriptorInput,
   ApiProviderDiagnostic,
   ApiProviderReadiness,
@@ -30,12 +32,60 @@ export {
   CodexCliImageProvider,
   CodexCliVisionEvaluationProvider,
   classifyCodexCliFailure,
+  resolveCodexCliPath,
   runProviderProcess,
   type CodexCliImageProviderOptions,
   type CodexCliVisionEvaluationProviderOptions,
   type CodexFailureClassification,
   type ProviderProcessOptions
 } from "./codex.js";
+export {
+  createCodexAppServerProviderBundle,
+  type CodexAppServerProviderBundle,
+  type CodexAppServerProviderBundleOptions,
+  type CodexExecFallbackFacets
+} from "./codex/appServerProvider.js";
+export {
+  CodexAppServerClient,
+  type InitializeOptions,
+  type ModelListOptions,
+  type RunTurnOptions,
+  type ThreadStartOptions
+} from "./codex/appServer/client.js";
+export {
+  CodexAppServerSessionPool,
+  type CodexClientGeneration,
+  type CodexSessionIdentity
+} from "./codex/appServer/sessionPool.js";
+export {
+  CodexAppServerTurnRunner,
+  CodexImageInputError,
+  type CodexTurnImageInput,
+  type CodexTurnProvenance,
+  type CodexTurnRunnerRequest,
+  type CodexTurnRunnerResult
+} from "./codex/appServer/turnRunner.js";
+export {
+  CODEX_APP_SERVER_MANIFEST_SHA256,
+  CODEX_APP_SERVER_PROTOCOL,
+  CODEX_APP_SERVER_VERSION,
+  CodexAppServerProtocolError,
+  CodexAppServerRequestError,
+  type CodexAppServerEvent,
+  type CodexImageGenerationEvent,
+  type CodexModel,
+  type CodexReasoningEffort,
+  type CodexTurnResult,
+  type CodexUserInput
+} from "./codex/appServer/protocol.js";
+export {
+  CodexAppServerRuntime,
+  CodexRuntimeUnavailableError,
+  type CodexAppServerRuntimeOptions,
+  type CodexRuntimeHealth,
+  type CodexRuntimeStatus,
+  type CodexRuntimeTransport
+} from "./runtime.js";
 export {
   BLOCKED_OPENAI_ENV_KEYS,
   hasBlockedOpenAiEnvKey,

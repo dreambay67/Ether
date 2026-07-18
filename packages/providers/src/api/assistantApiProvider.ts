@@ -2,6 +2,7 @@ import type {
   AssistantProvider,
   AssistantProviderInput,
   ProviderDiagnosticContext,
+  ProviderExecutionContext,
   ProviderAssistantResult
 } from "../types.js";
 import { ApiProviderBase } from "./apiProviderBase.js";
@@ -29,7 +30,10 @@ export class ApiAssistantProvider extends ApiProviderBase implements AssistantPr
     return super.diagnose(context);
   }
 
-  async run(input: AssistantProviderInput): Promise<ProviderAssistantResult> {
+  async run(
+    input: AssistantProviderInput,
+    context?: ProviderExecutionContext<ProviderAssistantResult>
+  ): Promise<ProviderAssistantResult> {
     await this.requireConfigured();
 
     if (!this.adapter) {
@@ -38,7 +42,7 @@ export class ApiAssistantProvider extends ApiProviderBase implements AssistantPr
       );
     }
 
-    return this.adapter.run(input);
+    return this.adapter.run(input, context);
   }
 
   protected hasRunnableAdapter() {
@@ -54,7 +58,6 @@ export function createDefaultApiAssistantProvider() {
       capabilities: ["assistant.text", "assistant.vision", "image.reference-input"],
       notes: ["Disabled by default. This slot is reserved for explicit future API adapters."]
     },
-    enabled: false,
-    credentialEnvKey: "ETHER_ASSISTANT_API_KEY"
+    activation: { state: "disabled" }
   });
 }

@@ -1,17 +1,17 @@
 import {
-  CodexCliImageProvider,
-  CodexCliAssistantProvider,
-  CodexCliVisionEvaluationProvider,
+  CODEX_ASSISTANT_PROVIDER_ID,
   CODEX_PROVIDER_ID,
+  CODEX_VISION_EVALUATION_PROVIDER_ID,
   type CodexCliImageProviderOptions,
   type CodexCliVisionEvaluationProviderOptions
 } from "./codex.js";
+import type { CodexAppServerProviderBundle } from "./codex/appServerProvider.js";
 import { createDefaultApiAssistantProvider } from "./api/assistantApiProvider.js";
 import { createDefaultApiGenerationProvider } from "./api/generationApiProvider.js";
 import { BLOCKED_OPENAI_ENV_KEYS, hasBlockedOpenAiEnvKey } from "./env.js";
 import { ProviderNotFoundError } from "./errors.js";
 import { FAKE_PROVIDER_ID, FakeImageProvider } from "./fake.js";
-import { createNanoBananaProviders } from "./unavailable.js";
+import { createNanoBananaProviders, UnavailableImageProvider } from "./unavailable.js";
 import type {
   AssistantProvider,
   GenerationProvider,
@@ -28,8 +28,14 @@ import type {
 } from "./types.js";
 import type { ApiProviderDiagnostic } from "./api/types.js";
 
-export type DefaultProviderRegistryOptions = CodexCliImageProviderOptions;
-export type DefaultVisionEvaluationProviderRegistryOptions = CodexCliVisionEvaluationProviderOptions;
+export type DefaultProviderRegistryOptions = Partial<CodexCliImageProviderOptions> & {
+  codexBundle?: CodexAppServerProviderBundle;
+};
+export type DefaultVisionEvaluationProviderRegistryOptions = Partial<CodexCliVisionEvaluationProviderOptions> & {
+  codexBundle?: CodexAppServerProviderBundle;
+};
+
+const runtimeBundles = new WeakMap<GenerationProviderRegistry, CodexAppServerProviderBundle>();
 
 export class GenerationProviderRegistry {
   private readonly providers = new Map<string, GenerationProvider>();
@@ -180,19 +186,26 @@ export class VisionEvaluationProviderRegistry {
 }
 
 export function createDefaultProviderRegistry(options: DefaultProviderRegistryOptions = {}) {
-  return new GenerationProviderRegistry([
+  const codexProvider = options.codexBundle?.generation ?? new UnavailableImageProvider({
+    id: CODEX_PROVIDER_ID,
+    name: "ChatGPT Image 2 / Codex",
+    route: "codex-cli",
+    capabilities: ["image.generate", "image.edit", "image.reference-input"],
+    notes: ["A shared application-owned Codex runtime bundle was not supplied."]
+  }, "Codex is unavailable until the application supplies its shared App Server provider bundle.");
+  const registry = new GenerationProviderRegistry([
     new FakeImageProvider(),
-    new CodexCliImageProvider(options),
+    codexProvider,
     ...createNanoBananaProviders()
   ]);
+  if (options.codexBundle) runtimeBundles.set(registry, options.codexBundle);
+  return registry;
 }
 
 export function createDefaultVisionEvaluationProviderRegistry(
   options: DefaultVisionEvaluationProviderRegistryOptions = {}
 ) {
-  return new VisionEvaluationProviderRegistry([
-    new CodexCliVisionEvaluationProvider(options)
-  ]);
+  return new VisionEvaluationProviderRegistry(options.codexBundle ? [options.codexBundle.evaluation] : []);
 }
 
 export async function diagnoseProviderRegistry(
@@ -205,17 +218,21 @@ export async function diagnoseProviderRegistry(
     generation: await createDefaultApiGenerationProvider().diagnose(context),
     assistant: await createDefaultApiAssistantProvider().diagnose(context)
   };
-  const codexImageDiagnostics = providers.find((provider) => provider.id === CODEX_PROVIDER_ID);
-  const codexCliPath =
-    typeof codexImageDiagnostics?.details?.codexCliPath === "string"
-      ? codexImageDiagnostics.details.codexCliPath
-      : undefined;
-  const codexDiagnosticOptions = {
-    env,
-    ...(codexCliPath ? { codexCliPath } : {})
-  };
-  const assistantDiagnostics = await new CodexCliAssistantProvider(codexDiagnosticOptions).diagnose(context);
-  const evaluationDiagnostics = await new CodexCliVisionEvaluationProvider(codexDiagnosticOptions).diagnose(context);
+  const bundle = runtimeBundles.get(registry);
+  const assistantDiagnostics = bundle
+    ? await bundle.assistant.diagnose(context)
+    : unavailableFacetDiagnostic(
+        CODEX_ASSISTANT_PROVIDER_ID,
+        "Codex Assistant",
+        ["assistant.text", "assistant.vision", "image.reference-input"]
+      );
+  const evaluationDiagnostics = bundle
+    ? await bundle.evaluation.diagnose(context)
+    : unavailableFacetDiagnostic(
+        CODEX_VISION_EVALUATION_PROVIDER_ID,
+        "Codex Vision Evaluation",
+        ["evaluation.vision", "assistant.vision", "image.reference-input"]
+      );
   const policy = {
     openAiPlatformApi: {
       status: "blocked" as const,
@@ -236,6 +253,26 @@ export async function diagnoseProviderRegistry(
       optionalApiProviders
     }),
     optionalApiProviders
+  };
+}
+
+function unavailableFacetDiagnostic(
+  id: string,
+  name: string,
+  capabilities: ProviderDiagnostic["capabilities"]
+): ProviderDiagnostic {
+  return {
+    id,
+    name,
+    route: "codex-cli",
+    capabilities: [...capabilities],
+    availability: "unavailable",
+    messages: ["A shared application-owned Codex runtime bundle was not supplied."],
+    details: {
+      transport: "unavailable",
+      manifestHash: null,
+      noIndependentProviderConstruction: true
+    }
   };
 }
 
@@ -313,6 +350,7 @@ function matrixEntry(
     capabilities: [...diagnostic.capabilities],
     profiles: buildDiagnosticProfiles(diagnostic),
     messages: [...diagnostic.messages],
+    details: diagnostic.details ? { ...diagnostic.details } : undefined,
     unavailableReason: diagnostic.availability === "unavailable" ? diagnostic.messages[0] : undefined,
     model: diagnostic.model,
     notes: diagnostic.notes ? [...diagnostic.notes] : undefined,

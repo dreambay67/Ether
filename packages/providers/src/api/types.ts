@@ -6,6 +6,7 @@ import type {
   ProviderAssistantResult,
   ProviderDescriptor,
   ProviderDiagnostic,
+  ProviderExecutionContext,
   ProviderGenerationResult,
   ProviderRoute
 } from "../types.js";
@@ -17,8 +18,23 @@ export type ApiCredentialState = "present" | "missing" | "not_checked";
 export type ApiCredentialStatus = {
   state: ApiCredentialState;
   envKey?: string;
-  source: "environment" | "explicit" | "none";
+  referenceId?: string;
+  source: "environment" | "explicit" | "secure-store" | "none";
 };
+
+export type ApiCredentialReference = {
+  source: "environment" | "explicit" | "secure-store";
+  id: string;
+  validated: true;
+};
+
+export type ApiProviderActivation =
+  | { state: "disabled" }
+  | {
+      state: "explicit-user-selection";
+      selectedProviderId: string;
+      credentialReference: ApiCredentialReference;
+    };
 
 export type ApiRequestPolicy = {
   requiresExplicitSelection: boolean;
@@ -41,8 +57,7 @@ export type ApiProviderDescriptorInput = Omit<ProviderDescriptor, "route" | "cap
 
 export type ApiProviderConfig = {
   descriptor: ApiProviderDescriptorInput;
-  enabled?: boolean;
-  credentialEnvKey?: string;
+  activation: ApiProviderActivation;
   credential?: string;
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   requestPolicy?: Partial<ApiRequestPolicy>;
@@ -60,10 +75,13 @@ export type ApiProviderDiagnostic = ProviderDiagnostic & {
 
 export interface ApiGenerationAdapter {
   readonly maxOutputsPerCall?: number;
-  generate(input: GenerationProviderInput): Promise<ProviderGenerationResult>;
-  edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult>;
+  generate(input: GenerationProviderInput, context?: ProviderExecutionContext): Promise<ProviderGenerationResult>;
+  edit(input: ImageEditProviderInput, context?: ProviderExecutionContext): Promise<ProviderGenerationResult>;
 }
 
 export interface ApiAssistantAdapter {
-  run(input: AssistantProviderInput): Promise<ProviderAssistantResult>;
+  run(
+    input: AssistantProviderInput,
+    context?: ProviderExecutionContext<ProviderAssistantResult>
+  ): Promise<ProviderAssistantResult>;
 }

@@ -2443,7 +2443,7 @@ describe("fake local execution", () => {
     await expectPng(editedAsset!.path);
   });
 
-  it("records a failed provider run when Codex edit fails after invocation", async () => {
+  it("records a failed provider run when the application has not supplied its shared Codex bundle", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Failed Edit Provider Run" });
     const parentAsset = await saveGeneratedAsset(project.path, {
@@ -2475,12 +2475,7 @@ describe("fake local execution", () => {
 
     const result = await executeGraphRun(project.path, canvas, {
       policy: "selected",
-      targetNodeIds: ["edit"],
-      imageCodexCliPath: "C:\\Tools\\codex.exe",
-      imageProviderFileExists: async () => true,
-      imageProviderRunner: async () => {
-        throw new Error("Codex edit worker crashed after launch.");
-      }
+      targetNodeIds: ["edit"]
     });
     const providerRuns = await listProviderRuns(project.path);
 
@@ -2489,7 +2484,7 @@ describe("fake local execution", () => {
         nodeId: "edit",
         status: "error",
         action: "edit",
-        reason: expect.stringContaining("Codex edit worker crashed after launch")
+        reason: expect.stringMatching(/shared App Server provider bundle/i)
       })
     ]);
     expect(providerRuns).toEqual([
@@ -2502,8 +2497,7 @@ describe("fake local execution", () => {
           iteration: 1
         }),
         error: expect.objectContaining({
-          name: "Error",
-          message: "Codex edit worker crashed after launch."
+          message: expect.stringMatching(/shared App Server provider bundle/i)
         })
       })
     ]);
@@ -2853,7 +2847,7 @@ describe("fake local execution", () => {
     ]);
   });
 
-  it("defaults image generation to Codex CLI and reports unavailable Codex instead of falling back to simulation", async () => {
+  it("requires the application-owned Codex bundle for default image generation without simulation fallback", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Codex Default Unavailable" });
     const canvas = graph(
@@ -2879,14 +2873,14 @@ describe("fake local execution", () => {
         nodeId: "generation",
         status: "error",
         action: "generate",
-        reason: expect.stringMatching(/missing-codex\.exe|codex cli/i)
+        reason: expect.stringMatching(/shared App Server provider bundle/i)
       })
     ]);
     expect(nodeData(result.graph.nodes[0]).assetId).toBeUndefined();
     await expect(listAssets(project.path, { kind: "generated" })).resolves.toEqual([]);
   });
 
-  it("defaults image edits to Codex CLI and reports unavailable Codex instead of falling back to simulation", async () => {
+  it("requires the application-owned Codex bundle for default image edits without simulation fallback", async () => {
     const parentDirectory = await createTempRoot();
     const project = await createProject({ parentDirectory, name: "Codex Default Edit Unavailable" });
     const parentAsset = await saveGeneratedAsset(project.path, {
@@ -2928,7 +2922,7 @@ describe("fake local execution", () => {
         nodeId: "edit",
         status: "error",
         action: "edit",
-        reason: expect.stringMatching(/missing-codex\.exe|codex cli/i)
+        reason: expect.stringMatching(/shared App Server provider bundle/i)
       })
     ]);
     expect(nodeData(result.graph.nodes.find((candidate) => candidate.id === "edit")).assetId).toBeUndefined();

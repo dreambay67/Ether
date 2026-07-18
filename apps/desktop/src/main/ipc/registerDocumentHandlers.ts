@@ -9,6 +9,7 @@ import {
   type DesktopIpcChannel
 } from "../../shared/ipc/contracts.js";
 import type { DesktopApplicationService } from "../services/applicationService.js";
+import type { ProviderService } from "../services/providerService.js";
 
 type Handler = (
   request: Record<string, never> | { documentId: string } | { path: string }
@@ -19,10 +20,11 @@ export function registerDocumentHandlers(options: {
   mainWindow: BrowserWindow;
   rendererUrl: string;
   service: DesktopApplicationService;
+  providerService?: ProviderService | null;
   openDocument(): Promise<unknown>;
   openPath(filePath: string): Promise<unknown>;
 }): () => void {
-  const { ipcMain, mainWindow, rendererUrl, service, openDocument, openPath } = options;
+  const { ipcMain, mainWindow, rendererUrl, service, openDocument, openPath, providerService } = options;
   const registrations: Array<[DesktopIpcChannel, Handler]> = [
     [desktopIpcChannels.document.bootstrap, () => service.bootstrap()],
     [desktopIpcChannels.document.new, () => service.newDocument()],
@@ -54,6 +56,23 @@ export function registerDocumentHandlers(options: {
     [desktopIpcChannels.runtime.versions, () => ({
       electron: process.versions.electron ?? "unknown",
       node: process.versions.node
+    })],
+    [desktopIpcChannels.runtime.providerHealth, () => providerService?.providerHealth() ?? ({
+      providerId: "codex-chatgpt-image-2",
+      status: "unavailable",
+      message: "Codex runtime is disabled in simulation mode.",
+      checkedAt: new Date().toISOString(),
+      transport: "unavailable",
+      version: null,
+      manifestHash: null,
+      generation: 0,
+      restartCount: 0,
+      restartReason: null,
+      fallbackReason: null,
+      processPhase: "none",
+      threadId: null,
+      turnId: null,
+      timing: { startedAt: null, initializedAt: null, initializationMs: null, lastExitAt: null }
     })]
   ];
 

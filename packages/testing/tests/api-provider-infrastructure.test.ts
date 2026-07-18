@@ -53,8 +53,7 @@ describe("optional API provider infrastructure", () => {
         capabilities: ["image.generate", "image.edit", "image.reference-input"],
         model: "future-image-model"
       },
-      enabled: false,
-      credentialEnvKey: "CUSTOM_API_KEY"
+      activation: { state: "disabled" }
     });
     const assistantProvider = new ApiAssistantProvider({
       descriptor: {
@@ -63,8 +62,7 @@ describe("optional API provider infrastructure", () => {
         capabilities: ["assistant.text", "assistant.vision", "image.reference-input"],
         model: "future-assistant-model"
       },
-      enabled: false,
-      credentialEnvKey: "CUSTOM_API_KEY"
+      activation: { state: "disabled" }
     });
     const generationRegistry = new GenerationProviderRegistry([generationProvider]);
     const assistantRegistry = new AssistantProviderRegistry([assistantProvider]);
@@ -92,29 +90,63 @@ describe("optional API provider infrastructure", () => {
         name: "Disabled API Generation",
         capabilities: ["image.generate"]
       },
-      enabled: false,
-      credentialEnvKey: "ETHER_DISABLED_API_KEY"
+      activation: { state: "disabled" }
     });
 
     expect(provider.diagnose()).toMatchObject({
       availability: "unavailable",
       readiness: "disabled",
       credentialStatus: {
-        state: "not_checked",
-        envKey: "ETHER_DISABLED_API_KEY"
+        state: "not_checked"
       }
     });
   });
 
-  it("reports missing_credentials readiness when enabled without credentials", async () => {
+  it("never activates a disabled API slot from environment credentials alone", () => {
+    const provider = new ApiGenerationProvider({
+      descriptor: {
+        id: "environment-only-api-generation",
+        name: "Environment Only API Generation",
+        capabilities: ["image.generate"]
+      },
+      activation: { state: "disabled" },
+      env: { OPENAI_API_KEY: "present-but-not-selected" },
+      adapter: {
+        async generate() { throw new Error("must not dispatch"); },
+        async edit() { throw new Error("must not dispatch"); }
+      }
+    });
+
+    expect(provider.diagnose()).toMatchObject({ readiness: "disabled", availability: "unavailable" });
+  });
+
+  it("rejects an explicit selection for a different provider ID", () => {
+    expect(() => new ApiAssistantProvider({
+      descriptor: {
+        id: "selected-api-assistant",
+        name: "Selected API Assistant",
+        capabilities: ["assistant.text"]
+      },
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "another-provider",
+        credentialReference: { source: "secure-store", id: "credential-1", validated: true }
+      }
+    })).toThrow(/selected provider/i);
+  });
+
+  it("reports missing_credentials readiness when explicitly selected without a resolvable credential", async () => {
     const provider = new ApiAssistantProvider({
       descriptor: {
         id: "enabled-api-assistant",
         name: "Enabled API Assistant",
         capabilities: ["assistant.text"]
       },
-      enabled: true,
-      credentialEnvKey: "ETHER_ASSISTANT_API_KEY",
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "enabled-api-assistant",
+        credentialReference: { source: "environment", id: "ETHER_ASSISTANT_API_KEY", validated: true }
+      },
       env: {}
     });
 
@@ -136,8 +168,11 @@ describe("optional API provider infrastructure", () => {
         name: "Generation API Without Adapter",
         capabilities: ["image.generate"]
       },
-      enabled: true,
-      credentialEnvKey: "ETHER_GENERATION_API_KEY",
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "generation-api-without-adapter",
+        credentialReference: { source: "environment", id: "ETHER_GENERATION_API_KEY", validated: true }
+      },
       env: {
         ETHER_GENERATION_API_KEY: secret
       }
@@ -167,8 +202,11 @@ describe("optional API provider infrastructure", () => {
         name: "Assistant API Without Adapter",
         capabilities: ["assistant.text"]
       },
-      enabled: true,
-      credentialEnvKey: "ETHER_ASSISTANT_API_KEY",
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "assistant-api-without-adapter",
+        credentialReference: { source: "environment", id: "ETHER_ASSISTANT_API_KEY", validated: true }
+      },
       env: {
         ETHER_ASSISTANT_API_KEY: secret
       }
@@ -196,7 +234,11 @@ describe("optional API provider infrastructure", () => {
         name: "Configured API Generation",
         capabilities: ["image.generate", "image.edit"]
       },
-      enabled: true,
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "configured-api-generation",
+        credentialReference: { source: "explicit", id: "generation-credential", validated: true }
+      },
       credential: "explicit-secret",
       adapter: {
         async generate() {
@@ -242,7 +284,11 @@ describe("optional API provider infrastructure", () => {
         name: "Single Output API Generation",
         capabilities: ["image.generate"]
       },
-      enabled: true,
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "single-output-api-generation",
+        credentialReference: { source: "explicit", id: "generation-credential", validated: true }
+      },
       credential: "explicit-secret",
       adapter: {
         maxOutputsPerCall: 1,
@@ -270,7 +316,11 @@ describe("optional API provider infrastructure", () => {
         name: "Configured API Assistant",
         capabilities: ["assistant.text"]
       },
-      enabled: true,
+      activation: {
+        state: "explicit-user-selection",
+        selectedProviderId: "configured-api-assistant",
+        credentialReference: { source: "explicit", id: "assistant-credential", validated: true }
+      },
       credential: "assistant-explicit-secret",
       adapter: {
         async run() {
@@ -303,8 +353,7 @@ describe("optional API provider infrastructure", () => {
         name: "Policy API Generation",
         capabilities: ["image.generate"]
       },
-      enabled: false,
-      credentialEnvKey: "ETHER_GENERATION_API_KEY",
+      activation: { state: "disabled" },
       requestPolicy: {
         requiresExplicitSelection: false,
         noHiddenFallback: true,
@@ -389,8 +438,11 @@ describe("optional API provider infrastructure", () => {
           name: "Configured API Generation",
           capabilities: ["image.generate"]
         },
-        enabled: true,
-        credentialEnvKey: "ETHER_GENERATION_API_KEY",
+        activation: {
+          state: "explicit-user-selection",
+          selectedProviderId: "configured-api-generation",
+          credentialReference: { source: "environment", id: "ETHER_GENERATION_API_KEY", validated: true }
+        },
         env: {
           ETHER_GENERATION_API_KEY: secret
         },

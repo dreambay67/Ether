@@ -28,6 +28,8 @@ import {
   type DesktopApplicationServiceOptions,
   type NativeDialogPort
 } from "./services/applicationService.js";
+import { createCodexRuntimeService } from "./services/codexRuntime.js";
+import { createProviderService, type ProviderService } from "./services/providerService.js";
 import { createMainWindowOptions } from "./windowOptions.js";
 
 registerEtherAssetScheme(protocol);
@@ -42,11 +44,13 @@ export interface DesktopStartOptions {
   locationCapability?: DesktopApplicationServiceOptions["locationCapability"];
   autosaveOperation?: DesktopApplicationServiceOptions["autosaveOperation"];
   serviceFactory?: (options: DesktopApplicationServiceOptions) => DesktopApplicationService;
+  providerService?: ProviderService;
 }
 
 export async function startEtherDesktop(options: DesktopStartOptions = {}): Promise<{
   mainWindow: BrowserWindow;
   service: DesktopApplicationService;
+  providerService: ProviderService | null;
 }> {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -62,13 +66,17 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   const mainWindow = new BrowserWindow(createMainWindowOptions(preloadPath));
   const rendererUrl = options.rendererUrl ?? resolveRendererUrl();
   const dialogs = options.dialogs ?? createNativeDialogPort(() => mainWindow);
+  const providerService = options.simulationMode === true
+    ? null
+    : options.providerService ?? createProviderService({ codex: createCodexRuntimeService() });
+  await providerService?.start();
   const serviceOptions: DesktopApplicationServiceOptions = {
     appDataRoot: path.join(app.getPath("userData"), "4.0"),
     appVersion: "4.0.0",
     dialogs,
     provider: options.simulationMode === true
       ? new FakeImageProvider()
-      : new UnavailableImageProvider({
+      : providerService?.codex.generation ?? new UnavailableImageProvider({
           id: "ether-provider-unavailable",
           name: "No image provider configured",
           route: "unconfigured-clean-cli-or-mcp",
@@ -76,6 +84,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
           notes: ["Task 9 production lifecycle does not install a generation provider."]
         }, "No production image provider is configured."),
     simulationMode: options.simulationMode === true,
+    ...(providerService ? { providerLifecycle: providerService } : {}),
     ...(options.locationCapability !== undefined
       ? { locationCapability: options.locationCapability }
       : process.platform === "win32"
@@ -106,7 +115,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   let quitDrain: Promise<void> | null = null;
   const requestQuitDrain = () => {
     if (quitDrain !== null) return;
-    quitDrain = service.close().then(() => {
+    quitDrain = service.close().then(() => providerService?.close()).then(() => {
       lifecycleDrainedForQuit = true;
       app.quit();
     }, async (error) => {
@@ -156,6 +165,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     mainWindow,
     rendererUrl,
     service,
+    providerService,
     openDocument,
     openPath
   });
@@ -226,7 +236,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   else await service.bootstrap();
   if (quitDrain !== null) {
     await quitDrain;
-    return { mainWindow, service };
+    return { mainWindow, service, providerService };
   }
 
   await mainWindow.loadURL(rendererUrl);
@@ -236,7 +246,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     disposeApplicationMenu();
     disposeRecentSubscription();
   });
-  return { mainWindow, service };
+  return { mainWindow, service, providerService };
 }
 
 function resolveRendererUrl(): string {

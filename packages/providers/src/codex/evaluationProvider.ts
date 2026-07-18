@@ -6,6 +6,7 @@ import { removeInvalidPathCharacters } from "../pathSanitization.js";
 import type {
   ProviderDiagnostic,
   ProviderDiagnosticContext,
+  ProviderExecutionContext,
   ProviderProcessRunner,
   VisionEvaluationProvider,
   VisionEvaluationProviderInput,
@@ -77,7 +78,11 @@ export class CodexCliVisionEvaluationProvider implements VisionEvaluationProvide
     });
   }
 
-  async evaluate(input: VisionEvaluationProviderInput): Promise<VisionEvaluationProviderResult> {
+  async evaluate(
+    input: VisionEvaluationProviderInput,
+    context?: ProviderExecutionContext<VisionEvaluationProviderResult>
+  ): Promise<VisionEvaluationProviderResult> {
+    if (context?.signal.aborted) throw abortError("Codex evaluation was cancelled before dispatch.");
     const codexCliPath = await this.requireAvailableCodexCliPath();
     const job = await createEvaluationJobPaths(input);
     const requestPath = path.join(job.jobDir, "request.json");
@@ -148,6 +153,12 @@ export class CodexCliVisionEvaluationProvider implements VisionEvaluationProvide
 
     return this.codexCliPath;
   }
+}
+
+function abortError(message: string) {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
 }
 
 function buildCodexEvaluationExecArgs(

@@ -133,7 +133,7 @@ describe("workspace command surface", () => {
     const runnableSources = (await readdir(path.join(repositoryRoot, "packages/testing/tests"), {
       recursive: true
     }))
-      .filter((entry) => /\.(?:test|spec|packaged)\.ts$/.test(entry))
+      .filter((entry) => /\.(?:test|spec|packaged|conformance)\.ts$/.test(entry))
       .map((entry) => `tests/${entry.replaceAll("\\", "/")}`)
       .sort();
 

@@ -5,11 +5,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CodexCliAssistantProvider,
+  CodexAppServerRuntime,
   CodexCliImageProvider,
   FakeImageProvider,
   PROVIDER_CONNECTION_ROLES,
   PROVIDER_PAYLOAD_CHANNELS,
   classifyCodexCliFailure,
+  createCodexAppServerProviderBundle,
   createDefaultProviderRegistry,
   diagnoseProviderRegistry,
   hasBlockedOpenAiEnvKey,
@@ -20,6 +22,7 @@ import {
 } from "@ether/providers";
 
 const tempRoots: string[] = [];
+const runtimeBundles: Array<ReturnType<typeof createCodexAppServerProviderBundle>> = [];
 
 async function createTempRoot() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ether-provider-"));
@@ -28,8 +31,21 @@ async function createTempRoot() {
 }
 
 afterEach(async () => {
+  await Promise.all(runtimeBundles.splice(0).map((bundle) => bundle.close()));
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+async function createReadyCodexBundle() {
+  const runtime = new CodexAppServerRuntime({
+    executablePath: process.execPath,
+    appServerArgs: [path.join(process.cwd(), "fixtures", "codex-app-server", "fake-app-server.mjs")],
+    initializationTimeoutMs: 2_000
+  });
+  const bundle = createCodexAppServerProviderBundle({ runtime });
+  runtimeBundles.push(bundle);
+  await runtime.start();
+  return bundle;
+}
 
 async function waitForCondition(condition: () => boolean | Promise<boolean>, timeoutMs = 3000) {
   const startedAt = Date.now();
@@ -118,7 +134,7 @@ describe("generation provider registry", () => {
     ]);
   });
 
-  it("lists provider capabilities and diagnostics without enabling OpenAI API fallback", async () => {
+  it("does not activate Codex or OpenAI API routes from legacy options and environment alone", async () => {
     const registry = createDefaultProviderRegistry({
       codexCliPath: "C:\\Tools\\codex.exe",
       env: {
@@ -146,7 +162,7 @@ describe("generation provider registry", () => {
       envKeyDetected: true
     });
     expect(diagnostics.providers.find((provider) => provider.id === "codex-chatgpt-image-2")).toMatchObject({
-      availability: "available",
+      availability: "unavailable",
       route: "codex-cli"
     });
     expect(diagnostics.providers.find((provider) => provider.id === "google-nano-banana-pro")).toMatchObject({
@@ -157,23 +173,20 @@ describe("generation provider registry", () => {
 
   it("reports a provider capability matrix with real, simulation, and experimental slots", async () => {
     const userProfile = await createTempRoot();
+    const codexBundle = await createReadyCodexBundle();
     const registry = createDefaultProviderRegistry({
-      codexCliPath: "C:\\Tools\\codex.exe",
+      codexBundle,
       env: {
         USERPROFILE: userProfile,
-        CODEX_CLI_PATH: "C:\\Tools\\codex.exe",
         OPENAI_API_KEY: "sk-should-stay-blocked"
-      },
-      fileExists: async (filePath) => filePath === "C:\\Tools\\codex.exe"
+      }
     });
 
     const diagnostics = await diagnoseProviderRegistry(registry, {
       env: {
         USERPROFILE: userProfile,
-        CODEX_CLI_PATH: "C:\\Tools\\codex.exe",
         OPENAI_API_KEY: "sk-should-stay-blocked"
-      },
-      fileExists: async (filePath) => filePath === "C:\\Tools\\codex.exe"
+      }
     });
 
     expect(diagnostics.matrix.map((provider) => provider.id)).toEqual([
@@ -422,24 +435,13 @@ describe("generation provider registry", () => {
     ).toBe(true);
   });
 
-  it("reuses the resolved Codex image route for assistant and evaluation matrix diagnostics", async () => {
-    const userProfile = await createTempRoot();
-    const codexCliPath = "C:\\Tools\\codex.exe";
-    const fileExists = async (filePath: string) => filePath === codexCliPath;
+  it("reuses one runtime-backed Codex bundle for generation, assistant, and evaluation diagnostics", async () => {
+    const codexBundle = await createReadyCodexBundle();
     const registry = createDefaultProviderRegistry({
-      codexCliPath,
-      env: {
-        USERPROFILE: userProfile
-      },
-      fileExists
+      codexBundle
     });
 
-    const diagnostics = await diagnoseProviderRegistry(registry, {
-      env: {
-        USERPROFILE: userProfile
-      },
-      fileExists
-    });
+    const diagnostics = await diagnoseProviderRegistry(registry);
 
     expect(
       diagnostics.matrix.filter((provider) =>
@@ -464,6 +466,12 @@ describe("generation provider registry", () => {
         status: "ready"
       })
     ]);
+    const codexDetails = diagnostics.matrix
+      .filter((provider) => provider.id.startsWith("codex-"))
+      .map((provider) => provider.details);
+    expect(codexDetails).toHaveLength(3);
+    expect(codexDetails[1]).toEqual(codexDetails[0]);
+    expect(codexDetails[2]).toEqual(codexDetails[0]);
   });
 
   it("detects and strips blocked OpenAI env keys case-insensitively", () => {

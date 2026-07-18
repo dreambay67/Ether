@@ -50,3 +50,13 @@ export {
   type CodexFailureClassification,
   type ProviderProcessOptions
 } from "./codex/processRunner.js";
+export {
+  createCodexAppServerProviderBundle,
+  type CodexAppServerProviderBundle,
+  type CodexAppServerProviderBundleOptions,
+  type CodexExecFallbackFacets
+} from "./codex/appServerProvider.js";
+export * from "./codex/appServer/protocol.js";
+export * from "./codex/appServer/client.js";
+export * from "./codex/appServer/sessionPool.js";
+export * from "./codex/appServer/turnRunner.js";

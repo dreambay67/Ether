@@ -30,8 +30,7 @@ const defaultDataDisclosure: ApiDataDisclosure = {
 export abstract class ApiProviderBase {
   readonly descriptor: ProviderDescriptor;
 
-  protected readonly enabled: boolean;
-  protected readonly credentialEnvKey: string | undefined;
+  protected readonly activation: ApiProviderConfig["activation"];
   protected readonly credential: string | undefined;
   protected readonly env: NodeJS.ProcessEnv | Record<string, string | undefined>;
   private readonly requestPolicy: ApiRequestPolicy;
@@ -50,8 +49,17 @@ export abstract class ApiProviderBase {
       capabilities: [...config.descriptor.capabilities],
       notes: config.descriptor.notes ? [...config.descriptor.notes] : undefined
     };
-    this.enabled = config.enabled ?? false;
-    this.credentialEnvKey = config.credentialEnvKey;
+    this.activation = config.activation;
+    if (config.activation.state === "explicit-user-selection") {
+      if (config.activation.selectedProviderId !== config.descriptor.id) {
+        throw new Error(
+          `API selected provider "${config.activation.selectedProviderId}" does not match descriptor "${config.descriptor.id}".`
+        );
+      }
+      if (!config.activation.credentialReference.validated || !config.activation.credentialReference.id.trim()) {
+        throw new Error("API explicit user selection requires a validated credential reference.");
+      }
+    }
     this.credential = config.credential;
     this.env = config.env ?? process.env;
     this.unavailableMessage = config.unavailableMessage;
@@ -116,41 +124,44 @@ export abstract class ApiProviderBase {
   protected abstract hasRunnableAdapter(): boolean;
 
   private getCredentialStatus(contextEnv?: ProviderDiagnosticContext["env"]): ApiCredentialStatus {
-    if (!this.enabled) {
+    if (this.activation.state === "disabled") {
       return {
         state: "not_checked",
-        envKey: this.credentialEnvKey,
         source: "none"
       };
     }
 
-    if (this.credential && this.credential.trim()) {
+    const reference = this.activation.credentialReference;
+
+    if ((reference.source === "explicit" || reference.source === "secure-store") && this.credential?.trim()) {
       return {
         state: "present",
-        envKey: this.credentialEnvKey,
-        source: "explicit"
+        referenceId: reference.id,
+        source: reference.source
       };
     }
 
-    if (this.credentialEnvKey) {
+    if (reference.source === "environment") {
       const env = contextEnv ?? this.env;
-      const value = env[this.credentialEnvKey];
+      const value = env[reference.id];
 
       return {
         state: value && value.trim() ? "present" : "missing",
-        envKey: this.credentialEnvKey,
+        envKey: reference.id,
+        referenceId: reference.id,
         source: "environment"
       };
     }
 
     return {
       state: "missing",
-      source: "none"
+      referenceId: reference.id,
+      source: reference.source
     };
   }
 
   private getReadiness(credentialStatus: ApiCredentialStatus): ApiProviderReadiness {
-    if (!this.enabled) {
+    if (this.activation.state === "disabled") {
       return "disabled";
     }
 
@@ -171,13 +182,15 @@ export abstract class ApiProviderBase {
     }
 
     if (readiness === "missing_credentials") {
-      const suffix = this.credentialEnvKey ? ` Set ${this.credentialEnvKey} or pass a credential.` : "";
+      const reference = this.activation.state === "explicit-user-selection"
+        ? this.activation.credentialReference.id
+        : "the selected credential reference";
 
-      return `API provider "${this.descriptor.id}" is enabled but credentials are missing.${suffix}`;
+      return `API provider "${this.descriptor.id}" was explicitly selected, but credential reference ${reference} is unresolved.`;
     }
 
     if (readiness === "missing_adapter") {
-      return `API provider "${this.descriptor.id}" is enabled and credentialed, but no ${this.adapterKind} is installed.`;
+      return `API provider "${this.descriptor.id}" was explicitly selected and credentialed, but no ${this.adapterKind} is installed.`;
     }
 
     return `API provider "${this.descriptor.id}" is configured for explicit use.`;

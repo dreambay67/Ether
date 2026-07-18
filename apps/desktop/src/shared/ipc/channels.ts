@@ -25,7 +25,8 @@ export const desktopIpcChannels = {
     act: "ether:references:act"
   },
   runtime: {
-    versions: "ether:runtime:versions"
+    versions: "ether:runtime:versions",
+    providerHealth: "ether:runtime:provider-health"
   }
 } as const;
 

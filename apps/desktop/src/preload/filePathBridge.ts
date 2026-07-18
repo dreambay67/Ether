@@ -9,7 +9,7 @@ import type {
   PortableResult
 } from "../shared/ipc/contracts";
 import type { GraphTransaction } from "@ether/schema";
-import type { Artifact, EtherGraph } from "@ether/schema";
+import type { Artifact, EtherGraph, ProviderHealthResult } from "@ether/schema";
 
 type BridgeTransport = {
   invoke(channel: DesktopIpcChannel, request: unknown): Promise<NormalizedResult<unknown>>;
@@ -58,7 +58,8 @@ export function createEtherBridge(transport: BridgeTransport) {
         unwrap<DesktopReference[]>(transport.invoke(desktopIpcChannels.references.act, { documentId, referenceId, action }))
     },
     runtime: {
-      versions: () => unwrap<{ electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {}))
+      versions: () => unwrap<{ electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {})),
+      providerHealth: () => unwrap<ProviderHealthResult>(transport.invoke(desktopIpcChannels.runtime.providerHealth, {}))
     }
   };
 }

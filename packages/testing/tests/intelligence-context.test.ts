@@ -1422,10 +1422,11 @@ describe("worker memory policy", () => {
   });
 
   it("does not expose the collision-prone positional overload", () => {
-    if (false) {
+    const positionalCallMustNotTypecheck = () => {
       // @ts-expect-error Positional memory identity is intentionally unsupported.
       resolveMemoryScopeKey({ mode: "per-node" }, "worker", "branch-a");
-    }
+    };
+    expect(positionalCallMustNotTypecheck).toBeTypeOf("function");
     expect(resolveMemoryScopeKey.length).toBe(2);
   });
 });

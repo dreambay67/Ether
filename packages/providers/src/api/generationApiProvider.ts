@@ -49,7 +49,7 @@ export class ApiGenerationProvider extends ApiProviderBase implements Generation
       throw new ProviderOutputCountUnsupportedError(this.descriptor.id, input.outputCount, maximum);
     }
 
-    const result = await this.adapter.generate(input);
+    const result = await this.adapter.generate(input, context);
     await context?.complete(result);
     return result;
   }
@@ -66,7 +66,7 @@ export class ApiGenerationProvider extends ApiProviderBase implements Generation
       );
     }
 
-    const result = await this.adapter.edit(input);
+    const result = await this.adapter.edit(input, context);
     await context?.complete(result);
     return result;
   }
@@ -84,7 +84,6 @@ export function createDefaultApiGenerationProvider() {
       capabilities: ["image.generate", "image.edit", "image.reference-input"],
       notes: ["Disabled by default. This slot is reserved for explicit future API adapters."]
     },
-    enabled: false,
-    credentialEnvKey: "ETHER_GENERATION_API_KEY"
+    activation: { state: "disabled" }
   });
 }

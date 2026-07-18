@@ -1,4 +1,4 @@
-import { ArtifactSchema, EtherGraphSchema, GraphTransactionSchema } from "@ether/schema";
+import { ArtifactSchema, EtherGraphSchema, GraphTransactionSchema, ProviderHealthResultSchema } from "@ether/schema";
 import { z } from "zod";
 
 import { desktopIpcChannels } from "./channels.js";
@@ -163,6 +163,10 @@ export const desktopIpcContracts = {
   [desktopIpcChannels.runtime.versions]: {
     request: empty,
     response: resultSchema(z.object({ electron: z.string(), node: z.string() }).strict())
+  },
+  [desktopIpcChannels.runtime.providerHealth]: {
+    request: empty,
+    response: resultSchema(ProviderHealthResultSchema)
   }
 } as const;
 

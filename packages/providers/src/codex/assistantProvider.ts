@@ -9,6 +9,7 @@ import type {
   ProviderAssistantResult,
   ProviderDiagnostic,
   ProviderDiagnosticContext,
+  ProviderExecutionContext,
   ProviderProcessRunner
 } from "../types.js";
 import {
@@ -75,7 +76,11 @@ export class CodexCliAssistantProvider implements AssistantProvider {
     });
   }
 
-  async run(input: AssistantProviderInput): Promise<ProviderAssistantResult> {
+  async run(
+    input: AssistantProviderInput,
+    context?: ProviderExecutionContext<ProviderAssistantResult>
+  ): Promise<ProviderAssistantResult> {
+    if (context?.signal.aborted) throw abortError("Codex assistant execution was cancelled before dispatch.");
     const codexCliPath = await this.requireAvailableCodexCliPath();
     const job = await createAssistantJobPaths(input);
     const requestPath = path.join(job.jobDir, "request.json");
@@ -149,6 +154,12 @@ export class CodexCliAssistantProvider implements AssistantProvider {
 
     return this.codexCliPath;
   }
+}
+
+function abortError(message: string) {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
 }
 
 function buildCodexAssistantExecArgs(

@@ -31,6 +31,10 @@ async function createFakePackageRoot() {
     );
   }
   await createFile(path.join(root, "packages/document/dist/schema/40000.sql"), "-- packaged schema");
+  await createFile(
+    path.join(root, "packages/providers/protocol/codex-0.144.2/manifest.json"),
+    JSON.stringify({ version: "0.144.2", manifestSha256: "fixture" })
+  );
 
   const zodStore = path.join(root, "store/zod");
   await createFile(path.join(zodStore, "package.json"), JSON.stringify({ name: "zod", type: "module" }));
@@ -68,6 +72,7 @@ describe("Windows desktop package", () => {
         "packages\\graph-kernel\\dist\\index.js",
         "packages\\providers\\dist\\index.js",
         "packages\\schema\\dist\\index.js",
+        "packages\\providers\\protocol\\codex-0.144.2\\manifest.json",
         "packages\\schema\\node_modules\\zod\\package.json"
       ]);
     } finally {
@@ -95,6 +100,12 @@ describe("Windows desktop package", () => {
       await expect(
         readFile(path.join(appRoot, "node_modules/@ether/document/dist/schema/40000.sql"), "utf8")
       ).resolves.toContain("packaged schema");
+      await expect(
+        readFile(
+          path.join(appRoot, "node_modules/@ether/providers/protocol/codex-0.144.2/manifest.json"),
+          "utf8"
+        )
+      ).resolves.toContain('"version":"0.144.2"');
       expect((await lstat(path.join(appRoot, "node_modules/zod"))).isSymbolicLink()).toBe(false);
       expect(execFileSync(process.execPath, [
         "--input-type=module",

@@ -145,6 +145,7 @@ export type ProviderCapabilityMatrixEntry = {
   capabilities: GenerationCapability[];
   profiles: ProviderCapabilityProfile[];
   messages: string[];
+  details?: Record<string, unknown>;
   unavailableReason?: string;
   model?: string;
   notes?: string[];
@@ -376,12 +377,12 @@ export type ProviderProcessResult = {
   exitCode: number;
 };
 
-export type ProviderExecutionContext = {
+export type ProviderExecutionContext<TResult = ProviderGenerationResult> = {
   signal: AbortSignal;
   providerAttemptId: string;
   attemptOrdinal: number;
   stagingDirectory: string;
-  complete: (result: ProviderGenerationResult) => Promise<void>;
+  complete: (result: TResult) => Promise<void>;
 };
 
 export type ProviderProcessRunner = (
@@ -404,11 +405,17 @@ export interface GenerationProvider {
 export interface AssistantProvider {
   readonly descriptor: ProviderDescriptor;
   diagnose(context?: ProviderDiagnosticContext): Promise<ProviderDiagnostic> | ProviderDiagnostic;
-  run(input: AssistantProviderInput): Promise<ProviderAssistantResult>;
+  run(
+    input: AssistantProviderInput,
+    context?: ProviderExecutionContext<ProviderAssistantResult>
+  ): Promise<ProviderAssistantResult>;
 }
 
 export interface VisionEvaluationProvider {
   readonly descriptor: ProviderDescriptor;
   diagnose(context?: ProviderDiagnosticContext): Promise<ProviderDiagnostic> | ProviderDiagnostic;
-  evaluate(input: VisionEvaluationProviderInput): Promise<VisionEvaluationProviderResult>;
+  evaluate(
+    input: VisionEvaluationProviderInput,
+    context?: ProviderExecutionContext<VisionEvaluationProviderResult>
+  ): Promise<VisionEvaluationProviderResult>;
 }

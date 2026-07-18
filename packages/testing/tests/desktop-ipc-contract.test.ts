@@ -77,6 +77,38 @@ describe("desktop IPC contract", () => {
     ).toBe(true);
   });
 
+  it("surfaces read-only provider health without exposing runtime process control", () => {
+    const parsed = desktopIpcContracts[desktopIpcChannels.runtime.providerHealth].response.parse({
+      ok: true,
+      value: {
+        providerId: "codex-chatgpt-image-2",
+        status: "available",
+        message: null,
+        checkedAt: "2026-07-18T12:00:00.000Z",
+        transport: "app-server",
+        version: "0.144.2",
+        manifestHash: "579e6d66fe30749682413b6a32289b896c314db8a3e51b11d65874214e098ee6",
+        generation: 1,
+        restartCount: 0,
+        restartReason: null,
+        fallbackReason: null,
+        processPhase: "idle",
+        threadId: null,
+        turnId: null,
+        timing: { startedAt: 1, initializedAt: 2, initializationMs: 1, lastExitAt: null }
+      }
+    });
+    expect(parsed.ok).toBe(true);
+
+    const bridge = createEtherBridge({
+      invoke: async () => ({ ok: true, value: undefined }),
+      subscribe: () => () => undefined,
+      openDroppedDocument: async () => ({ ok: true, value: undefined })
+    });
+    expect(Object.keys(bridge.runtime).sort()).toEqual(["providerHealth", "versions"]);
+    expect(JSON.stringify(Object.keys(bridge.runtime))).not.toMatch(/spawn|start|stop|interrupt|process/i);
+  });
+
   it("parses capability-aware references and portable confirmation results", () => {
     const referenceResponse = desktopIpcContracts[desktopIpcChannels.references.list].response.safeParse({
       ok: true,

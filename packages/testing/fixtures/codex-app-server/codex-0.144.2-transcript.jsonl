@@ -1,0 +1,13 @@
+{"direction":"client","message":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ether","version":"4.0.0"},"capabilities":{"experimentalApi":true}}}}
+{"direction":"server","message":{"id":1,"result":{"codexHome":"C:\\CodexHome","platformFamily":"windows","platformOs":"windows","userAgent":"codex-cli/0.144.2"}}}
+{"direction":"client","message":{"method":"initialized","params":{}}}
+{"direction":"client","message":{"id":2,"method":"model/list","params":{"includeHidden":false,"limit":1}}}
+{"direction":"server","message":{"id":2,"result":{"data":[{"id":"gpt-5.4","model":"gpt-5.4","displayName":"GPT-5.4","description":"Default","hidden":false,"isDefault":true,"defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"medium","description":"Balanced"}],"inputModalities":["text","image"]}],"nextCursor":"page-2"}}}
+{"direction":"client","message":{"id":3,"method":"thread/start","params":{"cwd":"C:\\Project","model":"gpt-5.4","approvalPolicy":"never","sandbox":"read-only","ephemeral":true}}}
+{"direction":"server","message":{"id":3,"result":{"thread":{"id":"thread-1"},"model":"gpt-5.4","modelProvider":"openai","cwd":"C:\\Project","approvalPolicy":"never","approvalsReviewer":"user","sandbox":"read-only"}}}
+{"direction":"client","message":{"id":4,"method":"turn/start","params":{"threadId":"thread-1","input":[{"type":"text","text":"Return JSON."}],"outputSchema":{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}},"effort":"medium"}}}
+{"direction":"server","message":{"id":4,"result":{"turn":{"id":"turn-1","status":"inProgress","items":[],"error":null}}}}
+{"direction":"server","message":{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"{\"ok\":"}}}
+{"direction":"server","message":{"method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"true}"}}}
+{"direction":"server","message":{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":12,"item":{"id":"item-1","type":"agentMessage","text":"{\"ok\":true}"}}}}
+{"direction":"server","message":{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[],"error":null}}}}

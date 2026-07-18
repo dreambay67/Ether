@@ -37,6 +37,9 @@ export const testSuites = {
     "tests/job-coordinator.test.ts",
     "tests/migration.test.ts",
     "tests/project-store.test.ts",
+    "tests/codex-app-server-client.test.ts",
+    "tests/codex-app-server-provider.test.ts",
+    "tests/provider-lifecycle.test.ts",
     "tests/provider-registry.test.ts",
     "tests/revision-store.test.ts",
     "tests/vision-evaluation.test.ts",
@@ -53,7 +56,10 @@ export const testSuites = {
     "tests/workspace-command-surface.test.ts"
   ],
   performance: ["tests/prompt-assembly.performance.test.ts"],
-  "conformance:codex": ["tests/codex.conformance.test.ts"],
+  "conformance:codex": [
+    "tests/codex.conformance.test.ts",
+    "tests/conformance/codex-live.conformance.ts"
+  ],
   "conformance:antigravity": ["tests/antigravity.conformance.test.ts"],
   smoke: ["tests/smoke.spec.ts"],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],

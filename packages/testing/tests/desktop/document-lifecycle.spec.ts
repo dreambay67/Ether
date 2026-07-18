@@ -1616,11 +1616,13 @@ describe("autosave and event ordering", () => {
   it("supports reusable document close followed by New and Open", async () => {
     const root = await tempRoot("ether-reusable-close-");
     const savedPath = path.join(root, "Reusable.ether");
+    const clearedDocuments: string[] = [];
     const service = new DesktopApplicationService({
       appDataRoot: path.join(root, "appdata"),
       appVersion: "4.0.0-test",
       dialogs: dialogs({ saveDocument: async () => savedPath }),
-      provider: new FakeImageProvider()
+      provider: new FakeImageProvider(),
+      providerLifecycle: { clearDocument: (documentId) => clearedDocuments.push(documentId) }
     });
     const initial = await service.bootstrap();
     const saved = await service.save(initial.documentId);
@@ -1628,6 +1630,7 @@ describe("autosave and event ordering", () => {
     const fresh = await service.newDocument();
     expect(fresh.documentId).not.toBe(saved.documentId);
     await service.closeDocument();
+    expect(clearedDocuments).toEqual([saved.documentId, fresh.documentId]);
     await expect(service.openPath(savedPath)).resolves.toMatchObject({ documentId: saved.documentId });
     await service.close();
   });

@@ -664,7 +664,23 @@ export const ProviderHealthResultSchema = z
     providerId: idSchema,
     status: z.enum(["available", "degraded", "unavailable", "probing"]),
     message: z.string().nullable(),
-    checkedAt: TimestampSchema
+    checkedAt: TimestampSchema,
+    transport: z.enum(["app-server", "exec-fallback", "unavailable"]).optional(),
+    version: z.string().min(1).nullable().optional(),
+    manifestHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
+    generation: z.number().int().nonnegative().optional(),
+    restartCount: z.number().int().nonnegative().optional(),
+    restartReason: z.string().nullable().optional(),
+    fallbackReason: z.string().nullable().optional(),
+    processPhase: z.enum(["none", "initializing", "idle", "active"]).optional(),
+    threadId: idSchema.nullable().optional(),
+    turnId: idSchema.nullable().optional(),
+    timing: z.object({
+      startedAt: z.number().int().nonnegative().nullable(),
+      initializedAt: z.number().int().nonnegative().nullable(),
+      initializationMs: z.number().int().nonnegative().nullable(),
+      lastExitAt: z.number().int().nonnegative().nullable()
+    }).strict().optional()
   })
   .strict();
 export type ProviderHealthResult = z.infer<typeof ProviderHealthResultSchema>;
