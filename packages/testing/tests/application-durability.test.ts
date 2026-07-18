@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1320,5 +1320,61 @@ describe("durable application execution", () => {
     expect(await pathExists(attemptStagingDirectory)).toBe(false);
     expect(listRecoveryJournalPaths(ready.appDataRoot)).toEqual([]);
     await ready.application.closeDocument();
+  });
+
+  it("cleans a dangling provider staging junction without touching its deleted target on Windows", async () => {
+    if (process.platform !== "win32") return;
+    const externalParent = await temp("ether-dangling-junction-parent-");
+    const externalTarget = path.join(externalParent, "target");
+    const externalSentinel = path.join(externalParent, "keep.txt");
+    await mkdir(externalTarget);
+    await writeFile(externalSentinel, "keep");
+    let attemptStagingDirectory = "";
+    let ownedLinkPath = "";
+    const provider = new ArtifactProbeProvider(async (result, context) => {
+      const linkPath = path.join(context.stagingDirectory, "dangling-target");
+      attemptStagingDirectory = context.stagingDirectory;
+      ownedLinkPath = linkPath;
+      await symlink(externalTarget, linkPath, "junction");
+      await rm(externalTarget, { recursive: true, force: true });
+      return {
+        ...result,
+        artifacts: [{
+          ...result.artifacts[0]!,
+          content: undefined,
+          sourcePath: path.join(linkPath, "missing.png")
+        }]
+      };
+    });
+    const ready = await createReadyApplication({ provider });
+    const started = await ready.application.startRun({
+      commandId: "dangling-linked-source-path",
+      planId: ready.plan.id,
+      contentHash: ready.plan.contentHash,
+      runPermitId: ready.permit.id
+    });
+
+    expect((await ready.application.waitForJob(started.id)).status).toBe("failed");
+    expect((await ready.application.queryAttempts(started.id))[0]?.failure).toMatchObject({
+      code: "PROVIDER_OUTPUT_PATH_INVALID"
+    });
+    await ready.application.closeDocument();
+
+    const reopened = new EtherApplication({
+      appDataRoot: ready.appDataRoot,
+      appVersion: "4.0.0-test",
+      provider,
+      dispatchMode: "manual"
+    });
+    await reopened.openDocument({ path: ready.documentPath, access: "require-write" });
+    try {
+      await expect(lstat(ownedLinkPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(lstat(attemptStagingDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(listRecoveryJournalPaths(ready.appDataRoot)).toEqual([]);
+      expect(await pathExists(externalTarget)).toBe(false);
+      expect(await readFile(externalSentinel, "utf8")).toBe("keep");
+    } finally {
+      await reopened.closeDocument();
+    }
   });
 });

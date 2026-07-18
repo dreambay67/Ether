@@ -135,6 +135,15 @@ function assertOwnedTree(candidate: string, canonicalAppDataRoot: string): void 
   assertStableComponent(candidate, canonicalAppDataRoot);
 }
 
+function lstatIfPresent(candidate: string) {
+  try {
+    return lstatSync(candidate);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 export function assertDestructiveRecoveryPath(
   candidate: string,
   ownedRoot: string,
@@ -251,7 +260,7 @@ export function removeOwnedStagingPath(filePath: string, appDataRoot?: string): 
   const roots = resolveRecoveryRoots(appDataRoot);
   ensureOwnedRecoveryDirectory(roots.stagingRoot, roots.appDataRoot);
   const resolved = assertAppDataOwnedPath(filePath, roots.stagingRoot);
-  if (!existsSync(resolved)) return;
+  if (lstatIfPresent(resolved) === undefined) return;
   const canonicalAppDataRoot = assertCanonicalAppDataRoot(roots.appDataRoot);
   const parent = path.dirname(resolved);
   const relativeParent = path.relative(roots.appDataRoot, parent);
@@ -271,8 +280,8 @@ function removeOwnedEntry(
   canonicalAppDataRoot: string,
   allowReparsePoint: boolean
 ): void {
-  if (!existsSync(candidate)) return;
-  const before = lstatSync(candidate);
+  const before = lstatIfPresent(candidate);
+  if (before === undefined) return;
   if (before.isSymbolicLink()) {
     if (!allowReparsePoint) {
       throw new Error(`Owned staging root is a reparse point: ${candidate}`);
