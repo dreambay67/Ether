@@ -1,24 +1,37 @@
-export const DEFAULT_REFERENCE_ROLE = "context";
+import {
+  connectionRoles,
+  ConnectionRoleSchema,
+  type ConnectionRole
+} from "@ether/schema";
 
-export const REFERENCE_ROLE_OPTIONS = [
-  { value: "context", label: "Context (general)" },
-  { value: "subject", label: "Subject" },
-  { value: "style", label: "Style" },
-  { value: "composition", label: "Composition" },
-  { value: "product", label: "Product" },
-  { value: "face", label: "Face" },
-  { value: "setting", label: "Setting" },
-  { value: "lighting", label: "Lighting" },
-  { value: "colourPalette", label: "Colour palette" },
-  { value: "negative", label: "Negative" },
-  { value: "reference", label: "Reference" }
-] as const;
+export const DEFAULT_REFERENCE_ROLE: ConnectionRole = "general";
 
-export type ReferenceRole = (typeof REFERENCE_ROLE_OPTIONS)[number]["value"];
+const referenceRoleLabels = {
+  general: "General",
+  negative: "Negative",
+  subject: "Subject",
+  product: "Product",
+  face: "Face",
+  clothing: "Clothing",
+  pose: "Pose",
+  setting: "Setting",
+  composition: "Composition",
+  style: "Style",
+  lighting: "Lighting",
+  colourPalette: "Colour palette",
+  typography: "Typography",
+  motion: "Motion",
+  timing: "Timing"
+} satisfies Record<ConnectionRole, string>;
+
+export const REFERENCE_ROLE_OPTIONS = connectionRoles.map((value) => ({
+  value,
+  label: referenceRoleLabels[value]
+}));
+
+export type ReferenceRole = ConnectionRole;
 
 export function normalizeReferenceRole(value: unknown): ReferenceRole {
-  if (typeof value !== "string") return DEFAULT_REFERENCE_ROLE;
-  return REFERENCE_ROLE_OPTIONS.some((role) => role.value === value)
-    ? value as ReferenceRole
-    : DEFAULT_REFERENCE_ROLE;
+  const parsed = ConnectionRoleSchema.safeParse(value);
+  return parsed.success ? parsed.data : DEFAULT_REFERENCE_ROLE;
 }

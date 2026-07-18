@@ -17,6 +17,7 @@ import {
   getOptionalNodeContract,
   assembleGenerationInputs
 } from "@ether/engine";
+import { connectionRoles, type ConnectionRole } from "@ether/schema";
 import { REFERENCE_ROLE_OPTIONS, DEFAULT_REFERENCE_ROLE } from "../../../apps/desktop/src/renderer/canvas/referenceRoles";
 
 const manualPath = fileURLToPath(new URL("../../../docs/product/ether-2.0-user-manual.md", import.meta.url));
@@ -694,7 +695,7 @@ describe("connection rules", () => {
     });
   });
 
-  it("defaults reference edge roles to context", () => {
+  it("maps the legacy context label to the canonical general role", () => {
     expect(
       canConnectNodeKinds("Reference", "Generation", {
         sourceDefinitionId: "reference-image",
@@ -704,26 +705,33 @@ describe("connection rules", () => {
       })
     ).toMatchObject({
       allowed: true,
-      defaultLabel: DEFAULT_REFERENCE_ROLE,
+      defaultLabel: "context",
       defaultRole: "general"
     });
   });
 
-  it("keeps the reference role selector on the established 11 options", () => {
-    expect(DEFAULT_REFERENCE_ROLE).toBe("context");
+  it("keeps renderer reference roles in canonical schema order", () => {
+    expect(DEFAULT_REFERENCE_ROLE).toBe("general");
+    expect(REFERENCE_ROLE_OPTIONS.map((role) => role.value)).toEqual(connectionRoles);
     expect(REFERENCE_ROLE_OPTIONS.map((role) => [role.value, role.label])).toEqual([
-      ["context", "Context (general)"],
+      ["general", "General"],
+      ["negative", "Negative"],
       ["subject", "Subject"],
-      ["style", "Style"],
-      ["composition", "Composition"],
       ["product", "Product"],
       ["face", "Face"],
+      ["clothing", "Clothing"],
+      ["pose", "Pose"],
       ["setting", "Setting"],
+      ["composition", "Composition"],
+      ["style", "Style"],
       ["lighting", "Lighting"],
       ["colourPalette", "Colour palette"],
-      ["negative", "Negative"],
-      ["reference", "Reference"]
+      ["typography", "Typography"],
+      ["motion", "Motion"],
+      ["timing", "Timing"]
     ]);
+    expect(REFERENCE_ROLE_OPTIONS.every((role) => connectionRoles.includes(role.value as ConnectionRole)))
+      .toBe(true);
   });
 });
 
