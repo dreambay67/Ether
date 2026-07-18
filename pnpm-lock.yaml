@@ -80,9 +80,6 @@ importers:
       '@ether/document':
         specifier: workspace:*
         version: link:../../packages/document
-      '@ether/engine':
-        specifier: workspace:*
-        version: link:../../packages/engine
       '@ether/providers':
         specifier: workspace:*
         version: link:../../packages/providers

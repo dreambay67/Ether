@@ -1,18 +1,16 @@
-import type { AssetRecord } from "@ether/engine";
-
-export type DroppedReferenceLinker = (
+export type DroppedReferenceLinker<Asset> = (
   projectId: string,
   filePath: string,
   options?: { role?: string }
-) => Promise<AssetRecord>;
+) => Promise<Asset>;
 
-export async function linkDroppedReferenceFilesSequentially(
+export async function linkDroppedReferenceFilesSequentially<Asset>(
   projectId: string,
   filePaths: string[],
-  linker: DroppedReferenceLinker,
+  linker: DroppedReferenceLinker<Asset>,
   options?: { role?: string }
 ) {
-  const assets: AssetRecord[] = [];
+  const assets: Asset[] = [];
 
   for (const filePath of filePaths) {
     assets.push(await linker(projectId, filePath, options));
