@@ -20,7 +20,7 @@ export type WorkerOutputIssue = {
   path?: string;
 };
 
-const conversationalPreface = /^(?:(?:sure|certainly|of course)(?![-\p{L}\p{N}_])[\s,!:;-]*(?:here(?:'s| is)\b[\s,!:;-]*)?|i(?:'ve| have)\s+(?:revised|updated|corrected)\b|(?:the\s+)?(?:revised|updated|corrected)\s+(?:content|prompt|text|result)\b)/iu;
+const conversationalPreface = /^(?:(?:sure|certainly|of course)(?![\p{Dash_Punctuation}\p{L}\p{N}_])[\s,!:;-]*(?:here(?:'s| is)\b[\s,!:;-]*)?|i(?:'ve| have)\s+(?:revised|updated|corrected)\b|(?:the\s+)?(?:revised|updated|corrected)\s+(?:content|prompt|text|result)\b)/iu;
 const contrastiveNarration = /\binstead\s+of\b/i;
 
 function inspectString(config: PromptWorkerConfig, output: string, path?: string): WorkerOutputIssue[] {

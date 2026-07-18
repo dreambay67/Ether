@@ -1280,6 +1280,8 @@ describe("worker output validation and transformation guard", () => {
 
   it.each([
     "Sure-footed composition anchors the campaign.",
+    "Sure\u2011footed composition anchors the campaign.",
+    "Sure\u2013footed composition anchors the campaign.",
     "Certainly-crafted details sharpen the launch image.",
     "Of course-inspired typography gives the poster momentum."
   ])("accepts hyphenated content rather than treating it as an assistant preface: %s", (output) => {
