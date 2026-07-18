@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 const repositoryRoot = realpathSync.native(fileURLToPath(new URL("../../..", import.meta.url)));
 const desktopRoot = path.join(repositoryRoot, "apps", "desktop");
+const isolationFixtureRoot = path.join(repositoryRoot, "packages", "testing", "fixtures", "legacy-isolation");
 const ether40Packages = new Set([
   "@ether/application",
   "@ether/brand",
@@ -44,8 +45,24 @@ type SourceGraph = {
   moduleSpecifiers: Array<{ importer: string; specifier: string }>;
 };
 
+type RuntimeExportCondition = "import" | "default";
+
+type WorkspaceExportSource = {
+  typeSource: string | null;
+  runtimeSources: Array<{ condition: RuntimeExportCondition; source: string }>;
+};
+
+type SourceGraphOptions = {
+  entryPoints?: readonly string[];
+  workspaceRoots?: readonly string[];
+};
+
 const configCache = new Map<string, ts.ParsedCommandLine>();
-let workspaceExportsPromise: Promise<Map<string, string>> | undefined;
+const defaultWorkspaceRoots = [
+  path.join(repositoryRoot, "packages"),
+  path.join(repositoryRoot, "apps")
+] as const;
+let workspaceExportsPromise: Promise<Map<string, WorkspaceExportSource>> | undefined;
 
 async function readRepositoryFile(relativePath: string): Promise<string> {
   return readFile(path.join(repositoryRoot, relativePath), "utf8");
@@ -120,13 +137,21 @@ function moduleSpecifiers(source: string, filePath: string): string[] {
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
       result.push(node.moduleSpecifier.text);
-    } else if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1 &&
-      ts.isStringLiteral(node.arguments[0]!)
-    ) {
-      result.push(node.arguments[0]!.text);
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const argument = node.arguments[0];
+      if (
+        node.arguments.length !== 1 ||
+        argument === undefined ||
+        (!ts.isStringLiteral(argument) && !ts.isNoSubstitutionTemplateLiteral(argument))
+      ) {
+        const locationNode = argument ?? node;
+        const location = sourceFile.getLineAndCharacterOfPosition(locationNode.getStart(sourceFile));
+        throw new Error(
+          `Nonliteral dynamic import in ${repositoryPath(filePath)}:${location.line + 1}:` +
+          `${location.character + 1}; use a string or no-substitution template literal.`
+        );
+      }
+      result.push(argument.text);
     }
     ts.forEachChild(node, visit);
   };
@@ -134,12 +159,20 @@ function moduleSpecifiers(source: string, filePath: string): string[] {
   return result;
 }
 
-function exportedTarget(value: unknown): string | null {
+function exportedTarget(
+  value: unknown,
+  condition: "types" | RuntimeExportCondition
+): string | null {
   if (typeof value === "string") return value;
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const conditions = value as Record<string, unknown>;
-  for (const condition of ["types", "import", "default", "browser", "require"]) {
-    const target = exportedTarget(conditions[condition]);
+  const candidates = condition === "types"
+    ? ["types", "import", "default"] as const
+    : condition === "import"
+      ? ["import", "default"] as const
+      : ["default"] as const;
+  for (const candidate of candidates) {
+    const target = exportedTarget(conditions[candidate], condition);
     if (target !== null) return target;
   }
   return null;
@@ -169,6 +202,14 @@ function sourceCandidatesForOutput(relativeOutput: string): string[] {
 
 function sourceForExportTarget(packageRoot: string, target: string): string | null {
   const targetPath = path.resolve(packageRoot, target);
+  const relativeTarget = path.relative(packageRoot, targetPath);
+  if (
+    relativeTarget === ".." ||
+    relativeTarget.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeTarget)
+  ) {
+    return null;
+  }
   const configPath = path.join(packageRoot, "tsconfig.json");
   if (ts.sys.fileExists(configPath)) {
     const config = parseTsConfig(configPath);
@@ -191,15 +232,16 @@ function sourceForExportTarget(packageRoot: string, target: string): string | nu
   return ts.sys.fileExists(targetPath) ? canonicalFilePath(targetPath) : null;
 }
 
-async function workspaceExportSources(): Promise<Map<string, string>> {
+async function workspaceExportSources(): Promise<Map<string, WorkspaceExportSource>> {
   workspaceExportsPromise ??= loadWorkspaceExportSources();
   return workspaceExportsPromise;
 }
 
-async function loadWorkspaceExportSources(): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  for (const workspaceFolder of ["packages", "apps"]) {
-    const workspaceRoot = path.join(repositoryRoot, workspaceFolder);
+async function loadWorkspaceExportSources(
+  workspaceRoots: readonly string[] = defaultWorkspaceRoots
+): Promise<Map<string, WorkspaceExportSource>> {
+  const result = new Map<string, WorkspaceExportSource>();
+  for (const workspaceRoot of workspaceRoots) {
     const entries = await readdir(workspaceRoot, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -210,14 +252,29 @@ async function loadWorkspaceExportSources(): Promise<Map<string, string>> {
       if (manifest.name?.startsWith("@ether/") !== true) continue;
       for (const [exportName, value] of manifestExportEntries(manifest.exports)) {
         if (exportName !== "." && !exportName.startsWith("./")) continue;
-        const target = exportedTarget(value);
-        if (target === null) continue;
-        const source = sourceForExportTarget(packageRoot, target);
-        if (source === null) continue;
         const specifier = exportName === "."
           ? manifest.name
           : `${manifest.name}/${exportName.slice(2)}`;
-        result.set(specifier, source);
+        const typeTarget = exportedTarget(value, "types");
+        const typeSource = typeTarget === null ? null : sourceForExportTarget(packageRoot, typeTarget);
+        if (typeTarget !== null && typeSource === null) {
+          throw new Error(
+            `Cannot map types export ${JSON.stringify(typeTarget)} for ${specifier} to workspace source.`
+          );
+        }
+        const runtimeSources: WorkspaceExportSource["runtimeSources"] = [];
+        for (const condition of ["import", "default"] as const) {
+          const target = exportedTarget(value, condition);
+          if (target === null) continue;
+          const source = sourceForExportTarget(packageRoot, target);
+          if (source === null) {
+            throw new Error(
+              `Cannot map ${condition} export ${JSON.stringify(target)} for ${specifier} to workspace source.`
+            );
+          }
+          runtimeSources.push({ condition, source });
+        }
+        result.set(specifier, { typeSource, runtimeSources });
       }
     }
   }
@@ -246,14 +303,18 @@ function localAssetFallback(importer: string, specifier: string): string | null 
   return canonicalFilePath(candidate);
 }
 
-async function resolveWorkspaceSource(importer: string, specifier: string): Promise<string | null> {
+async function resolveWorkspaceSources(
+  importer: string,
+  specifier: string,
+  exportSources?: ReadonlyMap<string, WorkspaceExportSource>
+): Promise<string[]> {
   const isRelative = specifier.startsWith("./") || specifier.startsWith("../");
   const workspacePackage = /^@ether\/[^/]+/u.exec(specifier)?.[0];
-  if (!isRelative && workspacePackage === undefined) return null;
+  if (!isRelative && workspacePackage === undefined) return [];
 
-  const exports = await workspaceExportSources();
-  const exportedSource = workspacePackage === undefined ? undefined : exports.get(specifier);
-  if (workspacePackage !== undefined && exportedSource === undefined) {
+  const availableExports = exportSources ?? await workspaceExportSources();
+  const exportedSources = workspacePackage === undefined ? undefined : availableExports.get(specifier);
+  if (workspacePackage !== undefined && exportedSources === undefined) {
     throw new Error(
       `Unresolved workspace import ${JSON.stringify(specifier)} from ${repositoryPath(importer)}: ` +
       "the package or subpath is not exported."
@@ -261,37 +322,83 @@ async function resolveWorkspaceSource(importer: string, specifier: string): Prom
   }
 
   const config = parseTsConfig(tsConfigForSource(importer));
-  const paths = Object.fromEntries([...exports].map(([name, source]) => [name, [source]]));
-  const resolution = ts.resolveModuleName(
-    specifier,
-    canonicalFilePath(importer),
-    { ...config.options, baseUrl: repositoryRoot, paths: { ...config.options.paths, ...paths } },
-    {
-      ...ts.sys,
-      getCurrentDirectory: () => repositoryRoot,
-      realpath: (candidate) => {
-        try {
-          return realpathSync.native(candidate);
-        } catch {
-          return candidate;
-        }
+  const resolutionHost: ts.ModuleResolutionHost = {
+    ...ts.sys,
+    getCurrentDirectory: () => repositoryRoot,
+    realpath: (candidate) => {
+      try {
+        return realpathSync.native(candidate);
+      } catch {
+        return candidate;
       }
     }
+  };
+  const containingFile = canonicalFilePath(importer);
+  const conditionResolution = ts.resolveModuleName(
+    specifier,
+    containingFile,
+    config.options,
+    resolutionHost,
+    undefined,
+    undefined,
+    ts.ModuleKind.ESNext
   );
-  let resolved = resolution.resolvedModule?.resolvedFileName;
-  if (workspacePackage !== undefined && resolved !== undefined && exportedSource !== undefined) {
-    resolved = exportedSource;
+  const runtimePaths: Record<string, string[]> = {};
+  for (const [name, sources] of availableExports) {
+    const uniqueSources = new Map(
+      sources.runtimeSources.map(({ source }) => [canonicalPathKey(source), source])
+    );
+    if (uniqueSources.size > 0) runtimePaths[name] = [...uniqueSources.values()];
   }
+  const runtimeFallbackResolution = workspacePackage !== undefined && conditionResolution.resolvedModule === undefined
+    ? ts.resolveModuleName(
+        specifier,
+        containingFile,
+        {
+          ...config.options,
+          baseUrl: config.options.baseUrl ?? repositoryRoot,
+          paths: { ...config.options.paths, ...runtimePaths }
+        },
+        resolutionHost,
+        undefined,
+        undefined,
+        ts.ModuleKind.ESNext
+      )
+    : undefined;
+  const resolvedModule = conditionResolution.resolvedModule ?? runtimeFallbackResolution?.resolvedModule;
+
+  if (workspacePackage !== undefined && exportedSources !== undefined) {
+    if (exportedSources.runtimeSources.length === 0) {
+      throw new Error(
+        `Unresolved workspace import ${JSON.stringify(specifier)} from ${repositoryPath(importer)}: ` +
+        "the exported subpath has no import or default runtime target."
+      );
+    }
+    const runtimeSources = exportedSources.runtimeSources.map(({ source }) => canonicalFilePath(source));
+    const onlyAssets = runtimeSources.every((source) => !scriptExtensions.has(path.extname(source)));
+    if (resolvedModule === undefined && !onlyAssets) {
+      throw new Error(
+        `Unresolved workspace import ${JSON.stringify(specifier)} from ${repositoryPath(importer)} using ` +
+        `${repositoryPath(tsConfigForSource(importer))}; TypeScript could not resolve its runtime export.`
+      );
+    }
+    return runtimeSources;
+  }
+
+  const resolved = resolvedModule?.resolvedFileName;
   if (resolved === undefined) {
-    const asset = exportedSource ?? (isRelative ? localAssetFallback(importer, specifier) : null);
-    if (asset !== null && asset !== undefined && !scriptExtensions.has(path.extname(asset))) return asset;
+    const asset = isRelative ? localAssetFallback(importer, specifier) : null;
+    if (asset !== null && !scriptExtensions.has(path.extname(asset))) return [asset];
     throw new Error(
-      `Unresolved ${workspacePackage === undefined ? "relative" : "workspace"} import ` +
-      `${JSON.stringify(specifier)} from ${repositoryPath(importer)} using ` +
+      `Unresolved relative import ${JSON.stringify(specifier)} from ${repositoryPath(importer)} using ` +
       `${repositoryPath(tsConfigForSource(importer))}.`
     );
   }
-  return canonicalFilePath(resolved);
+  return [canonicalFilePath(resolved)];
+}
+
+async function resolveWorkspaceSource(importer: string, specifier: string): Promise<string | null> {
+  return (await resolveWorkspaceSources(importer, specifier))[0] ?? null;
 }
 
 function compiledEntrySource(outputPath: string, config: ts.ParsedCommandLine): string {
@@ -344,8 +451,13 @@ async function activeEntryPoints(): Promise<string[]> {
   return [...new Map(entries.map((entry) => [canonicalPathKey(entry), entry])).values()];
 }
 
-async function collectActiveSourceGraph(): Promise<SourceGraph> {
-  const pending = await activeEntryPoints();
+async function collectActiveSourceGraph(options: SourceGraphOptions = {}): Promise<SourceGraph> {
+  const pending = options.entryPoints === undefined
+    ? await activeEntryPoints()
+    : options.entryPoints.map(canonicalFilePath);
+  const exports = options.workspaceRoots === undefined
+    ? await workspaceExportSources()
+    : await loadWorkspaceExportSources([...defaultWorkspaceRoots, ...options.workspaceRoots]);
   const visited = new Set<string>();
   const graph: SourceGraph = {
     files: new Set(),
@@ -365,14 +477,66 @@ async function collectActiveSourceGraph(): Promise<SourceGraph> {
       graph.moduleSpecifiers.push({ importer: relativePath, specifier });
       const workspacePackage = /^(@ether\/[^/]+)/u.exec(specifier)?.[1];
       if (workspacePackage !== undefined) graph.etherImports.add(workspacePackage);
-      const resolved = await resolveWorkspaceSource(filePath, specifier);
-      if (resolved !== null) pending.push(resolved);
+      const resolved = await resolveWorkspaceSources(filePath, specifier, exports);
+      pending.push(...resolved);
     }
   }
   return graph;
 }
 
 describe("Ether 4.0 legacy isolation", () => {
+  it("captures no-substitution template literals used by dynamic import", async () => {
+    const filePath = path.join(isolationFixtureRoot, "dynamic-import-template.ts");
+    const source = await readFile(filePath, "utf8");
+
+    expect(moduleSpecifiers(source, filePath)).toEqual(["@ether/schema"]);
+  });
+
+  it("rejects computed dynamic imports instead of silently skipping them", async () => {
+    const filePath = path.join(isolationFixtureRoot, "dynamic-import-computed.ts");
+    const source = await readFile(filePath, "utf8");
+
+    expect(() => moduleSpecifiers(source, filePath)).toThrow(
+      /nonliteral dynamic import.*dynamic-import-computed\.ts:\d+:\d+/iu
+    );
+  });
+
+  it("keeps type declarations separate from import and default runtime exports", async () => {
+    const fixtureWorkspace = path.join(isolationFixtureRoot, "workspace");
+    const fixturePackage = path.join(fixtureWorkspace, "runtime-split");
+
+    const exports = await loadWorkspaceExportSources([fixtureWorkspace]);
+
+    expect(exports.get("@ether/isolation-runtime-fixture")).toEqual({
+      typeSource: canonicalFilePath(path.join(fixturePackage, "safe.d.ts")),
+      runtimeSources: [
+        {
+          condition: "import",
+          source: canonicalFilePath(path.join(fixturePackage, "legacy-import.ts"))
+        },
+        {
+          condition: "default",
+          source: canonicalFilePath(path.join(fixturePackage, "legacy-default.ts"))
+        }
+      ]
+    });
+  });
+
+  it("traverses legacy runtime exports even when the package has safe declarations", async () => {
+    const fixtureWorkspace = path.join(isolationFixtureRoot, "workspace");
+
+    const graph = await collectActiveSourceGraph({
+      entryPoints: [path.join(isolationFixtureRoot, "workspace-entry.ts")],
+      workspaceRoots: [fixtureWorkspace]
+    });
+
+    expect([...graph.files]).toEqual(expect.arrayContaining([
+      "packages/testing/fixtures/legacy-isolation/workspace/runtime-split/legacy-import.ts",
+      "packages/testing/fixtures/legacy-isolation/workspace/runtime-split/legacy-default.ts"
+    ]));
+    expect([...graph.etherImports]).toContain("@ether/engine");
+  });
+
   it("starts traversal from the packaged main, preload build, and Vite HTML entries", async () => {
     const graph = await collectActiveSourceGraph();
 
