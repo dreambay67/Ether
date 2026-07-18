@@ -197,6 +197,7 @@ export {
 } from "./graph/referenceRoles.js";
 export type { ReferenceRole } from "./graph/referenceRoles.js";
 export type {
+  ExecutionProviderFacets,
   ExecutionNodeResult,
   ExecutionPlan,
   ExecutionPolicy,

@@ -13,6 +13,7 @@ import {
   listRunRecords,
   loadGraph,
   openProject,
+  planExecution,
   previewGraphPatch,
   runHealthCheck,
   saveGraph,
@@ -20,8 +21,10 @@ import {
   type CoPilotGraphPatch,
   type CanvasNodeData,
   type EtherGraph,
+  type ExecutionProviderFacets,
   type ExecutionPolicy
 } from "@ether/engine";
+import { createMcpCodexBundle } from "./codexSession.js";
 
 export type EtherMcpToolName =
   | "ether_project_open"
@@ -69,6 +72,72 @@ type GraphEdge = EtherGraph["edges"][number] & {
   data?: { label?: unknown };
 };
 
+type McpCodexBundle = ExecutionProviderFacets & {
+  runtime: { start(): Promise<unknown> };
+  clearDocument(documentId: string): void;
+  close(): Promise<void>;
+};
+
+type ExecuteGraphRun = typeof executeGraphRun;
+
+type McpSessionContext = {
+  codex: McpCodexBundle;
+  executeGraphRun: ExecuteGraphRun;
+  documents: Set<string>;
+  ensureRuntimeStarted(): Promise<void>;
+};
+
+export type EtherMcpServerSessionOptions = {
+  codex?: McpCodexBundle;
+  executeGraphRun?: ExecuteGraphRun;
+};
+
+export type EtherMcpServerSession = {
+  callTool(name: EtherMcpToolName | string, input: Record<string, unknown>): Promise<unknown>;
+  handleMessage(message: unknown): Promise<unknown>;
+  close(): Promise<void>;
+};
+
+let defaultSession: EtherMcpServerSession | null = null;
+
+export function createEtherMcpServerSession(
+  options: EtherMcpServerSessionOptions = {}
+): EtherMcpServerSession {
+  const codex = options.codex ?? createMcpCodexBundle();
+  let runtimeStarted = false;
+  let runtimeStart: Promise<void> | null = null;
+  let closePromise: Promise<void> | null = null;
+  const context: McpSessionContext = {
+    codex,
+    executeGraphRun: options.executeGraphRun ?? executeGraphRun,
+    documents: new Set(),
+    ensureRuntimeStarted: () => {
+      if (runtimeStarted) return Promise.resolve();
+      runtimeStart ??= codex.runtime.start().then(() => { runtimeStarted = true; });
+      return runtimeStart;
+    }
+  };
+
+  const session: EtherMcpServerSession = {
+    callTool: (name, input) => callEtherToolInSession(context, name, input),
+    handleMessage: (message) => handleMcpJsonRpcMessageInSession(session, message),
+    close: () => {
+      closePromise ??= (async () => {
+        for (const documentId of context.documents) codex.clearDocument(documentId);
+        context.documents.clear();
+        await codex.close();
+      })();
+      return closePromise;
+    }
+  };
+  return session;
+}
+
+function getDefaultSession() {
+  defaultSession ??= createEtherMcpServerSession();
+  return defaultSession;
+}
+
 const toolDescriptors: EtherMcpToolDescriptor[] = [
   inspectTool("ether_project_open", "Open and inspect an existing Ether project bundle.", ["projectPath"]),
   inspectTool("ether_project_create", "Create a new local Ether project bundle.", ["projectPath", "name"]),
@@ -108,6 +177,14 @@ export function listEtherMcpTools() {
 }
 
 export async function callEtherTool(name: EtherMcpToolName | string, input: Record<string, unknown>) {
+  return getDefaultSession().callTool(name, input);
+}
+
+async function callEtherToolInSession(
+  session: McpSessionContext,
+  name: EtherMcpToolName | string,
+  input: Record<string, unknown>
+) {
   switch (name) {
     case "ether_project_open":
       return openProject(requiredString(input, "projectPath"));
@@ -145,17 +222,17 @@ export async function callEtherTool(name: EtherMcpToolName | string, input: Reco
         requiredString(input, "patchId")
       );
     case "ether_run_node":
-      return runAndSave(requiredString(input, "projectPath"), {
+      return runAndSave(session, requiredString(input, "projectPath"), {
         policy: normalizePolicy(input.policy),
         targetNodeIds: [requiredString(input, "nodeId")]
       });
     case "ether_run_selected":
-      return runAndSave(requiredString(input, "projectPath"), {
+      return runAndSave(session, requiredString(input, "projectPath"), {
         policy: normalizePolicy(input.policy),
         targetNodeIds: requiredStringArray(input.nodeIds, "nodeIds")
       });
     case "ether_run_branch":
-      return runAndSave(requiredString(input, "projectPath"), {
+      return runAndSave(session, requiredString(input, "projectPath"), {
         policy: "branch",
         targetNodeIds: [requiredString(input, "nodeId")],
         runCountCap: optionalNumber(input.runCountCap),
@@ -183,6 +260,10 @@ export async function callEtherTool(name: EtherMcpToolName | string, input: Reco
 }
 
 export async function handleMcpJsonRpcMessage(message: unknown) {
+  return getDefaultSession().handleMessage(message);
+}
+
+async function handleMcpJsonRpcMessageInSession(session: EtherMcpServerSession, message: unknown) {
   const request = requiredRecord(message, "message");
   const id = request.id;
   const method = optionalString(request.method);
@@ -212,7 +293,7 @@ export async function handleMcpJsonRpcMessage(message: unknown) {
         });
       case "tools/call": {
         const params = requiredRecord(request.params, "params");
-        const result = await callEtherTool(
+        const result = await session.callTool(
           requiredString(params, "name"),
           optionalRecord(params.arguments)
         );
@@ -385,6 +466,7 @@ async function rejectGraphPatch(projectPath: string, baseRevisionId: string, pat
 }
 
 async function runAndSave(
+  session: McpSessionContext,
   projectPath: string,
   request: {
     policy: ExecutionPolicy;
@@ -394,13 +476,41 @@ async function runAndSave(
   }
 ) {
   const graph = await loadGraph(projectPath);
-  const result = await executeGraphRun(projectPath, graph, request);
+  if (executionUsesCodex(graph, request)) await session.ensureRuntimeStarted();
+  const documentId = documentIdFromProjectPath(projectPath);
+  session.documents.add(documentId);
+  const result = await session.executeGraphRun(projectPath, graph, {
+    ...request,
+    providers: {
+      generation: session.codex.generation,
+      assistant: session.codex.assistant,
+      evaluation: session.codex.evaluation
+    }
+  });
   const savedGraph = await saveGraph(projectPath, result.graph);
 
   return {
     ...result,
     graph: savedGraph
   };
+}
+
+function executionUsesCodex(graph: EtherGraph, request: {
+  policy: ExecutionPolicy;
+  targetNodeIds: string[];
+  runCountCap?: number;
+  parallel?: boolean;
+}) {
+  const providerSubtypes = new Set(["Brainstormer", "Mutator", "Expander", "Reinforcer", "Evaluate", "Evaluation"]);
+  return planExecution(graph, request).items.some((item) => {
+    const node = graph.nodes.find((candidate) => candidate.id === item.nodeId) as GraphNode | undefined;
+    const kind = node?.data?.kind;
+    return kind === "Generation" || kind === "Edit" || kind === "Assistant" || providerSubtypes.has(String(node?.data?.subtype ?? ""));
+  });
+}
+
+function documentIdFromProjectPath(projectPath: string) {
+  return `project:${path.resolve(projectPath).toLocaleLowerCase()}`;
 }
 
 function parseProjectCreatePath(projectPath: string, name?: string) {
@@ -637,7 +747,8 @@ function parseMcpMessages(buffer: Buffer) {
   };
 }
 
-async function runStdioServer() {
+export async function runStdioServer() {
+  const session = createEtherMcpServerSession();
   let pending = Buffer.alloc(0);
 
   process.stdin.on("data", async (chunk: Buffer) => {
@@ -647,7 +758,7 @@ async function runStdioServer() {
       pending = parsed.rest;
 
       for (const message of parsed.messages) {
-        const response = await handleMcpJsonRpcMessage(message);
+        const response = await session.handleMessage(message);
 
         if (response) {
           writeMcpMessage(response);
@@ -658,6 +769,18 @@ async function runStdioServer() {
       pending = Buffer.alloc(0);
     }
   });
+  const close = () => session.close().catch((error) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
+  const closeAndExit = () => {
+    void close().finally(() => process.exit(process.exitCode ?? 0));
+  };
+  process.stdin.once("end", () => { void close(); });
+  process.stdin.once("close", () => { void close(); });
+  process.once("beforeExit", () => { void close(); });
+  process.once("SIGINT", closeAndExit);
+  process.once("SIGTERM", closeAndExit);
 }
 
 if (require.main === module) {

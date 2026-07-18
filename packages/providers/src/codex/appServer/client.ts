@@ -20,6 +20,27 @@ import {
 
 const defaultMaxFrameBytes = 32 * 1024 * 1024;
 
+export type CodexAppServerFailureCategory =
+  | "authentication"
+  | "capability"
+  | "invalid-input"
+  | "timeout"
+  | "cancellation"
+  | "process"
+  | "malformed-output";
+
+export class CodexAppServerOperationError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly category: CodexAppServerFailureCategory,
+    readonly retryable: boolean
+  ) {
+    super(message);
+    this.name = "CodexAppServerOperationError";
+  }
+}
+
 type ClientOptions = {
   stdin: Writable;
   stdout: Readable;
@@ -30,12 +51,21 @@ type ClientOptions = {
   maxToolEvents?: number;
   maxTextBytes?: number;
   maxStderrBytes?: number;
+  maxDiagnosticBytes?: number;
+  maxEventBytes?: number;
+  maxToolBytes?: number;
+  maxTextItems?: number;
+  maxBacklogKeys?: number;
+  maxBacklogBytes?: number;
+  requestTimeoutMs?: number;
+  turnTimeoutMs?: number;
 };
 
 type PendingRequest = {
   method: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
 };
 
 type TurnState = {
@@ -46,8 +76,13 @@ type TurnState = {
   abortListener?: () => void;
   interruptCompletionTimeoutMs: number;
   interruptTimer?: ReturnType<typeof setTimeout>;
-  interruptRequested: boolean;
+  deadlineTimer?: ReturnType<typeof setTimeout>;
+  completionReason: "cancel" | "timeout" | null;
   settled: boolean;
+  textBytes: number;
+  diagnosticBytes: number;
+  eventBytes: number;
+  toolBytes: number;
   textByItem: Map<string, string>;
   finalText: string | null;
   warnings: string[];
@@ -86,6 +121,7 @@ export type RunTurnOptions = {
   model?: string;
   signal?: AbortSignal;
   interruptCompletionTimeoutMs?: number;
+  timeoutMs?: number;
 };
 
 export class CodexAppServerClient {
@@ -98,6 +134,14 @@ export class CodexAppServerClient {
   private readonly maxToolEvents: number;
   private readonly maxTextBytes: number;
   private readonly maxStderrBytes: number;
+  private readonly maxDiagnosticBytes: number;
+  private readonly maxEventBytes: number;
+  private readonly maxToolBytes: number;
+  private readonly maxTextItems: number;
+  private readonly maxBacklogKeys: number;
+  private readonly maxBacklogBytes: number;
+  private readonly requestTimeoutMs: number;
+  private readonly turnTimeoutMs: number;
   private readonly decoder = new StringDecoder("utf8");
   private readonly listeners = new Set<(event: CodexAppServerEvent) => void>();
   private readonly pending = new Map<number, PendingRequest>();
@@ -105,6 +149,7 @@ export class CodexAppServerClient {
   private readonly turns = new Map<string, TurnState>();
   private readonly turnByThread = new Map<string, string>();
   private readonly eventBacklog = new Map<string, CodexAppServerEvent[]>();
+  private backlogBytes = 0;
   private inputBuffer = "";
   private nextRequestId = 1;
   private closed = false;
@@ -123,6 +168,14 @@ export class CodexAppServerClient {
     this.maxToolEvents = positiveInteger(options.maxToolEvents, 128);
     this.maxTextBytes = positiveInteger(options.maxTextBytes, 1024 * 1024);
     this.maxStderrBytes = positiveInteger(options.maxStderrBytes, 64 * 1024);
+    this.maxDiagnosticBytes = positiveInteger(options.maxDiagnosticBytes, 64 * 1024);
+    this.maxEventBytes = positiveInteger(options.maxEventBytes, 8 * 1024 * 1024);
+    this.maxToolBytes = positiveInteger(options.maxToolBytes, 8 * 1024 * 1024);
+    this.maxTextItems = positiveInteger(options.maxTextItems, 128);
+    this.maxBacklogKeys = positiveInteger(options.maxBacklogKeys, 128);
+    this.maxBacklogBytes = positiveInteger(options.maxBacklogBytes, 4 * 1024 * 1024);
+    this.requestTimeoutMs = positiveInteger(options.requestTimeoutMs, 30_000);
+    this.turnTimeoutMs = positiveInteger(options.turnTimeoutMs, 10 * 60_000);
     this.stdout.on("data", this.onData);
     this.stdout.once("end", this.onTransportEnd);
     this.stdout.once("error", this.onTransportError);
@@ -140,6 +193,10 @@ export class CodexAppServerClient {
 
   get activeTurnCount() {
     return this.turns.size;
+  }
+
+  get retentionStats() {
+    return { backlogKeys: this.eventBacklog.size, backlogBytes: this.backlogBytes };
   }
 
   async initialize(options: InitializeOptions = {}) {
@@ -215,13 +272,15 @@ export class CodexAppServerClient {
     if (!Array.isArray(options.input) || options.input.length === 0) {
       throw new CodexAppServerProtocolError("Codex turn input must contain at least one item.");
     }
+    const operationStartedAt = Date.now();
+    const turnTimeoutMs = positiveInteger(options.timeoutMs, this.turnTimeoutMs);
     const result = await this.request("turn/start", {
       threadId: options.threadId,
       input: options.input,
       ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
       ...(options.effort ? { effort: options.effort } : {}),
       ...(options.model ? { model: options.model } : {})
-    });
+    }, Math.min(this.requestTimeoutMs, turnTimeoutMs));
     if (!isRecord(result) || !isRecord(result.turn)) {
       throw new CodexAppServerProtocolError("Codex turn/start response is missing turn metadata.");
     }
@@ -230,11 +289,15 @@ export class CodexAppServerClient {
       const state: TurnState = {
         threadId: options.threadId,
         turnId,
-        startedAt: Date.now(),
+        startedAt: operationStartedAt,
         signal: options.signal,
         interruptCompletionTimeoutMs: positiveInteger(options.interruptCompletionTimeoutMs, 5_000),
-        interruptRequested: false,
+        completionReason: null,
         settled: false,
+        textBytes: 0,
+        diagnosticBytes: 2,
+        eventBytes: 2,
+        toolBytes: 2,
         textByItem: new Map(),
         finalText: null,
         warnings: [],
@@ -252,6 +315,8 @@ export class CodexAppServerClient {
       this.turnByThread.set(options.threadId, turnId);
       const backlog = this.eventBacklog.get(turnId) ?? [];
       this.eventBacklog.delete(turnId);
+      for (const event of backlog) this.backlogBytes -= backlogEntryBytes(turnId, event);
+      this.backlogBytes = Math.max(0, this.backlogBytes);
       for (const event of backlog) this.applyTurnEvent(state, event);
       if (state.settled) return;
       if (options.signal) {
@@ -259,6 +324,8 @@ export class CodexAppServerClient {
         options.signal.addEventListener("abort", state.abortListener, { once: true });
         if (options.signal.aborted) void this.interrupt(state);
       }
+      const remainingMs = Math.max(1, operationStartedAt + turnTimeoutMs - Date.now());
+      state.deadlineTimer = setTimeout(() => void this.timeoutTurn(state, turnTimeoutMs), remainingMs);
     });
   }
 
@@ -335,6 +402,7 @@ export class CodexAppServerClient {
       throw new CodexAppServerProtocolError(`Codex App Server returned a ${kind} response id ${message.id}.`);
     }
     this.pending.delete(message.id);
+    if (pending.timer) clearTimeout(pending.timer);
     this.rememberSettledId(message.id);
     if (message.error) pending.reject(new CodexAppServerRequestError(pending.method, message.error));
     else pending.resolve(message.result);
@@ -354,7 +422,13 @@ export class CodexAppServerClient {
     const state = this.turns.get(turnId);
     if (!state) {
       const backlog = this.eventBacklog.get(turnId) ?? [];
-      if (backlog.length < this.maxEvents) backlog.push(event);
+      const bytes = backlogEntryBytes(turnId, event);
+      const hasKey = this.eventBacklog.has(turnId);
+      if ((!hasKey && this.eventBacklog.size >= this.maxBacklogKeys)
+        || backlog.length >= this.maxEvents
+        || this.backlogBytes + bytes > this.maxBacklogBytes) return;
+      backlog.push(event);
+      this.backlogBytes += bytes;
       this.eventBacklog.set(turnId, backlog);
       return;
     }
@@ -363,39 +437,53 @@ export class CodexAppServerClient {
 
   private applyTurnEvent(state: TurnState, event: CodexAppServerEvent) {
     if (state.settled) return;
-    retainBounded(state.events, event, this.maxEvents, () => { state.truncated.events = true; });
+    state.eventBytes = retainByteBounded(state.events, event, this.maxEvents, state.eventBytes, this.maxEventBytes, () => { state.truncated.events = true; });
     const params = event.params;
     if (event.method === "item/agentMessage/delta") {
-      const itemId = typeof params.itemId === "string" ? params.itemId : "agent";
+      const itemId = typeof params.itemId === "string" && Buffer.byteLength(params.itemId) <= 256 ? params.itemId : "agent";
       const delta = typeof params.delta === "string" ? params.delta : "";
+      if (!state.textByItem.has(itemId) && state.textByItem.size >= this.maxTextItems) {
+        state.truncated.text = true;
+        return;
+      }
       const previous = state.textByItem.get(itemId) ?? "";
-      const next = previous + delta;
-      if (Buffer.byteLength(next) <= this.maxTextBytes) state.textByItem.set(itemId, next);
-      else state.truncated.text = true;
+      const retained = truncateUtf8(delta, Math.max(0, this.maxTextBytes - state.textBytes));
+      if (retained !== delta) state.truncated.text = true;
+      if (retained) {
+        state.textByItem.set(itemId, previous + retained);
+        state.textBytes += Buffer.byteLength(retained);
+      }
       return;
     }
     if (event.method === "warning") {
-      if (typeof params.message === "string") state.warnings.push(params.message);
+      if (typeof params.message === "string") {
+        state.diagnosticBytes = retainByteBounded(state.warnings, params.message, this.maxEvents, state.diagnosticBytes, this.maxDiagnosticBytes, () => { state.truncated.text = true; });
+      }
       return;
     }
     if (event.method === "error") {
       const error = isRecord(params.error) && typeof params.error.message === "string"
         ? params.error.message
         : "Codex turn failed.";
-      state.errors.push(error);
+      state.diagnosticBytes = retainByteBounded(state.errors, error, this.maxEvents, state.diagnosticBytes, this.maxDiagnosticBytes, () => { state.truncated.text = true; });
       return;
     }
     if (event.method === "item/completed") {
       if (!isRecord(params.item)) return;
       const item = params.item;
       const type = typeof item.type === "string" ? item.type : "unknown";
-      if (type === "agentMessage" && typeof item.text === "string") state.finalText = item.text;
+      if (type === "agentMessage" && typeof item.text === "string") {
+        state.finalText = truncateUtf8(item.text, this.maxTextBytes);
+        if (state.finalText !== item.text) state.truncated.text = true;
+        state.textByItem.clear();
+        state.textBytes = Buffer.byteLength(state.finalText);
+      }
       else if (type === "imageView" && typeof item.path === "string") {
-        retainBounded(state.imageViews, item.path, this.maxToolEvents, () => { state.truncated.toolEvents = true; });
+        state.toolBytes = retainByteBounded(state.imageViews, truncateUtf8(item.path, 4096), this.maxToolEvents, state.toolBytes, this.maxToolBytes, () => { state.truncated.toolEvents = true; });
       } else if (type === "imageGeneration") {
-        retainBounded(state.imageGenerations, readImageGeneration(item), this.maxToolEvents, () => { state.truncated.toolEvents = true; });
+        state.toolBytes = retainByteBounded(state.imageGenerations, readImageGeneration(item), this.maxToolEvents, state.toolBytes, this.maxToolBytes, () => { state.truncated.toolEvents = true; });
       } else {
-        retainBounded(state.toolEvents, item, this.maxToolEvents, () => { state.truncated.toolEvents = true; });
+        state.toolBytes = retainByteBounded(state.toolEvents, item, this.maxToolEvents, state.toolBytes, this.maxToolBytes, () => { state.truncated.toolEvents = true; });
       }
       return;
     }
@@ -405,7 +493,7 @@ export class CodexAppServerClient {
       return;
     }
     if (event.method !== "turn/started") {
-      retainBounded(state.unknownEvents, event, this.maxEvents, () => { state.truncated.events = true; });
+      state.eventBytes = retainByteBounded(state.unknownEvents, event, this.maxEvents, state.eventBytes, this.maxEventBytes, () => { state.truncated.events = true; });
     }
   }
 
@@ -413,10 +501,13 @@ export class CodexAppServerClient {
     if (state.settled) return;
     state.settled = true;
     this.cleanupTurn(state);
-    if (state.interruptRequested) {
-      const error = abortError("Codex turn was cancelled.") as Error & { completedStatus?: string };
-      error.completedStatus = status;
-      state.reject(error);
+    if (state.completionReason) {
+      const error = state.completionReason === "timeout"
+        ? operationError(`Codex turn exceeded its overall deadline.`, "CODEX_APP_SERVER_TURN_TIMEOUT", "timeout", true)
+        : abortError("Codex turn was cancelled.");
+      const completedError = error as Error & { completedStatus?: string };
+      completedError.completedStatus = status;
+      state.reject(completedError);
       return;
     }
     if (status !== "completed") {
@@ -443,8 +534,18 @@ export class CodexAppServerClient {
   }
 
   private async interrupt(state: TurnState) {
-    if (state.settled || state.interruptRequested) return;
-    state.interruptRequested = true;
+    if (state.settled || state.completionReason) return;
+    state.completionReason = "cancel";
+    await this.requestInterrupt(state);
+  }
+
+  private async timeoutTurn(state: TurnState, timeoutMs: number) {
+    if (state.settled || state.completionReason) return;
+    state.completionReason = "timeout";
+    await this.requestInterrupt(state, timeoutMs);
+  }
+
+  private async requestInterrupt(state: TurnState, timeoutMs?: number) {
     try {
       await this.request("turn/interrupt", { threadId: state.threadId, turnId: state.turnId });
     } catch (error) {
@@ -460,7 +561,9 @@ export class CodexAppServerClient {
       if (state.settled) return;
       state.settled = true;
       this.cleanupTurn(state);
-      state.reject(new Error(`Codex turn did not complete as interrupted within ${state.interruptCompletionTimeoutMs} ms.`));
+        state.reject(state.completionReason === "timeout"
+          ? operationError(`Codex turn exceeded its ${timeoutMs ?? this.turnTimeoutMs} ms overall deadline and did not complete after interrupt.`, "CODEX_APP_SERVER_TURN_TIMEOUT", "timeout", true)
+          : new Error(`Codex turn did not complete as interrupted within ${state.interruptCompletionTimeoutMs} ms.`));
     }, state.interruptCompletionTimeoutMs);
   }
 
@@ -468,18 +571,32 @@ export class CodexAppServerClient {
     this.turns.delete(state.turnId);
     if (this.turnByThread.get(state.threadId) === state.turnId) this.turnByThread.delete(state.threadId);
     if (state.interruptTimer) clearTimeout(state.interruptTimer);
+    if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
     if (state.signal && state.abortListener) state.signal.removeEventListener("abort", state.abortListener);
   }
 
-  private request(method: string, params: JsonObject): Promise<unknown> {
+  private request(method: string, params: JsonObject, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
     if (this.closed) return Promise.reject(this.closeError ?? new Error("Codex App Server client is closed."));
     const id = this.nextRequestId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { method, resolve, reject });
+      const pending: PendingRequest = { method, resolve, reject };
+      pending.timer = setTimeout(() => {
+        if (this.pending.get(id) !== pending) return;
+        this.pending.delete(id);
+        this.rememberSettledId(id);
+        reject(operationError(
+          `Codex App Server ${method} exceeded its ${timeoutMs} ms request deadline.`,
+          "CODEX_APP_SERVER_REQUEST_TIMEOUT",
+          "timeout",
+          true
+        ));
+      }, timeoutMs);
+      this.pending.set(id, pending);
       try {
         this.write({ id, method, params });
       } catch (error) {
         this.pending.delete(id);
+        if (pending.timer) clearTimeout(pending.timer);
         reject(error instanceof Error ? error : new Error("Codex App Server write failed."));
       }
     });
@@ -507,7 +624,10 @@ export class CodexAppServerClient {
     this.closed = true;
     this.closeError = error;
     this.stdout.off("data", this.onData);
-    for (const pending of this.pending.values()) pending.reject(error);
+    for (const pending of this.pending.values()) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(error);
+    }
     this.pending.clear();
     for (const state of this.turns.values()) {
       if (state.settled) continue;
@@ -516,6 +636,8 @@ export class CodexAppServerClient {
       state.reject(error);
     }
     this.turns.clear();
+    this.eventBacklog.clear();
+    this.backlogBytes = 0;
     this.listeners.clear();
   }
 }
@@ -551,21 +673,51 @@ function readImageGeneration(item: JsonObject): CodexImageGenerationEvent {
   return {
     id: typeof item.id === "string" ? item.id : undefined,
     status: typeof item.status === "string" ? item.status : undefined,
-    result: typeof item.result === "string" ? item.result : undefined,
-    savedPath: typeof item.savedPath === "string" ? item.savedPath : undefined,
+    result: typeof item.result === "string" ? truncateUtf8(item.result, 64 * 1024) : undefined,
+    savedPath: typeof item.savedPath === "string" ? truncateUtf8(item.savedPath, 4096) : undefined,
     revisedPrompt: typeof item.revisedPrompt === "string" || item.revisedPrompt === null
-      ? item.revisedPrompt
+      ? typeof item.revisedPrompt === "string" ? truncateUtf8(item.revisedPrompt, 64 * 1024) : null
       : undefined
   };
 }
 
-function retainBounded<T>(values: T[], value: T, limit: number, onTruncate: () => void) {
-  if (values.length < limit) values.push(value);
-  else onTruncate();
+function retainByteBounded<T>(
+  values: T[],
+  value: T,
+  countLimit: number,
+  retainedBytes: number,
+  byteLimit: number,
+  onTruncate: () => void
+) {
+  const bytes = serializedBytes(value) + (values.length > 0 ? 1 : 0);
+  if (values.length < countLimit && retainedBytes + bytes <= byteLimit) {
+    values.push(value);
+    return retainedBytes + bytes;
+  }
+  onTruncate();
+  return retainedBytes;
+}
+
+function serializedBytes(value: unknown) {
+  try { return Buffer.byteLength(JSON.stringify(value)); } catch { return Number.MAX_SAFE_INTEGER; }
+}
+
+function backlogEntryBytes(turnId: string, event: CodexAppServerEvent) {
+  return Buffer.byteLength(turnId) + serializedBytes(event);
+}
+
+function truncateUtf8(value: string, maxBytes: number) {
+  if (maxBytes <= 0) return "";
+  const bytes = Buffer.from(value);
+  return bytes.byteLength <= maxBytes ? value : bytes.subarray(0, maxBytes).toString("utf8").replace(/\uFFFD$/u, "");
+}
+
+function operationError(message: string, code: string, category: CodexAppServerFailureCategory, retryable: boolean) {
+  return new CodexAppServerOperationError(message, code, category, retryable);
 }
 
 function abortError(message: string) {
-  const error = new Error(message);
+  const error = operationError(message, "CODEX_APP_SERVER_CANCELLED", "cancellation", false);
   error.name = "AbortError";
   return error;
 }

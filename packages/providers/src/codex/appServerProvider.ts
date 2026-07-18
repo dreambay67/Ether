@@ -1,3 +1,6 @@
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -20,6 +23,7 @@ import {
   isRecord,
   type JsonObject
 } from "./appServer/protocol.js";
+import type { CodexImageCapabilityProfile } from "./appServer/imageCapability.js";
 import {
   CodexAppServerRuntime,
   CodexRuntimeUnavailableError,
@@ -68,11 +72,13 @@ export function createCodexAppServerProviderBundle(
 ): CodexAppServerProviderBundle {
   const sessions = new CodexAppServerSessionPool(() => ({
     client: options.runtime.getClient(),
-    generation: options.runtime.health().generation
+    generation: options.runtime.health().generation,
+    reportedVersion: options.runtime.health().reportedVersion
   }));
   const runner = new CodexAppServerTurnRunner(() => ({
     client: options.runtime.getClient(),
-    generation: options.runtime.health().generation
+    generation: options.runtime.health().generation,
+    reportedVersion: options.runtime.health().reportedVersion
   }), sessions);
   const route = new CodexProviderRoute(options.runtime, runner, options.execFallback ?? {});
   return {
@@ -109,16 +115,31 @@ class CodexProviderRoute {
     }
   }
 
-  diagnostic(descriptor: ProviderDiagnostic): ProviderDiagnostic {
+  diagnostic(descriptor: ProviderDiagnostic, requireImageCapability = false): ProviderDiagnostic {
     const health = this.runtime.health();
     const fallbackAvailable = health.transport === "exec-fallback" && Object.values(this.fallback).length > 0;
+    const appServerAvailable = health.status === "ready"
+      && (!requireImageCapability || health.imageCapability === "available");
     return {
       ...descriptor,
       capabilities: [...descriptor.capabilities],
-      availability: health.status === "ready" || fallbackAvailable ? "available" : "unavailable",
+      availability: appServerAvailable || fallbackAvailable ? "available" : "unavailable",
       messages: [healthMessage(health, fallbackAvailable)],
       details: runtimeDetails(health)
     };
+  }
+
+  requireImageCapability(): CodexImageCapabilityProfile {
+    const health = this.runtime.health();
+    if (health.imageCapability !== "available" || !health.imageCapabilityProfile) {
+      throw providerError(
+        "CODEX_IMAGE_CAPABILITY_UNAVAILABLE",
+        "capability",
+        "Codex image generation is unavailable because no verified capability manifest matches the active App Server.",
+        false
+      );
+    }
+    return health.imageCapabilityProfile;
   }
 }
 
@@ -135,7 +156,7 @@ class AppServerGenerationProvider implements GenerationProvider {
   constructor(private readonly route: CodexProviderRoute) {}
 
   diagnose(): ProviderDiagnostic {
-    return this.route.diagnostic({ ...this.descriptor, capabilities: [...this.descriptor.capabilities], availability: "unavailable", messages: [] });
+    return this.route.diagnostic({ ...this.descriptor, capabilities: [...this.descriptor.capabilities], availability: "unavailable", messages: [] }, true);
   }
 
   async generate(
@@ -150,15 +171,20 @@ class AppServerGenerationProvider implements GenerationProvider {
     }
     const fallback = await this.route.select("generation");
     if (fallback) return withFallbackMetadata(await fallback.generate(input, context), this.route.runtime.health());
+    const imageCapability = this.route.requireImageCapability();
+    validateRequestedAspect(input.output?.aspectRatio, imageCapability);
     const result = await this.route.runner.run({
       documentId: documentIdFromInput(input.projectPath),
       memoryScopeKey: null,
       cwd: input.projectPath,
       prompt: generationPrompt(input),
       images: collectGenerationImages(input),
+      model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      timeoutMs: input.timeoutMs,
       signal: context?.signal
     });
-    const output = await generationResult(result, this.descriptor);
+    const output = await generationResult(result, this.descriptor, input, context, imageCapability);
     await context?.complete(output);
     return output;
   }
@@ -169,6 +195,7 @@ class AppServerGenerationProvider implements GenerationProvider {
   ): Promise<ProviderGenerationResult> {
     const fallback = await this.route.select("generation");
     if (fallback) return withFallbackMetadata(await fallback.edit(input, context), this.route.runtime.health());
+    const imageCapability = this.route.requireImageCapability();
     const images: CodexTurnImageInput[] = [
       { kind: "local-image", value: input.sourceImage.assetPath },
       ...(input.mask?.assetPath ? [{ kind: "local-image" as const, value: input.mask.assetPath }] : [])
@@ -179,9 +206,12 @@ class AppServerGenerationProvider implements GenerationProvider {
       cwd: input.projectPath,
       prompt: editPrompt(input),
       images,
+      model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      timeoutMs: input.timeoutMs,
       signal: context?.signal
     });
-    const output = await generationResult(result, this.descriptor);
+    const output = await generationResult(result, this.descriptor, input, context, imageCapability);
     await context?.complete(output);
     return output;
   }
@@ -215,6 +245,9 @@ class AppServerAssistantProvider implements AssistantProvider {
       cwd: input.projectPath,
       prompt: assistantPrompt(input),
       images: collectEnvelopeImages(input.inputs),
+      model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      timeoutMs: input.timeoutMs,
       signal: context?.signal
     });
     return {
@@ -257,6 +290,9 @@ class AppServerEvaluationProvider implements VisionEvaluationProvider {
       prompt: evaluationPrompt(input),
       images: input.images.map((image) => ({ kind: "local-image", value: image.assetPath })),
       outputSchema: evaluationOutputSchema,
+      model: input.model,
+      reasoningEffort: input.reasoningEffort,
+      timeoutMs: input.timeoutMs,
       signal: context?.signal
     });
     const structured = readEvaluationOutput(result.structuredOutput, input);
@@ -304,7 +340,7 @@ function generationPrompt(input: GenerationProviderInput) {
     "Use the version-pinned image generation tool to create exactly one PNG image.",
     `Prompt: ${input.prompt}`,
     input.negativePrompt ? `Avoid: ${input.negativePrompt}` : "",
-    input.output ? `Target: ${input.output.width}x${input.output.height}, ${input.output.aspectRatio}.` : "",
+    input.output ? `Target aspect ratio: ${input.output.aspectRatio}. Pixel dimensions are provider-determined.` : "",
     "Return only after the imageGeneration item reports a savedPath."
   ].filter(Boolean).join("\n");
 }
@@ -363,17 +399,58 @@ function imageInput(value: string): CodexTurnImageInput {
 
 async function generationResult(
   result: CodexTurnRunnerResult,
-  descriptor: AppServerGenerationProvider["descriptor"]
+  descriptor: AppServerGenerationProvider["descriptor"],
+  input: GenerationProviderInput | ImageEditProviderInput,
+  context: ProviderExecutionContext | undefined,
+  imageCapability: CodexImageCapabilityProfile
 ): Promise<ProviderGenerationResult> {
   const artifacts: GeneratedArtifact[] = [];
   for (const image of result.imageGenerations) {
     if (!image.savedPath) continue;
-    await readRequiredPngOutput(image.savedPath);
+    const originalContent = await readRequiredPngOutput(image.savedPath);
+    const actualDimensions = readPngDimensions(originalContent);
+    const requestedOutput = "output" in input ? input.output : undefined;
+    if (requestedOutput) validateActualAspect(requestedOutput.aspectRatio, actualDimensions, imageCapability);
+    const stagingDirectory = context?.stagingDirectory
+      ?? path.join(input.projectPath, ".ether", "staging", "codex", randomUUID());
+    await mkdir(stagingDirectory, { recursive: true });
+    const originalBaseName = path.basename(image.savedPath, path.extname(image.savedPath))
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .slice(0, 80) || "codex-image";
+    const stagedPath = path.join(stagingDirectory, `${originalBaseName}-${randomUUID()}.png`);
+    await copyFile(image.savedPath, stagedPath, constants.COPYFILE_EXCL);
+    const stagedContent = await readRequiredPngOutput(stagedPath);
+    const originalHash = sha256(originalContent);
+    const stagedHash = sha256(stagedContent);
+    if (originalHash !== stagedHash) {
+      throw providerError(
+        "CODEX_IMAGE_STAGING_MISMATCH",
+        "malformed-output",
+        "The staged Codex image did not match the original generated PNG.",
+        false
+      );
+    }
     artifacts.push({
-      fileName: path.basename(image.savedPath),
+      fileName: path.basename(stagedPath),
       mimeType: "image/png",
-      sourcePath: image.savedPath,
-      metadata: { toolItemId: image.id, status: image.status, revisedPrompt: image.revisedPrompt }
+      sourcePath: stagedPath,
+      metadata: {
+        toolItemId: image.id,
+        status: image.status,
+        revisedPrompt: image.revisedPrompt,
+        outputDiscovery: imageCapability.outputDiscovery,
+        originalPreserved: true,
+        originalOutputHash: originalHash,
+        stagedOutputHash: stagedHash,
+        dimensionMode: imageCapability.dimensionMode,
+        exactResolution: imageCapability.exactResolution,
+        requestedDimensions: requestedOutput ? {
+          width: requestedOutput.width,
+          height: requestedOutput.height,
+          aspectRatio: requestedOutput.aspectRatio
+        } : undefined,
+        actualDimensions
+      }
     });
   }
   if (artifacts.length !== 1) {
@@ -385,8 +462,73 @@ async function generationResult(
     capabilities: [...descriptor.capabilities],
     artifacts,
     outputs: artifacts.map((artifact) => ({ channel: "image", assetPath: artifact.sourcePath, mimeType: artifact.mimeType })),
-    metadata: provenanceMetadata(result)
+    metadata: {
+      ...provenanceMetadata(result),
+      imageCapability
+    }
   };
+}
+
+function validateRequestedAspect(aspectRatio: string | undefined, profile: CodexImageCapabilityProfile) {
+  if (!aspectRatio || profile.verifiedAspectRatios.includes(aspectRatio)) return;
+  throw providerError(
+    "CODEX_IMAGE_ASPECT_UNSUPPORTED",
+    "capability",
+    `Codex ${CODEX_APP_SERVER_VERSION} has no verified image capability for aspect ratio ${aspectRatio}.`,
+    false
+  );
+}
+
+function validateActualAspect(
+  requestedAspect: string,
+  actual: { width: number; height: number },
+  profile: CodexImageCapabilityProfile
+) {
+  const expected = parseAspectRatio(requestedAspect);
+  if (!expected) {
+    throw providerError("CODEX_IMAGE_ASPECT_INVALID", "invalid-input", `Invalid image aspect ratio: ${requestedAspect}.`, false);
+  }
+  const actualRatio = actual.width / actual.height;
+  if (Math.abs(actualRatio - expected) / expected <= profile.aspectRatioTolerance) return;
+  throw providerError(
+    "CODEX_IMAGE_ASPECT_MISMATCH",
+    "malformed-output",
+    `Codex generated ${actual.width}x${actual.height}, which does not match the requested ${requestedAspect} aspect ratio.`,
+    false
+  );
+}
+
+function parseAspectRatio(value: string) {
+  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(value.trim());
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 ? width / height : null;
+}
+
+function readPngDimensions(content: Buffer) {
+  if (content.length < 24 || content.toString("ascii", 12, 16) !== "IHDR") {
+    throw providerError("CODEX_IMAGE_DIMENSIONS_INVALID", "malformed-output", "Codex image output has no valid PNG IHDR dimensions.", false);
+  }
+  const width = content.readUInt32BE(16);
+  const height = content.readUInt32BE(20);
+  if (width < 1 || height < 1) {
+    throw providerError("CODEX_IMAGE_DIMENSIONS_INVALID", "malformed-output", "Codex image output has invalid PNG dimensions.", false);
+  }
+  return { width, height };
+}
+
+function sha256(content: Buffer) {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function providerError(
+  code: string,
+  category: "capability" | "invalid-input" | "malformed-output",
+  message: string,
+  retryable: boolean
+) {
+  return Object.assign(new Error(message), { code, category, retryable });
 }
 
 function readEvaluationOutput(value: unknown, input: VisionEvaluationProviderInput) {
@@ -429,6 +571,7 @@ function provenanceMetadata(result: CodexTurnRunnerResult) {
   return {
     transport: "app-server",
     version: CODEX_APP_SERVER_VERSION,
+    reportedVersion: result.provenance.reportedVersion,
     manifestHash: CODEX_APP_SERVER_MANIFEST_SHA256,
     generation: result.provenance.generation,
     threadId: result.threadId,
@@ -471,7 +614,15 @@ function runtimeDetails(health: CodexRuntimeHealth) {
   return {
     transport: health.transport,
     version: health.version,
+    reportedVersion: health.reportedVersion,
+    versionCompatible: health.versionCompatible,
     manifestHash: health.manifestHash,
+    models: health.models,
+    defaultModelId: health.defaultModelId,
+    reasoningEfforts: health.reasoningEfforts,
+    imageCapability: health.imageCapability,
+    imageCapabilityManifestHash: health.imageCapabilityManifestHash,
+    imageCapabilityProfile: health.imageCapabilityProfile,
     generation: health.generation,
     restartCount: health.restartCount,
     restartReason: health.restartReason,

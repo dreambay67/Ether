@@ -3,6 +3,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 const mode = process.env.ETHER_FAKE_APP_SERVER_MODE ?? "normal";
 const requestLog = process.env.ETHER_FAKE_APP_SERVER_REQUEST_LOG;
 const environmentLog = process.env.ETHER_FAKE_APP_SERVER_ENV_LOG;
+const imageOutputPath = process.env.ETHER_FAKE_APP_SERVER_IMAGE_OUTPUT_PATH ?? "C:\\Fixture\\generated.png";
 const newline = mode === "crlf-split" ? "\r\n" : "\n";
 let input = "";
 let threadOrdinal = 0;
@@ -42,7 +43,7 @@ function emitCompleted(threadId, turnId, text) {
   send({ method: "ether/unknown", params: { threadId, turnId, retained: true } });
   send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "agent-1", delta: text.slice(4) } });
   send({ method: "item/completed", params: { threadId, turnId, completedAtMs: 10, item: { id: "tool-1", type: "imageView", path: "C:\\Fixture\\view.png" } } });
-  send({ method: "item/completed", params: { threadId, turnId, completedAtMs: 11, item: { id: "image-1", type: "imageGeneration", status: "completed", result: "generated", savedPath: "C:\\Fixture\\generated.png", revisedPrompt: null } } });
+  send({ method: "item/completed", params: { threadId, turnId, completedAtMs: 11, item: { id: "image-1", type: "imageGeneration", status: "completed", result: "generated", savedPath: imageOutputPath, revisedPrompt: null } } });
   if (mode === "flood-tools") {
     for (let index = 0; index < 20; index += 1) {
       send({ method: "item/completed", params: { threadId, turnId, item: { id: `tool-${index + 2}`, type: "commandExecution", command: "redacted" } } });
@@ -60,12 +61,18 @@ function handle(message) {
     if (mode === "no-init") return;
     if (mode === "malformed-init") return writeRaw("{not-json\n");
     if (mode === "unknown-response") return send({ id: 9999, result: {} });
-    send({ id: message.id, result: { codexHome: "C:\\CodexHome", platformFamily: "windows", platformOs: "windows", userAgent: "codex-cli/0.144.2" } });
+    const userAgent = mode === "version-mismatch"
+      ? "codex-cli/0.145.0"
+      : mode === "desktop-user-agent"
+        ? "Codex Desktop/0.144.2 (Windows 10.0.26200; x86_64) unknown (ether; 4.0.0)"
+        : "codex-cli/0.144.2";
+    send({ id: message.id, result: { codexHome: "C:\\CodexHome", platformFamily: "windows", platformOs: "windows", userAgent } });
     if (mode === "duplicate-response") send({ id: message.id, result: {} });
     if (mode === "die-idle") setTimeout(() => process.exit(32), 20);
     return;
   }
   if (message.method === "model/list") {
+    if (mode === "request-timeout") return;
     const second = message.params?.cursor === "page-2";
     send({ id: message.id, result: { data: [second ? {
       id: "hidden-model", model: "hidden-model", displayName: "Hidden", description: "Hidden fixture model", hidden: true, isDefault: false,
@@ -92,6 +99,11 @@ function handle(message) {
       }
     }
     const id = `turn-${++turnOrdinal}`;
+    if (mode === "flood-retention") {
+      for (let index = 0; index < 20; index += 1) {
+        send({ method: "warning", params: { threadId: message.params.threadId, turnId: `ghost-${index}`, message: "b".repeat(128) } });
+      }
+    }
     send({ id: message.id, result: { turn: turn(id) } });
     if (mode === "die-active") return setTimeout(() => process.exit(33), 5);
     if (mode === "turn-error") {
@@ -104,6 +116,16 @@ function handle(message) {
         id: "large-image", type: "imageGeneration", status: "completed", result: "x".repeat(2 * 1024 * 1024),
         savedPath: "C:\\Fixture\\large-generated.png", revisedPrompt: null
       } } });
+      return send({ method: "turn/completed", params: { threadId: message.params.threadId, turn: turn(id, "completed") } });
+    }
+    if (mode === "flood-retention") {
+      for (let index = 0; index < 20; index += 1) {
+        send({ method: "warning", params: { threadId: message.params.threadId, turnId: id, message: `warning-${index}-${"w".repeat(64)}` } });
+        send({ method: "error", params: { threadId: message.params.threadId, turnId: id, error: { message: `error-${index}-${"e".repeat(64)}` } } });
+        send({ method: "item/agentMessage/delta", params: { threadId: message.params.threadId, turnId: id, itemId: `agent-${index}-${"k".repeat(64)}`, delta: "d".repeat(64) } });
+        send({ method: "ether/unknown", params: { threadId: message.params.threadId, turnId: id, payload: "u".repeat(128) } });
+      }
+      send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: id, item: { id: "agent-final", type: "agentMessage", text: "f".repeat(512) } } });
       return send({ method: "turn/completed", params: { threadId: message.params.threadId, turn: turn(id, "completed") } });
     }
     const textInput = message.params?.input?.find((entry) => entry.type === "text")?.text ?? "fixture response";

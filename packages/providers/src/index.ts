@@ -79,6 +79,13 @@ export {
   type CodexUserInput
 } from "./codex/appServer/protocol.js";
 export {
+  CODEX_IMAGE_CAPABILITY_MANIFEST,
+  CODEX_IMAGE_CAPABILITY_MANIFEST_SHA256,
+  resolveCodexImageCapability,
+  type CodexImageCapabilityManifest,
+  type CodexImageCapabilityProfile
+} from "./codex/appServer/imageCapability.js";
+export {
   CodexAppServerRuntime,
   CodexRuntimeUnavailableError,
   type CodexAppServerRuntimeOptions,

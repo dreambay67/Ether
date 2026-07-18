@@ -1,15 +1,19 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeEtherGraph } from "@ether/engine";
+import type { AssistantProvider, GenerationProvider, VisionEvaluationProvider } from "@ether/providers";
 import {
   callEtherTool,
+  createEtherMcpServerSession,
   handleMcpJsonRpcMessage,
   listEtherMcpTools
 } from "../../mcp-server/src/index";
 
 const tempRoots: string[] = [];
+const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 function recordValue(value: unknown, label = "value"): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -38,6 +42,64 @@ afterEach(async () => {
 });
 
 describe("Ether MCP tool registry", () => {
+  it("keeps one injected Codex bundle for all MCP runs and closes its document sessions on shutdown", async () => {
+    const parentDirectory = await createTempRoot();
+    const projectPath = path.join(parentDirectory, "Mcp Runtime.ether");
+    const generation = { facet: "generation" } as unknown as GenerationProvider;
+    const assistant = { facet: "assistant" } as unknown as AssistantProvider;
+    const evaluation = { facet: "evaluation" } as unknown as VisionEvaluationProvider;
+    const start = vi.fn(async () => undefined);
+    const clearDocument = vi.fn();
+    const close = vi.fn(async () => undefined);
+    const executionRequests: Array<Record<string, unknown>> = [];
+    const session = createEtherMcpServerSession({
+      codex: {
+        runtime: { start },
+        generation,
+        assistant,
+        evaluation,
+        clearDocument,
+        close
+      },
+      executeGraphRun: async (_path, graph, request) => {
+        executionRequests.push(request as unknown as Record<string, unknown>);
+        return {
+          graph,
+          plan: { policy: request.policy, targetNodeIds: request.targetNodeIds, nodeIds: request.targetNodeIds, items: [], parallel: false },
+          results: []
+        };
+      }
+    });
+
+    await session.callTool("ether_project_create", { projectPath, name: "Mcp Runtime" });
+    await session.callTool("ether_node_create", {
+      projectPath,
+      node: { id: "generation", definitionId: "generation-image", position: { x: 0, y: 0 } }
+    });
+    await session.callTool("ether_run_node", { projectPath, nodeId: "generation", policy: "selected" });
+    await session.callTool("ether_run_node", { projectPath, nodeId: "generation", policy: "selected" });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(executionRequests).toHaveLength(2);
+    for (const request of executionRequests) {
+      expect(request.providers).toEqual({ generation, assistant, evaluation });
+    }
+    await session.close();
+    await session.close();
+    expect(clearDocument).toHaveBeenCalledTimes(1);
+    expect(clearDocument).toHaveBeenCalledWith(`project:${path.resolve(projectPath).toLocaleLowerCase()}`);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not construct one-shot Codex providers inside production node handlers", async () => {
+    const engineSource = await readFile(path.join(workspaceRoot, "packages/engine/src/run/execution.ts"), "utf8");
+    const mcpSource = await readFile(path.join(workspaceRoot, "packages/mcp-server/src/index.ts"), "utf8");
+    expect(engineSource).not.toContain("const provider = new CodexCliAssistantProvider");
+    expect(engineSource).not.toContain("const provider = new CodexCliVisionEvaluationProvider");
+    expect(engineSource).not.toContain("const registry = createDefaultProviderRegistry");
+    expect(mcpSource).not.toMatch(/new CodexCli(?:Assistant|VisionEvaluation|Image)Provider/);
+  });
+
   it("lists every required Phase 10 tool with explicit execution metadata", () => {
     const tools = listEtherMcpTools();
     const names = tools.map((tool) => tool.name);

@@ -9,13 +9,14 @@
     "ether-mcp-server": "dist/index.js"
   },
   "scripts": {
-    "build": "pnpm --filter @ether/engine build && tsc -p tsconfig.json",
-    "pretypecheck": "pnpm --filter @ether/engine build",
+    "build": "pnpm --filter @ether/engine build && pnpm --filter @ether/providers build && tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ether/engine build && pnpm --filter @ether/providers build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
-    "@ether/engine": "workspace:*"
+    "@ether/engine": "workspace:*",
+    "@ether/providers": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.32"

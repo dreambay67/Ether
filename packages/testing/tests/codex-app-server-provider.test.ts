@@ -1,8 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveMemoryScopeKey } from "@ether/intelligence";
 import { CodexAppServerClient } from "../../providers/src/codex/appServer/client.js";
@@ -12,12 +15,15 @@ import { CodexAppServerRuntime } from "../../providers/src/runtime.js";
 import { createCodexAppServerProviderBundle } from "../../providers/src/codex/appServerProvider.js";
 import type {
   AssistantProviderInput,
+  GenerationProviderInput,
   ProviderExecutionContext,
   VisionEvaluationProviderInput
 } from "../../providers/src/types.js";
 
 const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "codex-app-server", "fake-app-server.mjs");
 const children = new Set<ChildProcessWithoutNullStreams>();
+const tempRoots: string[] = [];
+const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=", "base64");
 
 function client() {
   const child = spawn(process.execPath, [fixture], { stdio: "pipe", windowsHide: true });
@@ -31,11 +37,11 @@ function client() {
   });
 }
 
-function runtime(mode = "normal") {
+function runtime(mode = "normal", extraEnv: Record<string, string> = {}) {
   return new CodexAppServerRuntime({
     executablePath: process.execPath,
     appServerArgs: [fixture],
-    env: { ...process.env, ETHER_FAKE_APP_SERVER_MODE: mode },
+    env: { ...process.env, ...extraEnv, ETHER_FAKE_APP_SERVER_MODE: mode },
     initializationTimeoutMs: 1_000,
     restartBudget: 1
   });
@@ -66,6 +72,7 @@ function executionContext<T>(signal = new AbortController().signal): ProviderExe
 afterEach(async () => {
   for (const child of children) child.kill();
   await new Promise((resolve) => setTimeout(resolve, 10));
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("Codex App Server session and turn providers", () => {
@@ -100,14 +107,97 @@ describe("Codex App Server session and turn providers", () => {
     const appServer = client();
     await appServer.initialize();
     const pool = new CodexAppServerSessionPool(() => ({ client: appServer, generation: 1 }));
-    await pool.withThread({ documentId: "doc-a", memoryScopeKey: "scope-a" }, { cwd: process.cwd() }, async () => undefined);
-    await pool.withThread({ documentId: "doc-b", memoryScopeKey: "scope-b" }, { cwd: process.cwd() }, async () => undefined);
+    await pool.withThread({ documentId: "doc-a", memoryScopeKey: "same-scope" }, { cwd: process.cwd() }, async () => undefined);
+    await pool.withThread({ documentId: "doc-b", memoryScopeKey: "same-scope" }, { cwd: process.cwd() }, async () => undefined);
     await pool.withThread({ documentId: "doc-a", memoryScopeKey: null }, { cwd: process.cwd() }, async () => undefined);
     expect(pool.size).toBe(2);
     pool.clearDocument("doc-a");
-    expect(pool.keys()).toEqual(["scope-b"]);
+    expect(pool.keys()).toEqual([JSON.stringify(["doc-b", "same-scope"])]);
     await pool.close();
     await appServer.close();
+  });
+
+  it("forwards selected model and reasoning effort to thread and turn requests", async () => {
+    const requestLog = path.join(os.tmpdir(), `ether-codex-requests-${Date.now()}.jsonl`);
+    const appRuntime = runtime("normal", { ETHER_FAKE_APP_SERVER_REQUEST_LOG: requestLog });
+    const bundle = createCodexAppServerProviderBundle({ runtime: appRuntime });
+    await bundle.assistant.run({ ...assistantInput(), model: "gpt-5.4", reasoningEffort: "low" }, executionContext());
+    const requests = (await readFile(requestLog, "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    expect(requests.find((request) => request.method === "thread/start")?.params).toMatchObject({
+      model: "gpt-5.4",
+      config: { model_reasoning_effort: "low" }
+    });
+    expect(requests.find((request) => request.method === "turn/start")?.params).toMatchObject({
+      model: "gpt-5.4",
+      effort: "low"
+    });
+    await bundle.close();
+    await rm(requestLog, { force: true });
+  });
+
+  it("preserves discovered PNGs, validates provider-determined aspect, and completes with a distinct staged copy", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-app-server-image-"));
+    tempRoots.push(root);
+    const originalPath = path.join(root, "original.png");
+    const stagingDirectory = path.join(root, "staging");
+    const requestLog = path.join(root, "requests.jsonl");
+    await writeFile(originalPath, tinyPng);
+    const originalHash = sha256(tinyPng);
+    const appRuntime = runtime("normal", {
+      ETHER_FAKE_APP_SERVER_IMAGE_OUTPUT_PATH: originalPath,
+      ETHER_FAKE_APP_SERVER_REQUEST_LOG: requestLog
+    });
+    const bundle = createCodexAppServerProviderBundle({ runtime: appRuntime });
+    const complete = vi.fn(async () => undefined);
+    const generated = await bundle.generation.generate(generationInput(root), {
+      signal: new AbortController().signal,
+      providerAttemptId: "image-attempt",
+      attemptOrdinal: 1,
+      stagingDirectory,
+      complete
+    });
+
+    const artifact = generated.artifacts[0]!;
+    expect(artifact.sourcePath).not.toBe(originalPath);
+    expect(path.dirname(artifact.sourcePath!)).toBe(stagingDirectory);
+    expect(sha256(await readFile(artifact.sourcePath!))).toBe(originalHash);
+    expect(sha256(await readFile(originalPath))).toBe(originalHash);
+    expect(artifact.metadata).toMatchObject({
+      outputDiscovery: "imageGeneration.savedPath",
+      originalPreserved: true,
+      dimensionMode: "provider-determined",
+      exactResolution: false,
+      requestedDimensions: { width: 1024, height: 1024, aspectRatio: "1:1" },
+      actualDimensions: { width: 1, height: 1 }
+    });
+    expect(complete).toHaveBeenCalledWith(generated);
+    const requests = await readFile(requestLog, "utf8");
+    expect(requests).toContain("provider-determined");
+    expect(requests).not.toContain("1024x1024");
+    await bundle.close();
+  });
+
+  it("rejects output whose aspect conflicts with the manifest profile without modifying the original", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-app-server-aspect-"));
+    tempRoots.push(root);
+    const originalPath = path.join(root, "original.png");
+    const content = pngWithDimensions(2, 1);
+    await writeFile(originalPath, content);
+    const appRuntime = runtime("normal", { ETHER_FAKE_APP_SERVER_IMAGE_OUTPUT_PATH: originalPath });
+    const bundle = createCodexAppServerProviderBundle({ runtime: appRuntime });
+    await expect(bundle.generation.generate(generationInput(root), {
+      signal: new AbortController().signal,
+      providerAttemptId: "aspect-attempt",
+      attemptOrdinal: 1,
+      stagingDirectory: path.join(root, "staging"),
+      complete: async () => undefined
+    })).rejects.toMatchObject({
+      code: "CODEX_IMAGE_ASPECT_MISMATCH",
+      category: "malformed-output",
+      retryable: false
+    });
+    expect(sha256(await readFile(originalPath))).toBe(sha256(content));
+    await bundle.close();
   });
 
   it("passes outputSchema and validated image inputs and assembles structured output", async () => {
@@ -201,3 +291,41 @@ describe("Codex App Server session and turn providers", () => {
     await activeDeathBundle.close();
   });
 });
+
+function generationInput(projectPath: string): GenerationProviderInput {
+  return {
+    projectPath,
+    runId: "run-image",
+    generationNodeId: "image-node",
+    iteration: 1,
+    prompt: "fixture image",
+    negativePrompt: "",
+    sections: [],
+    references: [],
+    edgeRoles: [],
+    outputCount: 1,
+    output: { aspectRatio: "1:1", resolution: "1024", width: 1024, height: 1024 },
+    requestedAt: new Date(0).toISOString()
+  };
+}
+
+function sha256(content: Buffer) {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function pngWithDimensions(width: number, height: number) {
+  const content = Buffer.from(tinyPng);
+  content.writeUInt32BE(width, 16);
+  content.writeUInt32BE(height, 20);
+  content.writeUInt32BE(crc32(content.subarray(12, 29)), 29);
+  return content;
+}
+
+function crc32(content: Buffer) {
+  let crc = 0xffffffff;
+  for (const byte of content) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}

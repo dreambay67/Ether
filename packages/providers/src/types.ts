@@ -83,6 +83,15 @@ export type ProviderMediaLimits = {
 
 export type ProviderAvailability = "available" | "unavailable";
 
+export type ProviderFailureCategory =
+  | "authentication"
+  | "capability"
+  | "invalid-input"
+  | "timeout"
+  | "cancellation"
+  | "process"
+  | "malformed-output";
+
 export type ProviderMode = "real" | "simulation" | "experimental";
 
 export type ProviderMatrixStatus = "ready" | "unavailable" | "experimental";
@@ -217,6 +226,9 @@ export type GenerationProviderInput = {
   outputCount: number;
   inputs?: PayloadEnvelope[];
   output?: GenerationOutputSettings;
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
   requestedAt: string;
 };
 
@@ -270,6 +282,9 @@ export type ImageEditProviderInput = {
   recipe?: ImageEditRecipeInput;
   frame?: ImageEditFrameInput;
   inputs?: PayloadEnvelope[];
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
   requestedAt: string;
 };
 
@@ -285,6 +300,9 @@ export type AssistantProviderInput = {
   references: GenerationReferenceInput[];
   edgeRoles: GenerationProviderInput["edgeRoles"];
   inputs?: PayloadEnvelope[];
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
   requestedAt: string;
 };
 
@@ -310,6 +328,9 @@ export type VisionEvaluationProviderInput = {
   threshold: number;
   images: VisionEvaluationImageInput[];
   inputs?: PayloadEnvelope[];
+  model?: string;
+  reasoningEffort?: string;
+  timeoutMs?: number;
   requestedAt: string;
 };
 

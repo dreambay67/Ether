@@ -3,6 +3,7 @@ import type { CodexAppServerClient, ThreadStartOptions } from "./client.js";
 export type CodexClientGeneration = {
   client: CodexAppServerClient;
   generation: number;
+  reportedVersion?: string | null;
 };
 
 export type CodexSessionIdentity = {
@@ -45,7 +46,7 @@ export class CodexAppServerSessionPool {
       const started = await current.client.startThread(threadOptions);
       return operation(started.threadId);
     }
-    const serializationKey = identity.memoryScopeKey;
+    const serializationKey = sessionKey(identity);
     const prior = this.tails.get(serializationKey) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -101,4 +102,12 @@ export class CodexAppServerSessionPool {
     }
     if (this.generation !== generation) this.invalidateGeneration(generation);
   }
+}
+
+function sessionKey(identity: CodexSessionIdentity) {
+  const documentId = identity.documentId.trim();
+  const memoryScopeKey = identity.memoryScopeKey?.trim();
+  if (!documentId) throw new Error("Codex session identity requires a documentId.");
+  if (!memoryScopeKey) throw new Error("Codex pooled session identity requires a memory scope key.");
+  return JSON.stringify([documentId, memoryScopeKey]);
 }

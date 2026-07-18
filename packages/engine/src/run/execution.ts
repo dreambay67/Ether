@@ -7,10 +7,12 @@ import {
   createDefaultProviderRegistry,
   diagnoseProviderRegistry,
   type AssistantProviderInput,
+  type AssistantProvider,
   type GeneratedArtifact,
   type CodexCliImageProviderOptions,
   type ImageEditFrameInput,
   type GenerationProviderInput,
+  type GenerationProvider,
   type GenerationReferenceInput,
   type ImageEditMaskInput,
   type ImageEditOperation,
@@ -27,6 +29,7 @@ import {
   type VisionEvaluationImageInput,
   type VisionEvaluationItemResult,
   type VisionEvaluationProviderInput,
+  type VisionEvaluationProvider,
   type VisionEvaluationProviderResult
 } from "@ether/providers";
 import { randomUUID } from "node:crypto";
@@ -77,6 +80,7 @@ export type ExecutionRequest = {
   targetNodeIds: string[];
   runCountCap?: number;
   parallel?: boolean;
+  providers?: ExecutionProviderFacets;
   providerId?: string;
   imageCodexCliPath?: string;
   imageProviderFileExists?: CodexCliImageProviderOptions["fileExists"];
@@ -89,6 +93,12 @@ export type ExecutionRequest = {
   evaluationProviderFileExists?: CodexCliImageProviderOptions["fileExists"];
   evaluationProviderRunner?: ProviderProcessRunner;
   now?: () => Date;
+};
+
+export type ExecutionProviderFacets = {
+  generation: GenerationProvider;
+  assistant: AssistantProvider;
+  evaluation: VisionEvaluationProvider;
 };
 
 export type ExecutionQueueItem = {
@@ -177,6 +187,11 @@ const GENERATION_RESOLUTION_LONG_EDGE: Record<string, number> = {
   "1536-long-edge": 1536,
   "2048-long-edge": 2048
 };
+const legacyProviderCache = new WeakMap<ExecutionRequest, {
+  generation: Map<string, GenerationProvider>;
+  assistant?: AssistantProvider;
+  evaluation?: VisionEvaluationProvider;
+}>();
 
 export type ExecutionWorkerState = {
   graph: EtherGraph;
@@ -637,11 +652,7 @@ async function executeAssistantNode(
   const node = findNode(state.graph, item.nodeId);
   const startedAt = startedDate.toISOString();
   const assembly = assembleAssistantInput(state.graph, item.nodeId);
-  const provider = new CodexCliAssistantProvider({
-    codexCliPath: request.assistantCodexCliPath,
-    fileExists: request.assistantProviderFileExists,
-    runner: request.assistantProviderRunner
-  });
+  const provider = request.providers?.assistant ?? legacyAssistantProvider(request);
   const providerInput: AssistantProviderInput = {
     projectPath,
     runId: randomUUID(),
@@ -933,13 +944,8 @@ async function executeGenerationNode(
   const assembly = assembleGenerationInputs(state.graph, item.nodeId);
   const startedAt = startedDate.toISOString();
   const output = generationOutputForNode(node.data);
-  const registry = createDefaultProviderRegistry({
-    codexCliPath: request.imageCodexCliPath,
-    fileExists: request.imageProviderFileExists,
-    runner: request.imageProviderRunner
-  });
   const providerId = request.providerId ?? CODEX_PROVIDER_ID;
-  const provider = registry.require(providerId);
+  const provider = request.providers?.generation ?? legacyGenerationProvider(request, providerId);
   const providerInput: GenerationProviderInput = {
     projectPath,
     runId: randomUUID(),
@@ -1115,13 +1121,8 @@ async function executeEditNode(
   const node = findNode(state.graph, item.nodeId);
   const assembly = assembleEditInputs(state.graph, item.nodeId);
   const startedAt = startedDate.toISOString();
-  const registry = createDefaultProviderRegistry({
-    codexCliPath: request.imageCodexCliPath,
-    fileExists: request.imageProviderFileExists,
-    runner: request.imageProviderRunner
-  });
   const providerId = request.providerId ?? CODEX_PROVIDER_ID;
-  const provider = registry.require(providerId);
+  const provider = request.providers?.generation ?? legacyGenerationProvider(request, providerId);
   const providerInput: ImageEditProviderInput = {
     projectPath,
     runId: randomUUID(),
@@ -1656,11 +1657,7 @@ async function executeProviderEvaluateNode(
     return executeSimulationEvaluateNode(projectPath, state, item, startedDate);
   }
 
-  const provider = new CodexCliVisionEvaluationProvider({
-    codexCliPath: request.evaluationCodexCliPath,
-    fileExists: request.evaluationProviderFileExists,
-    runner: request.evaluationProviderRunner
-  });
+  const provider = request.providers?.evaluation ?? legacyEvaluationProvider(request);
   const providerInput: VisionEvaluationProviderInput = {
     projectPath,
     runId: randomUUID(),
@@ -2560,6 +2557,49 @@ function shouldUseVisionEvaluationProvider(request: ExecutionRequest) {
   }
 
   return true;
+}
+
+function legacyGenerationProvider(request: ExecutionRequest, providerId: string) {
+  const cache = legacyProvidersFor(request);
+  let provider = cache.generation.get(providerId);
+  if (!provider) {
+    provider = createDefaultProviderRegistry({
+      codexCliPath: request.imageCodexCliPath,
+      fileExists: request.imageProviderFileExists,
+      runner: request.imageProviderRunner
+    }).require(providerId);
+    cache.generation.set(providerId, provider);
+  }
+  return provider;
+}
+
+function legacyAssistantProvider(request: ExecutionRequest) {
+  const cache = legacyProvidersFor(request);
+  cache.assistant ??= new CodexCliAssistantProvider({
+    codexCliPath: request.assistantCodexCliPath,
+    fileExists: request.assistantProviderFileExists,
+    runner: request.assistantProviderRunner
+  });
+  return cache.assistant;
+}
+
+function legacyEvaluationProvider(request: ExecutionRequest) {
+  const cache = legacyProvidersFor(request);
+  cache.evaluation ??= new CodexCliVisionEvaluationProvider({
+    codexCliPath: request.evaluationCodexCliPath,
+    fileExists: request.evaluationProviderFileExists,
+    runner: request.evaluationProviderRunner
+  });
+  return cache.evaluation;
+}
+
+function legacyProvidersFor(request: ExecutionRequest) {
+  let cache = legacyProviderCache.get(request);
+  if (!cache) {
+    cache = { generation: new Map() };
+    legacyProviderCache.set(request, cache);
+  }
+  return cache;
 }
 
 function evaluationCriteriaForNode(node: GraphNode, threshold: number) {

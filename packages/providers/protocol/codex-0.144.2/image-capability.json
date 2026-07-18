@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "codexVersion": "0.144.2",
+  "appServerManifestSha256": "579e6d66fe30749682413b6a32289b896c314db8a3e51b11d65874214e098ee6",
+  "toolContract": {
+    "itemType": "imageGeneration",
+    "completionMethod": "item/completed",
+    "outputPathField": "savedPath",
+    "referenceInputType": "localImage"
+  },
+  "profile": {
+    "status": "verified",
+    "outputDiscovery": "imageGeneration.savedPath",
+    "referenceInputs": true,
+    "dimensionMode": "provider-determined",
+    "exactResolution": false,
+    "verifiedAspectRatios": ["1:1"],
+    "aspectRatioTolerance": 0.01
+  }
+}

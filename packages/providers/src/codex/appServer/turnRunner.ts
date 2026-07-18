@@ -28,11 +28,13 @@ export type CodexTurnRunnerRequest = {
   reasoningEffort?: string;
   signal?: AbortSignal;
   interruptCompletionTimeoutMs?: number;
+  timeoutMs?: number;
 };
 
 export type CodexTurnProvenance = {
   transport: "app-server";
   version: string;
+  reportedVersion: string | null;
   manifestHash: string;
   generation: number;
   threadId: string;
@@ -52,6 +54,8 @@ export type CodexTurnRunnerResult = CodexTurnResult & {
 
 export class CodexImageInputError extends Error {
   readonly code = "CODEX_IMAGE_INPUT_INVALID";
+  readonly category = "invalid-input" as const;
+  readonly retryable = false;
 
   constructor(message: string) {
     super(message);
@@ -66,7 +70,7 @@ export class CodexAppServerTurnRunner {
   ) {}
 
   async run(request: CodexTurnRunnerRequest): Promise<CodexTurnRunnerResult> {
-    if (!request.prompt.trim()) throw new Error("Codex turn prompt must not be blank.");
+    if (!request.prompt.trim()) throw new CodexImageInputError("Codex turn prompt must not be blank.");
     if (request.signal?.aborted) throw abortError("Codex turn was cancelled before dispatch.");
     const startedAt = Date.now();
     const inputs = buildInputs(request.prompt, request.images ?? []);
@@ -85,7 +89,8 @@ export class CodexAppServerTurnRunner {
           effort: request.reasoningEffort,
           model: request.model,
           signal: request.signal,
-          interruptCompletionTimeoutMs: request.interruptCompletionTimeoutMs
+          interruptCompletionTimeoutMs: request.interruptCompletionTimeoutMs,
+          timeoutMs: request.timeoutMs
         });
         const completedAt = Date.now();
         const structuredOutput = request.outputSchema ? parseStructuredOutput(result.text) : undefined;
@@ -95,6 +100,7 @@ export class CodexAppServerTurnRunner {
           provenance: {
             transport: "app-server" as const,
             version: CODEX_APP_SERVER_VERSION,
+            reportedVersion: current.reportedVersion ?? null,
             manifestHash: CODEX_APP_SERVER_MANIFEST_SHA256,
             generation: current.generation,
             threadId,
@@ -134,16 +140,23 @@ function parseStructuredOutput(text: string) {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(
+    const failure = new Error(
       `Codex structured output was not valid JSON: ${error instanceof Error ? error.message : "parse failed"}`,
       { cause: error }
-    );
+    ) as Error & { code: string; category: "malformed-output"; retryable: boolean };
+    failure.code = "CODEX_STRUCTURED_OUTPUT_INVALID";
+    failure.category = "malformed-output";
+    failure.retryable = false;
+    throw failure;
   }
 }
 
 function abortError(message: string) {
-  const error = new Error(message);
+  const error = new Error(message) as Error & { code: string; category: "cancellation"; retryable: boolean };
   error.name = "AbortError";
+  error.code = "CODEX_APP_SERVER_CANCELLED";
+  error.category = "cancellation";
+  error.retryable = false;
   return error;
 }
 

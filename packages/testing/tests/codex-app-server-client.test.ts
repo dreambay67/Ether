@@ -26,7 +26,20 @@ function fake(mode = "normal") {
   return child;
 }
 
-function clientFor(mode = "normal", options: { maxFrameBytes?: number; maxEvents?: number; maxToolEvents?: number } = {}) {
+function clientFor(mode = "normal", options: {
+  maxFrameBytes?: number;
+  maxEvents?: number;
+  maxToolEvents?: number;
+  maxTextBytes?: number;
+  maxDiagnosticBytes?: number;
+  maxEventBytes?: number;
+  maxToolBytes?: number;
+  maxTextItems?: number;
+  maxBacklogKeys?: number;
+  maxBacklogBytes?: number;
+  requestTimeoutMs?: number;
+  turnTimeoutMs?: number;
+} = {}) {
   const child = fake(mode);
   return {
     child,
@@ -184,6 +197,57 @@ describe("Codex App Server protocol 0.144.2", () => {
     expect(result.truncated.events).toBe(true);
     expect(result.truncated.toolEvents).toBe(true);
     expect(client.capturedStderr).toContain("fake app server diagnostic noise");
+    await client.close();
+  });
+
+  it("enforces categorized request and turn deadlines with interrupt cleanup", async () => {
+    const requestTimeout = clientFor("request-timeout", { requestTimeoutMs: 200 });
+    await requestTimeout.client.initialize();
+    await expect(requestTimeout.client.listModels()).rejects.toMatchObject({
+      code: "CODEX_APP_SERVER_REQUEST_TIMEOUT",
+      category: "timeout",
+      retryable: true
+    });
+    await requestTimeout.client.close();
+
+    const turnTimeout = clientFor("normal", { turnTimeoutMs: 30 });
+    await turnTimeout.client.initialize();
+    const thread = await turnTimeout.client.startThread({ cwd: process.cwd() });
+    await expect(turnTimeout.client.runTurn({
+      threadId: thread.threadId,
+      input: [{ type: "text", text: "WAIT_FOR_INTERRUPT" }],
+      interruptCompletionTimeoutMs: 250
+    })).rejects.toMatchObject({
+      code: "CODEX_APP_SERVER_TURN_TIMEOUT",
+      category: "timeout",
+      completedStatus: "interrupted"
+    });
+    expect(turnTimeout.client.activeTurnCount).toBe(0);
+    await turnTimeout.client.close();
+  });
+
+  it("bounds diagnostic, event, tool, delta-key, final-text, and backlog retention by bytes and keys", async () => {
+    const { client } = clientFor("flood-retention", {
+      maxEvents: 4,
+      maxToolEvents: 2,
+      maxTextBytes: 64,
+      maxDiagnosticBytes: 96,
+      maxEventBytes: 768,
+      maxToolBytes: 256,
+      maxTextItems: 2,
+      maxBacklogKeys: 2,
+      maxBacklogBytes: 768
+    });
+    await client.initialize();
+    const thread = await client.startThread({ cwd: process.cwd() });
+    const result = await client.runTurn({ threadId: thread.threadId, input: [{ type: "text", text: "bounded" }] });
+    expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(64);
+    expect(Buffer.byteLength(JSON.stringify([...result.warnings, ...result.errors]))).toBeLessThanOrEqual(96);
+    expect(Buffer.byteLength(JSON.stringify(result.events))).toBeLessThanOrEqual(768);
+    expect(Buffer.byteLength(JSON.stringify([...result.toolEvents, ...result.imageViews, ...result.imageGenerations]))).toBeLessThanOrEqual(256);
+    expect(result.truncated).toMatchObject({ events: true, text: true });
+    expect(client.retentionStats).toMatchObject({ backlogKeys: 2 });
+    expect(client.retentionStats.backlogBytes).toBeLessThanOrEqual(768);
     await client.close();
   });
 

@@ -3,8 +3,15 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { sanitizeProviderEnv } from "./env.js";
 import { CodexAppServerClient } from "./codex/appServer/client.js";
 import {
+  CODEX_IMAGE_CAPABILITY_MANIFEST,
+  resolveCodexImageCapability,
+  type CodexImageCapabilityManifest,
+  type CodexImageCapabilityProfile
+} from "./codex/appServer/imageCapability.js";
+import {
   CODEX_APP_SERVER_MANIFEST_SHA256,
-  CODEX_APP_SERVER_VERSION
+  CODEX_APP_SERVER_VERSION,
+  type CodexModel
 } from "./codex/appServer/protocol.js";
 import {
   isWindowsAppsCodexAlias,
@@ -27,7 +34,15 @@ export type CodexRuntimeHealth = {
   status: CodexRuntimeStatus;
   transport: CodexRuntimeTransport;
   version: string;
+  reportedVersion: string | null;
+  versionCompatible: boolean | null;
   manifestHash: string;
+  models: CodexRuntimeModelChoice[];
+  defaultModelId: string | null;
+  reasoningEfforts: string[];
+  imageCapability: "available" | "unavailable";
+  imageCapabilityManifestHash: string | null;
+  imageCapabilityProfile: CodexImageCapabilityProfile | null;
   generation: number;
   restartCount: number;
   restartReason: string | null;
@@ -40,6 +55,15 @@ export type CodexRuntimeHealth = {
   initializationMs: number | null;
 };
 
+export type CodexRuntimeModelChoice = {
+  id: string;
+  displayName: string;
+  isDefault: boolean;
+  inputModalities: string[];
+  defaultReasoningEffort: string;
+  reasoningEfforts: string[];
+};
+
 export type CodexAppServerRuntimeOptions = {
   executablePath?: string;
   appServerArgs?: string[];
@@ -49,23 +73,46 @@ export type CodexAppServerRuntimeOptions = {
   initializationTimeoutMs?: number;
   restartBudget?: number;
   restartWindowMs?: number;
+  imageCapabilityManifest?: CodexImageCapabilityManifest | null;
   clientOptions?: {
     maxFrameBytes?: number;
     maxEvents?: number;
     maxToolEvents?: number;
     maxTextBytes?: number;
     maxStderrBytes?: number;
+    maxDiagnosticBytes?: number;
+    maxEventBytes?: number;
+    maxToolBytes?: number;
+    maxTextItems?: number;
+    maxBacklogKeys?: number;
+    maxBacklogBytes?: number;
+    requestTimeoutMs?: number;
+    turnTimeoutMs?: number;
   };
 };
 
 export class CodexRuntimeUnavailableError extends Error {
   readonly code = "CODEX_APP_SERVER_UNAVAILABLE";
+  readonly category = "process" as const;
+  readonly retryable = true;
   readonly health: CodexRuntimeHealth;
 
   constructor(health: CodexRuntimeHealth) {
     super(health.fallbackReason ?? health.restartReason ?? "Codex App Server is unavailable.");
     this.name = "CodexRuntimeUnavailableError";
     this.health = health;
+  }
+}
+
+export class CodexRuntimeVersionMismatchError extends Error {
+  readonly code = "CODEX_APP_SERVER_VERSION_MISMATCH";
+  readonly category = "capability" as const;
+  readonly retryable = false;
+  readonly expectedVersion = CODEX_APP_SERVER_VERSION;
+
+  constructor(readonly reportedVersion: string | null) {
+    super(`Codex App Server reported ${reportedVersion ?? "an unrecognized version"}; Ether requires ${CODEX_APP_SERVER_VERSION}.`);
+    this.name = "CodexRuntimeVersionMismatchError";
   }
 }
 
@@ -81,7 +128,15 @@ export class CodexAppServerRuntime {
     status: "stopped",
     transport: "unavailable",
     version: CODEX_APP_SERVER_VERSION,
+    reportedVersion: null,
+    versionCompatible: null,
     manifestHash: CODEX_APP_SERVER_MANIFEST_SHA256,
+    models: [],
+    defaultModelId: null,
+    reasoningEfforts: [],
+    imageCapability: "unavailable",
+    imageCapabilityManifestHash: null,
+    imageCapabilityProfile: null,
     generation: 0,
     restartCount: 0,
     restartReason: null,
@@ -100,7 +155,19 @@ export class CodexAppServerRuntime {
 
   health(): CodexRuntimeHealth {
     const phase = this.client?.activeTurnCount ? "active" : this.state.processPhase;
-    return { ...this.state, processPhase: phase };
+    return {
+      ...this.state,
+      models: this.state.models.map((model) => ({
+        ...model,
+        inputModalities: [...model.inputModalities],
+        reasoningEfforts: [...model.reasoningEfforts]
+      })),
+      reasoningEfforts: [...this.state.reasoningEfforts],
+      imageCapabilityProfile: this.state.imageCapabilityProfile
+        ? structuredClone(this.state.imageCapabilityProfile)
+        : null,
+      processPhase: phase
+    };
   }
 
   subscribe(listener: (health: CodexRuntimeHealth) => void) {
@@ -122,8 +189,17 @@ export class CodexAppServerRuntime {
   async ensureAvailable(): Promise<CodexAppServerClient> {
     if (this.state.status === "ready" && this.client && !this.client.isClosed) return this.client;
     if (this.state.transport === "exec-fallback") throw new CodexRuntimeUnavailableError(this.health());
+    if (this.state.versionCompatible === false) {
+      throw new CodexRuntimeVersionMismatchError(this.state.reportedVersion);
+    }
     if (this.state.generation > 0 && !this.canRestart()) {
-      this.activateFallback("Codex App Server restart budget was exhausted.");
+      this.patch({
+        status: "degraded",
+        transport: "unavailable",
+        restartReason: "Codex App Server restart budget was exhausted.",
+        fallbackReason: null,
+        imageCapability: "unavailable"
+      });
       throw new CodexRuntimeUnavailableError(this.health());
     }
     if (this.state.generation > 0) {
@@ -208,17 +284,56 @@ export class CodexAppServerRuntime {
     child.once("close", (code, signal) => this.onProcessClose(child, client, initialized, code, signal));
     this.patch({ pid: child.pid ?? null });
     try {
-      await withTimeout(
+      const initialization = await withTimeout(
         client.initialize(),
         this.options.initializationTimeoutMs ?? 10_000,
         `Codex App Server initialization timed out after ${this.options.initializationTimeoutMs ?? 10_000} ms.`
       );
+      const reportedVersion = reportedVersionFromUserAgent(initialization.userAgent);
+      if (reportedVersion !== CODEX_APP_SERVER_VERSION) {
+        initialized = true;
+        throw new CodexRuntimeVersionMismatchError(reportedVersion);
+      }
+      const models = await client.listModels({ includeHidden: false });
       initialized = true;
+      const manifest = this.options.imageCapabilityManifest === undefined
+        ? CODEX_IMAGE_CAPABILITY_MANIFEST
+        : this.options.imageCapabilityManifest;
+      const imageCapability = resolveCodexImageCapability(
+        reportedVersion,
+        CODEX_APP_SERVER_MANIFEST_SHA256,
+        manifest
+      );
+      this.patch({
+        ...discoveryHealth(reportedVersion, models),
+        imageCapability: imageCapability ? "available" : "unavailable",
+        imageCapabilityManifestHash: imageCapability?.manifestHash ?? null,
+        imageCapabilityProfile: imageCapability?.profile ?? null
+      });
     } catch (error) {
       client.notifyTransportClosed(error instanceof Error ? error : new Error("Codex App Server initialization failed."));
       await terminateProcessTree(child);
       if (this.child === child) this.child = null;
       if (this.client === client) this.client = null;
+      if (error instanceof CodexRuntimeVersionMismatchError) {
+        this.patch({
+          status: "degraded",
+          transport: "unavailable",
+          reportedVersion: error.reportedVersion,
+          versionCompatible: false,
+          models: [],
+          defaultModelId: null,
+          reasoningEfforts: [],
+          imageCapability: "unavailable",
+          imageCapabilityManifestHash: null,
+          imageCapabilityProfile: null,
+          fallbackReason: null,
+          restartReason: error.message,
+          pid: null,
+          processPhase: "none"
+        });
+        return this.health();
+      }
       this.activateFallback(`Codex App Server handshake failed: ${messageOf(error)}`);
       return this.health();
     }
@@ -261,7 +376,8 @@ export class CodexAppServerRuntime {
       pid: null,
       processPhase: "none",
       lastExitAt: Date.now(),
-      restartReason: `Codex App Server died ${active ? "during an active turn" : "while idle"} (code ${code ?? "none"}).`
+      restartReason: `Codex App Server died ${active ? "during an active turn" : "while idle"} (code ${code ?? "none"}).`,
+      imageCapability: "unavailable"
     });
   }
 
@@ -287,7 +403,8 @@ export class CodexAppServerRuntime {
       transport: "exec-fallback",
       fallbackReason: reason,
       pid: null,
-      processPhase: "none"
+      processPhase: "none",
+      imageCapability: "unavailable"
     });
   }
 
@@ -296,6 +413,28 @@ export class CodexAppServerRuntime {
     const snapshot = this.health();
     for (const listener of this.listeners) listener(snapshot);
   }
+}
+
+function reportedVersionFromUserAgent(userAgent: string) {
+  return /^(?:codex-cli|Codex Desktop)\/([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)/.exec(userAgent.trim())?.[1] ?? null;
+}
+
+function discoveryHealth(reportedVersion: string, models: CodexModel[]): Partial<CodexRuntimeHealth> {
+  const choices = models.slice(0, 256).map((model) => ({
+    id: model.id,
+    displayName: model.displayName,
+    isDefault: model.isDefault,
+    inputModalities: [...model.inputModalities],
+    defaultReasoningEffort: model.defaultReasoningEffort,
+    reasoningEfforts: model.supportedReasoningEfforts.map((effort) => effort.reasoningEffort)
+  }));
+  return {
+    reportedVersion,
+    versionCompatible: true,
+    models: choices,
+    defaultModelId: choices.find((model) => model.isDefault)?.id ?? choices[0]?.id ?? null,
+    reasoningEfforts: [...new Set(choices.flatMap((model) => model.reasoningEfforts))]
+  };
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
