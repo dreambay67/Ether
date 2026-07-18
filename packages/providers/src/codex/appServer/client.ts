@@ -2,14 +2,17 @@ import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 
 import {
+  CodexAppServerOperationError,
   CodexAppServerProtocolError,
   CodexAppServerRequestError,
+  mapCodexAppServerError,
   parseAppServerMessage,
   isRecord,
   stringField,
   type AppServerMessage,
   type AppServerNotification,
   type AppServerRequest,
+  type CodexAppServerFailureCategory,
   type CodexAppServerEvent,
   type CodexImageGenerationEvent,
   type CodexModel,
@@ -18,28 +21,10 @@ import {
   type JsonObject
 } from "./protocol.js";
 
+export { CodexAppServerOperationError } from "./protocol.js";
+export type { CodexAppServerFailureCategory } from "./protocol.js";
+
 const defaultMaxFrameBytes = 32 * 1024 * 1024;
-
-export type CodexAppServerFailureCategory =
-  | "authentication"
-  | "capability"
-  | "invalid-input"
-  | "timeout"
-  | "cancellation"
-  | "process"
-  | "malformed-output";
-
-export class CodexAppServerOperationError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-    readonly category: CodexAppServerFailureCategory,
-    readonly retryable: boolean
-  ) {
-    super(message);
-    this.name = "CodexAppServerOperationError";
-  }
-}
 
 type ClientOptions = {
   stdin: Writable;
@@ -59,6 +44,11 @@ type ClientOptions = {
   maxBacklogBytes?: number;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
+  maxModelPages?: number;
+  maxModels?: number;
+  maxModelBytes?: number;
+  maxModelCursorBytes?: number;
+  modelDiscoveryTimeoutMs?: number;
 };
 
 type PendingRequest = {
@@ -92,6 +82,7 @@ type TurnState = {
   imageViews: string[];
   imageGenerations: CodexImageGenerationEvent[];
   unknownEvents: CodexAppServerEvent[];
+  failure: CodexAppServerOperationError | null;
   truncated: CodexTurnResult["truncated"];
   resolve: (result: CodexTurnResult) => void;
   reject: (error: Error) => void;
@@ -142,6 +133,11 @@ export class CodexAppServerClient {
   private readonly maxBacklogBytes: number;
   private readonly requestTimeoutMs: number;
   private readonly turnTimeoutMs: number;
+  private readonly maxModelPages: number;
+  private readonly maxModels: number;
+  private readonly maxModelBytes: number;
+  private readonly maxModelCursorBytes: number;
+  private readonly modelDiscoveryTimeoutMs: number;
   private readonly decoder = new StringDecoder("utf8");
   private readonly listeners = new Set<(event: CodexAppServerEvent) => void>();
   private readonly pending = new Map<number, PendingRequest>();
@@ -176,6 +172,11 @@ export class CodexAppServerClient {
     this.maxBacklogBytes = positiveInteger(options.maxBacklogBytes, 4 * 1024 * 1024);
     this.requestTimeoutMs = positiveInteger(options.requestTimeoutMs, 30_000);
     this.turnTimeoutMs = positiveInteger(options.turnTimeoutMs, 10 * 60_000);
+    this.maxModelPages = positiveInteger(options.maxModelPages, 32);
+    this.maxModels = positiveInteger(options.maxModels, 256);
+    this.maxModelBytes = positiveInteger(options.maxModelBytes, 2 * 1024 * 1024);
+    this.maxModelCursorBytes = positiveInteger(options.maxModelCursorBytes, 16 * 1024);
+    this.modelDiscoveryTimeoutMs = positiveInteger(options.modelDiscoveryTimeoutMs, 30_000);
     this.stdout.on("data", this.onData);
     this.stdout.once("end", this.onTransportEnd);
     this.stdout.once("error", this.onTransportError);
@@ -226,22 +227,73 @@ export class CodexAppServerClient {
     this.requireInitialized();
     const models: CodexModel[] = [];
     let cursor: string | null = null;
+    let pages = 0;
+    let modelBytes = 0;
+    let cursorBytes = 0;
+    const discoveryDeadline = Date.now() + this.modelDiscoveryTimeoutMs;
     const seenCursors = new Set<string>();
     do {
+      pages += 1;
+      if (pages > this.maxModelPages) {
+        throw operationError(
+          `Codex model discovery exceeded its ${this.maxModelPages} page limit.`,
+          "CODEX_APP_SERVER_MODEL_PAGE_LIMIT",
+          "malformed-output",
+          false
+        );
+      }
+      const remainingMs = discoveryDeadline - Date.now();
+      if (remainingMs <= 0) throw modelDiscoveryTimeout(this.modelDiscoveryTimeoutMs);
+      const requestTimeoutMs = Math.min(this.requestTimeoutMs, remainingMs);
       const result = await this.request("model/list", {
         cursor,
         includeHidden: options.includeHidden ?? false,
         limit: options.pageSize ?? null
-      });
+      }, requestTimeoutMs, remainingMs <= this.requestTimeoutMs
+        ? () => modelDiscoveryTimeout(this.modelDiscoveryTimeoutMs)
+        : undefined);
       if (!isRecord(result) || !Array.isArray(result.data)) {
         throw new CodexAppServerProtocolError("Codex model/list response has invalid data.");
       }
+      const pageBytes = serializedBytes(result.data);
+      if (pageBytes > this.maxModelBytes - modelBytes) {
+        throw operationError(
+          `Codex model discovery exceeded its ${this.maxModelBytes} byte payload limit.`,
+          "CODEX_APP_SERVER_MODEL_BYTES_LIMIT",
+          "malformed-output",
+          false
+        );
+      }
+      modelBytes += pageBytes;
+      if (result.data.length > this.maxModels - models.length) {
+        throw operationError(
+          `Codex model discovery exceeded its ${this.maxModels} model limit.`,
+          "CODEX_APP_SERVER_MODEL_LIMIT",
+          "capability",
+          false
+        );
+      }
       for (const candidate of result.data) models.push(readModel(candidate));
+      if (result.nextCursor !== undefined && result.nextCursor !== null && typeof result.nextCursor !== "string") {
+        throw new CodexAppServerProtocolError("Codex model/list returned an invalid pagination cursor.");
+      }
       cursor = typeof result.nextCursor === "string" ? result.nextCursor : null;
       if (cursor !== null && seenCursors.has(cursor)) {
         throw new CodexAppServerProtocolError("Codex model/list returned a duplicate pagination cursor.");
       }
-      if (cursor !== null) seenCursors.add(cursor);
+      if (cursor !== null) {
+        const nextCursorBytes = Buffer.byteLength(cursor);
+        if (nextCursorBytes > this.maxModelCursorBytes - cursorBytes) {
+          throw operationError(
+            `Codex model discovery exceeded its ${this.maxModelCursorBytes} byte cursor limit.`,
+            "CODEX_APP_SERVER_MODEL_CURSOR_LIMIT",
+            "malformed-output",
+            false
+          );
+        }
+        cursorBytes += nextCursorBytes;
+        seenCursors.add(cursor);
+      }
     } while (cursor !== null);
     return (options.includeHidden ?? false) ? models : models.filter((model) => !model.hidden);
   }
@@ -307,6 +359,7 @@ export class CodexAppServerClient {
         imageViews: [],
         imageGenerations: [],
         unknownEvents: [],
+        failure: null,
         truncated: { events: false, toolEvents: false, text: false, stderr: this.stderrTruncated },
         resolve,
         reject
@@ -335,12 +388,12 @@ export class CodexAppServerClient {
   }
 
   notifyTransportClosed(error?: Error) {
-    this.fail(error ?? new Error("Codex App Server transport closed."));
+    this.fail(processError(error, "Codex App Server transport closed.", "CODEX_APP_SERVER_PROCESS_CLOSED", true));
   }
 
   async close() {
     if (this.closed) return;
-    this.fail(new Error("Codex App Server client closed."));
+    this.fail(operationError("Codex App Server client closed.", "CODEX_APP_SERVER_CLIENT_CLOSED", "process", false));
     await this.closeTransport?.();
   }
 
@@ -365,8 +418,18 @@ export class CodexAppServerClient {
     this.stderrText = combined.slice(-Math.floor(this.maxStderrBytes / 2));
   };
 
-  private readonly onTransportEnd = () => this.fail(new Error("Codex App Server transport closed."));
-  private readonly onTransportError = (error: Error) => this.fail(error);
+  private readonly onTransportEnd = () => this.fail(operationError(
+    "Codex App Server transport closed.",
+    "CODEX_APP_SERVER_PROCESS_CLOSED",
+    "process",
+    true
+  ));
+  private readonly onTransportError = (error: Error) => this.fail(processError(
+    error,
+    "Codex App Server transport failed.",
+    "CODEX_APP_SERVER_PROCESS_CLOSED",
+    true
+  ));
 
   private consumeFrames() {
     while (true) {
@@ -462,10 +525,13 @@ export class CodexAppServerClient {
       return;
     }
     if (event.method === "error") {
-      const error = isRecord(params.error) && typeof params.error.message === "string"
-        ? params.error.message
-        : "Codex turn failed.";
-      state.diagnosticBytes = retainByteBounded(state.errors, error, this.maxEvents, state.diagnosticBytes, this.maxDiagnosticBytes, () => { state.truncated.text = true; });
+      const failure = mapCodexAppServerError(
+        "Codex turn failed",
+        params.error,
+        typeof params.willRetry === "boolean" ? params.willRetry : undefined
+      );
+      state.failure = failure;
+      state.diagnosticBytes = retainByteBounded(state.errors, failure.message, this.maxEvents, state.diagnosticBytes, this.maxDiagnosticBytes, () => { state.truncated.text = true; });
       return;
     }
     if (event.method === "item/completed") {
@@ -489,7 +555,10 @@ export class CodexAppServerClient {
     }
     if (event.method === "turn/completed") {
       const turn = isRecord(params.turn) ? params.turn : {};
-      this.completeTurn(state, typeof turn.status === "string" ? turn.status : "completed");
+      const completionFailure = isRecord(turn.error)
+        ? mapCodexAppServerError("Codex turn failed", turn.error)
+        : null;
+      this.completeTurn(state, typeof turn.status === "string" ? turn.status : "", completionFailure);
       return;
     }
     if (event.method !== "turn/started") {
@@ -497,7 +566,11 @@ export class CodexAppServerClient {
     }
   }
 
-  private completeTurn(state: TurnState, status: string) {
+  private completeTurn(
+    state: TurnState,
+    status: string,
+    completionFailure: CodexAppServerOperationError | null = null
+  ) {
     if (state.settled) return;
     state.settled = true;
     this.cleanupTurn(state);
@@ -505,13 +578,32 @@ export class CodexAppServerClient {
       const error = state.completionReason === "timeout"
         ? operationError(`Codex turn exceeded its overall deadline.`, "CODEX_APP_SERVER_TURN_TIMEOUT", "timeout", true)
         : abortError("Codex turn was cancelled.");
-      const completedError = error as Error & { completedStatus?: string };
-      completedError.completedStatus = status;
-      state.reject(completedError);
+      error.completedStatus = status;
+      state.reject(error);
+      return;
+    }
+    if (status === "failed") {
+      state.reject(state.failure ?? completionFailure ?? operationError(
+        "Codex turn failed without structured error information.",
+        "CODEX_APP_SERVER_PROCESS",
+        "process",
+        false
+      ));
+      return;
+    }
+    if (status === "interrupted") {
+      const error = abortError("Codex turn completed as interrupted.");
+      error.completedStatus = status;
+      state.reject(error);
       return;
     }
     if (status !== "completed") {
-      state.reject(new Error(state.errors.at(-1) ?? `Codex turn completed with status ${status}.`));
+      state.reject(operationError(
+        `Codex turn completed with invalid status ${status || "<missing>"}.`,
+        "CODEX_APP_SERVER_MALFORMED_OUTPUT",
+        "malformed-output",
+        false
+      ));
       return;
     }
     const streamedText = [...state.textByItem.values()].join("");
@@ -552,7 +644,9 @@ export class CodexAppServerClient {
       if (!state.settled) {
         state.settled = true;
         this.cleanupTurn(state);
-        state.reject(error instanceof Error ? error : new Error("Codex interrupt failed."));
+        state.reject(error instanceof CodexAppServerOperationError
+          ? error
+          : processError(error, "Codex interrupt failed.", "CODEX_APP_SERVER_PROCESS", true));
       }
       return;
     }
@@ -563,7 +657,12 @@ export class CodexAppServerClient {
       this.cleanupTurn(state);
         state.reject(state.completionReason === "timeout"
           ? operationError(`Codex turn exceeded its ${timeoutMs ?? this.turnTimeoutMs} ms overall deadline and did not complete after interrupt.`, "CODEX_APP_SERVER_TURN_TIMEOUT", "timeout", true)
-          : new Error(`Codex turn did not complete as interrupted within ${state.interruptCompletionTimeoutMs} ms.`));
+          : operationError(
+            `Codex turn did not complete as interrupted within ${state.interruptCompletionTimeoutMs} ms.`,
+            "CODEX_APP_SERVER_INTERRUPT_TIMEOUT",
+            "cancellation",
+            false
+          ));
     }, state.interruptCompletionTimeoutMs);
   }
 
@@ -575,8 +674,18 @@ export class CodexAppServerClient {
     if (state.signal && state.abortListener) state.signal.removeEventListener("abort", state.abortListener);
   }
 
-  private request(method: string, params: JsonObject, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
-    if (this.closed) return Promise.reject(this.closeError ?? new Error("Codex App Server client is closed."));
+  private request(
+    method: string,
+    params: JsonObject,
+    timeoutMs = this.requestTimeoutMs,
+    timeoutError?: () => CodexAppServerOperationError
+  ): Promise<unknown> {
+    if (this.closed) return Promise.reject(this.closeError ?? operationError(
+      "Codex App Server client is closed.",
+      "CODEX_APP_SERVER_CLIENT_CLOSED",
+      "process",
+      false
+    ));
     const id = this.nextRequestId++;
     return new Promise((resolve, reject) => {
       const pending: PendingRequest = { method, resolve, reject };
@@ -584,7 +693,7 @@ export class CodexAppServerClient {
         if (this.pending.get(id) !== pending) return;
         this.pending.delete(id);
         this.rememberSettledId(id);
-        reject(operationError(
+        reject(timeoutError?.() ?? operationError(
           `Codex App Server ${method} exceeded its ${timeoutMs} ms request deadline.`,
           "CODEX_APP_SERVER_REQUEST_TIMEOUT",
           "timeout",
@@ -597,13 +706,18 @@ export class CodexAppServerClient {
       } catch (error) {
         this.pending.delete(id);
         if (pending.timer) clearTimeout(pending.timer);
-        reject(error instanceof Error ? error : new Error("Codex App Server write failed."));
+        reject(processError(error, "Codex App Server write failed.", "CODEX_APP_SERVER_PROCESS", true));
       }
     });
   }
 
   private write(message: AppServerRequest | AppServerNotification) {
-    if (this.closed) throw this.closeError ?? new Error("Codex App Server client is closed.");
+    if (this.closed) throw this.closeError ?? operationError(
+      "Codex App Server client is closed.",
+      "CODEX_APP_SERVER_CLIENT_CLOSED",
+      "process",
+      false
+    );
     this.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
@@ -621,19 +735,22 @@ export class CodexAppServerClient {
 
   private fail(error: Error) {
     if (this.closed) return;
+    const failure = error instanceof CodexAppServerOperationError
+      ? error
+      : processError(error, "Codex App Server process failed.", "CODEX_APP_SERVER_PROCESS_CLOSED", true);
     this.closed = true;
-    this.closeError = error;
+    this.closeError = failure;
     this.stdout.off("data", this.onData);
     for (const pending of this.pending.values()) {
       if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(error);
+      pending.reject(failure);
     }
     this.pending.clear();
     for (const state of this.turns.values()) {
       if (state.settled) continue;
       state.settled = true;
       this.cleanupTurn(state);
-      state.reject(error);
+      state.reject(failure);
     }
     this.turns.clear();
     this.eventBacklog.clear();
@@ -714,6 +831,25 @@ function truncateUtf8(value: string, maxBytes: number) {
 
 function operationError(message: string, code: string, category: CodexAppServerFailureCategory, retryable: boolean) {
   return new CodexAppServerOperationError(message, code, category, retryable);
+}
+
+function processError(
+  error: unknown,
+  fallbackMessage: string,
+  code: string,
+  retryable: boolean
+) {
+  if (error instanceof CodexAppServerOperationError) return error;
+  return operationError(error instanceof Error ? error.message : fallbackMessage, code, "process", retryable);
+}
+
+function modelDiscoveryTimeout(timeoutMs: number) {
+  return operationError(
+    `Codex model discovery exceeded its ${timeoutMs} ms overall deadline.`,
+    "CODEX_APP_SERVER_MODEL_DISCOVERY_TIMEOUT",
+    "timeout",
+    true
+  );
 }
 
 function abortError(message: string) {

@@ -10,7 +10,10 @@ import {
   CODEX_APP_SERVER_MANIFEST_SHA256,
   CODEX_APP_SERVER_VERSION
 } from "../../providers/src/codex/appServer/protocol.js";
-import { CodexAppServerClient } from "../../providers/src/codex/appServer/client.js";
+import {
+  CodexAppServerClient,
+  CodexAppServerOperationError
+} from "../../providers/src/codex/appServer/client.js";
 
 const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "codex-app-server");
 const children = new Set<ChildProcessWithoutNullStreams>();
@@ -39,6 +42,11 @@ function clientFor(mode = "normal", options: {
   maxBacklogBytes?: number;
   requestTimeoutMs?: number;
   turnTimeoutMs?: number;
+  maxModelPages?: number;
+  maxModels?: number;
+  maxModelBytes?: number;
+  maxModelCursorBytes?: number;
+  modelDiscoveryTimeoutMs?: number;
 } = {}) {
   const child = fake(mode);
   return {
@@ -224,6 +232,114 @@ describe("Codex App Server protocol 0.144.2", () => {
     });
     expect(turnTimeout.client.activeTurnCount).toBe(0);
     await turnTimeout.client.close();
+  });
+
+  it("maps JSON-RPC error data into every bounded operation failure category", async () => {
+    const cases = [
+      ["request-error-authentication", "CODEX_APP_SERVER_AUTHENTICATION", "authentication", false],
+      ["request-error-capability", "CODEX_APP_SERVER_CAPABILITY", "capability", false],
+      ["request-error-invalid-input", "CODEX_APP_SERVER_INVALID_INPUT", "invalid-input", false],
+      ["request-error-timeout", "CODEX_APP_SERVER_TIMEOUT", "timeout", true],
+      ["request-error-cancellation", "CODEX_APP_SERVER_CANCELLED", "cancellation", false],
+      ["request-error-process", "CODEX_APP_SERVER_PROCESS", "process", true],
+      ["request-error-malformed-output", "CODEX_APP_SERVER_MALFORMED_OUTPUT", "malformed-output", false]
+    ] as const;
+
+    for (const [mode, code, category, retryable] of cases) {
+      const { client } = clientFor(mode);
+      await client.initialize();
+      let failure: unknown;
+      try {
+        await client.listModels();
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(CodexAppServerOperationError);
+      expect(failure).toMatchObject({ code, category, retryable });
+      if (category === "authentication") {
+        const requestFailure = failure as CodexAppServerOperationError & {
+          requestCode?: number;
+          data?: unknown;
+        };
+        expect(requestFailure.requestCode).toBe(-32000);
+        expect(requestFailure.data).toMatchObject({
+          codexErrorInfo: "unauthorized",
+          httpStatusCode: 401,
+          token: "<redacted>",
+          path: "<redacted>"
+        });
+        expect(Buffer.byteLength(requestFailure.message)).toBeLessThanOrEqual(1_024);
+        expect(Buffer.byteLength(JSON.stringify(requestFailure.data))).toBeLessThanOrEqual(4_096);
+        expect(requestFailure.message).not.toMatch(/sk-fixture|Users\\fixture/i);
+      }
+      await client.close();
+    }
+  });
+
+  it("maps error notifications and failed turn status without emitting a plain Error", async () => {
+    const { client } = clientFor("turn-error");
+    await client.initialize();
+    const thread = await client.startThread({ cwd: process.cwd() });
+    let failure: unknown;
+    try {
+      await client.runTurn({ threadId: thread.threadId, input: [{ type: "text", text: "fail" }] });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(CodexAppServerOperationError);
+    expect(failure).toMatchObject({
+      code: "CODEX_APP_SERVER_INVALID_INPUT",
+      category: "invalid-input",
+      retryable: false
+    });
+    expect((failure as Error).message).not.toMatch(/sk-fixture|Users\\fixture/i);
+    await client.close();
+  });
+
+  it("categorizes process closure while a request is active", async () => {
+    const { client } = clientFor("die-active");
+    await client.initialize();
+    const thread = await client.startThread({ cwd: process.cwd() });
+    await expect(client.runTurn({
+      threadId: thread.threadId,
+      input: [{ type: "text", text: "active" }]
+    })).rejects.toMatchObject({
+      code: "CODEX_APP_SERVER_PROCESS_CLOSED",
+      category: "process",
+      retryable: true
+    });
+    await client.close();
+  });
+
+  it("bounds model discovery pages, models, payload bytes, and cursor bytes", async () => {
+    const cases = [
+      ["model-pages-unbounded", { maxModelPages: 2 }, "CODEX_APP_SERVER_MODEL_PAGE_LIMIT", "malformed-output"],
+      ["model-count-overflow", { maxModels: 2 }, "CODEX_APP_SERVER_MODEL_LIMIT", "capability"],
+      ["model-bytes-overflow", { maxModelBytes: 512 }, "CODEX_APP_SERVER_MODEL_BYTES_LIMIT", "malformed-output"],
+      ["model-cursor-overflow", { maxModelCursorBytes: 16 }, "CODEX_APP_SERVER_MODEL_CURSOR_LIMIT", "malformed-output"]
+    ] as const;
+
+    for (const [mode, options, code, category] of cases) {
+      const { client } = clientFor(mode, options);
+      await client.initialize();
+      await expect(client.listModels()).rejects.toMatchObject({ code, category, retryable: false });
+      await client.close();
+    }
+  });
+
+  it("enforces one overall model discovery deadline across individually responsive pages", async () => {
+    const { client } = clientFor("model-discovery-slow", {
+      requestTimeoutMs: 200,
+      modelDiscoveryTimeoutMs: 50,
+      maxModelPages: 10
+    });
+    await client.initialize();
+    await expect(client.listModels()).rejects.toMatchObject({
+      code: "CODEX_APP_SERVER_MODEL_DISCOVERY_TIMEOUT",
+      category: "timeout",
+      retryable: true
+    });
+    await client.close();
   });
 
   it("bounds diagnostic, event, tool, delta-key, final-text, and backlog retention by bytes and keys", async () => {

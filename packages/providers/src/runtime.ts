@@ -88,6 +88,11 @@ export type CodexAppServerRuntimeOptions = {
     maxBacklogBytes?: number;
     requestTimeoutMs?: number;
     turnTimeoutMs?: number;
+    maxModelPages?: number;
+    maxModels?: number;
+    maxModelBytes?: number;
+    maxModelCursorBytes?: number;
+    modelDiscoveryTimeoutMs?: number;
   };
 };
 
