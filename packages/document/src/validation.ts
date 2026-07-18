@@ -213,14 +213,14 @@ function identityFromStats(stats: BigIntStats): EtherFileIdentity {
   };
 }
 
-function assertRegularStats(filePath: string, stats: BigIntStats): void {
+function assertRegularStats(filePath: string, stats: BigIntStats, allowHardLinks = false): void {
   if (!stats.isFile()) {
     throw new EtherDocumentError(
       "NOT_A_REGULAR_FILE",
       `Ether document must be a regular file: ${filePath}`
     );
   }
-  if (stats.nlink > 1n) {
+  if (!allowHardLinks && stats.nlink > 1n) {
     throw new EtherDocumentError(
       "HARD_LINK_ALIAS",
       `Ether document has ${String(stats.nlink)} hard-link aliases and cannot be opened safely.`
@@ -250,17 +250,22 @@ function readStats(filePath: string, changed: boolean): BigIntStats {
   }
 }
 
-export function readEtherFileIdentity(filePath: string, changed = false): EtherFileIdentity {
+export function readEtherFileIdentity(
+  filePath: string,
+  changed = false,
+  allowHardLinks = false
+): EtherFileIdentity {
   const stats = readStats(filePath, changed);
-  assertRegularStats(filePath, stats);
+  assertRegularStats(filePath, stats, allowHardLinks);
   return identityFromStats(stats);
 }
 
 export function assertEtherFileIdentity(
   filePath: string,
-  expected: EtherFileIdentity
+  expected: EtherFileIdentity,
+  allowHardLinks = false
 ): EtherFileIdentity {
-  const actual = readEtherFileIdentity(filePath, true);
+  const actual = readEtherFileIdentity(filePath, true, allowHardLinks);
   if (
     actual.dev !== expected.dev ||
     actual.ino !== expected.ino ||
@@ -306,10 +311,14 @@ function readSqliteHeader(filePath: string): Buffer {
   return header;
 }
 
-export function inspectEtherFileHeader(filePath: string): EtherFileIdentity {
-  const identity = readEtherFileIdentity(filePath);
+export function inspectEtherFileHeader(
+  filePath: string,
+  options: { allowHardLinks?: boolean } = {}
+): EtherFileIdentity {
+  const allowHardLinks = options.allowHardLinks === true;
+  const identity = readEtherFileIdentity(filePath, false, allowHardLinks);
   const header = readSqliteHeader(filePath);
-  assertEtherFileIdentity(filePath, identity);
+  assertEtherFileIdentity(filePath, identity, allowHardLinks);
 
   const writeVersion = header[SQLITE_WRITE_VERSION_OFFSET];
   const readVersion = header[SQLITE_READ_VERSION_OFFSET];

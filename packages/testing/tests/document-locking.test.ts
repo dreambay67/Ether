@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync
@@ -65,7 +66,13 @@ interface StoreInstance {
     | { kind: "writable" }
     | {
         kind: "read-only";
-        reason: "requested" | "writer-active" | "location-unsupported" | "sqlite-busy" | "heartbeat-failed";
+        reason:
+          | "requested"
+          | "writer-active"
+          | "location-unsupported"
+          | "sqlite-busy"
+          | "heartbeat-failed"
+          | "recovery-attention";
       };
   readonly path: string;
   close(): Promise<void>;
@@ -182,6 +189,40 @@ async function waitFor(
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+function killCompactAt(input: {
+  leaseRoot: string;
+  recoveryRoot: string;
+  sourcePath: string;
+  stage: CompactStage;
+}) {
+  const documentEntry = pathToFileURL(
+    path.resolve(import.meta.dirname, "../../document/dist/index.js")
+  ).href;
+  return spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { DocumentStore } from ${JSON.stringify(documentEntry)};
+       const store = await DocumentStore.open(${JSON.stringify(input.sourcePath)}, {
+         access: "require-write",
+         environment: {
+           appInstanceId: "compact-kill-child",
+           leaseRoot: ${JSON.stringify(input.leaseRoot)},
+           recoveryRoot: ${JSON.stringify(input.recoveryRoot)},
+           machineId: "test-machine",
+           processIsAlive: () => false,
+           onCompactStage: (stage) => {
+             if (stage === ${JSON.stringify(input.stage)}) process.kill(process.pid, "SIGKILL");
+           }
+         }
+       });
+       await store.compact();`
+    ],
+    { encoding: "utf8", timeout: 10_000 }
+  );
 }
 
 describe("Ether document writer leases and backup lifecycle", () => {
@@ -652,6 +693,93 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(readdirSync(recoveryRoot, { recursive: true })).toEqual([]);
   }, 20_000);
 
+  it("retains recovery evidence and refuses writable admission for a same-UUID destination replacement", async () => {
+    const recoveryRoot = path.join(root, "recovery");
+    const documentId = "document-compact-spoof";
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId,
+      environment: environment(leaseRoot, "compact-spoof-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Original compact identity"
+    });
+    await source.close();
+    expect(killCompactAt({ leaseRoot, recoveryRoot, sourcePath, stage: "rollback-created" }).status)
+      .not.toBe(0);
+
+    const journalPath = path.join(recoveryRoot, readdirSync(recoveryRoot).find((name) => name.endsWith(".json"))!);
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      rollback: { path: string };
+      staging: { path: string };
+    };
+    const spoofPath = path.join(root, "Spoof.ether");
+    const spoof = await storeClass().create(spoofPath, {
+      appVersion: "4.0.0",
+      documentId,
+      environment: environment(leaseRoot, "compact-spoof-replacement", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Different file with the same UUID"
+    });
+    await spoof.close();
+    rmSync(sourcePath);
+    renameSync(spoofPath, sourcePath);
+
+    const opened = await storeClass().open(sourcePath, {
+      access: "prefer-write",
+      environment: environment(leaseRoot, "compact-spoof-open", {
+        now: () => Date.now() + 60_000,
+        processIsAlive: () => false,
+        recoveryRoot,
+        staleMs: 1
+      })
+    });
+    try {
+      expect(opened.mode).toEqual({ kind: "read-only", reason: "recovery-attention" });
+    } finally {
+      await opened.close();
+    }
+    expect(statSync(journalPath)).toBeDefined();
+    expect(statSync(journal.rollback.path)).toBeDefined();
+    expect(statSync(journal.staging.path)).toBeDefined();
+  }, 20_000);
+
+  it("retains recovery evidence and refuses writable admission when a published rollback is tampered", async () => {
+    const recoveryRoot = path.join(root, "recovery");
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-compact-tamper",
+      environment: environment(leaseRoot, "compact-tamper-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Compact rollback tamper"
+    });
+    await source.close();
+    expect(killCompactAt({ leaseRoot, recoveryRoot, sourcePath, stage: "post-publication" }).status)
+      .not.toBe(0);
+
+    const journalPath = path.join(recoveryRoot, readdirSync(recoveryRoot).find((name) => name.endsWith(".json"))!);
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      rollback: { path: string };
+    };
+    writeFileSync(journal.rollback.path, "tampered rollback bytes", "utf8");
+
+    const opened = await storeClass().open(sourcePath, {
+      access: "prefer-write",
+      environment: environment(leaseRoot, "compact-tamper-open", {
+        now: () => Date.now() + 60_000,
+        processIsAlive: () => false,
+        recoveryRoot,
+        staleMs: 1
+      })
+    });
+    try {
+      expect(opened.mode).toEqual({ kind: "read-only", reason: "recovery-attention" });
+    } finally {
+      await opened.close();
+    }
+    expect(statSync(journalPath)).toBeDefined();
+    expect(statSync(journal.rollback.path)).toBeDefined();
+  }, 20_000);
+
   it("uses validated no-clobber backups for Save a Copy and Save As with independent identities and leases", async () => {
     const store = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
@@ -884,7 +1012,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(sourceOwnershipWasSafe).toBe(true);
   });
 
-  it("removes a published recovery journal when its rollback was already cleaned", async () => {
+  it("retains an unverifiable legacy published journal with recovery attention", async () => {
     const destination = path.join(root, "Published-cleanup.ether");
     const recoveryRoot = path.join(root, "recovery");
     const documentId = "document-published-cleanup";
@@ -921,11 +1049,12 @@ describe("Ether document writer leases and backup lifecycle", () => {
       access: "read-only",
       environment: environment(leaseRoot, "published-cleanup-open", { recoveryRoot })
     });
+    expect(reopened.mode).toEqual({ kind: "read-only", reason: "recovery-attention" });
     await reopened.close();
-    expect(statSync(journalPath, { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(journalPath, { throwIfNoEntry: false })).toBeDefined();
   });
 
-  it("removes a recovery journal when the previous destination was already restored", async () => {
+  it("retains a UUID-only legacy restored journal with recovery attention", async () => {
     const destination = path.join(root, "Previous-restored.ether");
     const recoveryRoot = path.join(root, "recovery");
     const previousDocumentId = "document-previous-restored";
@@ -962,8 +1091,9 @@ describe("Ether document writer leases and backup lifecycle", () => {
       access: "read-only",
       environment: environment(leaseRoot, "previous-restored-open", { recoveryRoot })
     });
+    expect(reopened.mode).toEqual({ kind: "read-only", reason: "recovery-attention" });
     await reopened.close();
-    expect(statSync(journalPath, { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(journalPath, { throwIfNoEntry: false })).toBeDefined();
   });
 
   it("preserves a recovery journal without aborting open when rollback status is indeterminate", async () => {

@@ -35,7 +35,14 @@ export const DocumentDescriptorSchema = z
     named: z.boolean(),
     mode: z.enum(["writable", "read-only"]),
     readOnlyReason: z
-      .enum(["requested", "writer-active", "location-unsupported", "sqlite-busy", "heartbeat-failed"])
+      .enum([
+        "requested",
+        "writer-active",
+        "location-unsupported",
+        "sqlite-busy",
+        "heartbeat-failed",
+        "recovery-attention"
+      ])
       .nullable(),
     commands: z.object({
       save: z.boolean(),

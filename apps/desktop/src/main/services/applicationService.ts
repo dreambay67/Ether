@@ -213,26 +213,47 @@ export class OpenDocumentController {
   }
 }
 
+interface GrantBinding {
+  documentId: string;
+  documentPath: string;
+  grantId: string;
+  operation: ReferenceGrantPathRequest["operation"];
+  path: string;
+  fingerprint?: string;
+}
+
+interface PendingGrantRebind {
+  destinationDocumentPath: string;
+  id: string;
+  retainSource: boolean;
+  sourceDocumentId: string;
+  sourceDocumentPath: string;
+  switchActive: boolean;
+  version: 1;
+}
+
 export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
-  private grants = new Map<string, {
-    documentId: string;
-    documentPath: string;
-    grantId: string;
-    operation: ReferenceGrantPathRequest["operation"];
-    path: string;
-    fingerprint?: string;
-  }>();
+  private grants = new Map<string, GrantBinding>();
+  private pendingRebinds = new Map<string, PendingGrantRebind>();
   private readonly activeDocuments = new Map<string, string>();
+  private persistenceDirty = false;
 
   constructor(private readonly options: {
     storagePath?: string;
     persistenceCheckpoint?: (stage: "write" | "fsync" | "rename") => void;
   } = {}) {
     this.load();
+    this.loadPendingRebinds();
   }
 
   activateDocument(documentId: string, documentPath: string): void {
-    this.activeDocuments.set(documentId, canonicalGrantPath(documentPath));
+    const canonicalPath = canonicalGrantPath(documentPath);
+    this.activeDocuments.set(documentId, canonicalPath);
+    for (const pending of [...this.pendingRebinds.values()]) {
+      if (pending.destinationDocumentPath === canonicalPath) {
+        this.completeRebind(pending.id, documentId);
+      }
+    }
   }
 
   deactivateDocument(documentId: string): void {
@@ -290,10 +311,15 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
 
   revoke(grantId: string, documentId: string): void {
     const key = grantKey(grantId, documentId);
-    if (!this.grants.has(key)) return;
-    const next = new Map(this.grants);
-    next.delete(key);
-    this.commit(next);
+    if (this.grants.has(key)) {
+      const next = new Map(this.grants);
+      next.delete(key);
+      this.grants = next;
+      this.persistenceDirty = true;
+    }
+    if (!this.persistenceDirty) return;
+    this.persist(this.grants);
+    this.persistenceDirty = false;
   }
 
   revokeDocument(documentId: string): void {
@@ -339,6 +365,69 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     }
   }
 
+  beginRebind(input: {
+    sourceDocumentId: string;
+    sourceDocumentPath: string;
+    destinationDocumentPath: string;
+    retainSource: boolean;
+    switchActive: boolean;
+  }): string {
+    const sourcePath = canonicalGrantPath(input.sourceDocumentPath);
+    if (this.activeDocuments.get(input.sourceDocumentId) !== sourcePath) {
+      throw codedError("DOCUMENT_SCOPE_REJECTED", "Reference grants are not active for the source document identity.");
+    }
+    const pending: PendingGrantRebind = {
+      destinationDocumentPath: canonicalGrantDestinationPath(input.destinationDocumentPath),
+      id: randomUUID(),
+      retainSource: input.retainSource,
+      sourceDocumentId: input.sourceDocumentId,
+      sourceDocumentPath: sourcePath,
+      switchActive: input.switchActive,
+      version: 1
+    };
+    const next = new Map(this.pendingRebinds);
+    next.set(pending.id, pending);
+    this.persistPendingRebinds(next);
+    this.pendingRebinds = next;
+    return pending.id;
+  }
+
+  completeRebind(id: string, destinationDocumentId: string): void {
+    const pending = this.pendingRebinds.get(id);
+    if (pending === undefined) return;
+    this.applyRebind({
+      sourceDocumentId: pending.sourceDocumentId,
+      sourceDocumentPath: pending.sourceDocumentPath,
+      destinationDocumentId,
+      destinationDocumentPath: pending.destinationDocumentPath,
+      retainSource: pending.retainSource
+    });
+    const remaining = new Map(this.pendingRebinds);
+    remaining.delete(id);
+    this.persistPendingRebinds(remaining);
+    this.pendingRebinds = remaining;
+    this.activatePublishedRebind(id, destinationDocumentId, pending);
+  }
+
+  cancelRebind(id: string): void {
+    if (!this.pendingRebinds.has(id)) return;
+    const remaining = new Map(this.pendingRebinds);
+    remaining.delete(id);
+    this.persistPendingRebinds(remaining);
+    this.pendingRebinds = remaining;
+  }
+
+  activatePublishedRebind(
+    id: string,
+    destinationDocumentId: string,
+    knownPending?: PendingGrantRebind
+  ): void {
+    const pending = knownPending ?? this.pendingRebinds.get(id);
+    if (pending?.switchActive !== true) return;
+    this.activeDocuments.delete(pending.sourceDocumentId);
+    this.activeDocuments.set(destinationDocumentId, pending.destinationDocumentPath);
+  }
+
   private memoryDocumentPath(documentId: string): string {
     if (this.options.storagePath !== undefined) {
       throw codedError("DOCUMENT_SCOPE_REJECTED", "Reference grants require an active document identity.");
@@ -363,16 +452,48 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     }
   }
 
-  private commit(next: Map<string, {
-    documentId: string;
-    documentPath: string;
-    grantId: string;
-    operation: ReferenceGrantPathRequest["operation"];
-    path: string;
-    fingerprint?: string;
-  }>): void {
+  private loadPendingRebinds(): void {
+    const pendingPath = this.pendingStoragePath();
+    if (pendingPath === undefined) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(pendingPath, "utf8"));
+    } catch {
+      return;
+    }
+    if (!Array.isArray(parsed)) return;
+    for (const candidate of parsed) {
+      if (isPendingGrantRebind(candidate)) this.pendingRebinds.set(candidate.id, candidate);
+    }
+  }
+
+  private applyRebind(input: {
+    sourceDocumentId: string;
+    sourceDocumentPath: string;
+    destinationDocumentId: string;
+    destinationDocumentPath: string;
+    retainSource: boolean;
+  }): void {
+    const next = new Map(this.grants);
+    for (const binding of this.grants.values()) {
+      if (
+        binding.documentId !== input.sourceDocumentId ||
+        binding.documentPath !== input.sourceDocumentPath
+      ) continue;
+      next.set(grantKey(binding.grantId, input.destinationDocumentId), {
+        ...binding,
+        documentId: input.destinationDocumentId,
+        documentPath: input.destinationDocumentPath
+      });
+      if (!input.retainSource) next.delete(grantKey(binding.grantId, input.sourceDocumentId));
+    }
+    this.commit(next);
+  }
+
+  private commit(next: Map<string, GrantBinding>): void {
     this.persist(next);
     this.grants = next;
+    this.persistenceDirty = false;
   }
 
   private persist(grants: typeof this.grants): void {
@@ -385,6 +506,50 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
       descriptor = openSync(temporaryPath, "wx", 0o600);
       this.options.persistenceCheckpoint?.("write");
       writeFileSync(descriptor, `${JSON.stringify([...grants.values()], null, 2)}\n`, "utf8");
+      this.options.persistenceCheckpoint?.("fsync");
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      this.options.persistenceCheckpoint?.("rename");
+      renameSync(temporaryPath, storagePath);
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+      try {
+        unlinkSync(temporaryPath);
+      } catch {
+        // The owned temporary was published or is already absent.
+      }
+    }
+  }
+
+  private pendingStoragePath(): string | undefined {
+    const storagePath = this.options.storagePath;
+    return storagePath === undefined
+      ? undefined
+      : path.join(path.dirname(storagePath), "reference-grants.pending.json");
+  }
+
+  private persistPendingRebinds(pending: Map<string, PendingGrantRebind>): void {
+    const storagePath = this.pendingStoragePath();
+    if (storagePath === undefined) return;
+    this.persistJson(storagePath, [...pending.values()]);
+    if (pending.size === 0) {
+      try {
+        unlinkSync(storagePath);
+      } catch (error) {
+        if ((error as { code?: unknown } | null)?.code !== "ENOENT") throw error;
+      }
+    }
+  }
+
+  private persistJson(storagePath: string, value: unknown): void {
+    mkdirSync(path.dirname(storagePath), { recursive: true });
+    const temporaryPath = `${storagePath}.${randomUUID()}.tmp`;
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(temporaryPath, "wx", 0o600);
+      this.options.persistenceCheckpoint?.("write");
+      writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, "utf8");
       this.options.persistenceCheckpoint?.("fsync");
       fsyncSync(descriptor);
       closeSync(descriptor);
@@ -416,7 +581,10 @@ export interface DesktopApplicationServiceOptions {
   autosaveOperation?: (application: EtherApplication) => Promise<void>;
   pathGrantPersistenceCheckpoint?: (stage: "write" | "fsync" | "rename") => void;
   bootstrapOperation?: () => Promise<void>;
-  referenceCandidateCheckpoint?: (candidatePath: string) => Promise<void> | void;
+  referenceCandidateCheckpoint?: (
+    candidatePath: string,
+    stage: "before-grant" | "after-grant"
+  ) => Promise<void> | void;
   mutationOperationCheckpoint?: (operation: "graph" | "reference" | "portable") => Promise<void> | void;
 }
 
@@ -553,31 +721,41 @@ export class DesktopApplicationService {
     validateDestination(destination);
     const sourcePath = this.currentPath;
     if (sourcePath === null) throw codedError("DOCUMENT_NOT_OPEN", "No active document path is available.");
-    const saved = await this.requireApplication().saveAsDocument({ path: destination });
-    const destinationPath = await realpath(destination);
-    const rebind = {
+    const pendingRebindId = this.pathGrants.beginRebind({
       sourceDocumentId: documentId,
       sourceDocumentPath: sourcePath,
-      destinationDocumentId: saved.documentId,
-      destinationDocumentPath: destinationPath,
+      destinationDocumentPath: destination,
       retainSource: true,
       switchActive: true
-    };
-    this.currentPath = destinationPath;
-    this.untitled = false;
+    });
+    let saved;
     try {
-      this.pathGrants.rebindDocument(rebind);
+      saved = await this.requireApplication().saveAsDocument({ path: destination });
     } catch (error) {
       try {
-        this.pathGrants.rebindDocument(rebind);
+        this.pathGrants.cancelRebind(pendingRebindId);
       } catch {
-        this.pathGrants.deactivateDocument(documentId);
-        this.pathGrants.activateDocument(saved.documentId, destinationPath);
+        // The unpublished intent is harmless and remains available for deterministic cleanup.
       }
-      await this.refresh("snapshot", "needs-attention");
-      this.emitAttention(error);
-      await this.refreshTail;
       throw error;
+    }
+    const destinationPath = await realpath(destination);
+    this.currentPath = destinationPath;
+    this.untitled = false;
+    let rebindError: unknown;
+    try {
+      this.pathGrants.completeRebind(pendingRebindId, saved.documentId);
+    } catch (error) {
+      rebindError = error;
+      try {
+        this.pathGrants.completeRebind(pendingRebindId, saved.documentId);
+      } catch {
+        this.pathGrants.activatePublishedRebind(pendingRebindId, saved.documentId);
+        await this.refresh("snapshot", "needs-attention");
+        this.emitAttention(rebindError);
+        await this.refreshTail;
+        return this.requireSnapshot();
+      }
     }
     return this.refresh("snapshot", "saved");
   }
@@ -593,26 +771,36 @@ export class DesktopApplicationService {
     validateDestination(destination);
     const sourcePath = this.currentPath;
     if (sourcePath === null) throw codedError("DOCUMENT_NOT_OPEN", "No active document path is available.");
-    const copied = await this.requireApplication().saveCopyDocument({ path: destination });
-    const rebind = {
+    const pendingRebindId = this.pathGrants.beginRebind({
       sourceDocumentId: documentId,
       sourceDocumentPath: sourcePath,
-      destinationDocumentId: copied.documentId,
-      destinationDocumentPath: await realpath(destination),
+      destinationDocumentPath: destination,
       retainSource: true,
       switchActive: false
-    };
+    });
+    let copied;
     try {
-      this.pathGrants.rebindDocument(rebind);
+      copied = await this.requireApplication().saveCopyDocument({ path: destination });
     } catch (error) {
       try {
-        this.pathGrants.rebindDocument(rebind);
+        this.pathGrants.cancelRebind(pendingRebindId);
       } catch {
-        // The source remains authoritative; destination grants can be recovered on reopen.
+        // The unpublished intent is harmless and remains available for deterministic cleanup.
       }
-      this.emitAttention(error);
-      await this.refreshTail;
       throw error;
+    }
+    let rebindError: unknown;
+    try {
+      this.pathGrants.completeRebind(pendingRebindId, copied.documentId);
+    } catch (error) {
+      rebindError = error;
+      try {
+        this.pathGrants.completeRebind(pendingRebindId, copied.documentId);
+      } catch {
+        this.emitAttention(rebindError);
+        await this.refreshTail;
+        return this.refresh("state", "needs-attention");
+      }
     }
     return this.refresh("state", "saved");
   }
@@ -868,8 +1056,9 @@ export class DesktopApplicationService {
             })) {
               let grantId: string | undefined;
               try {
-                await this.options.referenceCandidateCheckpoint?.(candidate);
+                await this.options.referenceCandidateCheckpoint?.(candidate, "before-grant");
                 grantId = this.pathGrants.grant(documentId, "relink", candidate);
+                await this.options.referenceCandidateCheckpoint?.(candidate, "after-grant");
                 await application.relinkDocumentReference({
                   referenceId: target.id,
                   sourcePath: candidate,
@@ -878,7 +1067,10 @@ export class DesktopApplicationService {
                 this.pathGrants.allowResolve(grantId, documentId);
                 break;
               } catch (error) {
-                if (grantId !== undefined) this.pathGrants.revoke(grantId, documentId);
+                if (grantId !== undefined) {
+                  const revokeError = this.revokePathGrant(grantId, documentId);
+                  if (revokeError !== undefined) this.emitAttention(revokeError);
+                }
                 if (!isSkippableReferenceCandidateError(error)) throw error;
               }
             }
@@ -952,10 +1144,20 @@ export class DesktopApplicationService {
     return this.currentPath;
   }
 
+  async closeDocument(): Promise<void> {
+    return this.enqueueLifecycle(() => this.closeActiveDocument());
+  }
+
   async close(): Promise<void> {
     if (this.closePromise !== null) return this.closePromise;
     this.lifecycleAccepting = false;
-    this.closePromise = this.appendLifecycle(() => this.closeActiveDocument());
+    this.abortReferenceSearch();
+    const draining = this.appendLifecycle(() => this.closeActiveDocument());
+    this.closePromise = draining.catch((error) => {
+      this.lifecycleAccepting = true;
+      this.closePromise = null;
+      throw error;
+    });
     return this.closePromise;
   }
 
@@ -965,8 +1167,7 @@ export class DesktopApplicationService {
 
   private async closeActiveDocument(): Promise<void> {
     const closingDocumentId = this.current?.documentId;
-    this.referenceSearchController?.abort();
-    this.referenceSearchController = null;
+    this.abortReferenceSearch();
     await this.autosaveCoordinator?.flushAndDispose();
     this.autosaveCoordinator = null;
     await this.refreshTail;
@@ -976,6 +1177,27 @@ export class DesktopApplicationService {
     this.current = null;
     this.currentPath = null;
     this.untitled = false;
+  }
+
+  private abortReferenceSearch(): void {
+    this.referenceSearchController?.abort();
+    this.referenceSearchController = null;
+  }
+
+  private revokePathGrant(grantId: string, documentId: string): unknown | undefined {
+    let firstError: unknown;
+    try {
+      this.pathGrants.revoke(grantId, documentId);
+      return undefined;
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      this.pathGrants.revoke(grantId, documentId);
+      return undefined;
+    } catch {
+      return firstError;
+    }
   }
 
   private createApplication(): EtherApplication {
@@ -1147,6 +1369,16 @@ function canonicalGrantPath(filePath: string): string {
   return process.platform === "win32" ? canonical.toLocaleLowerCase() : canonical;
 }
 
+function canonicalGrantDestinationPath(filePath: string): string {
+  try {
+    return canonicalGrantPath(filePath);
+  } catch {
+    const canonicalParent = realpathSync.native(path.dirname(path.resolve(filePath)));
+    const destination = path.join(canonicalParent, path.basename(filePath));
+    return process.platform === "win32" ? destination.toLocaleLowerCase() : destination;
+  }
+}
+
 function tryCanonicalGrantPath(filePath: string): string | null {
   try {
     return canonicalGrantPath(filePath);
@@ -1177,6 +1409,18 @@ function isGrantBinding(value: unknown): value is {
     (binding.fingerprint === undefined || typeof binding.fingerprint === "string");
 }
 
+function isPendingGrantRebind(value: unknown): value is PendingGrantRebind {
+  if (value === null || typeof value !== "object") return false;
+  const pending = value as Record<string, unknown>;
+  return pending.version === 1 &&
+    typeof pending.id === "string" &&
+    typeof pending.sourceDocumentId === "string" &&
+    typeof pending.sourceDocumentPath === "string" &&
+    typeof pending.destinationDocumentPath === "string" &&
+    typeof pending.retainSource === "boolean" &&
+    typeof pending.switchActive === "boolean";
+}
+
 function sameCanonicalPath(left: string, right: string): boolean {
   const resolvedLeft = path.resolve(left);
   const resolvedRight = path.resolve(right);
@@ -1204,10 +1448,12 @@ export interface WindowsLocationCapabilityPort {
 
 export function createWindowsLocationCapability(
   port: WindowsLocationCapabilityPort = productionWindowsLocationPort(),
-  options: { timeoutMs?: number } = {}
+  options: { cacheTtlMs?: number; timeoutMs?: number } = {}
 ): WritableLocationCapabilityAdapter {
+  const cache = new Map<string, { expiresAt: number; kind: WritableLocationKind }>();
   return {
     async classify(filePath, callerSignal): Promise<WritableLocationKind> {
+      if (callerSignal?.aborted === true) return "unknown";
       const controller = new AbortController();
       const abort = () => controller.abort();
       callerSignal?.addEventListener("abort", abort, { once: true });
@@ -1221,15 +1467,26 @@ export function createWindowsLocationCapability(
         });
         const inspection = await Promise.race([port.inspect(filePath, controller.signal), timeout]);
         const normalized = normalizeWindowsPath(inspection.finalPath);
-        if (normalized.startsWith("\\\\")) return "mapped-network";
-        if (
+        const factKey = JSON.stringify({
+          cloudPlaceholder: inspection.cloudPlaceholder,
+          cloudRoots: inspection.cloudRoots.map(normalizeWindowsPath).sort(),
+          finalPath: normalized,
+          volumeType: inspection.volumeType
+        });
+        const cached = cache.get(factKey);
+        if (cached !== undefined && cached.expiresAt > Date.now()) return cached.kind;
+        const kind: WritableLocationKind = normalized.startsWith("\\\\")
+          ? "mapped-network"
+          : (
           inspection.cloudPlaceholder ||
           inspection.cloudRoots.some((root) => insideWindowsPath(normalized, normalizeWindowsPath(root)))
-        ) return "cloud-placeholder";
-        if (inspection.volumeType === "fixed") return "local-fixed";
-        if (inspection.volumeType === "network") return "mapped-network";
-        if (inspection.volumeType === "removable") return "removable";
-        return "unknown";
+        ) ? "cloud-placeholder"
+          : inspection.volumeType === "fixed" ? "local-fixed"
+            : inspection.volumeType === "network" ? "mapped-network"
+              : inspection.volumeType === "removable" ? "removable"
+                : "unknown";
+        cache.set(factKey, { expiresAt: Date.now() + (options.cacheTtlMs ?? 5_000), kind });
+        return kind;
       } catch {
         return "unknown";
       } finally {
@@ -1241,12 +1498,7 @@ export function createWindowsLocationCapability(
 }
 
 function productionWindowsLocationPort(): WindowsLocationCapabilityPort {
-  type Inspection = Awaited<ReturnType<WindowsLocationCapabilityPort["inspect"]>>;
-  const cache = new Map<string, Inspection>();
   return { inspect: async (filePath, signal) => {
-    const key = filePath.toLocaleLowerCase();
-    const cached = cache.get(key);
-    if (cached !== undefined) return cached;
     const script = [
       "Add-Type -Language CSharp -TypeDefinition @'",
       "using System;",
@@ -1299,7 +1551,7 @@ function productionWindowsLocationPort(): WindowsLocationCapabilityPort {
     };
     const driveType = String(value.driveType ?? "unknown");
     const attributes = Number(value.attributes ?? 0);
-    const result: Inspection = {
+    return {
       cloudPlaceholder: (attributes & (4096 | 262144 | 4194304)) !== 0,
       cloudRoots: Array.isArray(value.cloudRoots)
         ? value.cloudRoots.filter((root): root is string => typeof root === "string")
@@ -1309,12 +1561,13 @@ function productionWindowsLocationPort(): WindowsLocationCapabilityPort {
         ? driveType
         : "unknown"
     };
-    cache.set(key, result);
-    return result;
   } };
 }
 
 export function runBoundedLocationProbe(script: string, filePath: string, signal: AbortSignal): Promise<string> {
+  if (signal.aborted) {
+    return Promise.reject(Object.assign(new Error("Location probe was cancelled."), { code: "ABORT_ERR" }));
+  }
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -1324,16 +1577,23 @@ export function runBoundedLocationProbe(script: string, filePath: string, signal
     let output = "";
     let outputBytes = 0;
     let settled = false;
+    let terminating = false;
     const finish = (operation: () => void) => {
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", abort);
       operation();
     };
-    const abort = () => {
-      child.kill();
-      finish(() => reject(Object.assign(new Error("Location probe was cancelled."), { code: "ABORT_ERR" })));
+    const stop = (error: Error) => {
+      if (settled || terminating) return;
+      terminating = true;
+      signal.removeEventListener("abort", abort);
+      void terminateProbeProcessTree(child).then(
+        () => finish(() => reject(error)),
+        (terminationError) => finish(() => reject(terminationError))
+      );
     };
+    const abort = () => stop(Object.assign(new Error("Location probe was cancelled."), { code: "ABORT_ERR" }));
     signal.addEventListener("abort", abort, { once: true });
     child.once("error", (error) => finish(() => reject(error)));
     child.stdout.setEncoding("utf8");
@@ -1341,23 +1601,47 @@ export function runBoundedLocationProbe(script: string, filePath: string, signal
       output += chunk;
       outputBytes += Buffer.byteLength(chunk, "utf8");
       if (outputBytes > maximumOutputBytes) {
-        child.kill();
-        finish(() => reject(codedError("LOCATION_PROBE_OUTPUT_LIMIT", "Location probe output exceeded its limit.")));
+        stop(codedError("LOCATION_PROBE_OUTPUT_LIMIT", "Location probe output exceeded its limit."));
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
       outputBytes += chunk.byteLength;
       if (outputBytes > maximumOutputBytes) {
-        child.kill();
-        finish(() => reject(codedError("LOCATION_PROBE_OUTPUT_LIMIT", "Location probe output exceeded its limit.")));
+        stop(codedError("LOCATION_PROBE_OUTPUT_LIMIT", "Location probe output exceeded its limit."));
       }
     });
-    child.once("close", (code) => finish(() => {
+    child.once("close", (code) => {
+      if (terminating) return;
+      finish(() => {
       if (code === 0) resolve(output);
       else reject(codedError("LOCATION_PROBE_FAILED", "Windows location capability probe failed."));
-    }));
+      });
+    });
     child.stdin.end(filePath, "utf8");
   });
+}
+
+async function terminateProbeProcessTree(
+  child: ReturnType<typeof spawn>
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  if (process.platform === "win32" && child.pid !== undefined) {
+    await new Promise<void>((resolve) => {
+      const killer = spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: "ignore",
+        windowsHide: true
+      });
+      killer.once("error", () => {
+        child.kill();
+        resolve();
+      });
+      killer.once("close", () => resolve());
+    });
+  } else {
+    child.kill("SIGKILL");
+  }
+  await closed;
 }
 
 function normalizeWindowsPath(filePath: string): string {

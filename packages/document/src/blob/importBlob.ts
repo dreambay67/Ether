@@ -293,8 +293,17 @@ export async function importBlob(
     if (artifact !== undefined) artifacts.attach(artifact);
     return result;
   });
-  updateJournal(staged, "committed", options.appDataRoot);
-  options.checkpoint?.("committed");
+  try {
+    updateJournal(staged, "committed", options.appDataRoot);
+    options.checkpoint?.("committed");
+  } catch (error) {
+    try {
+      cleanupStaging(staged, options.appDataRoot);
+    } catch {
+      // Preserve the publication error; document-level cleanup reclaims the unreferenced ready blob.
+    }
+    throw error;
+  }
   cleanupStaging(staged, options.appDataRoot);
   return { ...ready, deduplicated: false };
 }

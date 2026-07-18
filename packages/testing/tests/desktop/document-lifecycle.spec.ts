@@ -1,12 +1,26 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { EtherApplication } from "@ether/application";
 import { DocumentStore, importBlob, linkReference } from "@ether/document";
-import { FakeImageProvider } from "@ether/providers";
+import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -15,6 +29,7 @@ import {
   DesktopPathGrantAuthority,
   OpenDocumentController,
   OpenDocumentCoordinator,
+  createWindowsLocationCapability,
   referenceCapabilities,
   type NativeDialogPort
 } from "../../../../apps/desktop/src/main/services/applicationService";
@@ -44,10 +59,155 @@ function dialogs(overrides: Partial<NativeDialogPort> = {}): NativeDialogPort {
   };
 }
 
+async function recoveryFileFact(filePath: string) {
+  const value = await lstat(filePath, { bigint: true });
+  return {
+    identity: {
+      birthtimeNs: value.birthtimeNs.toString(),
+      dev: value.dev.toString(),
+      ino: value.ino.toString(),
+      size: value.size.toString()
+    },
+    sha256: createHash("sha256").update(await readFile(filePath)).digest("hex")
+  };
+}
+
+async function stagePendingCompactRecovery(
+  documentPath: string,
+  recoveryRoot: string
+): Promise<string[]> {
+  await mkdir(recoveryRoot, { recursive: true });
+  const journalId = randomUUID();
+  const stagingPath = path.join(
+    path.dirname(documentPath),
+    `.${path.basename(documentPath)}.ether-compact-${randomUUID()}`
+  );
+  const rollbackPath = path.join(
+    path.dirname(documentPath),
+    `.${path.basename(documentPath)}.ether-rollback-${journalId}`
+  );
+  await copyFile(documentPath, stagingPath);
+  await link(documentPath, rollbackPath);
+  const destination = await recoveryFileFact(documentPath);
+  const staging = await recoveryFileFact(stagingPath);
+  const rollback = await recoveryFileFact(rollbackPath);
+  const database = new DatabaseSync(documentPath, { readOnly: true });
+  const documentId = (database.prepare("SELECT document_id FROM document WHERE singleton = 1").get() as {
+    document_id: string;
+  }).document_id;
+  database.close();
+  const journalPath = path.join(recoveryRoot, `${journalId}.json`);
+  await writeFile(journalPath, JSON.stringify({
+    version: 2,
+    journalId,
+    destinationPath: documentPath,
+    destination,
+    sourcePath: documentPath,
+    sourceDocumentId: documentId,
+    newDocumentId: documentId,
+    previousDocumentId: documentId,
+    phase: "rollback-created",
+    rollback: { ...rollback, path: rollbackPath },
+    staging: { ...staging, path: stagingPath }
+  }));
+  return [journalPath, rollbackPath, stagingPath];
+}
+
+async function createQueuedCandidate(root: string, candidatePath: string) {
+  const candidateBuilder = new EtherApplication({
+    appDataRoot: path.join(root, "candidate-appdata"),
+    appVersion: "4.0.0-test",
+    provider: new FakeImageProvider(),
+    dispatchMode: "manual"
+  });
+  await candidateBuilder.createDocument({
+    path: candidatePath,
+    title: "Candidate B",
+    initialGraph: {
+      id: "graph-root",
+      title: "Candidate B",
+      kind: "root",
+      createdAt: "2026-07-18T00:00:00.000Z",
+      updatedAt: "2026-07-18T00:00:00.000Z",
+      nodes: [], edges: [], groups: [], modules: [],
+      viewState: {
+        viewport: { x: 0, y: 0, zoom: 1 },
+        selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null
+      }
+    }
+  });
+  const initial = await candidateBuilder.queryDocument();
+  await candidateBuilder.applyGraphTransaction({
+    commandId: "candidate-graph",
+    transaction: {
+      id: "candidate-graph-transaction",
+      baseDocumentRevisionId: initial.documentRevisionId,
+      baseGraphRevisions: { "graph-root": initial.graphRevisions["graph-root"]! },
+      title: "Queued candidate workflow",
+      actor: "user",
+      layoutPolicy: "preserve",
+      operations: [
+        {
+          type: "addNode", graphId: "graph-root",
+          node: {
+            id: "prompt", definitionId: "prompt.text", title: "Prompt",
+            position: { x: 0, y: 0 }, size: { width: 220, height: 140 },
+            config: { kind: "prompt.text", body: "Do not run during inspection.", assembly: "append" },
+            presentation: { collapsed: false, accent: "default", previewMode: "content" }
+          }
+        },
+        {
+          type: "addNode", graphId: "graph-root",
+          node: {
+            id: "generator", definitionId: "generation.image", title: "Generator",
+            position: { x: 300, y: 0 }, size: { width: 220, height: 140 },
+            config: {
+              kind: "generation.image", providerId: "ether-fake-local", profileId: "fake-image-default",
+              aspectRatio: "1:1", resolution: { width: 32, height: 32 }, outputCount: 1
+            },
+            presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+          }
+        },
+        {
+          type: "addEdge", graphId: "graph-root",
+          edge: {
+            id: "candidate-lane",
+            from: { kind: "node", nodeId: "prompt", channel: "text" },
+            to: { kind: "node", nodeId: "generator", channel: "text" },
+            role: "subject", order: 0, selector: { kind: "latest-approved" },
+            adapter: { kind: "auto" }, enabled: true
+          }
+        }
+      ]
+    }
+  });
+  const plan = await candidateBuilder.previewRun({
+    commandId: "candidate-preview", graphId: "graph-root", scope: { kind: "graph" }
+  });
+  const permit = await candidateBuilder.grantRunPermit({
+    commandId: "candidate-permit", planId: plan.id, contentHash: plan.contentHash
+  });
+  const queued = await candidateBuilder.startRun({
+    commandId: "candidate-start", planId: plan.id,
+    contentHash: plan.contentHash, runPermitId: permit.id
+  });
+  await candidateBuilder.closeDocument();
+  return queued;
+}
+
 function pngBytes(size: number, fill: number) {
   const bytes = Buffer.alloc(Math.max(size, 8), fill);
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
   return bytes;
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 beforeEach(() => {
@@ -202,89 +362,74 @@ describe("desktop document lifecycle", () => {
     }
   );
 
+  it("does not reconcile a candidate replacement journal before the active document drains", async () => {
+    const root = await tempRoot("ether-provisional-replacement-");
+    const appDataRoot = path.join(root, "appdata");
+    const candidatePath = path.join(root, "Candidate B.ether");
+    const creator = new DesktopApplicationService({
+      appDataRoot: path.join(root, "candidate-appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => candidatePath }),
+      provider: new FakeImageProvider()
+    });
+    const candidate = await creator.bootstrap();
+    await creator.save(candidate.documentId);
+    await creator.close();
+    const recoveryPaths = await stagePendingCompactRecovery(
+      candidatePath,
+      path.join(appDataRoot, "recovery")
+    );
+    const candidateBytes = await readFile(candidatePath);
+    let failDrain = true;
+    const service = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider(),
+      autosaveOperation: async () => {
+        if (failDrain) throw Object.assign(new Error("active drain failed"), { code: "ENOSPC" });
+      }
+    });
+    try {
+      const active = await service.bootstrap();
+      await service.applyGraphTransaction(active.documentId, {
+        id: "dirty-before-open",
+        baseDocumentRevisionId: active.documentRevisionId,
+        baseGraphRevisions: { [active.graphId]: active.graphRevisionId },
+        title: "Keep active",
+        actor: "user",
+        layoutPolicy: "preserve",
+        operations: [{
+          type: "addNode",
+          graphId: active.graphId,
+          node: {
+            id: "keep-active",
+            definitionId: "prompt.text",
+            title: "Keep active",
+            position: { x: 0, y: 0 },
+            size: { width: 220, height: 140 },
+            config: { kind: "prompt.text", body: "Do not replace this document.", assembly: "append" },
+            presentation: { collapsed: false, accent: "default", previewMode: "content" }
+          }
+        }]
+      });
+
+      await expect(service.openPath(candidatePath)).rejects.toMatchObject({ code: "ENOSPC" });
+      expect(service.snapshot().documentId).toBe(active.documentId);
+      expect(await readFile(candidatePath)).toEqual(candidateBytes);
+      for (const recoveryPath of recoveryPaths) await expect(stat(recoveryPath)).resolves.toBeDefined();
+    } finally {
+      failDrain = false;
+      await service.close();
+    }
+  }, 15_000);
+
   it("inspects a queued-job candidate without recovery when the active document cannot drain", async () => {
     const root = await tempRoot("ether-provisional-open-effects-");
     const appDataRoot = path.join(root, "appdata");
     const candidatePath = path.join(root, "Candidate B.ether");
-    const candidateBuilder = new EtherApplication({
-      appDataRoot: path.join(root, "candidate-appdata"),
-      appVersion: "4.0.0-test",
-      provider: new FakeImageProvider(),
-      dispatchMode: "manual"
-    });
-    await candidateBuilder.createDocument({
-      path: candidatePath,
-      title: "Candidate B",
-      initialGraph: {
-        id: "graph-root",
-        title: "Candidate B",
-        kind: "root",
-        createdAt: "2026-07-18T00:00:00.000Z",
-        updatedAt: "2026-07-18T00:00:00.000Z",
-        nodes: [], edges: [], groups: [], modules: [],
-        viewState: {
-          viewport: { x: 0, y: 0, zoom: 1 },
-          selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null
-        }
-      }
-    });
-    const initial = await candidateBuilder.queryDocument();
-    await candidateBuilder.applyGraphTransaction({
-      commandId: "candidate-graph",
-      transaction: {
-        id: "candidate-graph-transaction",
-        baseDocumentRevisionId: initial.documentRevisionId,
-        baseGraphRevisions: { "graph-root": initial.graphRevisions["graph-root"]! },
-        title: "Queued candidate workflow",
-        actor: "user",
-        layoutPolicy: "preserve",
-        operations: [
-          {
-            type: "addNode", graphId: "graph-root",
-            node: {
-              id: "prompt", definitionId: "prompt.text", title: "Prompt",
-              position: { x: 0, y: 0 }, size: { width: 220, height: 140 },
-              config: { kind: "prompt.text", body: "Do not run during inspection.", assembly: "append" },
-              presentation: { collapsed: false, accent: "default", previewMode: "content" }
-            }
-          },
-          {
-            type: "addNode", graphId: "graph-root",
-            node: {
-              id: "generator", definitionId: "generation.image", title: "Generator",
-              position: { x: 300, y: 0 }, size: { width: 220, height: 140 },
-              config: {
-                kind: "generation.image", providerId: "ether-fake-local", profileId: "fake-image-default",
-                aspectRatio: "1:1", resolution: { width: 32, height: 32 }, outputCount: 1
-              },
-              presentation: { collapsed: false, accent: "default", previewMode: "summary" }
-            }
-          },
-          {
-            type: "addEdge", graphId: "graph-root",
-            edge: {
-              id: "candidate-lane",
-              from: { kind: "node", nodeId: "prompt", channel: "text" },
-              to: { kind: "node", nodeId: "generator", channel: "text" },
-              role: "subject", order: 0, selector: { kind: "latest-approved" },
-              adapter: { kind: "auto" }, enabled: true
-            }
-          }
-        ]
-      }
-    });
-    const plan = await candidateBuilder.previewRun({
-      commandId: "candidate-preview", graphId: "graph-root", scope: { kind: "graph" }
-    });
-    const permit = await candidateBuilder.grantRunPermit({
-      commandId: "candidate-permit", planId: plan.id, contentHash: plan.contentHash
-    });
-    const queued = await candidateBuilder.startRun({
-      commandId: "candidate-start", planId: plan.id,
-      contentHash: plan.contentHash, runPermitId: permit.id
-    });
+    const queued = await createQueuedCandidate(root, candidatePath);
     expect(queued.status).toBe("queued");
-    await candidateBuilder.closeDocument();
     const candidateBytes = await readFile(candidatePath);
 
     const provider = new FakeImageProvider();
@@ -335,6 +480,37 @@ describe("desktop document lifecycle", () => {
       await service.close();
     }
   }, 15_000);
+
+  it("leaves a foreign-provider queued job queued in production mode", async () => {
+    const root = await tempRoot("ether-foreign-provider-queue-");
+    const candidatePath = path.join(root, "Candidate B.ether");
+    const queued = await createQueuedCandidate(root, candidatePath);
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new UnavailableImageProvider({
+        id: "ether-production-unavailable",
+        name: "Unavailable production provider",
+        route: "unconfigured-clean-cli-or-mcp",
+        capabilities: ["image.generate"]
+      }, "Provider is intentionally unavailable in this production-mode test."),
+      simulationMode: false
+    });
+    try {
+      await service.openPath(candidatePath);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const database = new DatabaseSync(candidatePath, { readOnly: true });
+      try {
+        expect(database.prepare("SELECT status FROM execution_jobs WHERE job_id = ?").get(queued.id))
+          .toMatchObject({ status: "queued" });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await service.close();
+    }
+  });
 
   it("rejects legacy Ether directories and opens uncertain locations honestly read-only", async () => {
     const root = await tempRoot("ether-location-capability-");
@@ -641,14 +817,19 @@ describe("desktop document lifecycle", () => {
     await store.close();
     authority.deactivateDocument("document-reference-lifecycle");
 
-    let failNextSidecarRename = false;
+    let failOnRename = 0;
+    let renameCount = 0;
+    const armRenameFailure = (ordinal: number) => {
+      failOnRename = ordinal;
+      renameCount = 0;
+    };
     const serviceOptions = {
       appDataRoot,
       appVersion: "4.0.0-test",
       provider: new FakeImageProvider(),
       pathGrantPersistenceCheckpoint: (stage: "write" | "fsync" | "rename") => {
-        if (failNextSidecarRename && stage === "rename") {
-          failNextSidecarRename = false;
+        if (failOnRename > 0 && stage === "rename" && ++renameCount === failOnRename) {
+          failOnRename = 0;
           throw Object.assign(new Error("injected grant rename failure"), { code: "ENOSPC" });
         }
       }
@@ -662,7 +843,7 @@ describe("desktop document lifecycle", () => {
       dialogs: dialogs({ saveDocument: async (kind) => kind === "save-as" ? renamedPath : copyPath })
     });
     const original = await reopened.openPath(originalPath);
-    failNextSidecarRename = true;
+    armRenameFailure(1);
     await expect(reopened.actOnReference(original.documentId, "reference-reopen", "embed-available-copy"))
       .rejects.toMatchObject({ code: "ENOSPC" });
     await expect(reopened.listReferences(original.documentId))
@@ -671,7 +852,7 @@ describe("desktop document lifecycle", () => {
       await readFile(path.join(appDataRoot, "reference-grants.json"), "utf8")
     ) as Array<{ grantId: string }>;
     expect(bindingsAfterEmbed.some(({ grantId }) => grantId === grantIds.get("reference-reopen"))).toBe(false);
-    failNextSidecarRename = true;
+    armRenameFailure(1);
     await expect(reopened.actOnReference(original.documentId, "reference-remove", "remove"))
       .rejects.toMatchObject({ code: "ENOSPC" });
     await expect(reopened.listReferences(original.documentId))
@@ -681,8 +862,11 @@ describe("desktop document lifecycle", () => {
     ) as Array<{ grantId: string }>;
     expect(bindingsAfterRemove.some(({ grantId }) => grantId === grantIds.get("reference-remove"))).toBe(false);
     const renamed = await reopened.saveAs(original.documentId);
-    failNextSidecarRename = true;
-    await expect(reopened.saveCopy(renamed.documentId)).rejects.toMatchObject({ code: "ENOSPC" });
+    armRenameFailure(2);
+    await expect(reopened.saveCopy(renamed.documentId)).resolves.toMatchObject({
+      documentId: renamed.documentId,
+      saveState: "saved"
+    });
     await expect(reopened.actOnReference(renamed.documentId, "reference-save-as", "embed-available-copy"))
       .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ id: "reference-save-as", state: "embedded" })]));
     await reopened.close();
@@ -700,7 +884,7 @@ describe("desktop document lifecycle", () => {
     await sourceAgain.close();
   });
 
-  it("keeps a published Save As identity and recovers its durable grant sidecar with attention", async () => {
+  it("returns Save As success when durable grant rebind succeeds on its internal retry", async () => {
     const root = await tempRoot("ether-save-as-grant-recovery-");
     const appDataRoot = path.join(root, "appdata");
     const originalPath = path.join(root, "Original.ether");
@@ -725,12 +909,13 @@ describe("desktop document lifecycle", () => {
     authority.deactivateDocument(original.documentId);
 
     let armed = false;
+    let renameCount = 0;
     const service = new DesktopApplicationService({
       appDataRoot, appVersion: "4.0.0-test",
       dialogs: dialogs({ saveDocument: async () => destinationPath }),
       provider: new FakeImageProvider(),
-      pathGrantPersistenceCheckpoint: (stage) => {
-        if (armed && stage === "rename") {
+      pathGrantPersistenceCheckpoint: (stage: "write" | "fsync" | "rename") => {
+        if (armed && stage === "rename" && ++renameCount === 2) {
           armed = false;
           throw Object.assign(new Error("sidecar rename failed"), { code: "ENOSPC" });
         }
@@ -738,10 +923,13 @@ describe("desktop document lifecycle", () => {
     });
     const opened = await service.openPath(originalPath);
     armed = true;
-    await expect(service.saveAs(opened.documentId)).rejects.toMatchObject({ code: "ENOSPC" });
+    await expect(service.saveAs(opened.documentId)).resolves.toMatchObject({
+      named: true,
+      saveState: "saved"
+    });
     const destination = service.snapshot();
     expect(service.activePath()).toBe(await realpath(destinationPath));
-    expect(destination).toMatchObject({ named: true, saveState: "needs-attention" });
+    expect(destination).toMatchObject({ named: true, saveState: "saved" });
     expect(destination.documentId).not.toBe(original.documentId);
     await service.close();
 
@@ -757,6 +945,118 @@ describe("desktop document lifecycle", () => {
       documentId: destination.documentId, operation: "resolve", grantId, path: referencePath
     })).toBe(true);
   });
+
+  it.each(["write", "fsync", "rename"] as const)(
+    "returns a published Save As identity with attention and recovers a persistent pending grant rebind after %s failure",
+    async (failureStage) => {
+    const root = await tempRoot("ether-save-as-pending-rebind-");
+    const appDataRoot = path.join(root, "appdata");
+    const originalPath = path.join(root, "Original.ether");
+    const destinationPath = path.join(root, "Destination.ether");
+    const copyPath = path.join(root, "Destination copy.ether");
+    const referencePath = path.join(root, "Reference.png");
+    await writeFile(referencePath, pngBytes(128, 0x42));
+    const creator = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => originalPath }),
+      provider: new FakeImageProvider()
+    });
+    const untitled = await creator.bootstrap();
+    const original = await creator.save(untitled.documentId);
+    await creator.close();
+    const authority = new DesktopPathGrantAuthority({
+      storagePath: path.join(appDataRoot, "reference-grants.json")
+    });
+    authority.activateDocument(original.documentId, originalPath);
+    const grantId = authority.grant(original.documentId, "link", referencePath);
+    authority.allowResolve(grantId, original.documentId);
+    authority.deactivateDocument(original.documentId);
+
+    let persistentlyFail = false;
+    let publicationCount = 0;
+    const service = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => destinationPath }),
+      provider: new FakeImageProvider(),
+      pathGrantPersistenceCheckpoint: (stage: "write" | "fsync" | "rename") => {
+        if (persistentlyFail && stage === failureStage && ++publicationCount > 1) {
+          throw Object.assign(new Error("persistent grant sidecar failure"), { code: "ENOSPC" });
+        }
+      }
+    });
+    const opened = await service.openPath(originalPath);
+    persistentlyFail = true;
+    const published = await service.saveAs(opened.documentId);
+    expect(published).toMatchObject({ named: true, saveState: "needs-attention" });
+    expect(published.documentId).not.toBe(original.documentId);
+    expect(service.activePath()).toBe(await realpath(destinationPath));
+    expect((await stat(destinationPath)).isFile()).toBe(true);
+    persistentlyFail = false;
+    await service.close();
+
+    const recovered = new DesktopPathGrantAuthority({
+      storagePath: path.join(appDataRoot, "reference-grants.json")
+    });
+    recovered.activateDocument(original.documentId, originalPath);
+    expect(recovered.authorizePath({
+      documentId: original.documentId,
+      operation: "resolve",
+      grantId,
+      path: referencePath
+    })).toBe(true);
+    recovered.activateDocument(published.documentId, destinationPath);
+    expect(recovered.authorizePath({
+      documentId: published.documentId,
+      operation: "resolve",
+      grantId,
+      path: referencePath
+    })).toBe(true);
+    await expect(stat(path.join(appDataRoot, "reference-grants.pending.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+
+    let copyPublicationCount = 0;
+    let copyPersistenceFails = false;
+    const copyService = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => copyPath }),
+      provider: new FakeImageProvider(),
+      pathGrantPersistenceCheckpoint: (stage) => {
+        if (copyPersistenceFails && stage === failureStage && ++copyPublicationCount > 1) {
+          throw Object.assign(new Error("persistent copy grant sidecar failure"), { code: "ENOSPC" });
+        }
+      }
+    });
+    const destinationActive = await copyService.openPath(destinationPath);
+    copyPersistenceFails = true;
+    await expect(copyService.saveCopy(destinationActive.documentId)).resolves.toMatchObject({
+      documentId: destinationActive.documentId,
+      saveState: "needs-attention"
+    });
+    expect(copyService.activePath()).toBe(await realpath(destinationPath));
+    copyPersistenceFails = false;
+    await copyService.close();
+    const copyDatabase = new DatabaseSync(copyPath, { readOnly: true });
+    const copyDocumentId = (copyDatabase.prepare(
+      "SELECT document_id FROM document WHERE singleton = 1"
+    ).get() as { document_id: string }).document_id;
+    copyDatabase.close();
+    const copyRecovered = new DesktopPathGrantAuthority({
+      storagePath: path.join(appDataRoot, "reference-grants.json")
+    });
+    copyRecovered.activateDocument(copyDocumentId, copyPath);
+    expect(copyRecovered.authorizePath({
+      documentId: copyDocumentId,
+      operation: "resolve",
+      grantId,
+      path: referencePath
+    })).toBe(true);
+    await expect(stat(path.join(appDataRoot, "reference-grants.pending.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    }
+  );
 
   it("preflights portable references, confirms natively, and makes no change on cancellation", async () => {
     const root = await tempRoot("ether-portable-confirm-");
@@ -919,7 +1219,7 @@ describe("desktop document lifecycle", () => {
     await service.close();
   });
 
-  it("propagates an unexpected Portable failure without partially embedding references and can retry", async () => {
+  it("reclaims a Portable blob finalized immediately before import failure and can retry after reopen", async () => {
     type ActivatableAuthority = DesktopPathGrantAuthority & {
       activateDocument?: (documentId: string, documentPath: string) => void;
     };
@@ -985,15 +1285,14 @@ describe("desktop document lifecycle", () => {
     await store.close();
 
     let fail = true;
-    let prepared = 0;
     const createApplication = () => new EtherApplication({
       appDataRoot,
       appVersion: "4.0.0-test",
       provider: new FakeImageProvider(),
       dispatchMode: "manual",
       documentEnvironment: { referenceGrantAuthority: authority },
-      portableCheckpoint: (stage: string) => {
-        if (stage === "prepared" && ++prepared === 2 && fail) {
+      portableImportCheckpoint: (stage: string) => {
+        if (stage === "committed" && fail) {
           throw Object.assign(new Error("disk full during Portable"), { code: "ENOSPC" });
         }
       }
@@ -1007,6 +1306,23 @@ describe("desktop document lifecycle", () => {
       const beforeDirty = (await application.queryDocument()).dirty;
       const beforeGrants = await readFile(path.join(appDataRoot, "reference-grants.json"));
       const beforeBytes = (await stat(documentPath)).size;
+      const cleanupFailure = Object.assign(new Error("cleanup store closed"), { code: "STORE_CLOSED" });
+      const reclaim = vi.spyOn(activeStore, "reclaimUnreferencedReadyBlobs")
+        .mockRejectedValueOnce(cleanupFailure);
+      let originalFailure: unknown;
+      try {
+        await application.makeDocumentPortable();
+      } catch (error) {
+        originalFailure = error;
+      }
+      expect(originalFailure).toMatchObject({ code: "ENOSPC", cleanupError: { code: "STORE_CLOSED" } });
+      reclaim.mockRestore();
+      const leakedContentKeys = await activeStore.read(({ blobs }) => blobs.list()
+        .map(({ contentKey }) => contentKey)
+        .filter((contentKey) => !beforeBlobs.includes(contentKey)));
+      await activeStore.reclaimUnreferencedReadyBlobs(leakedContentKeys);
+      await activeStore.reclaimUnusedPages();
+
       await expect(application.makeDocumentPortable()).rejects.toMatchObject({ code: "ENOSPC" });
       expect((await application.queryReferences()).map(({ state }) => state)).toEqual(["linked", "linked"]);
       expect(await activeStore.read(({ blobs }) => blobs.list().map(({ contentKey }) => contentKey))).toEqual(beforeBlobs);
@@ -1026,7 +1342,6 @@ describe("desktop document lifecycle", () => {
       expect((await application.queryDocument()).dirty).toBe(beforeDirty);
 
       fail = false;
-      prepared = 0;
       await expect(application.makeDocumentPortable()).resolves.toMatchObject({
         embeddedCount: 2,
         embeddedBytes: 1280 * 1024,
@@ -1166,6 +1481,71 @@ describe("autosave and event ordering", () => {
     await flush;
     await close;
     expect(closed).toBe(true);
+  });
+
+  it("resets terminal close admission and permits retry after a failed drain", async () => {
+    const root = await tempRoot("ether-close-retry-");
+    let fail = true;
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      autosaveOperation: async () => {
+        if (fail) throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      },
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    await service.bootstrap();
+    const coordinator = (service as unknown as { autosaveCoordinator: AutosaveCoordinator }).autosaveCoordinator;
+    coordinator.markDirty();
+
+    await expect(service.close()).rejects.toMatchObject({ code: "ENOSPC" });
+    fail = false;
+    await expect(service.close()).resolves.toBeUndefined();
+  });
+
+  it("supports reusable document close followed by New and Open", async () => {
+    const root = await tempRoot("ether-reusable-close-");
+    const savedPath = path.join(root, "Reusable.ether");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => savedPath }),
+      provider: new FakeImageProvider()
+    });
+    const initial = await service.bootstrap();
+    const saved = await service.save(initial.documentId);
+    await service.closeDocument();
+    const fresh = await service.newDocument();
+    expect(fresh.documentId).not.toBe(saved.documentId);
+    await service.closeDocument();
+    await expect(service.openPath(savedPath)).resolves.toMatchObject({ documentId: saved.documentId });
+    await service.close();
+  });
+
+  it("aborts an active reference search synchronously before terminal lifecycle drain", async () => {
+    const root = await tempRoot("ether-shutdown-search-abort-");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    await service.bootstrap();
+    const controller = new AbortController();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const internals = service as unknown as {
+      lifecycleTail: Promise<void>;
+      referenceSearchController: AbortController | null;
+    };
+    internals.referenceSearchController = controller;
+    internals.lifecycleTail = blocked;
+
+    const closing = service.close();
+    expect(controller.signal.aborted).toBe(true);
+    release();
+    await closing;
   });
 
   it("serializes Close behind an in-progress Save As", async () => {
@@ -1513,7 +1893,7 @@ describe("desktop reference path grants", () => {
 
       armed = true;
       expect(() => authority.revoke(grantId, "document-1")).toThrow(/failed/);
-      expect(authority.authorizePath(request)).toBe(true);
+      expect(authority.authorizePath(request)).toBe(false);
 
       const reopened = new DesktopPathGrantAuthority({ storagePath });
       reopened.activateDocument("document-1", documentPath);
@@ -1556,6 +1936,49 @@ describe("Windows writable location classification", () => {
       if (previousOneDrive === undefined) delete process.env.OneDrive;
       else process.env.OneDrive = previousOneDrive;
     }
+  });
+
+  it.runIf(process.platform === "win32")("re-resolves a junction retargeted after its first admission", async () => {
+    const root = await tempRoot("ether-native-junction-retarget-");
+    const fixedRoot = path.join(root, "Fixed");
+    const cloudRoot = path.join(root, "Cloud");
+    const junctionRoot = path.join(root, "Mutable Junction");
+    await Promise.all([mkdir(fixedRoot), mkdir(cloudRoot)]);
+    await Promise.all([
+      writeFile(path.join(fixedRoot, "Campaign.ether"), "location probe"),
+      writeFile(path.join(cloudRoot, "Campaign.ether"), "location probe")
+    ]);
+    await symlink(fixedRoot, junctionRoot, "junction");
+    const capability = createWindowsLocationCapability();
+    const previousOneDrive = process.env.OneDrive;
+    process.env.OneDrive = cloudRoot;
+    try {
+      await expect(capability.classify(path.join(junctionRoot, "Campaign.ether")))
+        .resolves.toBe("local-fixed");
+      await unlink(junctionRoot);
+      await symlink(cloudRoot, junctionRoot, "junction");
+      await expect(capability.classify(path.join(junctionRoot, "Campaign.ether")))
+        .resolves.toBe("cloud-placeholder");
+    } finally {
+      if (previousOneDrive === undefined) delete process.env.OneDrive;
+      else process.env.OneDrive = previousOneDrive;
+    }
+  });
+
+  it("does not start a location probe for a pre-aborted admission", async () => {
+    const inspect = vi.fn(async () => ({
+      finalPath: "D:\\Campaign.ether",
+      volumeType: "fixed" as const,
+      cloudRoots: [],
+      cloudPlaceholder: false
+    }));
+    const capability = createWindowsLocationCapability({ inspect });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(capability.classify("D:\\Campaign.ether", controller.signal))
+      .resolves.toBe("unknown");
+    expect(inspect).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1624,18 +2047,25 @@ describe("Windows writable location classification", () => {
       | undefined;
     expect(runProbe).toBeTypeOf("function");
     const controller = new AbortController();
+    const root = await tempRoot("ether-probe-process-");
+    const pidPath = path.join(root, "probe.pid");
     let ticks = 0;
     const timer = setInterval(() => { ticks += 1; }, 5);
-    const abortTimer = setTimeout(() => controller.abort(), 60);
     try {
-      await expect(runProbe!(
-        "$null = [Console]::In.ReadToEnd(); Start-Sleep -Seconds 30",
-        "D:\\Probe input Ω.ether",
+      const running = runProbe!(
+        "$pidPath = [Console]::In.ReadToEnd(); Set-Content -LiteralPath $pidPath -Value $PID; Start-Sleep -Seconds 30",
+        pidPath,
         controller.signal
-      )).rejects.toMatchObject({ code: "ABORT_ERR" });
+      );
+      await vi.waitFor(() => expect(readFile(pidPath, "utf8")).resolves.toMatch(/^\d+/), {
+        timeout: 5_000
+      });
+      const pid = Number((await readFile(pidPath, "utf8")).trim());
+      controller.abort();
+      await expect(running).rejects.toMatchObject({ code: "ABORT_ERR" });
       expect(ticks).toBeGreaterThan(1);
+      expect(processIsAlive(pid)).toBe(false);
     } finally {
-      clearTimeout(abortTimer);
       clearInterval(timer);
     }
   });
@@ -1752,6 +2182,85 @@ describe("incremental reference folder search", () => {
       const grants = JSON.parse(await readFile(path.join(root, "appdata", "reference-grants.json"), "utf8")) as
         Array<{ path: string }>;
       expect(grants.some((grant) => path.basename(grant.path) === "gone.png")).toBe(false);
+      expect((service as unknown as { referenceSearchController: AbortController | null }).referenceSearchController)
+        .toBeNull();
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("continues after post-grant disappearance and retries durable revoke without leaking authority", async () => {
+    const root = await tempRoot("ether-reference-search-post-grant-");
+    const folder = path.join(root, "search");
+    const firstPath = path.join(folder, "first.png");
+    const matchPath = path.join(folder, "match.png");
+    await mkdir(folder, { recursive: true });
+    await Promise.all([
+      writeFile(firstPath, pngBytes(64, 0x10)),
+      writeFile(matchPath, pngBytes(64, 0x20))
+    ]);
+    let failRevokeRename = false;
+    let sawAfterGrant = false;
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ searchReferenceFolder: async () => folder }),
+      provider: new FakeImageProvider(),
+      pathGrantPersistenceCheckpoint: (stage: "write" | "fsync" | "rename") => {
+        if (failRevokeRename && stage === "rename") {
+          failRevokeRename = false;
+          throw Object.assign(new Error("injected revoke publication failure"), { code: "ENOSPC" });
+        }
+      },
+      referenceCandidateCheckpoint: async (candidatePath: string, stage: string) => {
+        if (stage === "after-grant" && path.basename(candidatePath) === "first.png") {
+          sawAfterGrant = true;
+          await unlink(candidatePath);
+          failRevokeRename = true;
+        }
+      }
+    } as unknown as ConstructorParameters<typeof DesktopApplicationService>[0]);
+    const snapshot = await service.bootstrap();
+    const application = (service as unknown as { application: {
+      queryReferences(): Promise<Array<Record<string, unknown>>>;
+      relinkDocumentReference(input: { sourcePath: string }): Promise<void>;
+    } }).application;
+    vi.spyOn(service, "listReferences").mockResolvedValue([{
+      id: "reference-1",
+      displayName: "match.png",
+      mediaType: "image/png",
+      state: "missing",
+      actions: ["search-folder"]
+    }]);
+    vi.spyOn(application, "queryReferences").mockResolvedValue([{
+      id: "reference-1",
+      displayName: "match.png",
+      mediaType: "image/png",
+      state: "missing"
+    }]);
+    const attempted: string[] = [];
+    vi.spyOn(application, "relinkDocumentReference").mockImplementation(async ({ sourcePath }) => {
+      attempted.push(path.basename(sourcePath));
+      await stat(sourcePath);
+      if (path.basename(sourcePath) !== "match.png") {
+        throw Object.assign(new Error("identity mismatch"), { code: "REFERENCE_IDENTITY_MISMATCH" });
+      }
+    });
+
+    try {
+      await expect(service.actOnReference(snapshot.documentId, "reference-1", "search-folder"))
+        .resolves.toBeDefined();
+      expect(sawAfterGrant).toBe(true);
+      expect(attempted).toEqual(["first.png", "match.png"]);
+      const grants = JSON.parse(
+        await readFile(path.join(root, "appdata", "reference-grants.json"), "utf8")
+      ) as Array<{ operation: string; path: string }>;
+      expect(grants.some((grant) => path.basename(grant.path) === "first.png")).toBe(false);
+      const canonicalMatchPath = (await realpath(matchPath)).toLocaleLowerCase();
+      expect(grants.some((grant) =>
+        grant.operation === "resolve" &&
+        grant.path === canonicalMatchPath
+      )).toBe(true);
       expect((service as unknown as { referenceSearchController: AbortController | null }).referenceSearchController)
         .toBeNull();
     } finally {

@@ -20,7 +20,8 @@ export type ReadOnlyReason =
   | "writer-active"
   | "location-unsupported"
   | "sqlite-busy"
-  | "heartbeat-failed";
+  | "heartbeat-failed"
+  | "recovery-attention";
 
 export type CreateStage = "format-initialized" | "genesis-initialized";
 export type CompactStage =

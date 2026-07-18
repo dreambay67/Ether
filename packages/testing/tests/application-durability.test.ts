@@ -1171,7 +1171,7 @@ describe("durable application execution", () => {
     await copy.closeDocument();
   });
 
-  it("blocks resumed dispatch when the injected provider differs from the persisted capsule", async () => {
+  it("leaves resumed work queued when the injected provider differs from the persisted capsule", async () => {
     const ready = await createReadyApplication({ dispatchMode: "manual" });
     const started = await ready.application.startRun({
       commandId: "provider-reopen-start",
@@ -1192,11 +1192,11 @@ describe("durable application execution", () => {
     });
     await reopened.openDocument({ path: ready.documentPath, access: "require-write" });
 
-    expect((await reopened.waitForJob(started.id)).status).toBe("failed");
+    expect((await reopened.queryJob(started.id)).status).toBe("queued");
     expect(provider.calls).toBe(0);
-    expect((await reopened.queryAttempts(started.id))[0]?.failure).toMatchObject({
-      code: "PROVIDER_MISMATCH"
-    });
+    expect(await reopened.queryAttempts(started.id)).toEqual([
+      expect.objectContaining({ status: "queued", startedAt: null, failure: null })
+    ]);
     await reopened.closeDocument();
   });
 

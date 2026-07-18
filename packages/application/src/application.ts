@@ -53,6 +53,7 @@ export class EtherApplication {
   readonly events = new ApplicationEventBus();
   private store: DocumentStore | undefined;
   private scheduler: DurableScheduler | undefined;
+  private inspectedAccess: "prefer-write" | "read-only" | "require-write" | undefined;
   private eventDrain: Promise<void> = Promise.resolve();
 
   constructor(
@@ -64,6 +65,7 @@ export class EtherApplication {
       documentEnvironment?: Omit<DocumentStoreEnvironment, "leaseRoot" | "recoveryRoot">;
       executionCheckpoint?: (name: string) => void;
       portableCheckpoint?: (stage: "prepared", referenceId: string) => void;
+      portableImportCheckpoint?: (stage: string, referenceId: string) => void;
     }
   ) {}
 
@@ -95,22 +97,37 @@ export class EtherApplication {
     access: "prefer-write" | "read-only" | "require-write";
   }): Promise<DocumentSnapshot> {
     this.assertNoDocument();
-    this.store = await DocumentStore.open(input.path, {
-      access: input.access,
-      deferRecovery: true,
-      environment: this.documentEnvironment()
-    });
+    this.store = await DocumentStore.inspect(input.path, this.documentEnvironment());
+    this.inspectedAccess = input.access;
     return this.queryDocument();
   }
 
   async activateInspectedDocument(): Promise<DocumentSnapshot> {
-    const store = this.requireStore();
-    await store.activateRecovery();
+    const inspected = this.requireStore();
+    const access = this.inspectedAccess;
+    if (access === undefined) {
+      throw new ApplicationServiceError("DOCUMENT_NOT_INSPECTED", "No inspected Ether document is pending activation.");
+    }
+    const inspectedPath = inspected.path;
+    await inspected.close();
+    this.store = undefined;
+    this.inspectedAccess = undefined;
+    const store = await DocumentStore.open(inspectedPath, {
+      access,
+      environment: this.documentEnvironment()
+    });
+    this.store = store;
     this.attachScheduler();
     if (store.mode.kind === "writable") {
       const jobIds = await store.transaction(({ execution }) => {
         execution.quarantineForeignDocumentPlans();
-        return execution.recoverProcessLost();
+        return execution.recoverProcessLost().filter((jobId) => {
+          const job = execution.getJob(jobId);
+          const plan = job === undefined ? undefined : execution.getPlan(job.planId);
+          return plan !== undefined && plan.steps.every(
+            (step) => step.provider.providerId === this.options.provider.descriptor.id
+          );
+        });
       });
       await this.drainEvents();
       if (this.options.dispatchMode !== "manual") jobIds.forEach((jobId) => void this.scheduler!.run(jobId));
@@ -161,6 +178,7 @@ export class EtherApplication {
     await store.close();
     this.store = undefined;
     this.scheduler = undefined;
+    this.inspectedAccess = undefined;
   }
 
   async applyGraphTransaction(input: {
@@ -397,7 +415,10 @@ export class EtherApplication {
           const blob = await importBlob(
             store,
             { mediaType: resolved.mediaType, sourcePath: resolved.originalPath },
-            { appDataRoot: this.options.appDataRoot }
+            {
+              appDataRoot: this.options.appDataRoot,
+              checkpoint: (stage) => this.options.portableImportCheckpoint?.(stage, resolved.id)
+            }
           );
           prepared.push({ referenceId: resolved.id, contentKey: blob.contentKey });
           embeddedBytes += resolved.fingerprint.byteLength;
@@ -410,12 +431,22 @@ export class EtherApplication {
       await embedReferences(store, prepared);
       return { embeddedBytes, embeddedCount: prepared.length, missingReferenceIds };
     } catch (error) {
-      const operationContentKeys = [...new Set(
-        prepared.map(({ contentKey }) => contentKey).filter((contentKey) => !existingContentKeys.has(contentKey))
-      )];
-      if (operationContentKeys.length > 0) {
-        await store.reclaimUnreferencedReadyBlobs(operationContentKeys);
-        await store.reclaimUnusedPages();
+      try {
+        const operationContentKeys = await store.read(({ blobs }) => blobs.list()
+          .map(({ contentKey }) => contentKey)
+          .filter((contentKey) => !existingContentKeys.has(contentKey)));
+        if (operationContentKeys.length > 0) {
+          await store.reclaimUnreferencedReadyBlobs(operationContentKeys);
+          await store.reclaimUnusedPages();
+        }
+      } catch (cleanupError) {
+        if (typeof error === "object" && error !== null && !("cleanupError" in error)) {
+          Object.defineProperty(error, "cleanupError", {
+            configurable: true,
+            enumerable: false,
+            value: cleanupError
+          });
+        }
       }
       throw error;
     }

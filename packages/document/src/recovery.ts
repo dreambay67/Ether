@@ -15,14 +15,13 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 
 import {
-  openEtherDocumentConnection,
   removeOwnedReplacementRollback,
   restoreOwnedReplacementRollback,
   type OwnedReplacementRollback
 } from "./database.js";
-import { readEtherFileIdentity, type EtherFileIdentity } from "./validation.js";
+import type { EtherFileIdentity } from "./validation.js";
 
-type RecoveryPhase = "prepared" | "published" | "rollback-created" | "rollback-planned";
+type RecoveryPhase = "published" | "rollback-created" | "rollback-planned";
 
 interface SerializedIdentity {
   birthtimeNs: string;
@@ -31,23 +30,35 @@ interface SerializedIdentity {
   size: string;
 }
 
-interface SerializedRollback {
+interface SerializedFileFact {
   identity: SerializedIdentity;
+  sha256: string;
+}
+
+interface SerializedRollback extends SerializedFileFact {
   path: string;
-  sha256?: string;
 }
 
 interface ReplacementRecoveryRecord {
   destinationPath: string;
+  destination: SerializedFileFact;
   journalId: string;
   newDocumentId: string;
   phase: RecoveryPhase;
   previousDocumentId: string;
-  rollback?: SerializedRollback;
-  staging?: { identity: SerializedIdentity; path: string };
+  rollback: SerializedRollback;
+  staging: SerializedFileFact & { path: string };
   sourceDocumentId: string;
   sourcePath: string;
-  version: 1;
+  version: 2;
+}
+
+export interface ReplacementRecoveryResult {
+  attention: boolean;
+}
+
+export interface ReplacementRecoveryInspection extends ReplacementRecoveryResult {
+  pending: boolean;
 }
 
 export interface ReplacementRecoveryJournal {
@@ -82,6 +93,10 @@ function sameIdentity(left: EtherFileIdentity, right: EtherFileIdentity): boolea
   return left.birthtimeNs === right.birthtimeNs && left.dev === right.dev && left.ino === right.ino;
 }
 
+function sameSizedIdentity(left: EtherFileIdentity, right: EtherFileIdentity): boolean {
+  return sameIdentity(left, right) && left.size === right.size;
+}
+
 function readAliasIdentity(filePath: string): EtherFileIdentity {
   const stats = lstatSync(filePath, { bigint: true });
   if (!stats.isFile()) throw new Error("Recovery-owned path is not a regular file.");
@@ -108,6 +123,33 @@ async function fileHash(filePath: string, onChunk?: () => void): Promise<string>
     onChunk?.();
   }
   return hash.digest("hex");
+}
+
+async function readFileFact(
+  filePath: string,
+  onChunk?: () => void
+): Promise<{ identity: EtherFileIdentity; sha256: string }> {
+  const before = readAliasIdentity(filePath);
+  const sha256 = await fileHash(filePath, onChunk);
+  const after = readAliasIdentity(filePath);
+  if (!sameSizedIdentity(before, after)) {
+    throw new Error("Recovery file identity changed while it was being hashed.");
+  }
+  return { identity: after, sha256 };
+}
+
+function serializeFileFact(fact: { identity: EtherFileIdentity; sha256: string }): SerializedFileFact {
+  return { identity: serializeIdentity(fact.identity), sha256: fact.sha256 };
+}
+
+function matchesFileFact(
+  actual: { identity: EtherFileIdentity; sha256: string },
+  expected: SerializedFileFact
+): boolean {
+  return (
+    sameSizedIdentity(actual.identity, deserializeIdentity(expected.identity)) &&
+    actual.sha256 === expected.sha256
+  );
 }
 
 function atomicWrite(
@@ -145,48 +187,39 @@ function atomicWrite(
   }
 }
 
+function isSerializedFileFact(input: unknown): input is SerializedFileFact {
+  if (typeof input !== "object" || input === null) return false;
+  const value = input as Partial<SerializedFileFact>;
+  const identity = value.identity;
+  return (
+    typeof value.sha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(value.sha256) &&
+    typeof identity === "object" &&
+    identity !== null &&
+    [identity.birthtimeNs, identity.dev, identity.ino, identity.size].every(
+      (part) => typeof part === "string" && /^\d+$/.test(part)
+    )
+  );
+}
+
 function parseRecord(input: unknown): ReplacementRecoveryRecord | undefined {
-  if (typeof input !== "object" || input === null) {
-    return undefined;
-  }
+  if (typeof input !== "object" || input === null) return undefined;
   const value = input as Partial<ReplacementRecoveryRecord>;
   if (
-    value.version !== 1 ||
+    value.version !== 2 ||
     typeof value.journalId !== "string" ||
     typeof value.destinationPath !== "string" ||
     typeof value.sourcePath !== "string" ||
     typeof value.sourceDocumentId !== "string" ||
     typeof value.newDocumentId !== "string" ||
     typeof value.previousDocumentId !== "string" ||
-    !["prepared", "rollback-planned", "rollback-created", "published"].includes(value.phase ?? "")
-  ) {
-    return undefined;
-  }
-  if (value.rollback !== undefined) {
-    const identity = value.rollback.identity;
-    if (
-      typeof value.rollback.path !== "string" ||
-      (value.rollback.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(value.rollback.sha256)) ||
-      typeof identity !== "object" ||
-      identity === null ||
-      ![identity.birthtimeNs, identity.dev, identity.ino, identity.size].every(
-        (part) => typeof part === "string" && /^\d+$/.test(part)
-      )
-    ) {
-      return undefined;
-    }
-  }
-  if (value.staging !== undefined) {
-    const identity = value.staging.identity;
-    if (
-      typeof value.staging.path !== "string" ||
-      typeof identity !== "object" ||
-      identity === null ||
-      ![identity.birthtimeNs, identity.dev, identity.ino, identity.size].every(
-        (part) => typeof part === "string" && /^\d+$/.test(part)
-      )
-    ) return undefined;
-  }
+    !["rollback-planned", "rollback-created", "published"].includes(value.phase ?? "") ||
+    !isSerializedFileFact(value.destination) ||
+    !isSerializedFileFact(value.rollback) ||
+    typeof value.rollback.path !== "string" ||
+    !isSerializedFileFact(value.staging) ||
+    typeof value.staging.path !== "string"
+  ) return undefined;
   return value as ReplacementRecoveryRecord;
 }
 
@@ -202,70 +235,56 @@ function removeJournal(journal: ReplacementRecoveryJournal): void {
   }
 }
 
-async function ownedRollback(record: ReplacementRecoveryRecord): Promise<OwnedReplacementRollback | undefined> {
-  if (record.rollback === undefined) {
-    return undefined;
-  }
-  const expectedPrefix = `.${path.basename(record.destinationPath)}.ether-rollback-`;
-  if (
+function recoveryPathsAreOwned(record: ReplacementRecoveryRecord): boolean {
+  const expectedName = `.${path.basename(record.destinationPath)}.ether-rollback-${record.journalId}`;
+  const expectedStagingPrefixes = [
+    `.${path.basename(record.destinationPath)}.ether-compact-`,
+    `.${path.basename(record.destinationPath)}.ether-save-`
+  ];
+  return !(
     path.dirname(path.resolve(record.rollback.path)) !== path.dirname(path.resolve(record.destinationPath)) ||
-    !path.basename(record.rollback.path).startsWith(expectedPrefix)
-  ) {
-    return undefined;
-  }
-  const identity = deserializeIdentity(record.rollback.identity);
-  try {
-    if (
-      !sameIdentity(readAliasIdentity(record.rollback.path), identity) ||
-      (record.rollback.sha256 !== undefined && await fileHash(record.rollback.path) !== record.rollback.sha256)
-    ) {
-      return undefined;
-    }
-  } catch {
-    return undefined;
-  }
-  return { identity, path: record.rollback.path };
+    path.basename(record.rollback.path) !== expectedName ||
+    path.dirname(path.resolve(record.staging.path)) !== path.dirname(path.resolve(record.destinationPath)) ||
+    !expectedStagingPrefixes.some((prefix) => path.basename(record.staging.path).startsWith(prefix))
+  );
 }
 
-function rollbackPathStatus(
-  record: ReplacementRecoveryRecord
-): "absent" | "indeterminate" | "present" {
-  if (record.rollback === undefined) {
-    return "absent";
-  }
+type InspectedFileState =
+  | { kind: "absent" }
+  | { kind: "indeterminate" }
+  | { fact: { identity: EtherFileIdentity; sha256: string }; kind: "present" };
+
+async function inspectFileState(filePath: string): Promise<InspectedFileState> {
   try {
-    return lstatSync(record.rollback.path, { throwIfNoEntry: false }) === undefined
-      ? "absent"
-      : "present";
-  } catch {
-    return "indeterminate";
+    if (lstatSync(filePath, { throwIfNoEntry: false }) === undefined) return { kind: "absent" };
+    return { fact: await readFileFact(filePath), kind: "present" };
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : "";
+    return code === "ENOENT" ? { kind: "absent" } : { kind: "indeterminate" };
   }
 }
 
-function documentIdAt(filePath: string): string | undefined {
-  try {
-    const connection = openEtherDocumentConnection(filePath, true);
-    try {
-      return connection.inspection.document.documentId;
-    } finally {
-      connection.database.close();
-    }
-  } catch {
-    return undefined;
-  }
-}
-
-export function beginReplacementRecovery(
+export async function beginReplacementRecovery(
   recoveryRoot: string,
-  input: Omit<ReplacementRecoveryRecord, "journalId" | "phase" | "rollback" | "staging" | "version"> & {
-    staging?: OwnedReplacementRollback;
+  input: Omit<
+    ReplacementRecoveryRecord,
+    "destination" | "journalId" | "phase" | "rollback" | "staging" | "version"
+  > & {
+    staging: OwnedReplacementRollback;
   }
-): ReplacementRecoveryJournal {
+): Promise<ReplacementRecoveryJournal> {
   const { staging, ...recordInput } = input;
   const journalId = randomUUID();
   const destinationPath = path.resolve(input.destinationPath);
+  const destinationFact = await readFileFact(destinationPath);
+  const stagingFact = await readFileFact(staging.path);
+  if (!sameSizedIdentity(stagingFact.identity, staging.identity)) {
+    throw new Error("Replacement staging identity changed before recovery publication.");
+  }
   const rollback: SerializedRollback = {
-    identity: serializeIdentity(readEtherFileIdentity(destinationPath, true)),
+    ...serializeFileFact(destinationFact),
     path: path.join(
       path.dirname(destinationPath),
       `.${path.basename(destinationPath)}.ether-rollback-${journalId}`
@@ -275,17 +294,13 @@ export function beginReplacementRecovery(
     filePath: path.join(recoveryRoot, `${journalId}.json`),
     record: {
       ...recordInput,
+      destination: serializeFileFact(destinationFact),
       destinationPath,
       journalId,
       phase: "rollback-planned" as const,
       rollback,
-      ...(staging === undefined ? {} : {
-        staging: {
-          identity: serializeIdentity(staging.identity),
-          path: staging.path
-        }
-      }),
-      version: 1 as const
+      staging: { ...serializeFileFact(stagingFact), path: staging.path },
+      version: 2 as const
     }
   };
   atomicWrite(journal.filePath, journal.record);
@@ -309,11 +324,14 @@ export async function recordReplacementRollback(
 ): Promise<void> {
   const planned = journal.record.rollback;
   if (
-    planned === undefined ||
     path.resolve(planned.path) !== path.resolve(rollback.path) ||
-    !sameIdentity(deserializeIdentity(planned.identity), rollback.identity)
+    !sameSizedIdentity(deserializeIdentity(planned.identity), rollback.identity)
   ) {
     throw new Error("Replacement rollback does not match its durable recovery plan.");
+  }
+  const rollbackFact = await readFileFact(rollback.path, hooks.afterHashChunk);
+  if (!matchesFileFact(rollbackFact, planned)) {
+    throw new Error("Replacement rollback content does not match its durable recovery plan.");
   }
   journal.record = {
     ...journal.record,
@@ -321,7 +339,7 @@ export async function recordReplacementRollback(
     rollback: {
       identity: serializeIdentity(rollback.identity),
       path: rollback.path,
-      sha256: await fileHash(rollback.path, hooks.afterHashChunk)
+      sha256: rollbackFact.sha256
     }
   };
   atomicWrite(journal.filePath, journal.record, {
@@ -339,15 +357,22 @@ export function completeReplacementRecovery(journal: ReplacementRecoveryJournal)
   removeJournal(journal);
 }
 
-export async function reconcileReplacementRecovery(destinationPath: string, recoveryRoot: string): Promise<void> {
+async function processReplacementRecovery(
+  destinationPath: string,
+  recoveryRoot: string,
+  apply: boolean
+): Promise<ReplacementRecoveryInspection> {
+  let attention = false;
+  let pending = false;
   let names: string[];
   try {
     names = readdirSync(recoveryRoot).filter((name) => /^[a-f0-9-]+\.json(?:\.tmp)?$/i.test(name));
   } catch {
-    return;
+    return { attention, pending };
   }
   for (const name of names) {
     if (name.endsWith(".tmp")) {
+      if (!apply) continue;
       const finalPath = path.join(recoveryRoot, name.slice(0, -4));
       if (names.includes(path.basename(finalPath))) {
         try {
@@ -365,57 +390,104 @@ export async function reconcileReplacementRecovery(destinationPath: string, reco
       continue;
     }
     const filePath = path.join(recoveryRoot, name);
+    let input: unknown;
     let record: ReplacementRecoveryRecord | undefined;
     try {
-      record = parseRecord(JSON.parse(readFileSync(filePath, "utf8")));
+      input = JSON.parse(readFileSync(filePath, "utf8"));
+      record = parseRecord(input);
     } catch {
       continue;
     }
-    if (record === undefined || canonicalPath(record.destinationPath) !== canonicalPath(destinationPath)) {
+    const recordedDestination = typeof input === "object" && input !== null && "destinationPath" in input
+      ? (input as { destinationPath?: unknown }).destinationPath
+      : undefined;
+    if (typeof recordedDestination !== "string" || canonicalPath(recordedDestination) !== canonicalPath(destinationPath)) {
+      continue;
+    }
+    pending = true;
+    if (record === undefined || !recoveryPathsAreOwned(record)) {
+      attention = true;
       continue;
     }
     const journal = { filePath, record };
-    const currentDocumentId = documentIdAt(record.destinationPath);
-    const rollbackStatus = rollbackPathStatus(record);
-    const rollback = rollbackStatus === "present" ? await ownedRollback(record) : undefined;
-    const previousIdentityIsCurrent = record.rollback === undefined ? false : (() => {
-      try {
-        return sameIdentity(
-          readAliasIdentity(record.destinationPath),
-          deserializeIdentity(record.rollback.identity)
-        );
-      } catch {
-        return false;
-      }
-    })();
-    const expectedDocumentIsCurrent =
-      (record.phase === "published" && currentDocumentId === record.newDocumentId) ||
-      currentDocumentId === record.previousDocumentId ||
-      previousIdentityIsCurrent;
-    if (expectedDocumentIsCurrent) {
-      if (
-        rollbackStatus === "indeterminate" ||
-        (rollbackStatus === "present" && rollback === undefined)
-      ) {
-        continue;
-      }
-      if (rollback !== undefined) {
-        removeOwnedReplacementRollback(rollback);
-      }
-      if (record.staging !== undefined) {
-        removeOwnedPath(record.staging.path, deserializeIdentity(record.staging.identity));
-      }
-      removeJournal(journal);
+    const destination = await inspectFileState(record.destinationPath);
+    const rollbackState = await inspectFileState(record.rollback.path);
+    const stagingState = await inspectFileState(record.staging.path);
+    const destinationIsPrevious = destination.kind === "present" && matchesFileFact(destination.fact, record.destination);
+    const destinationIsStaging = destination.kind === "present" && matchesFileFact(destination.fact, record.staging);
+    const rollbackMatches = rollbackState.kind === "present" && matchesFileFact(rollbackState.fact, record.rollback);
+    const stagingMatches = stagingState.kind === "present" && matchesFileFact(stagingState.fact, record.staging);
+    const indeterminate = [destination, rollbackState, stagingState]
+      .some((state) => state.kind === "indeterminate");
+    const tampered =
+      (destination.kind === "present" && !destinationIsPrevious && !destinationIsStaging) ||
+      (rollbackState.kind === "present" && !rollbackMatches) ||
+      (stagingState.kind === "present" && !stagingMatches);
+    if (indeterminate || tampered) {
+      attention = true;
       continue;
     }
-    if (rollback !== undefined && record.rollback?.sha256 !== undefined) {
+
+    let resolved = record.phase === "rollback-planned"
+      ? destinationIsPrevious && stagingMatches && (rollbackMatches || rollbackState.kind === "absent")
+      : record.phase === "rollback-created"
+        ? (
+            destinationIsPrevious && (
+              (stagingMatches && rollbackMatches) ||
+              (stagingState.kind === "absent" && rollbackState.kind === "absent")
+            )
+          ) || (
+            destinationIsStaging && stagingState.kind === "absent" && rollbackMatches
+          )
+        : (
+            destinationIsStaging &&
+            stagingState.kind === "absent" &&
+            (rollbackMatches || rollbackState.kind === "absent")
+          ) || (
+            destinationIsPrevious &&
+            stagingState.kind === "absent" &&
+            rollbackState.kind === "absent"
+          );
+
+    if (apply && !resolved && destination.kind === "absent" && rollbackMatches) {
+      const rollback = {
+        identity: deserializeIdentity(record.rollback.identity),
+        path: record.rollback.path
+      };
       restoreOwnedReplacementRollback(rollback, record.destinationPath);
-      if (documentIdAt(record.destinationPath) === record.previousDocumentId) {
-        if (record.staging !== undefined) {
-          removeOwnedPath(record.staging.path, deserializeIdentity(record.staging.identity));
-        }
-        removeJournal(journal);
-      }
+      const restored = await inspectFileState(record.destinationPath);
+      resolved = restored.kind === "present" && matchesFileFact(restored.fact, record.destination);
     }
+    if (!resolved) {
+      attention = true;
+      continue;
+    }
+    if (!apply) continue;
+    if (rollbackMatches) {
+      removeOwnedReplacementRollback({
+        identity: deserializeIdentity(record.rollback.identity),
+        path: record.rollback.path
+      });
+    }
+    if (stagingMatches) {
+      removeOwnedPath(record.staging.path, deserializeIdentity(record.staging.identity));
+    }
+    removeJournal(journal);
   }
+  return { attention, pending };
+}
+
+export async function inspectReplacementRecovery(
+  destinationPath: string,
+  recoveryRoot: string
+): Promise<ReplacementRecoveryInspection> {
+  return processReplacementRecovery(destinationPath, recoveryRoot, false);
+}
+
+export async function reconcileReplacementRecovery(
+  destinationPath: string,
+  recoveryRoot: string
+): Promise<ReplacementRecoveryResult> {
+  const { attention } = await processReplacementRecovery(destinationPath, recoveryRoot, true);
+  return { attention };
 }

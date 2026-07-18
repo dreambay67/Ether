@@ -43,6 +43,7 @@ import {
   markReplacementPublished,
   plannedReplacementRollback,
   reconcileReplacementRecovery,
+  inspectReplacementRecovery,
   recordReplacementRollback,
   type ReplacementRecoveryJournal
 } from "./recovery.js";
@@ -378,7 +379,24 @@ export class DocumentStore {
   static async open(filePath: string, options: OpenDocumentStoreOptions): Promise<DocumentStore> {
     const absolutePath = path.resolve(filePath);
     const runtime = resolveDocumentStoreEnvironment(options.environment);
-    await reconcileReplacementRecovery(absolutePath, runtime.recoveryRoot);
+    const replacementRecovery = await reconcileReplacementRecovery(absolutePath, runtime.recoveryRoot);
+    if (replacementRecovery.attention) {
+      if (options.access === "require-write") {
+        throw new DocumentStoreError(
+          "WRITER_LEASE_UNAVAILABLE",
+          "Ether recovery evidence does not match the current document files.",
+          "recovery-attention"
+        );
+      }
+      const connection = openEtherDocumentConnection(absolutePath, true);
+      return new DocumentStore({
+        database: connection.database,
+        documentId: connection.inspection.document.documentId,
+        mode: { kind: "read-only", reason: "recovery-attention" },
+        path: absolutePath,
+        runtime
+      });
+    }
     if (options.access === "read-only") {
       const connection = openEtherDocumentConnection(absolutePath, true);
       return new DocumentStore({
@@ -451,6 +469,25 @@ export class DocumentStore {
       await store.close();
       throw error;
     }
+  }
+
+  static async inspect(
+    filePath: string,
+    environment?: DocumentStoreEnvironment
+  ): Promise<DocumentStore> {
+    const absolutePath = path.resolve(filePath);
+    const runtime = resolveDocumentStoreEnvironment(environment);
+    const recovery = await inspectReplacementRecovery(absolutePath, runtime.recoveryRoot);
+    const connection = openEtherDocumentConnection(absolutePath, true, {
+      allowHardLinks: recovery.pending && !recovery.attention
+    });
+    return new DocumentStore({
+      database: connection.database,
+      documentId: connection.inspection.document.documentId,
+      mode: { kind: "read-only", reason: "requested" },
+      path: absolutePath,
+      runtime
+    });
   }
 
   static async [DOCUMENT_STORE_RECOVERY_OPEN](
@@ -701,7 +738,7 @@ export class DocumentStore {
 
       this.database.close();
       connectionOpen = false;
-      recovery = beginReplacementRecovery(this.runtime.recoveryRoot, {
+      recovery = await beginReplacementRecovery(this.runtime.recoveryRoot, {
         destinationPath: this.currentPath,
         newDocumentId: this.currentDocumentId,
         previousDocumentId: this.currentDocumentId,
@@ -1207,7 +1244,7 @@ export class DocumentStore {
               "The existing Save As destination identity was not validated."
             );
           }
-          replacementRecovery = beginReplacementRecovery(this.runtime.recoveryRoot, {
+          replacementRecovery = await beginReplacementRecovery(this.runtime.recoveryRoot, {
             destinationPath: absoluteDestination,
             newDocumentId: nextDocumentId,
             previousDocumentId: existingDestinationDocumentId,

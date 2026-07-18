@@ -296,10 +296,11 @@ export interface InternalEtherDocumentConnection {
 export function openEtherDocumentConnection(
   filePath: string,
   readOnly: boolean,
-  options: { allowDerivedIndexMismatch?: boolean } = {}
+  options: { allowDerivedIndexMismatch?: boolean; allowHardLinks?: boolean } = {}
 ): InternalEtherDocumentConnection {
   const absolutePath = path.resolve(filePath);
-  const identity = inspectEtherFileHeader(absolutePath);
+  const allowHardLinks = options.allowHardLinks === true;
+  const identity = inspectEtherFileHeader(absolutePath, { allowHardLinks });
   const database = new DatabaseSync(writableDatabaseUrl(absolutePath, readOnly), {
     allowExtension: false,
     enableDoubleQuotedStringLiterals: false,
@@ -319,9 +320,9 @@ export function openEtherDocumentConnection(
         `SQLite opened a different location than the requested Ether document: ${absolutePath}`
       );
     }
-    assertEtherFileIdentity(absolutePath, identity);
+    assertEtherFileIdentity(absolutePath, identity, allowHardLinks);
     const inspection = validateEtherDocumentConnection(database, absolutePath, options);
-    assertEtherFileIdentity(absolutePath, identity);
+    assertEtherFileIdentity(absolutePath, identity, allowHardLinks);
     return { database, inspection };
   } catch (error) {
     if (opened) {

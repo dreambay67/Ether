@@ -300,7 +300,14 @@ export const applicationEventPayloadSchemas = {
       dirty: z.boolean(),
       documentRevisionId: idSchema.nullable(),
       readOnlyReason: z
-        .enum(["requested", "writer-active", "location-unsupported", "sqlite-busy", "heartbeat-failed"])
+        .enum([
+          "requested",
+          "writer-active",
+          "location-unsupported",
+          "sqlite-busy",
+          "heartbeat-failed",
+          "recovery-attention"
+        ])
         .optional()
     })
     .strict(),

@@ -101,6 +101,9 @@ function readOnlyLabel(reason: DocumentDescriptor["readOnlyReason"]) {
     return "the document database is busy; close the app using it, then reopen";
   }
   if (reason === "heartbeat-failed") return "Ether lost safe write access; save a copy, then reopen";
+  if (reason === "recovery-attention") {
+    return "recovery evidence does not match this file; keep the file and recovery data for repair";
+  }
   if (reason === "requested") return "this document was explicitly opened read-only; reopen it with write access";
   return "write access is unavailable; save a copy before closing";
 }
