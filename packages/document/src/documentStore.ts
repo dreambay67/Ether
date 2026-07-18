@@ -625,22 +625,125 @@ export class DocumentStore {
   }
 
   compact(): Promise<{ beforeBytes: number; afterBytes: number }> {
-    return this.enqueue(() => {
-      this.assertOpen();
-      if (this.currentMode.kind !== "writable") {
-        throw new DocumentStoreError("READ_ONLY", "This Ether document is open read-only.");
+    return this.enqueue(() => this.compactActiveDocument());
+  }
+
+  private async compactActiveDocument(): Promise<{ beforeBytes: number; afterBytes: number }> {
+    this.assertOpen();
+    if (this.currentMode.kind !== "writable") {
+      throw new DocumentStoreError("READ_ONLY", "This Ether document is open read-only.");
+    }
+    const beforeBytes = statSync(this.currentPath).size;
+    const temporaryPath = path.join(
+      path.dirname(this.currentPath),
+      `.${path.basename(this.currentPath)}.ether-compact-${randomUUID()}`
+    );
+    let temporaryIdentity: EtherFileIdentity | undefined;
+    let rollback: OwnedReplacementRollback | undefined;
+    let recovery: ReplacementRecoveryJournal | undefined;
+    let connectionOpen = true;
+    try {
+      this.database.prepare("VACUUM INTO ?").run(temporaryPath);
+      temporaryIdentity = readEtherFileIdentity(temporaryPath);
+      this.runtime.onCompactStage?.("vacuum");
+
+      const staged = openEtherDocumentConnection(temporaryPath, false);
+      try {
+        if (staged.inspection.document.documentId !== this.currentDocumentId) {
+          throw new DocumentStoreError(
+            "INVALID_COMPACT",
+            "Compacted document identity differs from the active document."
+          );
+        }
+        validateEtherDocumentConnection(staged.database, temporaryPath);
+      } finally {
+        staged.database.close();
       }
-      const beforeBytes = statSync(this.currentPath).size;
-      this.database.exec("VACUUM");
-      validateEtherDocumentConnection(this.database, this.currentPath);
-      const descriptor = openSync(this.currentPath, "r+");
+      this.runtime.onCompactStage?.("validation");
+
+      const descriptor = openSync(temporaryPath, "r+");
       try {
         fsyncSync(descriptor);
       } finally {
         closeSync(descriptor);
       }
+      this.runtime.onCompactStage?.("fsync");
+
+      this.database.close();
+      connectionOpen = false;
+      recovery = beginReplacementRecovery(this.runtime.recoveryRoot, {
+        destinationPath: this.currentPath,
+        newDocumentId: this.currentDocumentId,
+        previousDocumentId: this.currentDocumentId,
+        sourceDocumentId: this.currentDocumentId,
+        sourcePath: this.currentPath
+      });
+      rollback = createOwnedReplacementRollback(this.currentPath);
+      recordReplacementRollback(recovery, rollback);
+      this.runtime.onCompactStage?.("rollback-created");
+
+      replaceWithOwnedTemporaryDatabase(temporaryPath, this.currentPath, temporaryIdentity);
+      temporaryIdentity = undefined;
+      markReplacementPublished(recovery);
+      this.runtime.onCompactStage?.("publication");
+      this.runtime.onCompactStage?.("post-publication");
+
+      const replacement = openEtherDocumentConnection(this.currentPath, false);
+      this.database = replacement.database;
+      connectionOpen = true;
+      this.currentDirty = readPersistedDirtyState(this.database);
+      removeOwnedReplacementRollback(rollback);
+      rollback = undefined;
+      completeReplacementRecovery(recovery);
+      recovery = undefined;
       return { beforeBytes, afterBytes: statSync(this.currentPath).size };
-    });
+    } catch (error) {
+      if (connectionOpen) {
+        try {
+          this.database.close();
+        } catch {
+          // The original failure remains authoritative.
+        }
+      }
+      removeOwnedFile(temporaryPath, temporaryIdentity);
+      let restorationError: unknown;
+      if (rollback !== undefined) {
+        try {
+          restoreOwnedReplacementRollback(rollback, this.currentPath);
+          rollback = undefined;
+          if (recovery !== undefined) {
+            completeReplacementRecovery(recovery);
+            recovery = undefined;
+          }
+        } catch (candidate) {
+          restorationError = candidate;
+        }
+      } else if (recovery !== undefined) {
+        try {
+          completeReplacementRecovery(recovery);
+          recovery = undefined;
+        } catch {
+          // Reconciliation can safely remove a prepared journal on the next open.
+        }
+      }
+      try {
+        const original = openEtherDocumentConnection(this.currentPath, false);
+        this.database = original.database;
+        connectionOpen = true;
+        this.currentDirty = readPersistedDirtyState(this.database);
+      } catch (reopenError) {
+        if (restorationError === undefined) restorationError = reopenError;
+      }
+      if (restorationError !== undefined) {
+        throw new DocumentStoreError(
+          "COMPACT_ROLLBACK_FAILED",
+          "Compact failed and the original Ether document could not be restored.",
+          undefined,
+          { cause: restorationError }
+        );
+      }
+      throw error;
+    }
   }
 
   close(): Promise<void> {
@@ -1207,6 +1310,7 @@ export class DocumentStore {
 
 export { DocumentRepositoryError };
 export type {
+  CompactStage,
   CreateStage,
   DocumentStoreEnvironment,
   ReferenceGrantAuthority,

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,10 +130,54 @@ test("real Electron delivers autosave failure details and ignores a stale snapsh
     await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
     await expect(page.getByText("Fixture autosave failure", { exact: true })).toBeVisible();
   } finally {
-    await electronApp.close();
+    await forceExit(electronApp);
     await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
+
+for (const operation of ["autosave", "save-as"] as const) {
+  test(`real Electron delays quit until an in-flight ${operation} lifecycle operation drains`, async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), `ether-electron-quit-${operation}-`));
+    const gatePath = path.join(fixtureRoot, `${operation}.release`);
+    const quitGatePath = `${gatePath}.quit`;
+    const electronApp = await launchFixture(fixtureRoot, [
+      operation === "autosave" ? `--autosave-gate=${gatePath}` : `--save-as-gate=${gatePath}`,
+      `--quit-gate=${quitGatePath}`
+    ]);
+    const electronProcess = electronApp.process();
+    const saveAsDestination = path.join(fixtureRoot, "documents", "Campaign with spaces.ether");
+    try {
+      const page = await electronApp.firstWindow();
+      if (operation === "autosave") {
+        await page.getByRole("button", { name: "Prompt", exact: true }).click();
+      } else {
+        await invokeNativeMenuItem(electronApp, "file.save-as");
+      }
+      await expect.poll(() => fileExists(`${gatePath}.started`)).toBe(true);
+      await expect.poll(() => fileExists(`${quitGatePath}.started`)).toBe(true);
+
+      await writeFile(quitGatePath, "quit", "utf8");
+      await expect.poll(() => fileExists(`${quitGatePath}.observed`)).toBe(true);
+      await page.waitForTimeout(300).catch(() => undefined);
+      expect(electronProcess.exitCode).toBeNull();
+      expect(page.isClosed()).toBe(false);
+      if (operation === "save-as") {
+        expect(await fileExists(saveAsDestination)).toBe(false);
+      }
+
+      await writeFile(gatePath, "release", "utf8");
+      await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).not.toBeNull();
+      if (operation === "save-as") {
+        expect(await fileExists(`${gatePath}.selected`)).toBe(true);
+        expect((await stat(saveAsDestination)).size).toBeGreaterThan(0);
+      }
+    } finally {
+      await writeFile(gatePath, "release", "utf8").catch(() => undefined);
+      if (electronProcess.exitCode === null) await forceExit(electronApp);
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+}
 
 test("real Electron disables read-only canvas controls before invocation", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-readonly-"));
@@ -215,6 +259,18 @@ async function launchFixture(fixtureRoot: string, extraArgs: string[] = []): Pro
     executablePath: electronPath,
     args: [fixtureMain, `--fixture-root=${fixtureRoot}`, ...extraArgs]
   });
+}
+
+async function forceExit(electronApp: ElectronApplication): Promise<void> {
+  const electronProcess = electronApp.process();
+  if (electronProcess.exitCode !== null) return;
+  const exited = new Promise<void>((resolve) => electronProcess.once("exit", () => resolve()));
+  void electronApp.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
+  await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5_000))]);
+  if (electronProcess.exitCode === null) {
+    electronProcess.kill();
+    await exited;
+  }
 }
 
 async function expectWorkspaceBounds(page: Page, viewport: { width: number; height: number }) {

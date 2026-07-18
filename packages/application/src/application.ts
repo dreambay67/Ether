@@ -7,6 +7,7 @@ import {
   DocumentStoreError,
   ExecutionRepositoryError,
   embedReference,
+  embedReferences,
   importBlob,
   readBlobRange,
   relinkReference,
@@ -62,6 +63,7 @@ export class EtherApplication {
       dispatchMode?: "automatic" | "manual";
       documentEnvironment?: Omit<DocumentStoreEnvironment, "leaseRoot" | "recoveryRoot">;
       executionCheckpoint?: (name: string) => void;
+      portableCheckpoint?: (stage: "prepared", referenceId: string) => void;
     }
   ) {}
 
@@ -347,28 +349,47 @@ export class EtherApplication {
   }
 
   async removeDocumentReference(referenceId: string): Promise<void> {
-    const removed = await this.requireWritableStore().transaction(({ references }) =>
+    const store = this.requireWritableStore();
+    const reference = await store.read(({ references }) => references.get(referenceId));
+    if (reference === undefined) {
+      throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+    }
+    const removed = await store.transaction(({ references }) =>
       references.remove(referenceId)
     );
     if (!removed) throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+    if (reference.pathGrantId !== null) store.revokeReferenceGrantAuthority(reference.pathGrantId);
   }
 
   async makeDocumentPortable() {
+    const store = this.requireWritableStore();
     const references = await this.queryReferences();
     let embeddedBytes = 0;
-    let embeddedCount = 0;
     const missingReferenceIds: string[] = [];
+    const prepared: Array<{ referenceId: string; contentKey: string }> = [];
     for (const reference of references) {
       if (reference.state === "embedded") continue;
       try {
-        await this.embedAvailableReference(reference.id);
-        embeddedCount += 1;
-        embeddedBytes += reference.fingerprint.byteLength;
-      } catch {
+        const resolved = await resolveReference(store, reference.id);
+        if (resolved.state !== "linked" || resolved.originalPath === null) {
+          missingReferenceIds.push(reference.id);
+          continue;
+        }
+        const blob = await importBlob(
+          store,
+          { mediaType: resolved.mediaType, sourcePath: resolved.originalPath },
+          { appDataRoot: this.options.appDataRoot }
+        );
+        prepared.push({ referenceId: resolved.id, contentKey: blob.contentKey });
+        embeddedBytes += resolved.fingerprint.byteLength;
+        this.options.portableCheckpoint?.("prepared", resolved.id);
+      } catch (error) {
+        if (!isExpectedReferenceUnavailable(error)) throw error;
         missingReferenceIds.push(reference.id);
       }
     }
-    return { embeddedBytes, embeddedCount, missingReferenceIds };
+    await embedReferences(store, prepared);
+    return { embeddedBytes, embeddedCount: prepared.length, missingReferenceIds };
   }
 
   async preflightDocumentPortable(): Promise<{
@@ -597,6 +618,23 @@ function capabilityFor(graph: EtherGraph, provider: GenerationProvider): Provide
     provenance: "static-constraint",
     limitations: []
   };
+}
+
+function isExpectedReferenceUnavailable(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : "";
+  return new Set([
+    "EACCES",
+    "ENOENT",
+    "EPERM",
+    "MIME_MISMATCH",
+    "REFERENCE_CHANGED",
+    "REFERENCE_GRANT_DENIED",
+    "REFERENCE_IDENTITY_MISMATCH",
+    "REFERENCE_MISSING",
+    "REFERENCE_SOURCE_UNAVAILABLE"
+  ]).has(code);
 }
 
 function mapError(error: unknown): ApplicationServiceError {

@@ -7,6 +7,7 @@ export * from "./format.js";
 export {
   DocumentStore,
   DocumentStoreError,
+  type CompactStage,
   type CreateStage,
   type CreateDocumentStoreOptions,
   type DocumentAccessMode,
@@ -46,6 +47,7 @@ export {
 } from "./blob/readBlobRange.js";
 export {
   embedReference,
+  embedReferences,
   linkReference,
   ReferenceError,
   relinkReference,

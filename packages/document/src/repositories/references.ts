@@ -397,16 +397,16 @@ export async function revokeReferenceGrant(
   if (reference === undefined) {
     throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
   }
-  if (reference.pathGrantId !== null) {
-    store.revokeReferenceGrantAuthority(reference.pathGrantId);
-  }
+  const grantId = reference.pathGrantId;
   const revoked = LinkedReferenceSchema.parse({
     ...reference,
     state: "missing",
     pathGrantId: null,
     updatedAt: new Date().toISOString()
   });
-  return persistReference(store, revoked);
+  const saved = await persistReference(store, revoked);
+  if (grantId !== null) store.revokeReferenceGrantAuthority(grantId);
+  return saved;
 }
 
 export async function embedReference(
@@ -418,6 +418,7 @@ export async function embedReference(
   if (reference === undefined) {
     throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
   }
+  const grantId = reference.pathGrantId;
   const embedded = LinkedReferenceSchema.parse({
     ...reference,
     state: "embedded",
@@ -426,5 +427,35 @@ export async function embedReference(
     pathGrantId: null,
     updatedAt: new Date().toISOString()
   });
-  return persistReference(store, embedded);
+  const saved = await persistReference(store, embedded);
+  if (grantId !== null) store.revokeReferenceGrantAuthority(grantId);
+  return saved;
+}
+
+export async function embedReferences(
+  store: DocumentStore,
+  inputs: readonly { referenceId: string; contentKey: string }[]
+): Promise<LinkedReference[]> {
+  const grantsToRevoke: string[] = [];
+  const embedded = await store[DOCUMENT_STORE_INTERNAL]("write", ({ references }) =>
+    inputs.map(({ referenceId, contentKey }) => {
+      const reference = references.get(referenceId);
+      if (reference === undefined) {
+        throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${referenceId} does not exist.`);
+      }
+      if (reference.pathGrantId !== null) {
+        grantsToRevoke.push(reference.pathGrantId);
+      }
+      return references.put(LinkedReferenceSchema.parse({
+        ...reference,
+        state: "embedded",
+        contentKey,
+        originalPath: null,
+        pathGrantId: null,
+        updatedAt: new Date().toISOString()
+      }));
+    })
+  );
+  for (const grantId of grantsToRevoke) store.revokeReferenceGrantAuthority(grantId);
+  return embedded;
 }

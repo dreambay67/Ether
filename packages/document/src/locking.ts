@@ -23,10 +23,18 @@ export type ReadOnlyReason =
   | "heartbeat-failed";
 
 export type CreateStage = "format-initialized" | "genesis-initialized";
+export type CompactStage =
+  | "vacuum"
+  | "validation"
+  | "fsync"
+  | "rollback-created"
+  | "publication"
+  | "post-publication";
 export type WritableLocationKind =
   | "cloud-placeholder"
   | "local-fixed"
   | "mapped-network"
+  | "removable"
   | "unknown";
 
 export interface WritableLocationCapabilityAdapter {
@@ -60,6 +68,7 @@ export interface DocumentStoreEnvironment {
   machineId?: string;
   now?: () => number;
   onCreateStage?: (stage: CreateStage) => void;
+  onCompactStage?: (stage: CompactStage) => void;
   onHeartbeat?: () => void;
   onLeaseMutexAcquired?: () => void;
   onReadOnly?: (reason: ReadOnlyReason) => void;
@@ -88,6 +97,7 @@ interface ResolvedEnvironment {
   machineId: string;
   now: () => number;
   onCreateStage?: (stage: CreateStage) => void;
+  onCompactStage?: (stage: CompactStage) => void;
   onHeartbeat?: () => void;
   onLeaseMutexAcquired?: () => void;
   onReadOnly?: (reason: ReadOnlyReason) => void;
@@ -173,6 +183,7 @@ export function resolveDocumentStoreEnvironment(
     machineId,
     now: environment.now ?? Date.now,
     onCreateStage: environment.onCreateStage,
+    onCompactStage: environment.onCompactStage,
     onHeartbeat: environment.onHeartbeat,
     onLeaseMutexAcquired: environment.onLeaseMutexAcquired,
     onReadOnly: environment.onReadOnly,

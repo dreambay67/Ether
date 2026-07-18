@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -29,6 +30,9 @@ async function runFixture() {
   const saveQueue = [campaignPath, renamedPath, copyPath];
   const initialDocument = argumentValue("--open-document=");
   const referenceFixture = process.argv.includes("--reference-capabilities");
+  const autosaveGate = argumentValue("--autosave-gate=");
+  const saveAsGate = argumentValue("--save-as-gate=");
+  const quitGate = argumentValue("--quit-gate=");
 
   const started = await startEtherDesktop({
     rendererUrl: pathToFileURL(path.join(repositoryRoot, "apps", "desktop", "dist", "index.html")).href,
@@ -43,13 +47,20 @@ async function runFixture() {
       : undefined,
     autosaveOperation: process.argv.includes("--autosave-failure")
       ? async () => { throw Object.assign(new Error("Fixture autosave failure"), { code: "ENOSPC" }); }
-      : undefined,
+      : autosaveGate === null ? undefined : async () => waitForGate(autosaveGate),
     serviceFactory: referenceFixture ? createReferenceFixtureService : undefined,
     dialogs: {
       openDocument: async () => process.argv.includes("--read-only-location") && initialDocument !== null
         ? initialDocument
         : renamedPath,
-      saveDocument: async () => saveQueue.shift() ?? null,
+      saveDocument: async (kind) => {
+        if (kind === "save-as" && saveAsGate !== null) await waitForGate(saveAsGate);
+        const destination = saveQueue.shift() ?? null;
+        if (kind === "save-as" && saveAsGate !== null) {
+          await writeFile(`${saveAsGate}.selected`, destination ?? "cancelled", "utf8");
+        }
+        return destination;
+      },
       locateReference: async () => null,
       searchReferenceFolder: async () => null,
       confirmPortable: async () => !process.argv.includes("--portable-cancel")
@@ -67,6 +78,24 @@ async function runFixture() {
         snapshot: { ...snapshot, revision: 0, saveState: "saved" }
       });
     }, 2_500);
+  }
+  if (quitGate !== null) {
+    app.on("before-quit", () => {
+      writeFileSync(`${quitGate}.observed`, "before-quit", "utf8");
+    });
+    void waitForGate(quitGate).then(() => app.quit());
+  }
+}
+
+async function waitForGate(gatePath) {
+  await writeFile(`${gatePath}.started`, "started", "utf8");
+  while (true) {
+    try {
+      await access(gatePath);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
   }
 }
 

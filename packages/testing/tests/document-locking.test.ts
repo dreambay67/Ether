@@ -27,6 +27,13 @@ type SaveStage =
   | "publication"
   | "post-publication";
 type CreateStage = "format-initialized" | "genesis-initialized";
+type CompactStage =
+  | "vacuum"
+  | "validation"
+  | "fsync"
+  | "rollback-created"
+  | "publication"
+  | "post-publication";
 type WritableLocationKind = "cloud-placeholder" | "local-fixed" | "mapped-network" | "unknown";
 
 interface StoreEnvironment {
@@ -37,6 +44,7 @@ interface StoreEnvironment {
   machineId: string;
   now?: () => number;
   onCreateStage?: (stage: CreateStage) => void;
+  onCompactStage?: (stage: CompactStage) => void;
   onHeartbeat?: () => void;
   onLeaseMutexAcquired?: () => void;
   onSaveStage?: (stage: SaveStage) => void;
@@ -56,6 +64,7 @@ interface StoreInstance {
       };
   readonly path: string;
   close(): Promise<void>;
+  compact(): Promise<{ beforeBytes: number; afterBytes: number }>;
   saveAs(destinationPath: string): Promise<void>;
   saveCopy(destinationPath: string): Promise<{ documentId: string; path: string }>;
 }
@@ -541,6 +550,94 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(leaseRecordPaths(leaseRoot)).toEqual([]);
     await writer.close();
   });
+
+  it("restores the active document when staged Compact fails after publication", async () => {
+    const failure = new Error("injected compact failure after publication");
+    const store = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-compact-rollback",
+      environment: environment(leaseRoot, "compact-rollback", {
+        recoveryRoot: path.join(root, "recovery"),
+        onCompactStage: (stage) => {
+          if (stage === "post-publication") throw failure;
+        }
+      }),
+      initialGraph: initialGraph(),
+      title: "Compact rollback"
+    });
+    const original = readFileSync(sourcePath);
+    try {
+      await expect(store.compact()).rejects.toThrow(failure.message);
+
+      expect(readFileSync(sourcePath)).toEqual(original);
+      expect(store.documentId).toBe("document-compact-rollback");
+      expect(store.mode).toEqual({ kind: "writable" });
+      const reader = await storeClass().open(sourcePath, {
+        access: "read-only",
+        environment: environment(leaseRoot, "compact-rollback-reader")
+      });
+      expect(reader.documentId).toBe("document-compact-rollback");
+      await reader.close();
+      expect(readdirSync(root).filter((name) => name.includes("compact") || name.includes("rollback"))).toEqual([]);
+    } finally {
+      await store.close();
+    }
+  }, 15_000);
+
+  it("recovers a Compact replacement interrupted after publication", async () => {
+    const recoveryRoot = path.join(root, "recovery");
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-compact-interrupted",
+      environment: environment(leaseRoot, "compact-interrupted-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Compact interrupted"
+    });
+    await source.close();
+    const documentEntry = pathToFileURL(
+      path.resolve(import.meta.dirname, "../../document/dist/index.js")
+    ).href;
+
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { DocumentStore } from ${JSON.stringify(documentEntry)};
+         const store = await DocumentStore.open(${JSON.stringify(sourcePath)}, {
+           access: "require-write",
+           environment: {
+             appInstanceId: "compact-interrupted-child",
+             leaseRoot: ${JSON.stringify(leaseRoot)},
+             recoveryRoot: ${JSON.stringify(recoveryRoot)},
+             machineId: "test-machine",
+             processIsAlive: () => false,
+             onCompactStage: (stage) => {
+               if (stage === "post-publication") process.kill(process.pid, "SIGKILL");
+             }
+           }
+         });
+         await store.compact();`
+      ],
+      { encoding: "utf8", timeout: 10_000 }
+    );
+    expect(child.status).not.toBe(0);
+
+    const recovered = await storeClass().open(sourcePath, {
+      access: "require-write",
+      environment: environment(leaseRoot, "compact-interrupted-recovery", {
+        now: () => Date.now() + 60_000,
+        processIsAlive: () => false,
+        recoveryRoot,
+        staleMs: 1
+      })
+    });
+    expect(recovered.documentId).toBe("document-compact-interrupted");
+    expect(recovered.mode).toEqual({ kind: "writable" });
+    await recovered.close();
+    expect(readdirSync(root).filter((name) => name.includes("compact") || name.includes("rollback"))).toEqual([]);
+    expect(readdirSync(recoveryRoot, { recursive: true })).toEqual([]);
+  }, 20_000);
 
   it("uses validated no-clobber backups for Save a Copy and Save As with independent identities and leases", async () => {
     const store = await storeClass().create(sourcePath, {

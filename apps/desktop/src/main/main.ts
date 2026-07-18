@@ -24,6 +24,7 @@ import {
   DesktopApplicationService,
   OpenDocumentController,
   OpenDocumentCoordinator,
+  createWindowsLocationCapability,
   type DesktopApplicationServiceOptions,
   type NativeDialogPort
 } from "./services/applicationService.js";
@@ -67,7 +68,11 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     dialogs,
     provider: new FakeImageProvider(),
     simulationMode: options.simulationMode === true,
-    ...(options.locationCapability === undefined ? {} : { locationCapability: options.locationCapability }),
+    ...(options.locationCapability !== undefined
+      ? { locationCapability: options.locationCapability }
+      : process.platform === "win32"
+        ? { locationCapability: createWindowsLocationCapability() }
+        : {}),
     ...(options.autosaveOperation === undefined ? {} : { autosaveOperation: options.autosaveOperation })
   };
   const service = options.serviceFactory?.(serviceOptions) ?? new DesktopApplicationService(serviceOptions);
@@ -190,15 +195,33 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   else await service.bootstrap();
 
   await mainWindow.loadURL(rendererUrl);
+  let lifecycleDrainedForQuit = false;
+  let quitDrain: Promise<void> | null = null;
+  const requestQuitDrain = () => {
+    if (quitDrain !== null) return;
+    quitDrain = service.close().then(() => {
+      lifecycleDrainedForQuit = true;
+      app.quit();
+    }, async (error) => {
+      quitDrain = null;
+      await reportFailure(error);
+    });
+  };
+  mainWindow.on("close", (event) => {
+    if (lifecycleDrainedForQuit) return;
+    event.preventDefault();
+    requestQuitDrain();
+  });
   mainWindow.on("closed", () => {
     disposeGraphHandlers();
     disposeDocumentHandlers();
     disposeApplicationMenu();
     disposeRecentSubscription();
-    void service.close();
   });
-  app.on("before-quit", () => {
-    void service.close();
+  app.on("before-quit", (event) => {
+    if (lifecycleDrainedForQuit) return;
+    event.preventDefault();
+    requestQuitDrain();
   });
   app.on("window-all-closed", () => app.quit());
 
