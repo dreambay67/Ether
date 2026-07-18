@@ -14,10 +14,12 @@ test("shows an immediate untitled canvas and subscribes before the initial snaps
 test("keeps header, graph, tools, and status bounded across presentation widths", async ({ page }) => {
   await openEther(page);
 
+  // Task 9 evidence covers the lifecycle canvas only. Task 15 owns Build/Focus/Run/Review
+  // workspaces, adaptive pane transitions, pane resizing/collapse, and the full shell screenshot suite.
   for (const viewport of [
     { width: 1920, height: 1080 },
-    { width: 1280, height: 800 },
-    { width: 820, height: 720 }
+    { width: 1440, height: 900 },
+    { width: 1280, height: 720 }
   ]) {
     await page.setViewportSize(viewport);
     const bounds = await page.evaluate(() => {
@@ -71,7 +73,7 @@ test("explains honest read-only mode and disables canvas mutation before invocat
   });
 
   await expect(page.getByTestId("project-header")).toContainText(
-    "Read-only: this location cannot guarantee safe writes"
+    "Read-only: this location cannot guarantee safe writes; save a copy to a local fixed drive"
   );
   for (const name of ["Save", "Save as", "Compact document", "Make document portable"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
@@ -83,6 +85,18 @@ test("explains honest read-only mode and disables canvas mutation before invocat
   await expect(page.getByRole("button", { name: "Save a copy", exact: true })).toBeEnabled();
   expect(await calls(page)).not.toContain("graph.apply");
 });
+
+for (const [reason, guidance] of [
+  ["requested", "this document was explicitly opened read-only; reopen it with write access"],
+  ["writer-active", "another Ether window is editing this document; close it there, then reopen"],
+  ["sqlite-busy", "the document database is busy; close the app using it, then reopen"],
+  ["heartbeat-failed", "Ether lost safe write access; save a copy, then reopen"]
+] as const) {
+  test(`surfaces ${reason} with precise recovery guidance`, async ({ page }) => {
+    await openEther(page, { mode: "read-only", readOnlyReason: reason });
+    await expect(page.getByTestId("project-header")).toContainText(`Read-only: ${guidance}`);
+  });
+}
 
 test("shows only capability-backed missing-reference actions", async ({ page }) => {
   await openEther(page, { missingReference: "limited" });
@@ -110,9 +124,12 @@ test("presents simulation, compact, portable, and exact save-state feedback", as
   await expect(page.getByRole("button", { name: "Embed Available Copy", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Compact document" }).click();
-  await expect(page.getByText("Compacted document and reclaimed 1 B", { exact: true })).toBeVisible();
+  await expect(page.getByText("Compacted document: 10 B before, 9 B after; reclaimed 1 B", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Make document portable" }).click();
-  await expect(page.getByText("Made portable: embedded 2 references; 1 unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText(
+    "Made portable: embedded 2 references (4.0 KB); missing source-image.png",
+    { exact: true }
+  )).toBeVisible();
 
   await emitState(page, 5, "saving", null);
   await expect(page.getByText("Saving", { exact: true })).toBeVisible();
@@ -130,7 +147,7 @@ async function openEther(
   page: Page,
   options: {
     mode?: "writable" | "read-only";
-    readOnlyReason?: "location-unsupported" | null;
+    readOnlyReason?: "requested" | "writer-active" | "location-unsupported" | "sqlite-busy" | "heartbeat-failed" | null;
     initialNode?: boolean;
     missingReference?: "limited" | "full";
     simulationMode?: boolean;
@@ -158,6 +175,13 @@ async function openEther(
       named: false,
       mode: fixture.mode ?? "writable",
       readOnlyReason: fixture.readOnlyReason ?? null,
+      commands: {
+        save: (fixture.mode ?? "writable") === "writable",
+        saveAs: (fixture.mode ?? "writable") === "writable",
+        saveCopy: true,
+        compact: (fixture.mode ?? "writable") === "writable",
+        makePortable: (fixture.mode ?? "writable") === "writable"
+      },
       saveState,
       documentRevisionId: `document-revision-${revision}`,
       graphId: "graph-root",
@@ -234,9 +258,10 @@ async function openEther(
         makePortable: async () => ({
           cancelled: false,
           embeddedCount: 2,
+          embeddedBytes: 4096,
           expectedBytes: 4096,
           expectedCount: 2,
-          missingReferenceIds: ["reference-missing"]
+          missingReferences: [{ id: "reference-missing", displayName: "source-image.png" }]
         }),
         close: async () => null
       },

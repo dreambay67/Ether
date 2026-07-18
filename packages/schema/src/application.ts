@@ -298,7 +298,10 @@ export const applicationEventPayloadSchemas = {
     .object({
       state: z.enum(["open", "read-only", "closing", "closed"]),
       dirty: z.boolean(),
-      documentRevisionId: idSchema.nullable()
+      documentRevisionId: idSchema.nullable(),
+      readOnlyReason: z
+        .enum(["requested", "writer-active", "location-unsupported", "sqlite-busy", "heartbeat-failed"])
+        .optional()
     })
     .strict(),
   "graph.revisionChanged": z

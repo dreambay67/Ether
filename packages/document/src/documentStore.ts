@@ -959,6 +959,7 @@ export class DocumentStore {
     this.database = connection.database;
     this.currentDirty = readPersistedDirtyState(this.database);
     this.currentMode = { kind: "read-only", reason };
+    this.runtime.onReadOnly?.(reason);
   }
 
   private async saveBackup(

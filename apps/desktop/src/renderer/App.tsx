@@ -11,7 +11,12 @@ import {
 import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink } from "lucide-react";
 import type { EtherGraph, EtherNode, GraphTransaction } from "@ether/schema";
 
-import type { DesktopReference, DocumentDescriptor, ReferenceAction } from "../shared/ipc/contracts";
+import type {
+  DesktopReference,
+  DocumentCommandResult,
+  DocumentDescriptor,
+  ReferenceAction
+} from "../shared/ipc/contracts";
 import { ArtifactBrowser } from "./artifacts/ArtifactBrowser";
 import { ProjectHeader } from "./project/ProjectHeader";
 import { StartScreen } from "./project/StartScreen";
@@ -39,6 +44,10 @@ export function App() {
       setMessage(error instanceof Error ? error.message : "The graph needs attention.");
     });
   }, [document, loadGraph]);
+
+  useEffect(() => {
+    if (state.commandResult !== null) setMessage(formatDocumentCommandResult(state.commandResult));
+  }, [state.commandResult]);
 
   const runDocumentCommand = async (command: (id: string) => Promise<unknown>) => {
     if (document === null) return;
@@ -137,8 +146,7 @@ export function App() {
   const compact = async (documentId: string) => {
     try {
       const result = await window.ether.document.compact(documentId);
-      const reclaimed = Math.max(0, result.beforeBytes - result.afterBytes);
-      setMessage(`Compacted document and reclaimed ${formatBytes(reclaimed)}`);
+      setMessage(formatDocumentCommandResult({ kind: "compact", ...result }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The document could not be compacted.");
     }
@@ -147,14 +155,7 @@ export function App() {
   const makePortable = async (documentId: string) => {
     try {
       const result = await window.ether.document.makePortable(documentId);
-      if (result.cancelled) {
-        setMessage("Make Portable cancelled; the document was not changed");
-      } else {
-        setMessage(
-          `Made portable: embedded ${result.embeddedCount} reference${result.embeddedCount === 1 ? "" : "s"}; ` +
-          `${result.missingReferenceIds.length} unavailable`
-        );
-      }
+      setMessage(formatDocumentCommandResult({ kind: "portable", ...result }));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The document could not be made portable.");
     }
@@ -277,6 +278,20 @@ function formatBytes(byteLength: number): string {
   if (byteLength < 1024) return `${byteLength} B`;
   if (byteLength < 1024 * 1024) return `${(byteLength / 1024).toFixed(1)} KB`;
   return `${(byteLength / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDocumentCommandResult(result: DocumentCommandResult): string {
+  if (result.kind === "compact") {
+    const reclaimed = Math.max(0, result.beforeBytes - result.afterBytes);
+    return `Compacted document: ${formatBytes(result.beforeBytes)} before, ${formatBytes(result.afterBytes)} after; ` +
+      `reclaimed ${formatBytes(reclaimed)}`;
+  }
+  if (result.cancelled) return "Make Portable cancelled; the document was not changed";
+  const missing = result.missingReferences.length === 0
+    ? "no missing references"
+    : `missing ${result.missingReferences.map((reference) => reference.displayName).join(", ")}`;
+  return `Made portable: embedded ${result.embeddedCount} reference${result.embeddedCount === 1 ? "" : "s"} ` +
+    `(${formatBytes(result.embeddedBytes)}); ${missing}`;
 }
 
 function promptNode(ordinal: number): EtherNode {

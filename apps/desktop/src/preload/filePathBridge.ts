@@ -1,10 +1,12 @@
 import { desktopIpcChannels } from "../shared/ipc/channels";
 import type {
+  CompactResult,
   DesktopDocumentEvent,
   DesktopIpcChannel,
   DesktopReference,
   DocumentDescriptor,
-  NormalizedResult
+  NormalizedResult,
+  PortableResult
 } from "../shared/ipc/contracts";
 import type { GraphTransaction } from "@ether/schema";
 import type { Artifact, EtherGraph } from "@ether/schema";
@@ -33,14 +35,8 @@ export function createEtherBridge(transport: BridgeTransport) {
       save: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.save, documentId),
       saveAs: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.saveAs, documentId),
       saveCopy: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.saveCopy, documentId),
-      compact: (documentId: string) => scoped<{ beforeBytes: number; afterBytes: number }>(desktopIpcChannels.document.compact, documentId),
-      makePortable: (documentId: string) => scoped<{
-        cancelled: boolean;
-        embeddedCount: number;
-        expectedBytes: number;
-        expectedCount: number;
-        missingReferenceIds: string[];
-      }>(desktopIpcChannels.document.makePortable, documentId),
+      compact: (documentId: string) => scoped<CompactResult>(desktopIpcChannels.document.compact, documentId),
+      makePortable: (documentId: string) => scoped<PortableResult>(desktopIpcChannels.document.makePortable, documentId),
       close: (documentId: string) => scoped<null>(desktopIpcChannels.document.close, documentId),
       onEvent: (listener: (event: DesktopDocumentEvent) => void) =>
         transport.subscribe(desktopIpcChannels.document.event, (event) => listener(event as DesktopDocumentEvent))

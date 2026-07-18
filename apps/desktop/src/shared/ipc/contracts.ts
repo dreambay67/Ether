@@ -37,6 +37,13 @@ export const DocumentDescriptorSchema = z
     readOnlyReason: z
       .enum(["requested", "writer-active", "location-unsupported", "sqlite-busy", "heartbeat-failed"])
       .nullable(),
+    commands: z.object({
+      save: z.boolean(),
+      saveAs: z.boolean(),
+      saveCopy: z.boolean(),
+      compact: z.boolean(),
+      makePortable: z.boolean()
+    }).strict(),
     saveState: z.enum(["saving", "saved", "needs-attention"]),
     documentRevisionId: id,
     graphId: id,
@@ -47,18 +54,27 @@ export const DocumentDescriptorSchema = z
   .strict();
 export type DocumentDescriptor = z.infer<typeof DocumentDescriptorSchema>;
 
-const compactResult = z
+export const CompactResultSchema = z
   .object({ beforeBytes: z.number().int().nonnegative(), afterBytes: z.number().int().nonnegative() })
   .strict();
-const portableResult = z
+export type CompactResult = z.infer<typeof CompactResultSchema>;
+const missingReferenceSummary = z.object({ id, displayName: z.string().min(1) }).strict();
+export const PortableResultSchema = z
   .object({
     cancelled: z.boolean(),
     embeddedCount: z.number().int().nonnegative(),
+    embeddedBytes: z.number().int().nonnegative(),
     expectedBytes: z.number().int().nonnegative(),
     expectedCount: z.number().int().nonnegative(),
-    missingReferenceIds: z.array(id)
+    missingReferences: z.array(missingReferenceSummary)
   })
   .strict();
+export type PortableResult = z.infer<typeof PortableResultSchema>;
+export const DocumentCommandResultSchema = z.discriminatedUnion("kind", [
+  CompactResultSchema.extend({ kind: z.literal("compact") }).strict(),
+  PortableResultSchema.extend({ kind: z.literal("portable") }).strict()
+]);
+export type DocumentCommandResult = z.infer<typeof DocumentCommandResultSchema>;
 const graphResult = z.object({ graph: EtherGraphSchema, revision: z.number().int().nonnegative() }).strict();
 export const ReferenceActionSchema = z.enum([
   "locate",
@@ -92,7 +108,8 @@ export const DesktopDocumentEventSchema = z
     revision: z.number().int().nonnegative(),
     saveState: z.enum(["saving", "saved", "needs-attention"]).optional(),
     snapshot: DocumentDescriptorSchema.optional(),
-    error: DesktopErrorSchema.optional()
+    error: DesktopErrorSchema.optional(),
+    commandResult: DocumentCommandResultSchema.optional()
   })
   .strict();
 export type DesktopDocumentEvent = z.infer<typeof DesktopDocumentEventSchema>;
@@ -108,8 +125,8 @@ export const desktopIpcContracts = {
   [desktopIpcChannels.document.save]: { request: documentScope, response: resultSchema(DocumentDescriptorSchema) },
   [desktopIpcChannels.document.saveAs]: { request: documentScope, response: resultSchema(DocumentDescriptorSchema) },
   [desktopIpcChannels.document.saveCopy]: { request: documentScope, response: resultSchema(DocumentDescriptorSchema) },
-  [desktopIpcChannels.document.compact]: { request: documentScope, response: resultSchema(compactResult) },
-  [desktopIpcChannels.document.makePortable]: { request: documentScope, response: resultSchema(portableResult) },
+  [desktopIpcChannels.document.compact]: { request: documentScope, response: resultSchema(CompactResultSchema) },
+  [desktopIpcChannels.document.makePortable]: { request: documentScope, response: resultSchema(PortableResultSchema) },
   [desktopIpcChannels.document.close]: { request: documentScope, response: resultSchema(z.null()) },
   [desktopIpcChannels.document.event]: { request: DesktopDocumentEventSchema, response: resultSchema(z.null()) },
   [desktopIpcChannels.graph.snapshot]: {

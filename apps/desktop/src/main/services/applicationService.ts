@@ -8,6 +8,7 @@ import type {
   ReferenceGrantAuthority,
   ReferenceGrantFingerprintRequest,
   ReferenceGrantPathRequest,
+  DocumentStoreEnvironment,
   WritableLocationCapabilityAdapter
 } from "@ether/document";
 import type { GenerationProvider } from "@ether/providers";
@@ -17,7 +18,10 @@ import type {
   DesktopDocumentEvent,
   DesktopReference,
   ReferenceAction,
-  DocumentDescriptor
+  CompactResult,
+  DocumentCommandResult,
+  DocumentDescriptor,
+  PortableResult
 } from "../../shared/ipc/contracts.js";
 
 export interface NativeDialogPort {
@@ -25,7 +29,11 @@ export interface NativeDialogPort {
   saveDocument(kind?: "save-as" | "save-copy"): Promise<string | null>;
   locateReference(referenceId: string): Promise<string | null>;
   searchReferenceFolder(referenceId: string): Promise<string | null>;
-  confirmPortable(input: { expectedBytes: number; expectedCount: number }): Promise<boolean>;
+  confirmPortable(input: {
+    expectedBytes: number;
+    expectedCount: number;
+    missingReferences: PortableResult["missingReferences"];
+  }): Promise<boolean>;
 }
 
 type SaveState = DocumentDescriptor["saveState"];
@@ -228,6 +236,10 @@ export interface DesktopApplicationServiceOptions {
   dialogs: NativeDialogPort;
   provider: GenerationProvider;
   locationCapability?: WritableLocationCapabilityAdapter;
+  documentEnvironment?: Omit<
+    DocumentStoreEnvironment,
+    "leaseRoot" | "recoveryRoot" | "referenceGrantAuthority" | "locationCapability"
+  >;
   simulationMode?: boolean;
   autosaveOperation?: (application: EtherApplication) => Promise<void>;
 }
@@ -333,33 +345,49 @@ export class DesktopApplicationService {
     return this.refresh("state", "saved");
   }
 
-  async compact(documentId: string): Promise<{ beforeBytes: number; afterBytes: number }> {
+  async compact(documentId: string): Promise<CompactResult> {
     this.assertScope(documentId);
     const result = await this.requireApplication().compactDocument();
     await this.refresh("state", "saved");
+    await this.emitCommandResult({ kind: "compact", ...result });
     return result;
   }
 
-  async makePortable(documentId: string): Promise<{
-    cancelled: boolean;
-    embeddedCount: number;
-    expectedBytes: number;
-    expectedCount: number;
-    missingReferenceIds: string[];
-  }> {
+  async makePortable(documentId: string): Promise<PortableResult> {
     this.assertScope(documentId);
     const application = this.requireApplication();
+    const references = await application.queryReferences();
     const preflight = await application.preflightDocumentPortable();
+    const preflightMissing = identifyReferences(preflight.missingReferenceIds, references);
     if (!await this.options.dialogs.confirmPortable({
       expectedBytes: preflight.expectedBytes,
-      expectedCount: preflight.expectedCount
+      expectedCount: preflight.expectedCount,
+      missingReferences: preflightMissing
     })) {
-      return { cancelled: true, embeddedCount: 0, ...preflight };
+      const cancelled: PortableResult = {
+        cancelled: true,
+        embeddedCount: 0,
+        embeddedBytes: 0,
+        expectedBytes: preflight.expectedBytes,
+        expectedCount: preflight.expectedCount,
+        missingReferences: preflightMissing
+      };
+      await this.emitCommandResult({ kind: "portable", ...cancelled });
+      return cancelled;
     }
     const result = await application.makeDocumentPortable();
     await this.refresh("references", "saving");
+    const completed: PortableResult = {
+      cancelled: false,
+      embeddedCount: result.embeddedCount,
+      embeddedBytes: result.embeddedBytes,
+      expectedBytes: preflight.expectedBytes,
+      expectedCount: preflight.expectedCount,
+      missingReferences: identifyReferences(result.missingReferenceIds, references)
+    };
+    await this.emitCommandResult({ kind: "portable", ...completed });
     this.autosaveCoordinator?.markDirty();
-    return { cancelled: false, ...preflight, ...result };
+    return completed;
   }
 
   async graphSnapshot(documentId: string) {
@@ -617,12 +645,13 @@ export class DesktopApplicationService {
       appDataRoot: this.options.appDataRoot,
       appVersion: this.options.appVersion,
       provider: this.options.provider,
-      documentEnvironment: this.options.locationCapability === undefined
-        ? { referenceGrantAuthority: this.pathGrants }
-        : {
-            locationCapability: this.options.locationCapability,
-            referenceGrantAuthority: this.pathGrants
-          }
+      documentEnvironment: {
+        ...this.options.documentEnvironment,
+        ...(this.options.locationCapability === undefined
+          ? {}
+          : { locationCapability: this.options.locationCapability }),
+        referenceGrantAuthority: this.pathGrants
+      }
     });
     application.events.subscribe(() => {
       if (this.current !== null) void this.refresh("state");
@@ -666,9 +695,8 @@ export class DesktopApplicationService {
       displayName: displayNameOverride ?? (this.untitled || this.currentPath === null ? "Untitled" : path.basename(this.currentPath)),
       named: !this.untitled,
       mode,
-      readOnlyReason: mode === "read-only"
-        ? (await this.readOnlyReason())
-        : null,
+      readOnlyReason: document.readOnlyReason,
+      commands: documentCommandCapabilities(mode),
       saveState: saveState ?? this.current?.saveState ?? "saved",
       documentRevisionId: document.documentRevisionId,
       graphId,
@@ -706,11 +734,22 @@ export class DesktopApplicationService {
     this.refreshTail = operation.then(() => undefined, () => undefined);
   }
 
-  private async readOnlyReason(): Promise<DocumentDescriptor["readOnlyReason"]> {
-    const document = await this.requireApplication().queryDocument();
-    if (document.mode !== "read-only" || this.currentPath === null) return null;
-    if (this.options.locationCapability?.classify(this.currentPath) !== "local-fixed") return "location-unsupported";
-    return "requested";
+  private emitCommandResult(commandResult: DocumentCommandResult): Promise<void> {
+    const operation = this.refreshTail.then(() => {
+      if (this.current === null) return;
+      this.revision += 1;
+      this.current = { ...this.current, revision: this.revision };
+      const event: DesktopDocumentEvent = {
+        kind: "state",
+        documentId: this.current.documentId,
+        revision: this.revision,
+        snapshot: this.current,
+        commandResult
+      };
+      for (const listener of this.listeners) listener(structuredClone(event));
+    });
+    this.refreshTail = operation.then(() => undefined, () => undefined);
+    return operation;
   }
 
   private assertScope(documentId: string): void {
@@ -751,6 +790,31 @@ function tryCanonicalGrantPath(filePath: string): string | null {
   } catch {
     return null;
   }
+}
+
+function documentCommandCapabilities(mode: DocumentDescriptor["mode"]): DocumentDescriptor["commands"] {
+  const writable = mode === "writable";
+  return {
+    save: writable,
+    saveAs: writable,
+    saveCopy: true,
+    compact: writable,
+    makePortable: writable
+  };
+}
+
+function identifyReferences(
+  ids: readonly string[],
+  references: readonly Pick<LinkedReference, "id" | "displayName">[]
+): PortableResult["missingReferences"] {
+  const byId = new Map(references.map((reference) => [reference.id, reference.displayName]));
+  return ids.map((id) => {
+    const displayName = byId.get(id);
+    if (displayName === undefined) {
+      throw codedError("REFERENCE_NOT_FOUND", `Portable preflight returned unknown reference ${id}.`);
+    }
+    return { id, displayName };
+  });
 }
 
 async function listFiles(root: string): Promise<string[]> {

@@ -158,7 +158,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     })
   );
 
-  installApplicationMenu(mainWindow, service, openDocument, run);
+  const disposeApplicationMenu = installApplicationMenu(service, openDocument, run);
   installWindowSecurity(mainWindow, rendererUrl);
   app.setJumpList([{ type: "recent" }]);
 
@@ -193,6 +193,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   mainWindow.on("closed", () => {
     disposeGraphHandlers();
     disposeDocumentHandlers();
+    disposeApplicationMenu();
     disposeRecentSubscription();
     void service.close();
   });
@@ -242,12 +243,15 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
       });
       return result.canceled ? null : result.filePaths[0] ?? null;
     },
-    confirmPortable: async ({ expectedBytes, expectedCount }) => {
+    confirmPortable: async ({ expectedBytes, expectedCount, missingReferences }) => {
+      const missingDetail = missingReferences.length === 0
+        ? "All known references are available."
+        : `Unavailable: ${missingReferences.map((reference) => reference.displayName).join(", ")}`;
       const result = await dialog.showMessageBox(getWindow(), {
         type: "question",
         title: "Make Document Portable",
         message: `Embed ${expectedCount} available reference${expectedCount === 1 ? "" : "s"}?`,
-        detail: `${expectedBytes.toLocaleString()} bytes will be copied into this Ether document.`,
+        detail: `${expectedBytes.toLocaleString()} bytes will be copied into this Ether document. ${missingDetail}`,
         buttons: ["Make Portable", "Cancel"],
         defaultId: 0,
         cancelId: 1
@@ -258,31 +262,73 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
 }
 
 function installApplicationMenu(
-  mainWindow: BrowserWindow,
   service: DesktopApplicationService,
   openDocument: () => Promise<unknown>,
   run: (operation: () => Promise<unknown>, remember?: boolean) => void
-): void {
-  const scoped = (operation: (documentId: string) => Promise<unknown>) => () =>
-    run(() => operation(service.snapshot().documentId));
+): () => void {
+  type Command = keyof ReturnType<DesktopApplicationService["snapshot"]>["commands"];
+  let commands: Record<Command, boolean> = {
+    save: false,
+    saveAs: false,
+    saveCopy: false,
+    compact: false,
+    makePortable: false
+  };
+  const scoped = (
+    command: Command,
+    operation: (documentId: string) => Promise<unknown>,
+    remember = false
+  ) => () => {
+    let snapshot;
+    try {
+      snapshot = service.snapshot();
+    } catch {
+      return;
+    }
+    if (!snapshot.commands[command]) return;
+    run(() => operation(snapshot.documentId), remember);
+  };
   const template: MenuItemConstructorOptions[] = [{
     label: "File",
     submenu: [
-      { label: "New", accelerator: "Ctrl+N", click: () => run(() => service.newDocument()) },
-      { label: "Open...", accelerator: "Ctrl+O", click: () => run(openDocument) },
+      { id: "file.new", label: "New", accelerator: "Ctrl+N", click: () => run(() => service.newDocument()) },
+      { id: "file.open", label: "Open...", accelerator: "Ctrl+O", click: () => run(openDocument) },
       { type: "separator" },
-      { label: "Save", accelerator: "Ctrl+S", click: scoped((id) => service.save(id)) },
-      { label: "Save As...", accelerator: "Ctrl+Shift+S", click: () => run(() => service.saveAs(service.snapshot().documentId), true) },
-      { label: "Save a Copy...", click: scoped((id) => service.saveCopy(id)) },
+      { id: "file.save", label: "Save", accelerator: "Ctrl+S", enabled: false, click: scoped("save", (id) => service.save(id)) },
+      { id: "file.save-as", label: "Save As...", accelerator: "Ctrl+Shift+S", enabled: false, click: scoped("saveAs", (id) => service.saveAs(id), true) },
+      { id: "file.save-copy", label: "Save a Copy...", enabled: false, click: scoped("saveCopy", (id) => service.saveCopy(id)) },
       { type: "separator" },
-      { label: "Compact Document", click: scoped((id) => service.compact(id)) },
-      { label: "Make Document Portable", click: scoped((id) => service.makePortable(id)) },
+      { id: "file.compact", label: "Compact Document", enabled: false, click: scoped("compact", (id) => service.compact(id)) },
+      { id: "file.make-portable", label: "Make Document Portable", enabled: false, click: scoped("makePortable", (id) => service.makePortable(id)) },
       { type: "separator" },
       { role: "quit" }
     ]
   }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-  void mainWindow;
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+  const update = (next: ReturnType<DesktopApplicationService["snapshot"]>["commands"]) => {
+    commands = next;
+    const items: Array<[string, Command]> = [
+      ["file.save", "save"],
+      ["file.save-as", "saveAs"],
+      ["file.save-copy", "saveCopy"],
+      ["file.compact", "compact"],
+      ["file.make-portable", "makePortable"]
+    ];
+    for (const [id, command] of items) {
+      const item = menu.getMenuItemById(id);
+      if (item !== null) item.enabled = commands[command];
+    }
+  };
+  const unsubscribe = service.subscribe((event) => {
+    if (event.snapshot !== undefined) update(event.snapshot.commands);
+  });
+  try {
+    update(service.snapshot().commands);
+  } catch {
+    // The initial document event enables commands after bootstrap.
+  }
+  return unsubscribe;
 }
 
 function installWindowSecurity(mainWindow: BrowserWindow, rendererUrl: string): void {

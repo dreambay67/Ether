@@ -14,8 +14,9 @@ export const defaultDesktopSettings: DesktopSettings = { recentDocuments: [] };
 
 export function createDesktopSettingsStore(settingsPathProvider: () => string) {
   const settingsPath = () => settingsPathProvider();
+  let pendingUpdate: Promise<void> = Promise.resolve();
 
-  const load = async (): Promise<DesktopSettings> => {
+  const loadFromDisk = async (): Promise<DesktopSettings> => {
     try {
       return sanitizeSettings(JSON.parse(await readFile(settingsPath(), "utf8")) as unknown);
     } catch (error) {
@@ -25,7 +26,7 @@ export function createDesktopSettingsStore(settingsPathProvider: () => string) {
     }
   };
 
-  const save = async (settings: DesktopSettings): Promise<DesktopSettings> => {
+  const saveToDisk = async (settings: DesktopSettings): Promise<DesktopSettings> => {
     const next = sanitizeSettings(settings);
     const target = settingsPath();
     const temporary = `${target}.${randomUUID()}.tmp`;
@@ -35,23 +36,36 @@ export function createDesktopSettingsStore(settingsPathProvider: () => string) {
     return next;
   };
 
+  const update = <Result>(operation: () => Promise<Result>): Promise<Result> => {
+    const result = pendingUpdate.then(operation);
+    pendingUpdate = result.then(() => undefined, () => undefined);
+    return result;
+  };
+
   return {
-    load,
-    save,
+    async load() {
+      await pendingUpdate;
+      return loadFromDisk();
+    },
+    save(settings: DesktopSettings) {
+      return update(() => saveToDisk(settings));
+    },
     async remember(document: Omit<RecentDocument, "id">): Promise<DesktopSettings> {
-      const current = await load();
-      const identityKey = document.canonicalPath.toLocaleLowerCase();
-      const recent: RecentDocument = {
-        ...document,
-        id: createHash("sha256").update(identityKey).digest("hex").slice(0, 32)
-      };
-      return save({
-        recentDocuments: [
-          recent,
-          ...current.recentDocuments.filter(
-            (candidate) => candidate.canonicalPath.toLocaleLowerCase() !== identityKey
-          )
-        ].slice(0, 12)
+      return update(async () => {
+        const current = await loadFromDisk();
+        const identityKey = document.canonicalPath.toLocaleLowerCase();
+        const recent: RecentDocument = {
+          ...document,
+          id: createHash("sha256").update(identityKey).digest("hex").slice(0, 32)
+        };
+        return saveToDisk({
+          recentDocuments: [
+            recent,
+            ...current.recentDocuments.filter(
+              (candidate) => candidate.canonicalPath.toLocaleLowerCase() !== identityKey
+            )
+          ].slice(0, 12)
+        });
       });
     }
   };

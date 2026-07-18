@@ -62,6 +62,7 @@ export interface DocumentStoreEnvironment {
   onCreateStage?: (stage: CreateStage) => void;
   onHeartbeat?: () => void;
   onLeaseMutexAcquired?: () => void;
+  onReadOnly?: (reason: ReadOnlyReason) => void;
   onSaveStage?: (stage: SaveStage) => void;
   pid?: number;
   processIsAlive?: (pid: number, machineId: string) => boolean;
@@ -89,6 +90,7 @@ interface ResolvedEnvironment {
   onCreateStage?: (stage: CreateStage) => void;
   onHeartbeat?: () => void;
   onLeaseMutexAcquired?: () => void;
+  onReadOnly?: (reason: ReadOnlyReason) => void;
   onSaveStage?: (stage: SaveStage) => void;
   pid: number;
   processIsAlive: (pid: number, machineId: string) => boolean;
@@ -173,6 +175,7 @@ export function resolveDocumentStoreEnvironment(
     onCreateStage: environment.onCreateStage,
     onHeartbeat: environment.onHeartbeat,
     onLeaseMutexAcquired: environment.onLeaseMutexAcquired,
+    onReadOnly: environment.onReadOnly,
     onSaveStage: environment.onSaveStage,
     pid: environment.pid ?? process.pid,
     processIsAlive:

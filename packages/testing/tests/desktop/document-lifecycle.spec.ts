@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { FakeImageProvider } from "@ether/providers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -170,6 +171,119 @@ describe("desktop document lifecycle", () => {
     await opener.close();
   });
 
+  it("preserves a competing writer reason and exposes only read-only-safe document commands", async () => {
+    const root = await tempRoot("ether-desktop-writer-active-");
+    const appDataRoot = path.join(root, "appdata");
+    const documentPath = path.join(root, "Writer owned.ether");
+    const writer = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => documentPath }),
+      provider: new FakeImageProvider()
+    });
+    const initial = await writer.bootstrap();
+    await writer.save(initial.documentId);
+
+    const competitor = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    try {
+      const opened = await competitor.openPath(documentPath);
+      expect(opened).toMatchObject({
+        mode: "read-only",
+        readOnlyReason: "writer-active",
+        commands: {
+          save: false,
+          saveAs: false,
+          saveCopy: true,
+          compact: false,
+          makePortable: false
+        }
+      });
+    } finally {
+      await competitor.close();
+      await writer.close();
+    }
+  });
+
+  it("preserves sqlite-busy when a stale writer lease cannot be safely reclaimed", async () => {
+    const root = await tempRoot("ether-desktop-sqlite-busy-");
+    const appDataRoot = path.join(root, "appdata");
+    const documentPath = path.join(root, "Busy.ether");
+    const creator = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => documentPath }),
+      provider: new FakeImageProvider()
+    });
+    const initial = await creator.bootstrap();
+    await creator.save(initial.documentId);
+    const leaseRoot = path.join(appDataRoot, "leases");
+    const leaseName = (await readdir(leaseRoot)).find((name) => name.endsWith(".json"));
+    if (leaseName === undefined) throw new Error("Expected an active writer lease.");
+    const leasePath = path.join(leaseRoot, leaseName);
+    const lease = JSON.parse(await readFile(leasePath, "utf8")) as Record<string, unknown>;
+    await creator.close();
+    await writeFile(leasePath, JSON.stringify({
+      ...lease,
+      heartbeatAt: 1,
+      ownerToken: randomUUID(),
+      pid: 999_999
+    }));
+
+    const blocker = new DatabaseSync(documentPath);
+    blocker.exec("BEGIN IMMEDIATE");
+    const opener = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    try {
+      await expect(opener.openPath(documentPath)).resolves.toMatchObject({
+        mode: "read-only",
+        readOnlyReason: "sqlite-busy"
+      });
+    } finally {
+      await opener.close();
+      blocker.exec("ROLLBACK");
+      blocker.close();
+    }
+  });
+
+  it("delivers heartbeat-failed access changes without waiting for another edit", async () => {
+    const root = await tempRoot("ether-desktop-heartbeat-");
+    const events: Array<{ snapshot?: { readOnlyReason?: string | null } }> = [];
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider(),
+      documentEnvironment: {
+        heartbeatMs: 10,
+        onHeartbeat: () => { throw new Error("injected heartbeat failure"); }
+      }
+    });
+    try {
+      service.subscribe((event) => events.push(event));
+      await service.bootstrap();
+
+      await vi.waitFor(() => {
+        expect(service.snapshot()).toMatchObject({
+          mode: "read-only",
+          readOnlyReason: "heartbeat-failed",
+          commands: { save: false, saveCopy: true }
+        });
+      });
+      expect(events.some((event) => event.snapshot?.readOnlyReason === "heartbeat-failed")).toBe(true);
+    } finally {
+      await service.close();
+    }
+  });
+
   it("canonicalizes open requests and focuses an already-open identity", async () => {
     const root = await tempRoot("ether-open-coordinator-");
     const filePath = path.join(root, "Campaign.ether");
@@ -272,10 +386,19 @@ describe("desktop document lifecycle", () => {
       provider: new FakeImageProvider()
     });
     const snapshot = await service.bootstrap();
+    const commandResults: unknown[] = [];
+    service.subscribe((event) => {
+      if (event.commandResult !== undefined) commandResults.push(event.commandResult);
+    });
     const application = (service as unknown as { application: {
+      queryReferences(): Promise<unknown[]>;
       preflightDocumentPortable(): Promise<{ expectedBytes: number; expectedCount: number; missingReferenceIds: string[] }>;
-      makeDocumentPortable(): Promise<{ embeddedCount: number; missingReferenceIds: string[] }>;
+      makeDocumentPortable(): Promise<{ embeddedCount: number; embeddedBytes: number; missingReferenceIds: string[] }>;
     } }).application;
+    vi.spyOn(application, "queryReferences").mockResolvedValue([{
+      id: "missing-1",
+      displayName: "offline source.png"
+    }]);
     vi.spyOn(application, "preflightDocumentPortable").mockResolvedValue({
       expectedBytes: 8192,
       expectedCount: 2,
@@ -283,16 +406,76 @@ describe("desktop document lifecycle", () => {
     });
     const makePortable = vi.spyOn(application, "makeDocumentPortable");
 
-    await expect(service.makePortable(snapshot.documentId)).resolves.toEqual({
-      cancelled: true,
-      embeddedCount: 0,
-      expectedBytes: 8192,
-      expectedCount: 2,
+    try {
+      await expect(service.makePortable(snapshot.documentId)).resolves.toEqual({
+        cancelled: true,
+        embeddedCount: 0,
+        embeddedBytes: 0,
+        expectedBytes: 8192,
+        expectedCount: 2,
+        missingReferences: [{ id: "missing-1", displayName: "offline source.png" }]
+      });
+      expect(confirmPortable).toHaveBeenCalledWith({
+        expectedBytes: 8192,
+        expectedCount: 2,
+        missingReferences: [{ id: "missing-1", displayName: "offline source.png" }]
+      });
+      expect(makePortable).not.toHaveBeenCalled();
+      expect(commandResults).toContainEqual({
+        kind: "portable",
+        cancelled: true,
+        embeddedCount: 0,
+        embeddedBytes: 0,
+        expectedBytes: 8192,
+        expectedCount: 2,
+        missingReferences: [{ id: "missing-1", displayName: "offline source.png" }]
+      });
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("reports successful portable byte counts and identifiable missing references", async () => {
+    const root = await tempRoot("ether-portable-result-");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    const snapshot = await service.bootstrap();
+    const application = (service as unknown as { application: {
+      queryReferences(): Promise<unknown[]>;
+      preflightDocumentPortable(): Promise<{ expectedBytes: number; expectedCount: number; missingReferenceIds: string[] }>;
+      makeDocumentPortable(): Promise<{ embeddedCount: number; embeddedBytes: number; missingReferenceIds: string[] }>;
+    } }).application;
+    vi.spyOn(application, "queryReferences").mockResolvedValue([
+      { id: "available-1", displayName: "available.png" },
+      { id: "missing-1", displayName: "missing source.psd" }
+    ]);
+    vi.spyOn(application, "preflightDocumentPortable").mockResolvedValue({
+      expectedBytes: 4096,
+      expectedCount: 1,
       missingReferenceIds: ["missing-1"]
     });
-    expect(confirmPortable).toHaveBeenCalledWith({ expectedBytes: 8192, expectedCount: 2 });
-    expect(makePortable).not.toHaveBeenCalled();
-    await service.close();
+    vi.spyOn(application, "makeDocumentPortable").mockResolvedValue({
+      embeddedCount: 1,
+      embeddedBytes: 4096,
+      missingReferenceIds: ["missing-1"]
+    });
+
+    try {
+      await expect(service.makePortable(snapshot.documentId)).resolves.toEqual({
+        cancelled: false,
+        embeddedCount: 1,
+        embeddedBytes: 4096,
+        expectedBytes: 4096,
+        expectedCount: 1,
+        missingReferences: [{ id: "missing-1", displayName: "missing source.psd" }]
+      });
+    } finally {
+      await service.close();
+    }
   });
 
   it("calculates portable embed count and byte size without mutating references", async () => {
@@ -444,7 +627,8 @@ describe("autosave and event ordering", () => {
       snapshot: null,
       revision: 0,
       saveState: "saved" as const,
-      error: null
+      error: null,
+      commandResult: null
     };
     const current = reduceDocumentSession(initial, {
       kind: "snapshot",
@@ -469,7 +653,8 @@ describe("autosave and event ordering", () => {
       snapshot: null,
       revision: 2,
       saveState: "saved",
-      error: "An older error"
+      error: "An older error",
+      commandResult: null
     }, {
       kind: "snapshot",
       revision: 3,
@@ -486,7 +671,8 @@ describe("autosave and event ordering", () => {
       snapshot: { documentId: "document-1" },
       revision: 9,
       saveState: "needs-attention" as const,
-      error: "Keep this error"
+      error: "Keep this error",
+      commandResult: null
     };
 
     expect(reduceDocumentSession(current, {

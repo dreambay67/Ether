@@ -53,11 +53,11 @@ export function ProjectHeader({
       <nav className="project-header-actions" aria-label="Document commands">
         <IconCommand label="New document" icon={<FilePlus2 size={16} />} onClick={onNew} />
         <IconCommand label="Open document" icon={<FolderOpen size={16} />} onClick={onOpen} />
-        <IconCommand label="Save" icon={<Save size={16} />} onClick={onSave} disabled={document.mode === "read-only"} />
-        <IconCommand label="Save as" icon={<SaveAll size={16} />} onClick={onSaveAs} disabled={document.mode === "read-only"} />
-        <IconCommand label="Save a copy" icon={<Copy size={16} />} onClick={onSaveCopy} />
-        <IconCommand label="Compact document" icon={<ArchiveRestore size={16} />} onClick={onCompact} disabled={document.mode === "read-only"} />
-        <IconCommand label="Make document portable" icon={<PackageCheck size={16} />} onClick={onMakePortable} disabled={document.mode === "read-only"} />
+        <IconCommand label="Save" icon={<Save size={16} />} onClick={onSave} disabled={!document.commands.save} />
+        <IconCommand label="Save as" icon={<SaveAll size={16} />} onClick={onSaveAs} disabled={!document.commands.saveAs} />
+        <IconCommand label="Save a copy" icon={<Copy size={16} />} onClick={onSaveCopy} disabled={!document.commands.saveCopy} />
+        <IconCommand label="Compact document" icon={<ArchiveRestore size={16} />} onClick={onCompact} disabled={!document.commands.compact} />
+        <IconCommand label="Make document portable" icon={<PackageCheck size={16} />} onClick={onMakePortable} disabled={!document.commands.makePortable} />
         <button type="button" className={artifactsOpen ? "is-active" : ""} onClick={onToggleArtifacts} aria-pressed={artifactsOpen}>
           <Images size={16} aria-hidden="true" />
           Artifacts
@@ -91,7 +91,16 @@ function saveStateLabel(state: DocumentDescriptor["saveState"]) {
 }
 
 function readOnlyLabel(reason: DocumentDescriptor["readOnlyReason"]) {
-  if (reason === "location-unsupported") return "this location cannot guarantee safe writes";
-  if (reason === "writer-active") return "open in another Ether window";
-  return "changes are disabled";
+  if (reason === "location-unsupported") {
+    return "this location cannot guarantee safe writes; save a copy to a local fixed drive";
+  }
+  if (reason === "writer-active") {
+    return "another Ether window is editing this document; close it there, then reopen";
+  }
+  if (reason === "sqlite-busy") {
+    return "the document database is busy; close the app using it, then reopen";
+  }
+  if (reason === "heartbeat-failed") return "Ether lost safe write access; save a copy, then reopen";
+  if (reason === "requested") return "this document was explicitly opened read-only; reopen it with write access";
+  return "write access is unavailable; save a copy before closing";
 }

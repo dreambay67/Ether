@@ -42,6 +42,30 @@ describe("desktop settings store", () => {
     expect(settings.recentDocuments[0]?.id).toMatch(/^[a-f0-9]{32}$/);
   });
 
+  it("serializes concurrent recent-document updates without losing identities", async () => {
+    const settingsPath = await tempSettingsPath();
+    const store = createDesktopSettingsStore(() => settingsPath);
+
+    await Promise.all([
+      store.remember({
+        documentId: "document-1",
+        displayName: "First.ether",
+        canonicalPath: "C:\\Ether\\First.ether"
+      }),
+      store.remember({
+        documentId: "document-2",
+        displayName: "Second.ether",
+        canonicalPath: "C:\\Ether\\Second.ether"
+      })
+    ]);
+
+    const settings = await store.load();
+    expect(settings.recentDocuments.map(({ documentId }) => documentId).sort()).toEqual([
+      "document-1",
+      "document-2"
+    ]);
+  });
+
   it("recovers corrupted settings without reviving legacy project fields", async () => {
     const settingsPath = await tempSettingsPath();
     const store = createDesktopSettingsStore(() => settingsPath);

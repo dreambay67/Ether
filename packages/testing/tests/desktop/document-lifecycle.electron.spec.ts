@@ -34,13 +34,15 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
 
     for (const viewport of [
       { width: 1920, height: 1080 },
-      { width: 1280, height: 800 },
-      { width: 820, height: 720 }
+      { width: 1440, height: 900 },
+      { width: 1280, height: 720 }
     ]) {
       await page.setViewportSize(viewport);
       await expectWorkspaceBounds(page, viewport);
+      const screenshot = await page.screenshot();
+      expect(screenshot.byteLength).toBeGreaterThan(10_000);
     }
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1280, height: 720 });
     await startSaveStateObserver(page);
 
     await page.getByRole("button", { name: "Prompt", exact: true }).click();
@@ -58,7 +60,7 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
     await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect.poll(() => observedSaveStates(page)).toEqual(expect.arrayContaining(["Saving", "Saved"]));
 
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await invokeNativeMenuItem(electronApp, "file.save");
     const campaignPath = path.join(fixtureRoot, "documents", "Campaign with spaces.ether");
     await expect.poll(async () => fileExists(campaignPath)).toBe(true);
 
@@ -81,15 +83,15 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
       unknown: 404
     });
 
-    await page.getByRole("button", { name: "Compact document" }).click();
-    await expect(page.getByText(/Compacted document and reclaimed/)).toBeVisible();
-    await page.getByRole("button", { name: "Make document portable" }).click();
-    await expect(page.getByText(/Made portable: embedded 0 references; 0 unavailable/)).toBeVisible();
+    await invokeNativeMenuItem(electronApp, "file.compact");
+    await expect(page.getByText(/Compacted document: .* before, .* after; reclaimed/)).toBeVisible();
+    await invokeNativeMenuItem(electronApp, "file.make-portable");
+    await expect(page.getByText(/Made portable: embedded 0 references \(0 B\); no missing references/)).toBeVisible();
 
-    await page.getByRole("button", { name: "Save as" }).click();
+    await invokeNativeMenuItem(electronApp, "file.save-as");
     const renamedPath = path.join(fixtureRoot, "documents", "Kampa\u0148 \u03a9.ether");
     await expect(page.getByTestId("project-header")).toContainText("Kampa\u0148 \u03a9.ether");
-    await page.getByRole("button", { name: "Save a copy" }).click();
+    await invokeNativeMenuItem(electronApp, "file.save-copy");
     await expect.poll(async () => fileExists(path.join(fixtureRoot, "documents", "Campaign copy.ether"))).toBe(true);
 
     await page.getByRole("button", { name: "New document" }).click();
@@ -145,8 +147,19 @@ test("real Electron disables read-only canvas controls before invocation", async
   try {
     const page = await electronApp.firstWindow();
     await expect(page.getByTestId("project-header")).toContainText(
-      "Read-only: this location cannot guarantee safe writes"
+      "Read-only: this location cannot guarantee safe writes; save a copy to a local fixed drive"
     );
+    expect(await nativeDocumentMenuState(electronApp)).toEqual({
+      save: false,
+      saveAs: false,
+      saveCopy: true,
+      compact: false,
+      makePortable: false
+    });
+    for (const id of ["file.save", "file.save-as", "file.compact", "file.make-portable"]) {
+      await invokeNativeMenuItem(electronApp, id);
+    }
+    expect(await fileExists(path.join(fixtureRoot, "documents", "Campaign with spaces.ether"))).toBe(false);
     for (const name of ["Prompt", "Image", "Save", "Save as", "Compact document", "Make document portable"]) {
       await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
     }
@@ -154,6 +167,23 @@ test("real Electron disables read-only canvas controls before invocation", async
     await expect(page.getByRole("button", { name: "Simulation output", exact: true })).toHaveCount(0);
     await expect(page.locator(".react-flow__node")).toHaveCount(1);
     await expect(page.locator(".react-flow__node.draggable")).toHaveCount(0);
+
+    await invokeNativeMenuItem(electronApp, "file.save-copy");
+    await expect.poll(() => fileExists(path.join(fixtureRoot, "documents", "Campaign with spaces.ether"))).toBe(true);
+    await expect(page.getByTestId("project-header")).toContainText("Read only campaign.ether");
+
+    await invokeNativeMenuItem(electronApp, "file.new");
+    await expect(page.getByTestId("project-header")).toContainText("Untitled");
+    await expect.poll(() => nativeDocumentMenuState(electronApp)).toEqual({
+      save: true,
+      saveAs: true,
+      saveCopy: true,
+      compact: true,
+      makePortable: true
+    });
+    await invokeNativeMenuItem(electronApp, "file.open");
+    await expect(page.getByTestId("project-header")).toContainText("Read only campaign.ether");
+    await expect.poll(() => nativeDocumentMenuState(electronApp)).toMatchObject({ save: false, compact: false });
   } finally {
     await electronApp.close();
     await rm(fixtureRoot, { recursive: true, force: true });
@@ -172,7 +202,7 @@ test("real Electron renders only reference actions authorized by service capabil
     const full = page.getByText("full.png", { exact: true }).locator("..");
     await expect(full.getByRole("button", { name: "Use Embedded Preview", exact: true })).toBeVisible();
     await expect(full.getByRole("button", { name: "Embed Available Copy", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Make document portable" }).click();
+    await invokeNativeMenuItem(electronApp, "file.make-portable");
     await expect(page.getByText("Make Portable cancelled; the document was not changed", { exact: true })).toBeVisible();
   } finally {
     await electronApp.close();
@@ -198,7 +228,12 @@ async function expectWorkspaceBounds(page: Page, viewport: { width: number; heig
       header: rectangle("[data-testid=project-header]"),
       canvas: rectangle("[data-testid=document-canvas]"),
       footer: rectangle(".document-status"),
-      rail: rectangle(".document-tool-rail")
+      rail: rectangle(".document-tool-rail"),
+      actionButtons: Array.from(document.querySelectorAll<HTMLElement>(".project-header-actions button"))
+        .map((element) => {
+          const value = element.getBoundingClientRect();
+          return { top: value.top, right: value.right, bottom: value.bottom, left: value.left };
+        })
     };
   });
   expect(bounds.header.top).toBeGreaterThanOrEqual(0);
@@ -208,6 +243,35 @@ async function expectWorkspaceBounds(page: Page, viewport: { width: number; heig
   expect(bounds.footer.bottom).toBeLessThanOrEqual(viewport.height + 1);
   expect(bounds.rail.right).toBeLessThanOrEqual(bounds.canvas.right);
   expect(bounds.canvas.height).toBeGreaterThan(400);
+  for (let index = 1; index < bounds.actionButtons.length; index += 1) {
+    const previous = bounds.actionButtons[index - 1]!;
+    const current = bounds.actionButtons[index]!;
+    const overlapWidth = Math.min(previous.right, current.right) - Math.max(previous.left, current.left);
+    const overlapHeight = Math.min(previous.bottom, current.bottom) - Math.max(previous.top, current.top);
+    expect(overlapWidth <= 0 || overlapHeight <= 0).toBe(true);
+  }
+}
+
+async function nativeDocumentMenuState(electronApp: ElectronApplication) {
+  return electronApp.evaluate(({ Menu }) => {
+    const menu = Menu.getApplicationMenu();
+    const enabled = (id: string) => menu?.getMenuItemById(id)?.enabled ?? null;
+    return {
+      save: enabled("file.save"),
+      saveAs: enabled("file.save-as"),
+      saveCopy: enabled("file.save-copy"),
+      compact: enabled("file.compact"),
+      makePortable: enabled("file.make-portable")
+    };
+  });
+}
+
+async function invokeNativeMenuItem(electronApp: ElectronApplication, id: string) {
+  await electronApp.evaluate(({ BrowserWindow, Menu }, menuId) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(menuId);
+    if (item?.click === undefined) throw new Error(`Missing native menu item ${menuId}.`);
+    item.click(item, BrowserWindow.getFocusedWindow() ?? undefined, {} as Electron.KeyboardEvent);
+  }, id);
 }
 
 async function graphNodes(page: Page) {

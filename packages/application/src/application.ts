@@ -13,7 +13,8 @@ import {
   resolveReference,
   streamBlobRange,
   type ArtifactLineageSnapshot,
-  type DocumentStoreEnvironment
+  type DocumentStoreEnvironment,
+  type ReadOnlyReason
 } from "@ether/document";
 import { compilePlan, DurableScheduler } from "@ether/execution";
 import type { GenerationProvider } from "@ether/providers";
@@ -289,6 +290,7 @@ export class EtherApplication {
       documentId: store.documentId,
       path: store.path,
       mode: store.mode.kind,
+      readOnlyReason: store.mode.kind === "read-only" ? store.mode.reason : null,
       dirty: store.dirty,
       documentRevisionId: head.documentRevisionId,
       graphRevisions: head.graphRevisions
@@ -353,6 +355,7 @@ export class EtherApplication {
 
   async makeDocumentPortable() {
     const references = await this.queryReferences();
+    let embeddedBytes = 0;
     let embeddedCount = 0;
     const missingReferenceIds: string[] = [];
     for (const reference of references) {
@@ -360,11 +363,12 @@ export class EtherApplication {
       try {
         await this.embedAvailableReference(reference.id);
         embeddedCount += 1;
+        embeddedBytes += reference.fingerprint.byteLength;
       } catch {
         missingReferenceIds.push(reference.id);
       }
     }
-    return { embeddedCount, missingReferenceIds };
+    return { embeddedBytes, embeddedCount, missingReferenceIds };
   }
 
   async preflightDocumentPortable(): Promise<{
@@ -527,11 +531,36 @@ export class EtherApplication {
   }
 
   private documentEnvironment(): DocumentStoreEnvironment {
+    const configuredReadOnly = this.options.documentEnvironment?.onReadOnly;
     return {
       ...this.options.documentEnvironment,
       leaseRoot: path.join(this.options.appDataRoot, "leases"),
-      recoveryRoot: path.join(this.options.appDataRoot, "recovery")
+      recoveryRoot: path.join(this.options.appDataRoot, "recovery"),
+      onReadOnly: (reason) => {
+        configuredReadOnly?.(reason);
+        queueMicrotask(() => this.publishReadOnly(reason));
+      }
     };
+  }
+
+  private publishReadOnly(reason: ReadOnlyReason): void {
+    const store = this.store;
+    if (store === undefined || store.mode.kind !== "read-only" || store.mode.reason !== reason) return;
+    const eventId = randomUUID();
+    this.events.publish({
+      kind: "event",
+      id: eventId,
+      correlationId: eventId,
+      name: "document.stateChanged",
+      documentId: store.documentId,
+      occurredAt: new Date().toISOString(),
+      payload: {
+        state: "read-only",
+        dirty: store.dirty,
+        documentRevisionId: null,
+        readOnlyReason: reason
+      }
+    });
   }
 }
 

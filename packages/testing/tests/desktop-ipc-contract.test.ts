@@ -40,6 +40,13 @@ describe("desktop IPC contract", () => {
         named: true,
         mode: "writable",
         readOnlyReason: null,
+        commands: {
+          save: true,
+          saveAs: true,
+          saveCopy: true,
+          compact: true,
+          makePortable: true
+        },
         saveState: "saved",
         documentRevisionId: "revision-2",
         graphId: "graph-root",
@@ -86,14 +93,25 @@ describe("desktop IPC contract", () => {
       value: {
         cancelled: true,
         embeddedCount: 0,
+        embeddedBytes: 0,
         expectedBytes: 8192,
         expectedCount: 2,
-        missingReferenceIds: ["reference-1"]
+        missingReferences: [{ id: "reference-1", displayName: "source.png" }]
       }
     });
 
     expect(referenceResponse.success).toBe(true);
     expect(portableResponse.success).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.document.event].request.safeParse({
+      kind: "state",
+      documentId: "document-1",
+      revision: 3,
+      commandResult: {
+        kind: "compact",
+        beforeBytes: 16384,
+        afterBytes: 12288
+      }
+    }).success).toBe(true);
     expect(desktopIpcContracts[desktopIpcChannels.references.list].response.safeParse({
       ok: true,
       value: [{

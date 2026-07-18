@@ -35,14 +35,20 @@ async function runFixture() {
     initialArgv: initialDocument === null ? [] : [initialDocument],
     simulationMode: !process.argv.includes("--production-controls"),
     locationCapability: process.argv.includes("--read-only-location")
-      ? { classify: () => "unknown" }
+      ? {
+          classify: (filePath) => initialDocument !== null && path.resolve(filePath) === initialDocument
+            ? "unknown"
+            : "local-fixed"
+        }
       : undefined,
     autosaveOperation: process.argv.includes("--autosave-failure")
       ? async () => { throw Object.assign(new Error("Fixture autosave failure"), { code: "ENOSPC" }); }
       : undefined,
     serviceFactory: referenceFixture ? createReferenceFixtureService : undefined,
     dialogs: {
-      openDocument: async () => renamedPath,
+      openDocument: async () => process.argv.includes("--read-only-location") && initialDocument !== null
+        ? initialDocument
+        : renamedPath,
       saveDocument: async () => saveQueue.shift() ?? null,
       locateReference: async () => null,
       searchReferenceFolder: async () => null,
