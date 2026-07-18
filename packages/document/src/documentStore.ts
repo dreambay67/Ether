@@ -41,6 +41,7 @@ import {
   beginReplacementRecovery,
   completeReplacementRecovery,
   markReplacementPublished,
+  plannedReplacementRollback,
   reconcileReplacementRecovery,
   recordReplacementRollback,
   type ReplacementRecoveryJournal
@@ -81,6 +82,7 @@ export interface CreateDocumentStoreOptions {
 
 export interface OpenDocumentStoreOptions {
   access: DocumentAccessMode;
+  deferRecovery?: boolean;
   environment?: DocumentStoreEnvironment;
 }
 
@@ -141,10 +143,7 @@ type WriteExecutionRepository = Pick<
 
 export interface DocumentRepositories extends ReadDocumentRepositories {
   artifacts: Pick<ArtifactRepository, "attach" | "get" | "list">;
-  blobs: Pick<
-    BlobRepository,
-    "get" | "list"
-  >;
+  blobs: Pick<BlobRepository, "get" | "list">;
   outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert" | "listByNode">;
   execution: WriteExecutionRepository;
   revisions: Pick<
@@ -289,6 +288,7 @@ export class DocumentStore {
   private currentDirty: boolean;
   private currentMode: DocumentStoreMode;
   private currentPath: string;
+  private stagingRecovered: boolean;
 
   private constructor(options: {
     database: DatabaseSync;
@@ -297,6 +297,7 @@ export class DocumentStore {
     mode: DocumentStoreMode;
     path: string;
     runtime: DocumentStoreRuntime;
+    stagingRecovered?: boolean;
   }) {
     this.database = options.database;
     this.currentDirty = readPersistedDirtyState(options.database);
@@ -305,6 +306,7 @@ export class DocumentStore {
     this.currentMode = options.mode;
     this.currentPath = options.path;
     this.runtime = options.runtime;
+    this.stagingRecovered = options.stagingRecovered ?? true;
     this.startHeartbeat();
   }
 
@@ -376,7 +378,7 @@ export class DocumentStore {
   static async open(filePath: string, options: OpenDocumentStoreOptions): Promise<DocumentStore> {
     const absolutePath = path.resolve(filePath);
     const runtime = resolveDocumentStoreEnvironment(options.environment);
-    reconcileReplacementRecovery(absolutePath, runtime.recoveryRoot);
+    await reconcileReplacementRecovery(absolutePath, runtime.recoveryRoot);
     if (options.access === "read-only") {
       const connection = openEtherDocumentConnection(absolutePath, true);
       return new DocumentStore({
@@ -387,7 +389,7 @@ export class DocumentStore {
         runtime
       });
     }
-    if (!locationSupportsWriting(absolutePath, runtime)) {
+    if (!await locationSupportsWriting(absolutePath, runtime)) {
       if (options.access === "require-write") {
         throw new DocumentStoreError(
           "WRITER_LEASE_UNAVAILABLE",
@@ -437,10 +439,13 @@ export class DocumentStore {
       lease: acquisition.lease,
       mode: { kind: "writable" },
       path: absolutePath,
-      runtime
+      runtime,
+      stagingRecovered: options.deferRecovery !== true
     });
     try {
-      await reconcileStaging(store, { appDataRoot: path.dirname(runtime.recoveryRoot) });
+      if (options.deferRecovery !== true) {
+        await reconcileStaging(store, { appDataRoot: path.dirname(runtime.recoveryRoot) });
+      }
       return store;
     } catch (error) {
       await store.close();
@@ -480,6 +485,13 @@ export class DocumentStore {
 
   get path(): string {
     return this.currentPath;
+  }
+
+  async activateRecovery(): Promise<void> {
+    this.assertOpen();
+    if (this.stagingRecovered || this.currentMode.kind !== "writable") return;
+    await reconcileStaging(this, { appDataRoot: path.dirname(this.runtime.recoveryRoot) });
+    this.stagingRecovered = true;
   }
 
   authorizeReferencePath(request: Omit<ReferenceGrantPathRequest, "documentId">): void {
@@ -614,6 +626,24 @@ export class DocumentStore {
     });
   }
 
+  reclaimUnusedPages(): Promise<void> {
+    return this.enqueue(() => {
+      this.assertOpen();
+      if (this.currentMode.kind !== "writable") return;
+      this.database.exec("PRAGMA incremental_vacuum(1000000)");
+    });
+  }
+
+  reclaimUnreferencedReadyBlobs(contentKeys: readonly string[]): Promise<number> {
+    return this.enqueue(() => this.runInternalTransaction(({ blobs }) => {
+      let removed = 0;
+      for (const contentKey of new Set(contentKeys)) {
+        if (blobs.removeReadyIfUnreferenced(contentKey)) removed += 1;
+      }
+      return removed;
+    }));
+  }
+
   saveCopy(destinationPath: string): Promise<{ documentId: string; path: string }> {
     return this.enqueue(() => this.saveBackup(destinationPath, false));
   }
@@ -675,11 +705,18 @@ export class DocumentStore {
         destinationPath: this.currentPath,
         newDocumentId: this.currentDocumentId,
         previousDocumentId: this.currentDocumentId,
+        staging: { identity: temporaryIdentity, path: temporaryPath },
         sourceDocumentId: this.currentDocumentId,
         sourcePath: this.currentPath
       });
-      rollback = createOwnedReplacementRollback(this.currentPath);
-      recordReplacementRollback(recovery, rollback);
+      this.runtime.onCompactStage?.("rollback-planned");
+      rollback = createOwnedReplacementRollback(this.currentPath, plannedReplacementRollback(recovery));
+      this.runtime.onCompactStage?.("rollback-linked");
+      await recordReplacementRollback(recovery, rollback, {
+        afterHashChunk: () => this.runtime.onCompactStage?.("rollback-hash-chunk"),
+        beforeJournalRename: () => this.runtime.onCompactStage?.("rollback-journal-before-rename"),
+        afterJournalRename: () => this.runtime.onCompactStage?.("rollback-journal-after-rename")
+      });
       this.runtime.onCompactStage?.("rollback-created");
 
       replaceWithOwnedTemporaryDatabase(temporaryPath, this.currentPath, temporaryIdentity);
@@ -1072,7 +1109,7 @@ export class DocumentStore {
     this.assertOpen();
     const absoluteDestination = path.resolve(destinationPath);
     const destinationExisted = prepareDestination(absoluteDestination, switchActive);
-    if (switchActive && !locationSupportsWriting(absoluteDestination, this.runtime)) {
+    if (switchActive && !await locationSupportsWriting(absoluteDestination, this.runtime)) {
       throw new DocumentStoreError(
         "WRITER_LEASE_UNAVAILABLE",
         "The Save As destination is not approved for writable Ether semantics.",
@@ -1174,11 +1211,15 @@ export class DocumentStore {
             destinationPath: absoluteDestination,
             newDocumentId: nextDocumentId,
             previousDocumentId: existingDestinationDocumentId,
+            staging: { identity: temporaryIdentity, path: temporaryPath },
             sourceDocumentId,
             sourcePath
           });
-          replacementRollback = createOwnedReplacementRollback(absoluteDestination);
-          recordReplacementRollback(replacementRecovery, replacementRollback);
+          replacementRollback = createOwnedReplacementRollback(
+            absoluteDestination,
+            plannedReplacementRollback(replacementRecovery)
+          );
+          await recordReplacementRollback(replacementRecovery, replacementRollback);
         }
         replaceWithOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
         if (replacementRecovery !== undefined) {

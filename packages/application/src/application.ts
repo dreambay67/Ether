@@ -86,14 +86,29 @@ export class EtherApplication {
     path: string;
     access: "prefer-write" | "read-only" | "require-write";
   }): Promise<DocumentSnapshot> {
+    await this.inspectDocument(input);
+    return this.activateInspectedDocument();
+  }
+
+  async inspectDocument(input: {
+    path: string;
+    access: "prefer-write" | "read-only" | "require-write";
+  }): Promise<DocumentSnapshot> {
     this.assertNoDocument();
     this.store = await DocumentStore.open(input.path, {
       access: input.access,
+      deferRecovery: true,
       environment: this.documentEnvironment()
     });
+    return this.queryDocument();
+  }
+
+  async activateInspectedDocument(): Promise<DocumentSnapshot> {
+    const store = this.requireStore();
+    await store.activateRecovery();
     this.attachScheduler();
-    if (this.store.mode.kind === "writable") {
-      const jobIds = await this.store.transaction(({ execution }) => {
+    if (store.mode.kind === "writable") {
+      const jobIds = await store.transaction(({ execution }) => {
         execution.quarantineForeignDocumentPlans();
         return execution.recoverProcessLost();
       });
@@ -364,32 +379,46 @@ export class EtherApplication {
   async makeDocumentPortable() {
     const store = this.requireWritableStore();
     const references = await this.queryReferences();
+    const existingContentKeys = new Set(
+      await store.read(({ blobs }) => blobs.list().map(({ contentKey }) => contentKey))
+    );
     let embeddedBytes = 0;
     const missingReferenceIds: string[] = [];
     const prepared: Array<{ referenceId: string; contentKey: string }> = [];
-    for (const reference of references) {
-      if (reference.state === "embedded") continue;
-      try {
-        const resolved = await resolveReference(store, reference.id);
-        if (resolved.state !== "linked" || resolved.originalPath === null) {
+    try {
+      for (const reference of references) {
+        if (reference.state === "embedded") continue;
+        try {
+          const resolved = await resolveReference(store, reference.id);
+          if (resolved.state !== "linked" || resolved.originalPath === null) {
+            missingReferenceIds.push(reference.id);
+            continue;
+          }
+          const blob = await importBlob(
+            store,
+            { mediaType: resolved.mediaType, sourcePath: resolved.originalPath },
+            { appDataRoot: this.options.appDataRoot }
+          );
+          prepared.push({ referenceId: resolved.id, contentKey: blob.contentKey });
+          embeddedBytes += resolved.fingerprint.byteLength;
+          this.options.portableCheckpoint?.("prepared", resolved.id);
+        } catch (error) {
+          if (!isExpectedReferenceUnavailable(error)) throw error;
           missingReferenceIds.push(reference.id);
-          continue;
         }
-        const blob = await importBlob(
-          store,
-          { mediaType: resolved.mediaType, sourcePath: resolved.originalPath },
-          { appDataRoot: this.options.appDataRoot }
-        );
-        prepared.push({ referenceId: resolved.id, contentKey: blob.contentKey });
-        embeddedBytes += resolved.fingerprint.byteLength;
-        this.options.portableCheckpoint?.("prepared", resolved.id);
-      } catch (error) {
-        if (!isExpectedReferenceUnavailable(error)) throw error;
-        missingReferenceIds.push(reference.id);
       }
+      await embedReferences(store, prepared);
+      return { embeddedBytes, embeddedCount: prepared.length, missingReferenceIds };
+    } catch (error) {
+      const operationContentKeys = [...new Set(
+        prepared.map(({ contentKey }) => contentKey).filter((contentKey) => !existingContentKeys.has(contentKey))
+      )];
+      if (operationContentKeys.length > 0) {
+        await store.reclaimUnreferencedReadyBlobs(operationContentKeys);
+        await store.reclaimUnusedPages();
+      }
+      throw error;
     }
-    await embedReferences(store, prepared);
-    return { embeddedBytes, embeddedCount: prepared.length, missingReferenceIds };
   }
 
   async preflightDocumentPortable(): Promise<{

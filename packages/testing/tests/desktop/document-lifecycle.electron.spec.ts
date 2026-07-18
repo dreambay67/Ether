@@ -1,4 +1,5 @@
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -178,6 +179,68 @@ for (const operation of ["autosave", "save-as"] as const) {
     }
   });
 }
+
+for (const operation of ["graph", "reference", "portable"] as const) {
+  test(`real Electron delays quit until an in-flight ${operation} mutation drains`, async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), `ether-electron-quit-${operation}-`));
+    const gatePath = path.join(fixtureRoot, `${operation}.release`);
+    const quitGatePath = `${gatePath}.quit`;
+    const electronApp = await launchFixture(fixtureRoot, [
+      `--${operation}-gate=${gatePath}`,
+      `--quit-gate=${quitGatePath}`,
+      ...(operation === "reference" ? ["--reference-capabilities"] : [])
+    ]);
+    const electronProcess = electronApp.process();
+    try {
+      const page = await electronApp.firstWindow();
+      if (operation === "graph") {
+        await page.getByRole("button", { name: "Prompt", exact: true }).click();
+      } else if (operation === "reference") {
+        const limited = page.getByText("limited.png", { exact: true }).locator("..");
+        await limited.getByRole("button", { name: "Remove", exact: true }).click();
+      } else {
+        await invokeNativeMenuItem(electronApp, "file.make-portable");
+      }
+      await expect.poll(() => fileExists(`${gatePath}.started`)).toBe(true);
+      await expect.poll(() => fileExists(`${quitGatePath}.started`)).toBe(true);
+
+      await writeFile(quitGatePath, "quit", "utf8");
+      await expect.poll(() => fileExists(`${quitGatePath}.observed`)).toBe(true);
+      await page.waitForTimeout(300).catch(() => undefined);
+      expect(electronProcess.exitCode).toBeNull();
+      expect(page.isClosed()).toBe(false);
+
+      await writeFile(gatePath, "release", "utf8");
+      await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).not.toBeNull();
+    } finally {
+      await writeFile(gatePath, "release", "utf8").catch(() => undefined);
+      if (electronProcess.exitCode === null) await forceExit(electronApp);
+      await rm(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+test("real Electron intercepts quit while bootstrap is still draining", async () => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-startup-quit-"));
+  const gatePath = path.join(fixtureRoot, "startup.release");
+  const electronProcess = spawn(electronPath, [
+    fixtureMain,
+    `--fixture-root=${fixtureRoot}`,
+    `--startup-quit-gate=${gatePath}`
+  ], { stdio: "ignore", windowsHide: true });
+  try {
+    await expect.poll(() => fileExists(`${gatePath}.started`)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(electronProcess.exitCode).toBeNull();
+    await writeFile(gatePath, "release", "utf8");
+    await expect.poll(() => fileExists(`${gatePath}.bootstrap-released`)).toBe(true);
+    await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+  } finally {
+    await writeFile(gatePath, "release", "utf8").catch(() => undefined);
+    if (electronProcess.exitCode === null) electronProcess.kill();
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
 
 test("real Electron disables read-only canvas controls before invocation", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-readonly-"));

@@ -33,6 +33,8 @@ async function runFixture() {
   const autosaveGate = argumentValue("--autosave-gate=");
   const saveAsGate = argumentValue("--save-as-gate=");
   const quitGate = argumentValue("--quit-gate=");
+  const startupQuitGate = argumentValue("--startup-quit-gate=");
+  const mutationGate = mutationGateArgument();
 
   const started = await startEtherDesktop({
     rendererUrl: pathToFileURL(path.join(repositoryRoot, "apps", "desktop", "dist", "index.html")).href,
@@ -48,7 +50,19 @@ async function runFixture() {
     autosaveOperation: process.argv.includes("--autosave-failure")
       ? async () => { throw Object.assign(new Error("Fixture autosave failure"), { code: "ENOSPC" }); }
       : autosaveGate === null ? undefined : async () => waitForGate(autosaveGate),
-    serviceFactory: referenceFixture ? createReferenceFixtureService : undefined,
+    serviceFactory: startupQuitGate !== null
+      ? (options) => new DesktopApplicationService({
+          ...options,
+          bootstrapOperation: async () => {
+            await writeFile(`${startupQuitGate}.started`, "started", "utf8");
+            app.quit();
+            await waitForGate(startupQuitGate);
+            await writeFile(`${startupQuitGate}.bootstrap-released`, "released", "utf8");
+          }
+        })
+      : referenceFixture || mutationGate !== null
+        ? (options) => createFixtureService(options, { mutationGate, referenceFixture })
+        : undefined,
     dialogs: {
       openDocument: async () => process.argv.includes("--read-only-location") && initialDocument !== null
         ? initialDocument
@@ -66,7 +80,6 @@ async function runFixture() {
       confirmPortable: async () => !process.argv.includes("--portable-cancel")
     }
   });
-
   if (process.argv.includes("--stale-event")) {
     setTimeout(() => {
       const snapshot = started.service.snapshot();
@@ -104,8 +117,16 @@ function argumentValue(prefix) {
   return argument === undefined ? null : path.resolve(argument.slice(prefix.length));
 }
 
-function createReferenceFixtureService(options) {
-  const service = new DesktopApplicationService(options);
+function createFixtureService(options, { mutationGate, referenceFixture }) {
+  const service = new DesktopApplicationService({
+    ...options,
+    mutationOperationCheckpoint: mutationGate === null
+      ? undefined
+      : async (operation) => {
+          if (operation === mutationGate.operation) await waitForGate(mutationGate.path);
+        }
+  });
+  if (!referenceFixture) return service;
   const references = [
     reference("limited", ["locate", "search-folder", "relink-all", "remove"]),
     reference("full", [
@@ -118,8 +139,15 @@ function createReferenceFixtureService(options) {
     ])
   ];
   service.listReferences = async () => references;
-  service.actOnReference = async () => references;
   return service;
+}
+
+function mutationGateArgument() {
+  for (const operation of ["graph", "reference", "portable"]) {
+    const gate = argumentValue(`--${operation}-gate=`);
+    if (gate !== null) return { operation, path: gate };
+  }
+  return null;
 }
 
 function reference(name, actions) {

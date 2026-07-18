@@ -111,6 +111,22 @@ export class BlobRepository {
     return rows.map((row) => this.toRecord(row));
   }
 
+  removeReadyIfUnreferenced(contentKeyInput: string): boolean {
+    const contentKey = ContentKeySchema.parse(contentKeyInput).toLowerCase();
+    const result = this.context.database.prepare(
+      `DELETE FROM blobs
+       WHERE content_key = ? AND status = 'ready'
+         AND NOT EXISTS (
+           SELECT 1 FROM linked_references
+           WHERE content_key = ? OR preview_content_key = ?
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM artifacts WHERE content_key = ?
+         )`
+    ).run(contentKey, contentKey, contentKey, contentKey);
+    return result.changes === 1;
+  }
+
   readPart(contentKeyInput: string, index: number): StoredBlobPart | undefined {
     const contentKey = ContentKeySchema.parse(contentKeyInput).toLowerCase();
     const row = this.context.database

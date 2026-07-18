@@ -388,14 +388,21 @@ export interface OwnedReplacementRollback {
 }
 
 export function createOwnedReplacementRollback(
-  destinationPath: string
+  destinationPath: string,
+  planned?: OwnedReplacementRollback
 ): OwnedReplacementRollback {
   const absoluteDestination = path.resolve(destinationPath);
   const identity = readEtherFileIdentity(absoluteDestination, true);
-  const rollbackPath = path.join(
-    path.dirname(absoluteDestination),
-    `.${path.basename(absoluteDestination)}.ether-rollback-${randomUUID()}`
-  );
+  if (planned !== undefined && !sameIdentity(planned.identity, identity)) {
+    throw new EtherDocumentError(
+      "PATH_CHANGED",
+      `Ether document changed after its replacement rollback was planned: ${absoluteDestination}`
+    );
+  }
+  const rollbackPath = planned?.path ?? path.join(
+      path.dirname(absoluteDestination),
+      `.${path.basename(absoluteDestination)}.ether-rollback-${randomUUID()}`
+    );
   try {
     linkSync(absoluteDestination, rollbackPath);
     if (!sameIdentity(readOwnedAliasIdentity(rollbackPath), identity)) {

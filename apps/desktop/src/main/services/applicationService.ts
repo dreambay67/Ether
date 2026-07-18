@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   closeSync,
-  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -215,7 +214,7 @@ export class OpenDocumentController {
 }
 
 export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
-  private readonly grants = new Map<string, {
+  private grants = new Map<string, {
     documentId: string;
     documentPath: string;
     grantId: string;
@@ -225,7 +224,10 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }>();
   private readonly activeDocuments = new Map<string, string>();
 
-  constructor(private readonly options: { storagePath?: string } = {}) {
+  constructor(private readonly options: {
+    storagePath?: string;
+    persistenceCheckpoint?: (stage: "write" | "fsync" | "rename") => void;
+  } = {}) {
     this.load();
   }
 
@@ -240,14 +242,15 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   grant(documentId: string, operation: ReferenceGrantPathRequest["operation"], filePath: string): string {
     const documentPath = this.activeDocuments.get(documentId) ?? this.memoryDocumentPath(documentId);
     const grantId = randomUUID();
-    this.grants.set(grantKey(grantId, documentId), {
+    const next = new Map(this.grants);
+    next.set(grantKey(grantId, documentId), {
       documentId,
       documentPath,
       grantId,
       operation,
       path: canonicalGrantPath(filePath)
     });
-    this.persist();
+    this.commit(next);
     return grantId;
   }
 
@@ -269,30 +272,37 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     ) return false;
     const fingerprint = `${request.fingerprint.byteLength}:${request.fingerprint.sampleSha256}`;
     if (grant.fingerprint !== undefined && grant.fingerprint !== fingerprint) return false;
-    grant.fingerprint = fingerprint;
-    this.persist();
+    if (grant.fingerprint === fingerprint) return true;
+    const next = new Map(this.grants);
+    next.set(grantKey(request.grantId, request.documentId), { ...grant, fingerprint });
+    this.commit(next);
     return true;
   }
 
   allowResolve(grantId: string, documentId: string): void {
     const grant = this.grants.get(grantKey(grantId, documentId));
     if (grant !== undefined) {
-      grant.operation = "resolve";
-      this.persist();
+      const next = new Map(this.grants);
+      next.set(grantKey(grantId, documentId), { ...grant, operation: "resolve" });
+      this.commit(next);
     }
   }
 
   revoke(grantId: string, documentId: string): void {
-    if (this.grants.delete(grantKey(grantId, documentId))) this.persist();
+    const key = grantKey(grantId, documentId);
+    if (!this.grants.has(key)) return;
+    const next = new Map(this.grants);
+    next.delete(key);
+    this.commit(next);
   }
 
   revokeDocument(documentId: string): void {
-    let changed = false;
-    for (const [key, grant] of this.grants) {
-      if (grant.documentId === documentId) changed = this.grants.delete(key) || changed;
+    const next = new Map(this.grants);
+    for (const [key, grant] of next) {
+      if (grant.documentId === documentId) next.delete(key);
     }
+    if (next.size !== this.grants.size) this.commit(next);
     this.activeDocuments.delete(documentId);
-    if (changed) this.persist();
   }
 
   rebindDocument(input: {
@@ -301,6 +311,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     destinationDocumentId: string;
     destinationDocumentPath: string;
     retainSource: boolean;
+    switchActive?: boolean;
   }): void {
     const sourcePath = canonicalGrantPath(input.sourceDocumentPath);
     const destinationPath = canonicalGrantPath(input.destinationDocumentPath);
@@ -310,19 +321,22 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     const bindings = [...this.grants.values()].filter((grant) =>
       grant.documentId === input.sourceDocumentId && grant.documentPath === sourcePath
     );
+    const next = new Map(this.grants);
     for (const binding of bindings) {
-      this.grants.set(grantKey(binding.grantId, input.destinationDocumentId), {
+      next.set(grantKey(binding.grantId, input.destinationDocumentId), {
         ...binding,
         documentId: input.destinationDocumentId,
         documentPath: destinationPath
       });
       if (!input.retainSource) {
-        this.grants.delete(grantKey(binding.grantId, input.sourceDocumentId));
+        next.delete(grantKey(binding.grantId, input.sourceDocumentId));
       }
     }
-    if (!input.retainSource) this.activeDocuments.delete(input.sourceDocumentId);
-    this.activeDocuments.set(input.destinationDocumentId, destinationPath);
-    if (bindings.length > 0) this.persist();
+    if (bindings.length > 0) this.commit(next);
+    if (input.switchActive === true) {
+      this.activeDocuments.delete(input.sourceDocumentId);
+      this.activeDocuments.set(input.destinationDocumentId, destinationPath);
+    }
   }
 
   private memoryDocumentPath(documentId: string): string {
@@ -349,7 +363,19 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     }
   }
 
-  private persist(): void {
+  private commit(next: Map<string, {
+    documentId: string;
+    documentPath: string;
+    grantId: string;
+    operation: ReferenceGrantPathRequest["operation"];
+    path: string;
+    fingerprint?: string;
+  }>): void {
+    this.persist(next);
+    this.grants = next;
+  }
+
+  private persist(grants: typeof this.grants): void {
     const storagePath = this.options.storagePath;
     if (storagePath === undefined) return;
     mkdirSync(path.dirname(storagePath), { recursive: true });
@@ -357,10 +383,13 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     let descriptor: number | undefined;
     try {
       descriptor = openSync(temporaryPath, "wx", 0o600);
-      writeFileSync(descriptor, `${JSON.stringify([...this.grants.values()], null, 2)}\n`, "utf8");
+      this.options.persistenceCheckpoint?.("write");
+      writeFileSync(descriptor, `${JSON.stringify([...grants.values()], null, 2)}\n`, "utf8");
+      this.options.persistenceCheckpoint?.("fsync");
       fsyncSync(descriptor);
       closeSync(descriptor);
       descriptor = undefined;
+      this.options.persistenceCheckpoint?.("rename");
       renameSync(temporaryPath, storagePath);
     } finally {
       if (descriptor !== undefined) closeSync(descriptor);
@@ -385,6 +414,10 @@ export interface DesktopApplicationServiceOptions {
   >;
   simulationMode?: boolean;
   autosaveOperation?: (application: EtherApplication) => Promise<void>;
+  pathGrantPersistenceCheckpoint?: (stage: "write" | "fsync" | "rename") => void;
+  bootstrapOperation?: () => Promise<void>;
+  referenceCandidateCheckpoint?: (candidatePath: string) => Promise<void> | void;
+  mutationOperationCheckpoint?: (operation: "graph" | "reference" | "portable") => Promise<void> | void;
 }
 
 export class DesktopApplicationService {
@@ -398,11 +431,14 @@ export class DesktopApplicationService {
   private readonly pathGrants: DesktopPathGrantAuthority;
   private refreshTail: Promise<void> = Promise.resolve();
   private lifecycleTail: Promise<void> = Promise.resolve();
+  private lifecycleAccepting = true;
+  private closePromise: Promise<void> | null = null;
   private referenceSearchController: AbortController | null = null;
 
   constructor(private readonly options: DesktopApplicationServiceOptions) {
     this.pathGrants = new DesktopPathGrantAuthority({
-      storagePath: path.join(options.appDataRoot, "reference-grants.json")
+      storagePath: path.join(options.appDataRoot, "reference-grants.json"),
+      persistenceCheckpoint: options.pathGrantPersistenceCheckpoint
     });
   }
 
@@ -412,7 +448,10 @@ export class DesktopApplicationService {
   }
 
   async bootstrap(): Promise<DocumentDescriptor> {
-    return this.enqueueLifecycle(async () => this.current ?? this.newDocumentNow());
+    return this.enqueueLifecycle(async () => {
+      await this.options.bootstrapOperation?.();
+      return this.current ?? this.newDocumentNow();
+    });
   }
 
   async newDocument(): Promise<DocumentDescriptor> {
@@ -462,9 +501,13 @@ export class DesktopApplicationService {
     }
     const application = this.createApplication();
     try {
-      const opened = await application.openDocument({ path: canonicalPath, access: "prefer-write" });
+      const inspected = await application.inspectDocument({ path: canonicalPath, access: "prefer-write" });
       await application.queryDocumentHeader();
       await this.closeActiveDocument();
+      const opened = await application.activateInspectedDocument();
+      if (opened.documentId !== inspected.documentId) {
+        throw codedError("DOCUMENT_SCOPE_REJECTED", "The inspected document identity changed during activation.");
+      }
       this.activateApplication(application, opened.documentId, canonicalPath, false);
       return this.refresh("snapshot");
     } catch (error) {
@@ -489,6 +532,10 @@ export class DesktopApplicationService {
   }
 
   async autosave(documentId: string): Promise<DocumentDescriptor> {
+    return this.enqueueLifecycle(() => this.autosaveNow(documentId));
+  }
+
+  private async autosaveNow(documentId: string): Promise<DocumentDescriptor> {
     this.assertScope(documentId);
     if (this.untitled) return this.refresh("state", "saved");
     await this.requireApplication().saveDocument({ commandId: randomUUID() });
@@ -508,15 +555,30 @@ export class DesktopApplicationService {
     if (sourcePath === null) throw codedError("DOCUMENT_NOT_OPEN", "No active document path is available.");
     const saved = await this.requireApplication().saveAsDocument({ path: destination });
     const destinationPath = await realpath(destination);
-    this.pathGrants.rebindDocument({
+    const rebind = {
       sourceDocumentId: documentId,
       sourceDocumentPath: sourcePath,
       destinationDocumentId: saved.documentId,
       destinationDocumentPath: destinationPath,
-      retainSource: false
-    });
+      retainSource: true,
+      switchActive: true
+    };
     this.currentPath = destinationPath;
     this.untitled = false;
+    try {
+      this.pathGrants.rebindDocument(rebind);
+    } catch (error) {
+      try {
+        this.pathGrants.rebindDocument(rebind);
+      } catch {
+        this.pathGrants.deactivateDocument(documentId);
+        this.pathGrants.activateDocument(saved.documentId, destinationPath);
+      }
+      await this.refresh("snapshot", "needs-attention");
+      this.emitAttention(error);
+      await this.refreshTail;
+      throw error;
+    }
     return this.refresh("snapshot", "saved");
   }
 
@@ -532,13 +594,26 @@ export class DesktopApplicationService {
     const sourcePath = this.currentPath;
     if (sourcePath === null) throw codedError("DOCUMENT_NOT_OPEN", "No active document path is available.");
     const copied = await this.requireApplication().saveCopyDocument({ path: destination });
-    this.pathGrants.rebindDocument({
+    const rebind = {
       sourceDocumentId: documentId,
       sourceDocumentPath: sourcePath,
       destinationDocumentId: copied.documentId,
       destinationDocumentPath: await realpath(destination),
-      retainSource: true
-    });
+      retainSource: true,
+      switchActive: false
+    };
+    try {
+      this.pathGrants.rebindDocument(rebind);
+    } catch (error) {
+      try {
+        this.pathGrants.rebindDocument(rebind);
+      } catch {
+        // The source remains authoritative; destination grants can be recovered on reopen.
+      }
+      this.emitAttention(error);
+      await this.refreshTail;
+      throw error;
+    }
     return this.refresh("state", "saved");
   }
 
@@ -560,6 +635,7 @@ export class DesktopApplicationService {
 
   private async makePortableNow(documentId: string): Promise<PortableResult> {
     this.assertScope(documentId);
+    await this.options.mutationOperationCheckpoint?.("portable");
     const application = this.requireApplication();
     const references = await application.queryReferences();
     const preflight = await application.preflightDocumentPortable();
@@ -602,7 +678,12 @@ export class DesktopApplicationService {
   }
 
   async applyGraphTransaction(documentId: string, transaction: GraphTransaction) {
+    return this.enqueueLifecycle(() => this.applyGraphTransactionNow(documentId, transaction));
+  }
+
+  private async applyGraphTransactionNow(documentId: string, transaction: GraphTransaction) {
     this.assertScope(documentId);
+    await this.options.mutationOperationCheckpoint?.("graph");
     await this.requireApplication().applyGraphTransaction({ commandId: randomUUID(), transaction });
     const snapshot = await this.refresh("graph", "saving");
     this.autosaveCoordinator?.markDirty();
@@ -615,6 +696,10 @@ export class DesktopApplicationService {
   }
 
   async generateFakeArtifact(documentId: string) {
+    return this.enqueueLifecycle(() => this.generateFakeArtifactNow(documentId));
+  }
+
+  private async generateFakeArtifactNow(documentId: string) {
     this.assertScope(documentId);
     if (this.options.simulationMode !== true) {
       throw codedError("SIMULATION_DISABLED", "Simulation output is available only in diagnostic test mode.");
@@ -736,13 +821,20 @@ export class DesktopApplicationService {
   }
 
   async actOnReference(documentId: string, referenceId: string, action: string) {
+    return this.enqueueLifecycle(() => this.actOnReferenceNow(documentId, referenceId, action));
+  }
+
+  private async actOnReferenceNow(documentId: string, referenceId: string, action: string) {
     this.assertScope(documentId);
+    await this.options.mutationOperationCheckpoint?.("reference");
     const application = this.requireApplication();
+    const persistedBefore = (await application.queryReferences()).find((candidate) => candidate.id === referenceId);
     const reference = (await this.listReferences(documentId)).find((candidate) => candidate.id === referenceId);
     if (reference === undefined) throw codedError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
     if (!reference.actions.includes(action as ReferenceAction)) {
       throw codedError("REFERENCE_ACTION_UNAVAILABLE", "That recovery action is not currently available.");
     }
+    try {
     if (action === "locate") {
       const selected = await this.options.dialogs.locateReference(referenceId);
       if (selected !== null) {
@@ -774,8 +866,10 @@ export class DesktopApplicationService {
               extensions: referenceExtensions(target),
               signal: controller.signal
             })) {
-              const grantId = this.pathGrants.grant(documentId, "relink", candidate);
+              let grantId: string | undefined;
               try {
+                await this.options.referenceCandidateCheckpoint?.(candidate);
+                grantId = this.pathGrants.grant(documentId, "relink", candidate);
                 await application.relinkDocumentReference({
                   referenceId: target.id,
                   sourcePath: candidate,
@@ -784,7 +878,7 @@ export class DesktopApplicationService {
                 this.pathGrants.allowResolve(grantId, documentId);
                 break;
               } catch (error) {
-                this.pathGrants.revoke(grantId, documentId);
+                if (grantId !== undefined) this.pathGrants.revoke(grantId, documentId);
                 if (!isSkippableReferenceCandidateError(error)) throw error;
               }
             }
@@ -801,6 +895,24 @@ export class DesktopApplicationService {
       await application.removeDocumentReference(referenceId);
     } else {
       throw codedError("INVALID_REFERENCE_ACTION", `Unsupported reference action: ${action}`);
+    }
+    } catch (error) {
+      const persistedAfter = (await application.queryReferences()).find((candidate) => candidate.id === referenceId);
+      if (
+        persistedBefore?.pathGrantId !== null &&
+        persistedBefore?.pathGrantId !== undefined &&
+        (persistedAfter === undefined || persistedAfter.pathGrantId === null)
+      ) {
+        try {
+          this.pathGrants.revoke(persistedBefore.pathGrantId, documentId);
+        } catch {
+          // The original sidecar publication error remains visible and retryable on reopen.
+        }
+        await this.refresh("references", "needs-attention");
+        this.emitAttention(error);
+        await this.refreshTail;
+      }
+      throw error;
     }
     await this.refresh("references", "saving");
     this.autosaveCoordinator?.markDirty();
@@ -841,7 +953,10 @@ export class DesktopApplicationService {
   }
 
   async close(): Promise<void> {
-    return this.enqueueLifecycle(() => this.closeActiveDocument());
+    if (this.closePromise !== null) return this.closePromise;
+    this.lifecycleAccepting = false;
+    this.closePromise = this.appendLifecycle(() => this.closeActiveDocument());
+    return this.closePromise;
   }
 
   drainLifecycle(): Promise<void> {
@@ -904,6 +1019,13 @@ export class DesktopApplicationService {
   }
 
   private enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    if (!this.lifecycleAccepting) {
+      return Promise.reject(codedError("LIFECYCLE_CLOSING", "The document lifecycle is closing."));
+    }
+    return this.appendLifecycle(operation);
+  }
+
+  private appendLifecycle<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.lifecycleTail.then(operation, operation);
     this.lifecycleTail = result.then(() => undefined, () => undefined);
     return result;
@@ -1072,103 +1194,170 @@ async function closeCandidate(application: EtherApplication): Promise<void> {
 }
 
 export interface WindowsLocationCapabilityPort {
-  resolveFinalPath(filePath: string): string;
-  volumeType(filePath: string): "fixed" | "network" | "removable" | "unknown";
-  cloudRoots(): readonly string[];
-  isCloudPlaceholder(filePath: string): boolean;
+  inspect(filePath: string, signal: AbortSignal): Promise<{
+    cloudPlaceholder: boolean;
+    cloudRoots: readonly string[];
+    finalPath: string;
+    volumeType: "fixed" | "network" | "removable" | "unknown";
+  }>;
 }
 
 export function createWindowsLocationCapability(
-  port: WindowsLocationCapabilityPort = productionWindowsLocationPort()
+  port: WindowsLocationCapabilityPort = productionWindowsLocationPort(),
+  options: { timeoutMs?: number } = {}
 ): WritableLocationCapabilityAdapter {
   return {
-    classify(filePath): WritableLocationKind {
-      let finalPath: string;
+    async classify(filePath, callerSignal): Promise<WritableLocationKind> {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      callerSignal?.addEventListener("abort", abort, { once: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        finalPath = port.resolveFinalPath(filePath);
-      } catch {
-        return "unknown";
-      }
-      const normalized = normalizeWindowsPath(finalPath);
-      if (normalized.startsWith("\\\\")) return "mapped-network";
-      try {
+        const timeout = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            controller.abort();
+            reject(codedError("LOCATION_PROBE_TIMEOUT", "The location capability probe timed out."));
+          }, options.timeoutMs ?? 2_000);
+        });
+        const inspection = await Promise.race([port.inspect(filePath, controller.signal), timeout]);
+        const normalized = normalizeWindowsPath(inspection.finalPath);
+        if (normalized.startsWith("\\\\")) return "mapped-network";
         if (
-          port.isCloudPlaceholder(finalPath) ||
-          port.cloudRoots().some((root) => insideWindowsPath(normalized, normalizeWindowsPath(root)))
+          inspection.cloudPlaceholder ||
+          inspection.cloudRoots.some((root) => insideWindowsPath(normalized, normalizeWindowsPath(root)))
         ) return "cloud-placeholder";
-        const volume = port.volumeType(finalPath);
-        if (volume === "fixed") return "local-fixed";
-        if (volume === "network") return "mapped-network";
-        if (volume === "removable") return "removable";
+        if (inspection.volumeType === "fixed") return "local-fixed";
+        if (inspection.volumeType === "network") return "mapped-network";
+        if (inspection.volumeType === "removable") return "removable";
+        return "unknown";
       } catch {
         return "unknown";
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        callerSignal?.removeEventListener("abort", abort);
       }
-      return "unknown";
     }
   };
 }
 
 function productionWindowsLocationPort(): WindowsLocationCapabilityPort {
-  const cache = new Map<string, { cloudPlaceholder: boolean; volumeType: "fixed" | "network" | "removable" | "unknown" }>();
-  const inspect = (filePath: string) => {
-    const key = normalizeWindowsPath(filePath);
+  type Inspection = Awaited<ReturnType<WindowsLocationCapabilityPort["inspect"]>>;
+  const cache = new Map<string, Inspection>();
+  return { inspect: async (filePath, signal) => {
+    const key = filePath.toLocaleLowerCase();
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
     const script = [
-      "$path = [Console]::In.ReadToEnd()",
-      "while (-not (Test-Path -LiteralPath $path)) {",
-      "  $parent = [System.IO.Path]::GetDirectoryName($path)",
-      "  if ([string]::IsNullOrEmpty($parent) -or $parent -eq $path) { throw 'No existing path ancestor.' }",
-      "  $path = $parent",
+      "Add-Type -Language CSharp -TypeDefinition @'",
+      "using System;",
+      "using System.ComponentModel;",
+      "using System.Runtime.InteropServices;",
+      "using System.Text;",
+      "public static class EtherNativePath {",
+      "  [DllImport(\"kernel32.dll\", CharSet = CharSet.Unicode, SetLastError = true)]",
+      "  private static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);",
+      "  [DllImport(\"kernel32.dll\", CharSet = CharSet.Unicode, SetLastError = true)]",
+      "  private static extern uint GetFinalPathNameByHandleW(IntPtr handle, StringBuilder path, uint length, uint flags);",
+      "  [DllImport(\"kernel32.dll\", SetLastError = true)]",
+      "  private static extern bool CloseHandle(IntPtr handle);",
+      "  public static string Resolve(string path) {",
+      "    IntPtr handle = CreateFileW(path, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);",
+      "    if (handle == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());",
+      "    try {",
+      "      var result = new StringBuilder(32768);",
+      "      uint length = GetFinalPathNameByHandleW(handle, result, (uint)result.Capacity, 0);",
+      "      if (length == 0 || length >= result.Capacity) throw new Win32Exception(Marshal.GetLastWin32Error());",
+      "      return result.ToString();",
+      "    } finally { CloseHandle(handle); }",
+      "  }",
       "}",
-      "$item = Get-Item -LiteralPath $path -Force -ErrorAction Stop",
-      "$root = [System.IO.Path]::GetPathRoot($item.FullName)",
+      "'@",
+      "$requested = [System.IO.Path]::GetFullPath([Console]::In.ReadToEnd())",
+      "$existing = $requested",
+      "while (-not (Test-Path -LiteralPath $existing)) {",
+      "  $parent = [System.IO.Path]::GetDirectoryName($existing)",
+      "  if ([string]::IsNullOrEmpty($parent) -or $parent -eq $existing) { throw 'No existing path ancestor.' }",
+      "  $existing = $parent",
+      "}",
+      "$item = Get-Item -LiteralPath $existing -Force -ErrorAction Stop",
+      "$native = [EtherNativePath]::Resolve($existing)",
+      "$resolved = if ($native.StartsWith('\\\\?\\UNC\\')) { '\\\\' + $native.Substring(8) } elseif ($native.StartsWith('\\\\?\\')) { $native.Substring(4) } else { $native }",
+      "$suffix = [System.IO.Path]::GetRelativePath($existing, $requested)",
+      "$finalPath = if ($suffix -eq '.') { $resolved } else { [System.IO.Path]::GetFullPath((Join-Path $resolved $suffix)) }",
+      "$root = [System.IO.Path]::GetPathRoot($finalPath)",
       "$driveType = ([System.IO.DriveInfo]::new($root)).DriveType.ToString().ToLowerInvariant()",
       "$attributes = [int64]$item.Attributes",
-      "[pscustomobject]@{ driveType = $driveType; attributes = $attributes } | ConvertTo-Json -Compress"
+      "$cloudRoots = @($env:OneDrive, $env:OneDriveCommercial, $env:OneDriveConsumer, $env:Dropbox) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }",
+      "[pscustomobject]@{ finalPath = $finalPath; driveType = $driveType; attributes = $attributes; cloudRoots = $cloudRoots } | ConvertTo-Json -Compress"
     ].join("\n");
-    const raw = execFileSync("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      script
-    ], { encoding: "utf8", input: filePath, windowsHide: true });
-    const value = JSON.parse(raw) as { attributes?: unknown; driveType?: unknown };
+    const raw = await runBoundedLocationProbe(script, filePath, signal);
+    const value = JSON.parse(raw) as {
+      attributes?: unknown;
+      cloudRoots?: unknown;
+      driveType?: unknown;
+      finalPath?: unknown;
+    };
     const driveType = String(value.driveType ?? "unknown");
     const attributes = Number(value.attributes ?? 0);
-    const result = {
+    const result: Inspection = {
       cloudPlaceholder: (attributes & (4096 | 262144 | 4194304)) !== 0,
+      cloudRoots: Array.isArray(value.cloudRoots)
+        ? value.cloudRoots.filter((root): root is string => typeof root === "string")
+        : typeof value.cloudRoots === "string" ? [value.cloudRoots] : [],
+      finalPath: typeof value.finalPath === "string" ? value.finalPath : filePath,
       volumeType: driveType === "fixed" || driveType === "network" || driveType === "removable"
         ? driveType
         : "unknown"
-    } as const;
+    };
     cache.set(key, result);
     return result;
-  };
-  return {
-    resolveFinalPath: resolveFinalWindowsPath,
-    volumeType: (filePath) => inspect(filePath).volumeType,
-    cloudRoots: () => [
-      process.env.OneDrive,
-      process.env.OneDriveCommercial,
-      process.env.OneDriveConsumer,
-      process.env.Dropbox
-    ].filter((value): value is string => typeof value === "string" && value.length > 0),
-    isCloudPlaceholder: (filePath) => inspect(filePath).cloudPlaceholder
-  };
+  } };
 }
 
-function resolveFinalWindowsPath(filePath: string): string {
-  const absolutePath = path.resolve(filePath);
-  let existingPath = absolutePath;
-  while (!existsSync(existingPath)) {
-    const parent = path.dirname(existingPath);
-    if (parent === existingPath) throw codedError("INVALID_DOCUMENT_PATH", "No existing path ancestor is available.");
-    existingPath = parent;
-  }
-  const finalExistingPath = realpathSync.native(existingPath);
-  const suffix = path.relative(existingPath, absolutePath);
-  return suffix === "" ? finalExistingPath : path.join(finalExistingPath, suffix);
+export function runBoundedLocationProbe(script: string, filePath: string, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
+    });
+    const maximumOutputBytes = 32 * 1024;
+    let output = "";
+    let outputBytes = 0;
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      operation();
+    };
+    const abort = () => {
+      child.kill();
+      finish(() => reject(Object.assign(new Error("Location probe was cancelled."), { code: "ABORT_ERR" })));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    child.once("error", (error) => finish(() => reject(error)));
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      output += chunk;
+      outputBytes += Buffer.byteLength(chunk, "utf8");
+      if (outputBytes > maximumOutputBytes) {
+        child.kill();
+        finish(() => reject(codedError("LOCATION_PROBE_OUTPUT_LIMIT", "Location probe output exceeded its limit.")));
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      outputBytes += chunk.byteLength;
+      if (outputBytes > maximumOutputBytes) {
+        child.kill();
+        finish(() => reject(codedError("LOCATION_PROBE_OUTPUT_LIMIT", "Location probe output exceeded its limit.")));
+      }
+    });
+    child.once("close", (code) => finish(() => {
+      if (code === 0) resolve(output);
+      else reject(codedError("LOCATION_PROBE_FAILED", "Windows location capability probe failed."));
+    }));
+    child.stdin.end(filePath, "utf8");
+  });
 }
 
 function normalizeWindowsPath(filePath: string): string {

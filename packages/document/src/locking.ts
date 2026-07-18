@@ -27,6 +27,11 @@ export type CompactStage =
   | "vacuum"
   | "validation"
   | "fsync"
+  | "rollback-planned"
+  | "rollback-linked"
+  | "rollback-hash-chunk"
+  | "rollback-journal-before-rename"
+  | "rollback-journal-after-rename"
   | "rollback-created"
   | "publication"
   | "post-publication";
@@ -38,7 +43,7 @@ export type WritableLocationKind =
   | "unknown";
 
 export interface WritableLocationCapabilityAdapter {
-  classify(filePath: string): WritableLocationKind;
+  classify(filePath: string, signal?: AbortSignal): Promise<WritableLocationKind> | WritableLocationKind;
 }
 
 export interface ReferenceGrantPathRequest {
@@ -549,12 +554,12 @@ export class WriterLease {
   }
 }
 
-export function locationSupportsWriting(
+export async function locationSupportsWriting(
   filePath: string,
   runtime: ResolvedEnvironment
-): boolean {
+): Promise<boolean> {
   return (
-    runtime.locationCapability.classify(filePath) === "local-fixed" &&
+    await runtime.locationCapability.classify(filePath) === "local-fixed" &&
     statSync(path.dirname(filePath)).isDirectory()
   );
 }

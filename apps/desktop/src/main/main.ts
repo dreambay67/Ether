@@ -10,7 +10,7 @@ import {
   protocol,
   type MenuItemConstructorOptions
 } from "electron";
-import { FakeImageProvider } from "@ether/providers";
+import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
 
 import { registerDocumentHandlers } from "./ipc/registerDocumentHandlers.js";
 import { registerGraphHandlers } from "./ipc/registerGraphHandlers.js";
@@ -66,7 +66,15 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     appDataRoot: path.join(app.getPath("userData"), "4.0"),
     appVersion: "4.0.0",
     dialogs,
-    provider: new FakeImageProvider(),
+    provider: options.simulationMode === true
+      ? new FakeImageProvider()
+      : new UnavailableImageProvider({
+          id: "ether-provider-unavailable",
+          name: "No image provider configured",
+          route: "unconfigured-clean-cli-or-mcp",
+          capabilities: ["image.generate"],
+          notes: ["Task 9 production lifecycle does not install a generation provider."]
+        }, "No production image provider is configured."),
     simulationMode: options.simulationMode === true,
     ...(options.locationCapability !== undefined
       ? { locationCapability: options.locationCapability }
@@ -94,6 +102,29 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     const message = error instanceof Error ? error.message : "Ether could not complete the command.";
     await dialog.showMessageBox(mainWindow, { type: "error", title: "Ether", message });
   };
+  let lifecycleDrainedForQuit = false;
+  let quitDrain: Promise<void> | null = null;
+  const requestQuitDrain = () => {
+    if (quitDrain !== null) return;
+    quitDrain = service.close().then(() => {
+      lifecycleDrainedForQuit = true;
+      app.quit();
+    }, async (error) => {
+      quitDrain = null;
+      await reportFailure(error);
+    });
+  };
+  mainWindow.on("close", (event) => {
+    if (lifecycleDrainedForQuit) return;
+    event.preventDefault();
+    requestQuitDrain();
+  });
+  app.on("before-quit", (event) => {
+    if (lifecycleDrainedForQuit) return;
+    event.preventDefault();
+    requestQuitDrain();
+  });
+  app.on("window-all-closed", () => app.quit());
   const run = (operation: () => Promise<unknown>, remember = false) => {
     void operation().then(() => {
       if (remember) void rememberCurrentDocument().catch(reportFailure);
@@ -193,38 +224,18 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   const initialDocument = findEtherArgument(options.initialArgv ?? process.argv.slice(1));
   if (initialDocument !== null) await openController.request("argv", initialDocument);
   else await service.bootstrap();
+  if (quitDrain !== null) {
+    await quitDrain;
+    return { mainWindow, service };
+  }
 
   await mainWindow.loadURL(rendererUrl);
-  let lifecycleDrainedForQuit = false;
-  let quitDrain: Promise<void> | null = null;
-  const requestQuitDrain = () => {
-    if (quitDrain !== null) return;
-    quitDrain = service.close().then(() => {
-      lifecycleDrainedForQuit = true;
-      app.quit();
-    }, async (error) => {
-      quitDrain = null;
-      await reportFailure(error);
-    });
-  };
-  mainWindow.on("close", (event) => {
-    if (lifecycleDrainedForQuit) return;
-    event.preventDefault();
-    requestQuitDrain();
-  });
   mainWindow.on("closed", () => {
     disposeGraphHandlers();
     disposeDocumentHandlers();
     disposeApplicationMenu();
     disposeRecentSubscription();
   });
-  app.on("before-quit", (event) => {
-    if (lifecycleDrainedForQuit) return;
-    event.preventDefault();
-    requestQuitDrain();
-  });
-  app.on("window-all-closed", () => app.quit());
-
   return { mainWindow, service };
 }
 

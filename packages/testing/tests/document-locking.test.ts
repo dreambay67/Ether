@@ -31,6 +31,11 @@ type CompactStage =
   | "vacuum"
   | "validation"
   | "fsync"
+  | "rollback-planned"
+  | "rollback-linked"
+  | "rollback-hash-chunk"
+  | "rollback-journal-before-rename"
+  | "rollback-journal-after-rename"
   | "rollback-created"
   | "publication"
   | "post-publication";
@@ -584,7 +589,15 @@ describe("Ether document writer leases and backup lifecycle", () => {
     }
   }, 15_000);
 
-  it("recovers a Compact replacement interrupted after publication", async () => {
+  it.each([
+    "rollback-planned",
+    "rollback-linked",
+    "rollback-hash-chunk",
+    "rollback-journal-before-rename",
+    "rollback-journal-after-rename",
+    "rollback-created",
+    "post-publication"
+  ] as const)("recovers Compact interrupted at %s without orphan recovery files", async (killStage) => {
     const recoveryRoot = path.join(root, "recovery");
     const source = await storeClass().create(sourcePath, {
       appVersion: "4.0.0",
@@ -613,7 +626,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
              machineId: "test-machine",
              processIsAlive: () => false,
              onCompactStage: (stage) => {
-               if (stage === "post-publication") process.kill(process.pid, "SIGKILL");
+               if (stage === ${JSON.stringify(killStage)}) process.kill(process.pid, "SIGKILL");
              }
            }
          });
