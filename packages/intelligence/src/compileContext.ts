@@ -9,10 +9,10 @@ import type {
   PromptWorkerConfig,
   WorkerRequest
 } from "@ether/schema";
-import { assembleExecutorContext } from "@ether/graph-kernel";
+import { assembleExecutorContext, validateConnection } from "@ether/graph-kernel";
 
 import { behaviorInstructions, compileBehaviorInstruction } from "./behaviors.js";
-import type { StructuredOutputSchema } from "./outputValidation.js";
+import { inspectStructuredOutputSchema, type StructuredOutputSchema } from "./outputValidation.js";
 import {
   resolveWorkerProfile,
   WorkerProfileResolutionError,
@@ -143,6 +143,48 @@ function versionRanks(versions: readonly NodeOutputVersion[]): Map<string, numbe
   return new Map(ordered.map((version, index) => [version.id, index]));
 }
 
+function unresolvedConnectionDiagnostic(input: CompileWorkerContextInput): ContextDiagnostic | null {
+  const target = input.graph.nodes.find((node) => node.id === input.targetNodeId);
+  if (target === undefined) return null;
+  const incomingEdges = input.graph.edges.filter((edge) =>
+    edge.enabled
+    && edge.from.kind === "node"
+    && edge.to.kind === "node"
+    && edge.to.nodeId === input.targetNodeId
+  ).sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+
+  for (const edge of incomingEdges) {
+    if (edge.from.kind !== "node" || edge.to.kind !== "node") continue;
+    const sourceNodeId = edge.from.nodeId;
+    const source = input.graph.nodes.find((node) => node.id === sourceNodeId);
+    if (source === undefined) continue;
+    const decision = validateConnection({
+      sourceDefinitionId: source.definitionId,
+      sourceChannel: edge.from.channel,
+      targetDefinitionId: target.definitionId,
+      targetChannel: edge.to.channel,
+      role: edge.role,
+      adapter: edge.adapter,
+      capabilities: input.adapterCapabilities
+    });
+    if (decision.allowed) continue;
+    const requiredCapability = decision.remedies.find((remedy) => remedy.kind === "enable-capability")?.capability;
+    return {
+      code: decision.code,
+      message: decision.message,
+      blocking: true,
+      details: {
+        edgeId: edge.id,
+        ...(requiredCapability === undefined ? {} : { requiredCapability }),
+        sourceChannel: edge.from.channel,
+        targetChannel: edge.to.channel,
+        remedies: decision.remedies
+      }
+    };
+  }
+  return null;
+}
+
 export function compileWorkerContext(input: CompileWorkerContextInput): {
   request: WorkerRequest;
   manifest: ContextManifest;
@@ -165,6 +207,11 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
       mediaReferences: { included: 0, maximum: resolvedProfile.capability.maxReferences }
     }
   };
+
+  const connectionDiagnostic = unresolvedConnectionDiagnostic(input);
+  if (connectionDiagnostic !== null) {
+    throw new WorkerContextCompilationError(withDiagnostic(manifest, connectionDiagnostic));
+  }
 
   let assembled: ReturnType<typeof assembleExecutorContext>;
   try {
@@ -251,13 +298,26 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
     });
   }
   const schemaId = config.outputContract.schemaId;
-  if (schemaId !== undefined && !input.schemaCatalog.some((schema) => schema.id === schemaId)) {
-    diagnostics.push({
-      code: "UNKNOWN_OUTPUT_SCHEMA",
-      message: `Unknown structured output schema: ${schemaId}.`,
-      blocking: true,
-      details: { schemaId }
-    });
+  if (schemaId !== undefined) {
+    const schema = input.schemaCatalog.find((candidate) => candidate.id === schemaId);
+    if (schema === undefined) {
+      diagnostics.push({
+        code: "UNKNOWN_OUTPUT_SCHEMA",
+        message: `Unknown structured output schema: ${schemaId}.`,
+        blocking: true,
+        details: { schemaId }
+      });
+    } else {
+      const schemaIssue = inspectStructuredOutputSchema(schema);
+      if (schemaIssue !== null) {
+        diagnostics.push({
+          code: schemaIssue.code,
+          message: schemaIssue.message,
+          blocking: true,
+          details: { schemaId, path: schemaIssue.path ?? "$" }
+        });
+      }
+    }
   }
 
   const downstream = config.contextPolicy.includeDownstreamCapabilities ? input.downstream : null;

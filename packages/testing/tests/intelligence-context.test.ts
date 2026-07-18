@@ -259,6 +259,31 @@ function structuredSchema(): StructuredOutputSchema {
   };
 }
 
+function constrainedSchema(): StructuredOutputSchema {
+  return {
+    id: "constrained-brief",
+    schema: {
+      type: "object",
+      required: ["title", "score", "tags", "mode"],
+      properties: {
+        title: { type: "string", minLength: 5 },
+        score: { type: "number", minimum: 0, maximum: 10, multipleOf: 0.5 },
+        tags: {
+          type: "array",
+          minItems: 2,
+          uniqueItems: true,
+          items: { type: "string", pattern: "^[a-z]+$" }
+        },
+        mode: {
+          anyOf: [{ const: "draft" }, { const: "final" }]
+        }
+      },
+      allOf: [{ properties: { title: { maxLength: 40 } } }],
+      additionalProperties: false
+    }
+  };
+}
+
 function expectCompilationDiagnostic(input: CompileWorkerContextInput, code: string): void {
   try {
     compileWorkerContext(input);
@@ -579,6 +604,61 @@ describe("deterministic worker context compilation", () => {
     });
     expectCompilationDiagnostic(compileInput({ catalog: imageOnlyCatalog }), "OUTPUT_CHANNEL_UNSUPPORTED");
   });
+
+  it("preserves missing adapter capability identity and remedies in the blocking manifest", () => {
+    const imageToText = {
+      ...edge({ id: "edge-image-to-text", sourceNodeId: "image-source", channel: "image" }),
+      to: { kind: "node" as const, nodeId: "worker", channel: "text" as const }
+    };
+    const image = payload({
+      id: "payload-image-to-text",
+      nodeId: "image-source",
+      versionId: "version-image-to-text",
+      channel: "image"
+    });
+    const input = compileInput({
+      edges: [imageToText],
+      payloads: [image],
+      versions: [version({
+        id: "version-image-to-text",
+        nodeId: "image-source",
+        payloadIds: [image.id]
+      })]
+    });
+
+    try {
+      compileWorkerContext(input);
+      throw new Error("Expected missing adapter capability to block compilation.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkerContextCompilationError);
+      expect((error as WorkerContextCompilationError).code).toBe("PROVIDER_CAPABILITY_UNAVAILABLE");
+      expect((error as WorkerContextCompilationError).manifest.diagnostics).toContainEqual({
+        code: "PROVIDER_CAPABILITY_UNAVAILABLE",
+        message: "Adapter requires capability codex.vision.",
+        blocking: true,
+        details: {
+          edgeId: "edge-image-to-text",
+          requiredCapability: "codex.vision",
+          sourceChannel: "image",
+          targetChannel: "text",
+          remedies: [{ kind: "enable-capability", capability: "codex.vision" }]
+        }
+      });
+    }
+  });
+
+  it("blocks a known but invalid structured output schema before dispatch", () => {
+    const config = workerConfig({
+      outputContract: { channel: "data", schemaId: "invalid-schema", count: 1, selectionPolicy: "latest" }
+    });
+    expectCompilationDiagnostic(compileInput({
+      config,
+      schemas: [{
+        id: "invalid-schema",
+        schema: { type: "object", properties: { title: { type: "not-a-json-schema-type" } } }
+      }]
+    }), "INVALID_OUTPUT_SCHEMA");
+  });
 });
 
 describe("worker output validation and transformation guard", () => {
@@ -594,6 +674,134 @@ describe("worker output validation and transformation guard", () => {
     expect(validateWorkerOutput({ config, output: { title: 42 }, schemaCatalog: [structuredSchema()], attempt: 0 })).toMatchObject({
       accepted: false,
       issues: [expect.objectContaining({ code: "SCHEMA_INVALID" })]
+    });
+  });
+
+  it("applies transformation guards recursively to structured string leaves with stable JSON paths", () => {
+    const config = workerConfig({
+      outputContract: { channel: "data", count: 1, selectionPolicy: "latest" }
+    });
+    const result = validateWorkerOutput({
+      config,
+      output: {
+        metadata: { summary: "Sure, here is the revised prompt." },
+        variants: [
+          { prompt: "A woman holding a pineapple instead of a watermelon." },
+          { prompt: "A corrected studio portrait." }
+        ]
+      },
+      schemaCatalog: [],
+      attempt: 0
+    });
+
+    expect(result).toMatchObject({
+      accepted: false,
+      issues: [
+        expect.objectContaining({ code: "CONVERSATIONAL_PREFACE", path: "$.metadata.summary" }),
+        expect.objectContaining({ code: "CHANGE_NARRATION", path: "$.variants[0].prompt" })
+      ],
+      correctiveRetry: { attempt: 1, maximumAttempts: 1 }
+    });
+    expect(new Set(result.issues.map((issue) => `${issue.code}|${issue.path}|${issue.message}`)).size).toBe(result.issues.length);
+    const retryLines = result.correctiveRetry?.instruction.split("\n") ?? [];
+    expect(new Set(retryLines).size).toBe(retryLines.length);
+  });
+
+  it("accepts corrected structured transformation content", () => {
+    const config = workerConfig({
+      behavior: "mutate",
+      outputContract: { channel: "data", count: 1, selectionPolicy: "latest" }
+    });
+    expect(validateWorkerOutput({
+      config,
+      output: { prompt: "A woman holding a ripe pineapple on a marble counter." },
+      schemaCatalog: [],
+      attempt: 1
+    })).toMatchObject({ accepted: true, correctiveRetry: null });
+  });
+
+  it("validates representative JSON Schema constraints and normalizes errors stably", () => {
+    const schema = constrainedSchema();
+    const snapshot = JSON.stringify(schema);
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+    const valid = validateWorkerOutput({
+      config,
+      output: { title: "Launch brief", score: 8.5, tags: ["summer", "studio"], mode: "final" },
+      schemaCatalog: [schema],
+      attempt: 0
+    });
+    expect(valid.accepted).toBe(true);
+
+    const invalidInput = {
+      title: "tiny",
+      score: 10.25,
+      tags: ["Summer", "Summer"],
+      mode: "unknown",
+      extra: true
+    };
+    const first = validateWorkerOutput({ config, output: invalidInput, schemaCatalog: [schema], attempt: 0 });
+    const second = validateWorkerOutput({ config, output: invalidInput, schemaCatalog: [schema], attempt: 0 });
+    expect(first.accepted).toBe(false);
+    expect(first.issues).toEqual(second.issues);
+    expect(first.issues).toEqual([...first.issues].sort((left, right) =>
+      (left.path ?? "$ ").localeCompare(right.path ?? "$ ")
+      || left.message.localeCompare(right.message)
+    ));
+    expect(first.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.title" }),
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.score" }),
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.tags" }),
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.mode" }),
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.extra" })
+    ]));
+    expect(first.issues.find((issue) => issue.path === "$.title")?.message).toContain("minLength");
+    expect(JSON.stringify(schema)).toBe(snapshot);
+  });
+
+  it.each([
+    [
+      "invalid type declaration",
+      { type: "object", properties: { title: { type: "not-a-json-schema-type" } } }
+    ],
+    [
+      "unresolved external reference",
+      { $ref: "https://schemas.ether.invalid/missing.json" }
+    ]
+  ] as const)("rejects an %s explicitly", (_name, schemaDefinition) => {
+    const schema: StructuredOutputSchema = { id: "broken-schema", schema: schemaDefinition };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+    expect(validateWorkerOutput({
+      config,
+      output: { title: "Launch" },
+      schemaCatalog: [schema],
+      attempt: 0
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "INVALID_OUTPUT_SCHEMA" })],
+      correctiveRetry: { attempt: 1, maximumAttempts: 1 }
+    });
+  });
+
+  it("validates JSON null instead of treating it as a parse-failure sentinel", () => {
+    const schema: StructuredOutputSchema = { id: "object-only", schema: { type: "object" } };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+    expect(validateWorkerOutput({
+      config,
+      output: null,
+      schemaCatalog: [schema],
+      attempt: 0
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "SCHEMA_INVALID", path: "$" })]
     });
   });
 
@@ -631,6 +839,36 @@ describe("worker output validation and transformation guard", () => {
     })).toMatchObject({ accepted: true });
   });
 
+  it.each([
+    "Do not compare or contrast the old and new content.",
+    "Never compare the pineapple with the watermelon.",
+    "Rewrite the prompt without a comparison to the prior fruit.",
+    "Avoid contrasting the revised content with the original."
+  ])("does not grant the contrast exception for negated intent: %s", (instruction) => {
+    expect(validateWorkerOutput({
+      config: workerConfig({ instruction }),
+      output: "A pineapple instead of a watermelon creates a tropical silhouette.",
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "CHANGE_NARRATION" })]
+    });
+  });
+
+  it.each([
+    "Compare the pineapple with the watermelon.",
+    "Contrast the revised content against the original.",
+    "Show a before and after comparison of the fruit."
+  ])("grants the contrast exception for affirmative intent: %s", (instruction) => {
+    expect(validateWorkerOutput({
+      config: workerConfig({ instruction }),
+      output: "A pineapple instead of a watermelon creates a tropical silhouette.",
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({ accepted: true });
+  });
+
   it("offers exactly one bounded corrective retry and never performs it", () => {
     const first = validateWorkerOutput({ config: workerConfig(), output: "", schemaCatalog: [], attempt: 0 });
     const second = validateWorkerOutput({ config: workerConfig(), output: "", schemaCatalog: [], attempt: 1 });
@@ -649,7 +887,7 @@ describe("worker memory policy", () => {
 });
 
 describe("intelligence package boundary", () => {
-  it("publishes ESM with only schema and graph-kernel workspace dependencies", () => {
+  it("publishes ESM with the approved direct dependencies", () => {
     const packageJson = JSON.parse(readFileSync(`${workspaceRoot}/packages/intelligence/package.json`, "utf8")) as {
       name: string;
       type: string;
@@ -658,7 +896,8 @@ describe("intelligence package boundary", () => {
     expect(packageJson).toMatchObject({ name: "@ether/intelligence", type: "module" });
     expect(packageJson.dependencies).toEqual({
       "@ether/graph-kernel": "workspace:*",
-      "@ether/schema": "workspace:*"
+      "@ether/schema": "workspace:*",
+      "ajv": "^8.20.0"
     });
     const source = ["index", "profiles", "behaviors", "compileContext", "transformationGuard", "outputValidation", "memoryPolicy"]
       .map((name) => readFileSync(`${workspaceRoot}/packages/intelligence/src/${name}.ts`, "utf8"))

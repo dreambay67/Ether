@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@ether/graph-kernel": "workspace:*",
-    "@ether/schema": "workspace:*"
+    "@ether/schema": "workspace:*",
+    "ajv": "^8.20.0"
   }
 }
