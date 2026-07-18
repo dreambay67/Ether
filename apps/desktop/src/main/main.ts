@@ -22,7 +22,9 @@ import { isLocalDevelopmentRendererUrl } from "./rendererUrl.js";
 import { createDesktopSettingsStore } from "./settingsStore.js";
 import {
   DesktopApplicationService,
+  OpenDocumentController,
   OpenDocumentCoordinator,
+  type DesktopApplicationServiceOptions,
   type NativeDialogPort
 } from "./services/applicationService.js";
 import { createMainWindowOptions } from "./windowOptions.js";
@@ -35,6 +37,10 @@ export interface DesktopStartOptions {
   dialogs?: NativeDialogPort;
   initialArgv?: string[];
   rendererUrl?: string;
+  simulationMode?: boolean;
+  locationCapability?: DesktopApplicationServiceOptions["locationCapability"];
+  autosaveOperation?: DesktopApplicationServiceOptions["autosaveOperation"];
+  serviceFactory?: (options: DesktopApplicationServiceOptions) => DesktopApplicationService;
 }
 
 export async function startEtherDesktop(options: DesktopStartOptions = {}): Promise<{
@@ -55,19 +61,67 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   const mainWindow = new BrowserWindow(createMainWindowOptions(preloadPath));
   const rendererUrl = options.rendererUrl ?? resolveRendererUrl();
   const dialogs = options.dialogs ?? createNativeDialogPort(() => mainWindow);
-  const service = new DesktopApplicationService({
+  const serviceOptions: DesktopApplicationServiceOptions = {
     appDataRoot: path.join(app.getPath("userData"), "4.0"),
     appVersion: "4.0.0",
     dialogs,
-    provider: new FakeImageProvider()
-  });
+    provider: new FakeImageProvider(),
+    simulationMode: options.simulationMode === true,
+    ...(options.locationCapability === undefined ? {} : { locationCapability: options.locationCapability }),
+    ...(options.autosaveOperation === undefined ? {} : { autosaveOperation: options.autosaveOperation })
+  };
+  const service = options.serviceFactory?.(serviceOptions) ?? new DesktopApplicationService(serviceOptions);
   const settings = createDesktopSettingsStore(() => path.join(app.getPath("userData"), "settings.json"));
+
+  const rememberCurrentDocument = async () => {
+    const documentPath = service.activePath();
+    const snapshot = service.snapshot();
+    if (documentPath !== null && snapshot.named) {
+      app.addRecentDocument(documentPath);
+      await settings.remember({
+        documentId: snapshot.documentId,
+        displayName: snapshot.displayName,
+        canonicalPath: documentPath
+      });
+    }
+  };
+  const reportFailure = async (error: unknown) => {
+    const message = error instanceof Error ? error.message : "Ether could not complete the command.";
+    await dialog.showMessageBox(mainWindow, { type: "error", title: "Ether", message });
+  };
+  const run = (operation: () => Promise<unknown>, remember = false) => {
+    void operation().then(() => {
+      if (remember) void rememberCurrentDocument().catch(reportFailure);
+    }, reportFailure);
+  };
+  const coordinator = new OpenDocumentCoordinator({
+    focus: () => {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    },
+    open: async (documentPath) => {
+      await service.openPath(documentPath);
+      await rememberCurrentDocument();
+    }
+  });
+  const openController = new OpenDocumentController(coordinator, () => dialogs.openDocument());
+  const openDocument = async () => {
+    await openController.request("picker");
+    return service.snapshot();
+  };
+  const openPath = async (documentPath: string) => {
+    await openController.request("drop", documentPath);
+    return service.snapshot();
+  };
 
   const disposeDocumentHandlers = registerDocumentHandlers({
     ipcMain,
     mainWindow,
     rendererUrl,
-    service
+    service,
+    openDocument,
+    openPath
   });
   const disposeGraphHandlers = registerGraphHandlers({
     ipcMain,
@@ -99,48 +153,15 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
           return null;
         }
       },
-      readRange: (documentId, artifactId, _variant, start, endExclusive) =>
-        service.readArtifactRange(documentId, artifactId, start, endExclusive)
+      streamRange: (documentId, artifactId, _variant, start, endExclusive) =>
+        service.streamArtifactRange(documentId, artifactId, start, endExclusive)
     })
   );
 
-  const rememberCurrentDocument = async () => {
-    const documentPath = service.activePath();
-    const snapshot = service.snapshot();
-    if (documentPath !== null && snapshot.named) {
-      app.addRecentDocument(documentPath);
-      await settings.remember({
-        documentId: snapshot.documentId,
-        displayName: snapshot.displayName,
-        canonicalPath: documentPath
-      });
-    }
-  };
-  const reportFailure = async (error: unknown) => {
-    const message = error instanceof Error ? error.message : "Ether could not complete the command.";
-    await dialog.showMessageBox(mainWindow, { type: "error", title: "Ether", message });
-  };
-  const run = (operation: () => Promise<unknown>, remember = false) => {
-    void operation().then(() => {
-      if (remember) void rememberCurrentDocument().catch(reportFailure);
-    }, reportFailure);
-  };
-
-  installApplicationMenu(mainWindow, service, run);
+  installApplicationMenu(mainWindow, service, openDocument, run);
   installWindowSecurity(mainWindow, rendererUrl);
   app.setJumpList([{ type: "recent" }]);
 
-  const coordinator = new OpenDocumentCoordinator({
-    focus: () => {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.focus();
-    },
-    open: async (documentPath) => {
-      await service.openPath(documentPath);
-      await rememberCurrentDocument();
-    }
-  });
   const disposeRecentSubscription = service.subscribe((event) => {
     if (event.snapshot?.named === true) {
       const activePath = service.activePath();
@@ -157,15 +178,15 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
       mainWindow.focus();
       return;
     }
-    void coordinator.request(requested).catch(reportFailure);
+    void openController.request("second-instance", requested).catch(reportFailure);
   });
   app.on("open-file", (event, filePath) => {
     event.preventDefault();
-    void coordinator.request(filePath).catch(reportFailure);
+    void openController.request("open-file", filePath).catch(reportFailure);
   });
 
   const initialDocument = findEtherArgument(options.initialArgv ?? process.argv.slice(1));
-  if (initialDocument !== null) await coordinator.request(initialDocument);
+  if (initialDocument !== null) await openController.request("argv", initialDocument);
   else await service.bootstrap();
 
   await mainWindow.loadURL(rendererUrl);
@@ -220,6 +241,18 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
         properties: ["openDirectory"]
       });
       return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    confirmPortable: async ({ expectedBytes, expectedCount }) => {
+      const result = await dialog.showMessageBox(getWindow(), {
+        type: "question",
+        title: "Make Document Portable",
+        message: `Embed ${expectedCount} available reference${expectedCount === 1 ? "" : "s"}?`,
+        detail: `${expectedBytes.toLocaleString()} bytes will be copied into this Ether document.`,
+        buttons: ["Make Portable", "Cancel"],
+        defaultId: 0,
+        cancelId: 1
+      });
+      return result.response === 0;
     }
   };
 }
@@ -227,6 +260,7 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
 function installApplicationMenu(
   mainWindow: BrowserWindow,
   service: DesktopApplicationService,
+  openDocument: () => Promise<unknown>,
   run: (operation: () => Promise<unknown>, remember?: boolean) => void
 ): void {
   const scoped = (operation: (documentId: string) => Promise<unknown>) => () =>
@@ -235,7 +269,7 @@ function installApplicationMenu(
     label: "File",
     submenu: [
       { label: "New", accelerator: "Ctrl+N", click: () => run(() => service.newDocument()) },
-      { label: "Open...", accelerator: "Ctrl+O", click: () => run(() => service.open(), true) },
+      { label: "Open...", accelerator: "Ctrl+O", click: () => run(openDocument) },
       { type: "separator" },
       { label: "Save", accelerator: "Ctrl+S", click: scoped((id) => service.save(id)) },
       { label: "Save As...", accelerator: "Ctrl+Shift+S", click: () => run(() => service.saveAs(service.snapshot().documentId), true) },

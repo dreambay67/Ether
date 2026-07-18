@@ -5,7 +5,7 @@
   "main": "dist-electron/main/bootstrap.js",
   "type": "module",
   "scripts": {
-    "build:electron": "tsc -p tsconfig.electron.json && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload/preload.cjs",
+    "build:electron": "pnpm --filter @ether/application build && tsc -p tsconfig.electron.json && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload/preload.cjs",
     "pretypecheck": "pnpm --filter @ether/engine build",
     "typecheck": "tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.renderer.json",
     "lint": "eslint . --max-warnings=0",

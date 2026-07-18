@@ -6,13 +6,13 @@ export interface EtherAssetDescriptor {
 
 export interface EtherAssetSource {
   authorize(documentId: string, artifactId: string, variant: string): Promise<EtherAssetDescriptor | null>;
-  readRange(
+  streamRange(
     documentId: string,
     artifactId: string,
     variant: string,
     start: number,
     endExclusive: number
-  ): Promise<Uint8Array>;
+  ): AsyncIterable<Uint8Array>;
 }
 
 export interface EtherProtocolRegistrar {
@@ -128,10 +128,33 @@ export function createEtherAssetProtocolHandler(source: EtherAssetSource) {
       headers.set("Content-Range", `bytes ${range.start}-${range.endExclusive - 1}/${descriptor.byteLength}`);
     }
     headers.set("Content-Length", String(range.endExclusive - range.start));
-    const bytes = request.method === "HEAD"
+    const body = request.method === "HEAD"
       ? null
-      : await source.readRange(documentId, artifactId, variant, range.start, range.endExclusive);
-    const body = bytes === null ? null : Uint8Array.from(bytes).buffer;
+      : createRangeStream(source.streamRange(
+          documentId,
+          artifactId,
+          variant,
+          range.start,
+          range.endExclusive
+        ));
     return new Response(body, { status, headers });
   };
+}
+
+function createRangeStream(source: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+  const iterator = source[Symbol.asyncIterator]();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await iterator.next();
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    async cancel() {
+      await iterator.return?.();
+    }
+  }, { highWaterMark: 0 });
 }

@@ -9,9 +9,9 @@ import {
   type OnNodeDrag
 } from "@xyflow/react";
 import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink } from "lucide-react";
-import type { EtherGraph, EtherNode, GraphTransaction, LinkedReference } from "@ether/schema";
+import type { EtherGraph, EtherNode, GraphTransaction } from "@ether/schema";
 
-import type { DocumentDescriptor } from "../shared/ipc/contracts";
+import type { DesktopReference, DocumentDescriptor, ReferenceAction } from "../shared/ipc/contracts";
 import { ArtifactBrowser } from "./artifacts/ArtifactBrowser";
 import { ProjectHeader } from "./project/ProjectHeader";
 import { StartScreen } from "./project/StartScreen";
@@ -23,14 +23,14 @@ export function App() {
   const [graph, setGraph] = useState<EtherGraph | null>(null);
   const [message, setMessage] = useState("Preparing an untitled document...");
   const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const [references, setReferences] = useState<LinkedReference[]>([]);
+  const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
 
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
     const result = await window.ether.graph.snapshot(active.documentId);
     setGraph(result.graph);
     setReferences(await window.ether.references.list(active.documentId));
-    setMessage("");
+    setMessage((current) => current === "Preparing an untitled document..." ? "" : current);
   }, []);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function App() {
   };
 
   const apply = async (operations: GraphTransaction["operations"], title: string) => {
-    if (document === null || graph === null) return;
+    if (document === null || graph === null || document.mode === "read-only") return;
     const transaction: GraphTransaction = {
       id: crypto.randomUUID(),
       baseDocumentRevisionId: document.documentRevisionId,
@@ -71,7 +71,7 @@ export function App() {
   };
 
   const addNode = (kind: "prompt" | "generator") => {
-    if (graph === null) return;
+    if (graph === null || document?.mode === "read-only") return;
     const ordinal = graph.nodes.length + 1;
     const node = kind === "prompt" ? promptNode(ordinal) : generatorNode(ordinal);
     const operation = { type: "addNode", graphId: graph.id, node } as Extract<
@@ -104,7 +104,7 @@ export function App() {
   })), [graph]);
 
   const onNodeDragStop: OnNodeDrag<Node> = (_event, node) => {
-    if (graph === null) return;
+    if (graph === null || document?.mode === "read-only") return;
     void apply([{
       type: "moveNodes",
       graphId: graph.id,
@@ -112,7 +112,7 @@ export function App() {
     }], "Move node");
   };
 
-  const actOnReference = async (referenceId: string, action: string) => {
+  const actOnReference = async (referenceId: string, action: ReferenceAction) => {
     if (document === null) return;
     try {
       setReferences(await window.ether.references.act(document.documentId, referenceId, action));
@@ -121,16 +121,42 @@ export function App() {
     }
   };
 
-  const generate = async () => {
-    if (document === null) return;
+  const simulate = async () => {
+    if (document === null || document.mode === "read-only" || !document.simulationEnabled) return;
     try {
-      setMessage("Generating with the local fake provider...");
+      setMessage("Running simulation output...");
       await window.ether.artifacts.generateFake(document.documentId);
       setArtifactsOpen(true);
       setArtifactRevision((value) => value + 1);
-      setMessage("Generated artifact embedded in this document");
+      setMessage("Simulation artifact embedded in this document");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Generation failed.");
+      setMessage(error instanceof Error ? error.message : "Simulation failed.");
+    }
+  };
+
+  const compact = async (documentId: string) => {
+    try {
+      const result = await window.ether.document.compact(documentId);
+      const reclaimed = Math.max(0, result.beforeBytes - result.afterBytes);
+      setMessage(`Compacted document and reclaimed ${formatBytes(reclaimed)}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The document could not be compacted.");
+    }
+  };
+
+  const makePortable = async (documentId: string) => {
+    try {
+      const result = await window.ether.document.makePortable(documentId);
+      if (result.cancelled) {
+        setMessage("Make Portable cancelled; the document was not changed");
+      } else {
+        setMessage(
+          `Made portable: embedded ${result.embeddedCount} reference${result.embeddedCount === 1 ? "" : "s"}; ` +
+          `${result.missingReferenceIds.length} unavailable`
+        );
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The document could not be made portable.");
     }
   };
 
@@ -174,27 +200,36 @@ export function App() {
         onSave={() => void runDocumentCommand((id) => window.ether.document.save(id))}
         onSaveAs={() => void runDocumentCommand((id) => window.ether.document.saveAs(id))}
         onSaveCopy={() => void runDocumentCommand((id) => window.ether.document.saveCopy(id))}
-        onCompact={() => void runDocumentCommand((id) => window.ether.document.compact(id))}
-        onMakePortable={() => void runDocumentCommand((id) => window.ether.document.makePortable(id))}
+        onCompact={() => void compact(document.documentId)}
+        onMakePortable={() => void makePortable(document.documentId)}
         onToggleArtifacts={() => setArtifactsOpen((value) => !value)}
       />
       <section className="task-nine-workspace">
         <aside className="document-tool-rail" aria-label="Graph tools">
-          <button type="button" onClick={() => addNode("prompt")}>
+          <button type="button" onClick={() => addNode("prompt")} disabled={document.mode === "read-only"}>
             <Plus size={16} aria-hidden="true" />Prompt
           </button>
-          <button type="button" onClick={() => addNode("generator")}>
+          <button type="button" onClick={() => addNode("generator")} disabled={document.mode === "read-only"}>
             <ImagePlus size={16} aria-hidden="true" />Image
           </button>
-          <button type="button" onClick={() => void generate()}>
-            <Sparkles size={16} aria-hidden="true" />Generate
-          </button>
+          {document.simulationEnabled ? (
+            <button type="button" onClick={() => void simulate()} disabled={document.mode === "read-only"}>
+              <Sparkles size={16} aria-hidden="true" />Simulation output
+            </button>
+          ) : null}
           <button type="button" title="Reload graph" onClick={() => void loadGraph(document)}>
             <RefreshCcw size={16} aria-hidden="true" />Refresh
           </button>
         </aside>
         <section className="document-canvas" data-testid="document-canvas" aria-label="Document canvas">
-          <ReactFlow nodes={nodes} edges={edges} onNodeDragStop={onNodeDragStop} fitView>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodesDraggable={document.mode === "writable"}
+            nodesConnectable={document.mode === "writable"}
+            onNodeDragStop={onNodeDragStop}
+            fitView
+          >
             <Background color="#263241" gap={24} size={1} />
             <Controls />
             <MiniMap pannable zoomable />
@@ -210,7 +245,7 @@ export function App() {
             <div key={reference.id}>
               <Unlink size={15} aria-hidden="true" />
               <strong>{reference.displayName}</strong>
-              {referenceActions.map(([action, label]) => (
+              {referenceActions.filter(([action]) => reference.actions.includes(action)).map(([action, label]) => (
                 <button key={action} type="button" onClick={() => void actOnReference(reference.id, action)}>{label}</button>
               ))}
             </div>
@@ -236,6 +271,12 @@ const referenceActions = [
 
 function isDocumentDescriptor(value: unknown): value is DocumentDescriptor {
   return value !== null && typeof value === "object" && "graphId" in value;
+}
+
+function formatBytes(byteLength: number): string {
+  if (byteLength < 1024) return `${byteLength} B`;
+  if (byteLength < 1024 * 1024) return `${(byteLength / 1024).toFixed(1)} KB`;
+  return `${(byteLength / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function promptNode(ordinal: number): EtherNode {

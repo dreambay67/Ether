@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,6 +9,7 @@ import {
 } from "../../../apps/desktop/src/shared/ipc/channels";
 import {
   assertDocumentScope,
+  assertAuthorizedSenderFrame,
   assertTrustedIpcSender,
   desktopIpcContracts,
   type IpcSenderIdentity
@@ -13,7 +17,6 @@ import {
 import { createEtherBridge } from "../../../apps/desktop/src/preload/filePathBridge";
 
 const trustedSender: IpcSenderIdentity = {
-  rendererUrl: "http://127.0.0.1:5173/",
   webContentsId: 7,
   senderFrameUrl: "http://127.0.0.1:5173/",
   origin: "http://127.0.0.1:5173"
@@ -41,6 +44,7 @@ describe("desktop IPC contract", () => {
         documentRevisionId: "revision-2",
         graphId: "graph-root",
         graphRevisionId: "graph-revision-2",
+        simulationEnabled: false,
         revision: 2
       }
     });
@@ -66,10 +70,47 @@ describe("desktop IPC contract", () => {
     ).toBe(true);
   });
 
+  it("parses capability-aware references and portable confirmation results", () => {
+    const referenceResponse = desktopIpcContracts[desktopIpcChannels.references.list].response.safeParse({
+      ok: true,
+      value: [{
+        id: "reference-1",
+        displayName: "source.png",
+        mediaType: "image/png",
+        state: "missing",
+        actions: ["locate", "remove"]
+      }]
+    });
+    const portableResponse = desktopIpcContracts[desktopIpcChannels.document.makePortable].response.safeParse({
+      ok: true,
+      value: {
+        cancelled: true,
+        embeddedCount: 0,
+        expectedBytes: 8192,
+        expectedCount: 2,
+        missingReferenceIds: ["reference-1"]
+      }
+    });
+
+    expect(referenceResponse.success).toBe(true);
+    expect(portableResponse.success).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.references.list].response.safeParse({
+      ok: true,
+      value: [{
+        id: "reference-1",
+        displayName: "source.png",
+        mediaType: "image/png",
+        state: "missing",
+        originalPath: "C:\\private\\source.png",
+        actions: ["locate"]
+      }]
+    }).success).toBe(false);
+  });
+
   it("rejects the wrong webContents, frame URL, or origin", () => {
     expect(() =>
       assertTrustedIpcSender(trustedSender, {
-        rendererUrl: trustedSender.rendererUrl,
+        rendererUrl: "http://127.0.0.1:5173/",
         webContentsId: 7
       })
     ).not.toThrow();
@@ -81,11 +122,24 @@ describe("desktop IPC contract", () => {
     ]) {
       expect(() =>
         assertTrustedIpcSender(candidate, {
-          rendererUrl: trustedSender.rendererUrl,
+          rendererUrl: "http://127.0.0.1:5173/",
           webContentsId: 7
         })
       ).toThrowError(expect.objectContaining({ code: "IPC_SENDER_REJECTED" }));
     }
+  });
+
+  it("requires the exact authorized mainFrame object and rejects subframes or replaced frames", () => {
+    const mainFrame = { url: "http://127.0.0.1:5173/", routingId: 1 };
+    expect(() => assertAuthorizedSenderFrame(mainFrame, mainFrame)).not.toThrow();
+    expect(() => assertAuthorizedSenderFrame(
+      { url: mainFrame.url, routingId: mainFrame.routingId },
+      mainFrame
+    )).toThrowError(expect.objectContaining({ code: "IPC_SENDER_REJECTED" }));
+    expect(() => assertAuthorizedSenderFrame(
+      { url: "http://127.0.0.1:5173/navigated", routingId: 2 },
+      mainFrame
+    )).toThrowError(expect.objectContaining({ code: "IPC_SENDER_REJECTED" }));
   });
 
   it("enforces active document scope", () => {
@@ -123,5 +177,19 @@ describe("desktop IPC contract", () => {
       "saveCopy"
     ]);
     expect(JSON.stringify(Object.keys(bridge))).not.toMatch(/filesystem|ipc|path|shellExecute/i);
+  });
+
+  it("builds desktop and Windows package before real development and packaged acceptance journeys", async () => {
+    const root = path.resolve(import.meta.dirname, "../../..");
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const acceptance = manifest.scripts["test:acceptance"] ?? "";
+
+    expect(acceptance).toContain("desktop:package:win");
+    expect(acceptance).toContain("test:smoke");
+    expect(acceptance).toContain("test:desktop");
+    expect(acceptance).toContain("test:packaged");
+    expect(acceptance).not.toContain("test:acceptance");
   });
 });

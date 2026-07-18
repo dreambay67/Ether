@@ -10,7 +10,13 @@ export type DocumentSessionState = {
 };
 
 export type DocumentSessionAction =
-  | { kind: "snapshot"; revision: number; snapshot: DocumentDescriptor | { documentId: string } }
+  | {
+      kind: "snapshot";
+      revision: number;
+      snapshot: DocumentDescriptor | { documentId: string };
+      saveState?: DocumentSessionState["saveState"];
+      error?: string | null;
+    }
   | { kind: "event"; revision: number; saveState?: DocumentSessionState["saveState"]; error?: string | null };
 
 export function reduceDocumentSession(
@@ -19,7 +25,14 @@ export function reduceDocumentSession(
 ): DocumentSessionState {
   if (action.revision <= state.revision) return state;
   if (action.kind === "snapshot") {
-    return { ...state, snapshot: action.snapshot, revision: action.revision };
+    const snapshotSaveState = "saveState" in action.snapshot ? action.snapshot.saveState : undefined;
+    return {
+      ...state,
+      snapshot: action.snapshot,
+      revision: action.revision,
+      saveState: action.saveState ?? snapshotSaveState ?? state.saveState,
+      error: action.error === undefined ? state.error : action.error
+    };
   }
   return {
     ...state,
@@ -44,7 +57,13 @@ export function useDocumentSession() {
     const unsubscribe = window.ether.document.onEvent((event: DesktopDocumentEvent) => {
       if (!active) return;
       if (event.snapshot !== undefined) {
-        dispatch({ kind: "snapshot", revision: event.revision, snapshot: event.snapshot });
+        dispatch({
+          kind: "snapshot",
+          revision: event.revision,
+          snapshot: event.snapshot,
+          saveState: event.saveState ?? event.snapshot.saveState,
+          error: event.error?.message ?? null
+        });
       } else {
         dispatch({
           kind: "event",

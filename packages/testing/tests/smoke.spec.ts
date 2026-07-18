@@ -11,10 +11,14 @@ test("shows an immediate untitled canvas and subscribes before the initial snaps
   expect((await calls(page)).slice(0, 2)).toEqual(["subscribe", "bootstrap"]);
 });
 
-test("keeps header, graph, tools, and status bounded at desktop and narrow widths", async ({ page }) => {
+test("keeps header, graph, tools, and status bounded across presentation widths", async ({ page }) => {
   await openEther(page);
 
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 820, height: 720 }]) {
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 800 },
+    { width: 820, height: 720 }
+  ]) {
     await page.setViewportSize(viewport);
     const bounds = await page.evaluate(() => {
       const rectangle = (selector: string) => {
@@ -42,7 +46,7 @@ test("keeps header, graph, tools, and status bounded at desktop and narrow width
   await page.screenshot({ path: "../../test-results/task9-browser-smoke.png", fullPage: true });
 });
 
-test("applies graph edits and keeps ordinary save commands understandable", async ({ page }) => {
+test("presents graph edits and ordinary document commands without a production fake generator", async ({ page }) => {
   await openEther(page);
 
   await page.getByRole("button", { name: "Prompt", exact: true }).click();
@@ -54,10 +58,17 @@ test("applies graph edits and keeps ordinary save commands understandable", asyn
   for (const name of ["New document", "Open document", "Save as", "Save a copy", "Compact document", "Make document portable"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
   }
+  await expect(page.getByRole("button", { name: "Generate", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Simulation output", exact: true })).toHaveCount(0);
 });
 
-test("explains honest read-only mode and disables mutating document commands", async ({ page }) => {
-  await openEther(page, { mode: "read-only", readOnlyReason: "location-unsupported" });
+test("explains honest read-only mode and disables canvas mutation before invocation", async ({ page }) => {
+  await openEther(page, {
+    mode: "read-only",
+    readOnlyReason: "location-unsupported",
+    initialNode: true,
+    simulationMode: true
+  });
 
   await expect(page.getByTestId("project-header")).toContainText(
     "Read-only: this location cannot guarantee safe writes"
@@ -65,24 +76,54 @@ test("explains honest read-only mode and disables mutating document commands", a
   for (const name of ["Save", "Save as", "Compact document", "Make document portable"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
   }
+  for (const name of ["Prompt", "Image", "Simulation output"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
+  }
+  await expect(page.locator(".react-flow__node.draggable")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save a copy", exact: true })).toBeEnabled();
+  expect(await calls(page)).not.toContain("graph.apply");
 });
 
-test("offers every real missing-reference recovery action", async ({ page }) => {
-  await openEther(page, { missingReference: true });
+test("shows only capability-backed missing-reference actions", async ({ page }) => {
+  await openEther(page, { missingReference: "limited" });
 
-  const expected = [
+  const enabled = [
     ["Locate", "locate"],
     ["Search Folder", "search-folder"],
     ["Relink All", "relink-all"],
-    ["Use Embedded Preview", "use-embedded-preview"],
-    ["Embed Available Copy", "embed-available-copy"],
     ["Remove", "remove"]
   ] as const;
-  for (const [label, action] of expected) {
+  for (const [label, action] of enabled) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await expect.poll(() => calls(page)).toContain(`reference.${action}`);
   }
+  await expect(page.getByRole("button", { name: "Use Embedded Preview", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Embed Available Copy", exact: true })).toHaveCount(0);
+});
+
+test("presents simulation, compact, portable, and exact save-state feedback", async ({ page }) => {
+  await openEther(page, { simulationMode: true, missingReference: "full" });
+
+  await expect(page.getByRole("button", { name: "Simulation output", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Use Embedded Preview", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Embed Available Copy", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Compact document" }).click();
+  await expect(page.getByText("Compacted document and reclaimed 1 B", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Make document portable" }).click();
+  await expect(page.getByText("Made portable: embedded 2 references; 1 unavailable", { exact: true })).toBeVisible();
+
+  await emitState(page, 5, "saving", null);
+  await expect(page.getByText("Saving", { exact: true })).toBeVisible();
+  await emitState(page, 6, "needs-attention", "The disk is full.");
+  await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
+  await expect(page.getByText("The disk is full.", { exact: true })).toBeVisible();
+  await emitState(page, 5, "saved", null);
+  await expect(page.getByText("Needs attention", { exact: true })).toBeVisible();
+  await emitState(page, 7, "saved", null);
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(page.getByText("The disk is full.", { exact: true })).toHaveCount(0);
 });
 
 async function openEther(
@@ -90,7 +131,9 @@ async function openEther(
   options: {
     mode?: "writable" | "read-only";
     readOnlyReason?: "location-unsupported" | null;
-    missingReference?: boolean;
+    initialNode?: boolean;
+    missingReference?: "limited" | "full";
+    simulationMode?: boolean;
   } = {}
 ) {
   await page.addInitScript((fixture) => {
@@ -98,17 +141,28 @@ async function openEther(
     const listeners: Array<(event: unknown) => void> = [];
     let revision = 1;
     let graphRevision = "graph-revision-1";
-    let nodes: Array<Record<string, unknown>> = [];
+    let saveState: "saving" | "saved" | "needs-attention" = "saved";
+    let eventError: string | null = null;
+    let nodes: Array<Record<string, unknown>> = fixture.initialNode ? [{
+      id: "node-initial",
+      definitionId: "prompt.text",
+      title: "Initial Prompt",
+      position: { x: 120, y: 120 },
+      size: { width: 240, height: 132 },
+      config: { kind: "prompt.text", body: "Fixture", assembly: "append" },
+      presentation: { collapsed: false, accent: "default", previewMode: "content" }
+    }] : [];
     const snapshot = () => ({
       documentId: "document-browser-smoke",
       displayName: "Untitled",
       named: false,
       mode: fixture.mode ?? "writable",
       readOnlyReason: fixture.readOnlyReason ?? null,
-      saveState: "saved",
+      saveState,
       documentRevisionId: `document-revision-${revision}`,
       graphId: "graph-root",
       graphRevisionId: graphRevision,
+      simulationEnabled: fixture.simulationMode ?? false,
       revision
     });
     const graph = () => ({
@@ -132,7 +186,14 @@ async function openEther(
       kind: "snapshot",
       documentId: snapshot().documentId,
       revision,
-      snapshot: snapshot()
+      saveState,
+      snapshot: snapshot(),
+      ...(eventError === null ? {} : { error: {
+        code: "AUTOSAVE_FAILED",
+        category: "document",
+        message: eventError,
+        retryable: true
+      } })
     }));
     const command = async (name: string) => {
       calls.push(name);
@@ -142,6 +203,16 @@ async function openEther(
     };
 
     Object.defineProperty(window, "__etherSmokeCalls", { value: calls });
+    Object.defineProperty(window, "__etherEmitState", { value: (
+      nextRevision: number,
+      nextSaveState: "saving" | "saved" | "needs-attention",
+      nextError: string | null
+    ) => {
+      revision = nextRevision;
+      saveState = nextSaveState;
+      eventError = nextError;
+      emit();
+    } });
     Object.defineProperty(window, "ether", { value: {
       document: {
         onEvent: (listener: (event: unknown) => void) => {
@@ -160,7 +231,13 @@ async function openEther(
         saveAs: () => command("document.save-as"),
         saveCopy: () => command("document.save-copy"),
         compact: async () => ({ beforeBytes: 10, afterBytes: 9 }),
-        makePortable: async () => ({ embeddedCount: 0, missingReferenceIds: [] }),
+        makePortable: async () => ({
+          cancelled: false,
+          embeddedCount: 2,
+          expectedBytes: 4096,
+          expectedCount: 2,
+          missingReferenceIds: ["reference-missing"]
+        }),
         close: async () => null
       },
       graph: {
@@ -194,14 +271,20 @@ async function openEther(
           embeddedPreviewContentKey: null,
           embeddedContentKey: null,
           createdAt: "2026-07-18T00:00:00.000Z",
-          updatedAt: "2026-07-18T00:00:00.000Z"
+          updatedAt: "2026-07-18T00:00:00.000Z",
+          actions: fixture.missingReference === "full"
+            ? ["locate", "search-folder", "relink-all", "use-embedded-preview", "embed-available-copy", "remove"]
+            : ["locate", "search-folder", "relink-all", "remove"]
         }] : [],
         act: async (_documentId: string, _referenceId: string, action: string) => {
           calls.push(`reference.${action}`);
           return fixture.missingReference ? [{
             id: "reference-missing",
             displayName: "source-image.png",
-            state: "missing"
+            state: "missing",
+            actions: fixture.missingReference === "full"
+              ? ["locate", "search-folder", "relink-all", "use-embedded-preview", "embed-available-copy", "remove"]
+              : ["locate", "search-folder", "relink-all", "remove"]
           }] : [];
         }
       },
@@ -214,4 +297,17 @@ async function openEther(
 
 async function calls(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as typeof window & { __etherSmokeCalls: string[] }).__etherSmokeCalls);
+}
+
+async function emitState(
+  page: Page,
+  revision: number,
+  saveState: "saving" | "saved" | "needs-attention",
+  error: string | null
+) {
+  await page.evaluate(({ revision: nextRevision, saveState: nextState, error: nextError }) => {
+    (window as typeof window & {
+      __etherEmitState(revision: number, state: string, error: string | null): void;
+    }).__etherEmitState(nextRevision, nextState, nextError);
+  }, { revision, saveState, error });
 }

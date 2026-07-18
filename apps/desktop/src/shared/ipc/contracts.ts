@@ -1,4 +1,4 @@
-import { ArtifactSchema, EtherGraphSchema, GraphTransactionSchema, LinkedReferenceSchema } from "@ether/schema";
+import { ArtifactSchema, EtherGraphSchema, GraphTransactionSchema } from "@ether/schema";
 import { z } from "zod";
 
 import { desktopIpcChannels } from "./channels.js";
@@ -41,6 +41,7 @@ export const DocumentDescriptorSchema = z
     documentRevisionId: id,
     graphId: id,
     graphRevisionId: id,
+    simulationEnabled: z.boolean(),
     revision: z.number().int().nonnegative()
   })
   .strict();
@@ -50,10 +51,16 @@ const compactResult = z
   .object({ beforeBytes: z.number().int().nonnegative(), afterBytes: z.number().int().nonnegative() })
   .strict();
 const portableResult = z
-  .object({ embeddedCount: z.number().int().nonnegative(), missingReferenceIds: z.array(id) })
+  .object({
+    cancelled: z.boolean(),
+    embeddedCount: z.number().int().nonnegative(),
+    expectedBytes: z.number().int().nonnegative(),
+    expectedCount: z.number().int().nonnegative(),
+    missingReferenceIds: z.array(id)
+  })
   .strict();
 const graphResult = z.object({ graph: EtherGraphSchema, revision: z.number().int().nonnegative() }).strict();
-const referenceAction = z.enum([
+export const ReferenceActionSchema = z.enum([
   "locate",
   "search-folder",
   "relink-all",
@@ -61,6 +68,15 @@ const referenceAction = z.enum([
   "embed-available-copy",
   "remove"
 ]);
+export type ReferenceAction = z.infer<typeof ReferenceActionSchema>;
+export const DesktopReferenceSchema = z.object({
+  id,
+  displayName: z.string().min(1),
+  mediaType: z.string().min(1),
+  state: z.enum(["linked", "embedded", "missing", "relinking"]),
+  actions: z.array(ReferenceActionSchema)
+}).strict();
+export type DesktopReference = z.infer<typeof DesktopReferenceSchema>;
 
 function resultSchema<T extends z.ZodTypeAny>(value: T) {
   return z.discriminatedUnion("ok", [
@@ -114,11 +130,11 @@ export const desktopIpcContracts = {
   },
   [desktopIpcChannels.references.list]: {
     request: documentScope,
-    response: resultSchema(z.array(LinkedReferenceSchema))
+    response: resultSchema(z.array(DesktopReferenceSchema))
   },
   [desktopIpcChannels.references.act]: {
-    request: z.object({ documentId: id, referenceId: id, action: referenceAction }).strict(),
-    response: resultSchema(z.array(LinkedReferenceSchema))
+    request: z.object({ documentId: id, referenceId: id, action: ReferenceActionSchema }).strict(),
+    response: resultSchema(z.array(DesktopReferenceSchema))
   },
   [desktopIpcChannels.runtime.versions]: {
     request: empty,
@@ -130,7 +146,6 @@ export type DesktopIpcChannel = keyof typeof desktopIpcContracts;
 export type NormalizedResult<T> = { ok: true; value: T } | { ok: false; error: DesktopError };
 
 export interface IpcSenderIdentity {
-  rendererUrl: string;
   webContentsId: number;
   senderFrameUrl: string;
   origin: string;
@@ -166,10 +181,15 @@ export function assertTrustedIpcSender(
   if (
     sender.webContentsId !== expected.webContentsId ||
     actualFrame !== expectedFrame ||
-    sender.origin !== expectedOrigin ||
-    sender.rendererUrl !== expected.rendererUrl
+    sender.origin !== expectedOrigin
   ) {
     throw new IpcSecurityError("IPC_SENDER_REJECTED", "IPC sender is not the active Ether renderer.");
+  }
+}
+
+export function assertAuthorizedSenderFrame(actualFrame: object | null, authorizedMainFrame: object): void {
+  if (actualFrame === null || actualFrame !== authorizedMainFrame) {
+    throw new IpcSecurityError("IPC_SENDER_REJECTED", "IPC sender is not the authorized main frame.");
   }
 }
 

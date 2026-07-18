@@ -47,6 +47,8 @@ test("real Ether.exe opens, saves, and renders a portable document on Node 24", 
     const versions = await page.evaluate(() => window.ether.runtime.versions());
     expect(versions.electron).toMatch(/^43\./);
     expect(versionAtLeast(versions.node, "24.16.0")).toBe(true);
+    await expect(page.getByRole("button", { name: "Generate", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Simulation output", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Artifacts", exact: true }).click();
     const image = page.getByTestId("embedded-artifact").locator("img");
@@ -73,9 +75,11 @@ async function createPortableFixture(tempRoot: string, documentPath: string) {
       openDocument: async () => null,
       saveDocument: async () => documentPath,
       locateReference: async () => null,
-      searchReferenceFolder: async () => null
+      searchReferenceFolder: async () => null,
+      confirmPortable: async () => true
     },
-    provider: new FakeImageProvider()
+    provider: new FakeImageProvider(),
+    simulationMode: true
   });
   const untitled = await service.bootstrap();
   await service.generateFakeArtifact(untitled.documentId);

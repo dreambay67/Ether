@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -10,6 +11,7 @@ import {
   readBlobRange,
   relinkReference,
   resolveReference,
+  streamBlobRange,
   type ArtifactLineageSnapshot,
   type DocumentStoreEnvironment
 } from "@ether/document";
@@ -365,6 +367,36 @@ export class EtherApplication {
     return { embeddedCount, missingReferenceIds };
   }
 
+  async preflightDocumentPortable(): Promise<{
+    expectedBytes: number;
+    expectedCount: number;
+    missingReferenceIds: string[];
+  }> {
+    const references = await this.queryReferences();
+    let expectedBytes = 0;
+    let expectedCount = 0;
+    const missingReferenceIds: string[] = [];
+    for (const reference of references) {
+      if (reference.state === "embedded") continue;
+      if (reference.state !== "linked" || reference.originalPath === null) {
+        missingReferenceIds.push(reference.id);
+        continue;
+      }
+      try {
+        const source = await stat(reference.originalPath);
+        if (!source.isFile() || source.size !== reference.fingerprint.byteLength) {
+          missingReferenceIds.push(reference.id);
+          continue;
+        }
+        expectedCount += 1;
+        expectedBytes += source.size;
+      } catch {
+        missingReferenceIds.push(reference.id);
+      }
+    }
+    return { expectedBytes, expectedCount, missingReferenceIds };
+  }
+
   async queryArtifactDescriptor(artifactId: string) {
     const artifact = await this.requireStore().read(({ artifacts }) => artifacts.get(artifactId));
     if (artifact === undefined) {
@@ -377,6 +409,16 @@ export class EtherApplication {
     const store = this.requireStore();
     const artifact = await this.queryArtifactDescriptor(artifactId);
     return readBlobRange(store, artifact.contentKey, start, endExclusive);
+  }
+
+  async *streamArtifactRange(
+    artifactId: string,
+    start: number,
+    endExclusive: number
+  ): AsyncGenerator<Buffer, void, void> {
+    const store = this.requireStore();
+    const artifact = await this.queryArtifactDescriptor(artifactId);
+    yield* streamBlobRange(store, artifact.contentKey, start, endExclusive);
   }
 
   async queryGraph(graphId: string): Promise<EtherGraph> {

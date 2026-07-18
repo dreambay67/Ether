@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 
 import { desktopIpcChannels } from "../../shared/ipc/channels.js";
 import {
+  assertAuthorizedSenderFrame,
   assertTrustedIpcSender,
   desktopIpcContracts,
   normalizeDesktopError,
@@ -18,15 +19,17 @@ export function registerDocumentHandlers(options: {
   mainWindow: BrowserWindow;
   rendererUrl: string;
   service: DesktopApplicationService;
+  openDocument(): Promise<unknown>;
+  openPath(filePath: string): Promise<unknown>;
 }): () => void {
-  const { ipcMain, mainWindow, rendererUrl, service } = options;
+  const { ipcMain, mainWindow, rendererUrl, service, openDocument, openPath } = options;
   const registrations: Array<[DesktopIpcChannel, Handler]> = [
     [desktopIpcChannels.document.bootstrap, () => service.bootstrap()],
     [desktopIpcChannels.document.new, () => service.newDocument()],
-    [desktopIpcChannels.document.open, () => service.open()],
+    [desktopIpcChannels.document.open, () => openDocument()],
     [desktopIpcChannels.document.openDropped, (request) => {
       const dropped = request as { path: string };
-      return service.openPath(dropped.path);
+      return openPath(dropped.path);
     }],
     [desktopIpcChannels.document.save, (request) => service.save(scopedId(request))],
     [desktopIpcChannels.document.saveAs, (request) => service.saveAs(scopedId(request))],
@@ -77,6 +80,7 @@ export function registerDocumentHandlers(options: {
 }
 
 function assertSender(event: IpcMainInvokeEvent, mainWindow: BrowserWindow, rendererUrl: string): void {
+  assertAuthorizedSenderFrame(event.senderFrame, mainWindow.webContents.mainFrame);
   const senderFrameUrl = event.senderFrame?.url ?? "";
   let origin = "";
   try {
@@ -87,7 +91,6 @@ function assertSender(event: IpcMainInvokeEvent, mainWindow: BrowserWindow, rend
   }
   assertTrustedIpcSender(
     {
-      rendererUrl,
       webContentsId: event.sender.id,
       senderFrameUrl,
       origin

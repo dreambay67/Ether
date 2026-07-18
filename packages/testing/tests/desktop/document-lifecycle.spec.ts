@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,7 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AutosaveCoordinator,
   DesktopApplicationService,
+  DesktopPathGrantAuthority,
+  OpenDocumentController,
   OpenDocumentCoordinator,
+  referenceCapabilities,
   type NativeDialogPort
 } from "../../../../apps/desktop/src/main/services/applicationService";
 import {
@@ -32,6 +35,7 @@ function dialogs(overrides: Partial<NativeDialogPort> = {}): NativeDialogPort {
     saveDocument: async () => null,
     locateReference: async () => null,
     searchReferenceFolder: async () => null,
+    confirmPortable: async () => true,
     ...overrides
   };
 }
@@ -184,13 +188,37 @@ describe("desktop document lifecycle", () => {
     expect(focused).toBe(1);
   });
 
+  it("routes picker, drop, argv, second-instance, and open-file through one coordinator", async () => {
+    const root = await tempRoot("ether-open-entrypoints-");
+    const filePath = path.join(root, "Campaign.ether");
+    await writeFile(filePath, "fixture");
+    const opened: string[] = [];
+    let focused = 0;
+    const controller = new OpenDocumentController(
+      new OpenDocumentCoordinator({
+        focus: () => { focused += 1; },
+        open: async (canonicalPath) => { opened.push(canonicalPath); }
+      }),
+      async () => filePath
+    );
+
+    await controller.request("picker");
+    for (const source of ["drop", "argv", "second-instance", "open-file"] as const) {
+      await controller.request(source, path.join(root, ".", "Campaign.ether"));
+    }
+
+    expect(opened).toHaveLength(1);
+    expect(focused).toBe(4);
+  });
+
   it("keeps a fake-provider PNG embedded after save, close, and reopen", async () => {
     const root = await tempRoot("ether-fake-artifact-");
     const documentPath = path.join(root, "Generated.ether");
     const options = {
       appDataRoot: path.join(root, "appdata"),
       appVersion: "4.0.0-test",
-      provider: new FakeImageProvider()
+      provider: new FakeImageProvider(),
+      simulationMode: true
     };
     const service = new DesktopApplicationService({
       ...options,
@@ -216,6 +244,159 @@ describe("desktop document lifecycle", () => {
     );
     expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     await reopened.close();
+  });
+
+  it("does not expose fake generation through a normal production service", async () => {
+    const root = await tempRoot("ether-production-generation-");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    const snapshot = await service.bootstrap();
+
+    await expect(service.generateFakeArtifact(snapshot.documentId)).rejects.toMatchObject({
+      code: "SIMULATION_DISABLED"
+    });
+    await service.close();
+  });
+
+  it("preflights portable references, confirms natively, and makes no change on cancellation", async () => {
+    const root = await tempRoot("ether-portable-confirm-");
+    const confirmPortable = vi.fn(async () => false);
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ confirmPortable }),
+      provider: new FakeImageProvider()
+    });
+    const snapshot = await service.bootstrap();
+    const application = (service as unknown as { application: {
+      preflightDocumentPortable(): Promise<{ expectedBytes: number; expectedCount: number; missingReferenceIds: string[] }>;
+      makeDocumentPortable(): Promise<{ embeddedCount: number; missingReferenceIds: string[] }>;
+    } }).application;
+    vi.spyOn(application, "preflightDocumentPortable").mockResolvedValue({
+      expectedBytes: 8192,
+      expectedCount: 2,
+      missingReferenceIds: ["missing-1"]
+    });
+    const makePortable = vi.spyOn(application, "makeDocumentPortable");
+
+    await expect(service.makePortable(snapshot.documentId)).resolves.toEqual({
+      cancelled: true,
+      embeddedCount: 0,
+      expectedBytes: 8192,
+      expectedCount: 2,
+      missingReferenceIds: ["missing-1"]
+    });
+    expect(confirmPortable).toHaveBeenCalledWith({ expectedBytes: 8192, expectedCount: 2 });
+    expect(makePortable).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+  it("calculates portable embed count and byte size without mutating references", async () => {
+    const root = await tempRoot("ether-portable-size-");
+    const sourcePath = path.join(root, "available.png");
+    await writeFile(sourcePath, Buffer.alloc(2048));
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    await service.bootstrap();
+    const application = (service as unknown as { application: {
+      queryReferences(): Promise<unknown[]>;
+      preflightDocumentPortable(): Promise<{
+        expectedBytes: number;
+        expectedCount: number;
+        missingReferenceIds: string[];
+      }>;
+    } }).application;
+    const timestamp = "2026-07-18T00:00:00.000Z";
+    vi.spyOn(application, "queryReferences").mockResolvedValue([
+      {
+        id: "available",
+        displayName: "available.png",
+        mediaType: "image/png",
+        state: "linked",
+        originalPath: sourcePath,
+        pathGrantId: "grant-available",
+        contentKey: null,
+        previewContentKey: null,
+        identity: null,
+        fingerprint: { byteLength: 2048, modifiedAt: 1, sampleSha256: "a".repeat(64) },
+        createdAt: timestamp,
+        updatedAt: timestamp
+      },
+      {
+        id: "missing",
+        displayName: "missing.png",
+        mediaType: "image/png",
+        state: "missing",
+        originalPath: null,
+        pathGrantId: null,
+        contentKey: null,
+        previewContentKey: null,
+        identity: null,
+        fingerprint: { byteLength: 4096, modifiedAt: 1, sampleSha256: "b".repeat(64) },
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }
+    ]);
+
+    await expect(application.preflightDocumentPortable()).resolves.toEqual({
+      expectedBytes: 2048,
+      expectedCount: 1,
+      missingReferenceIds: ["missing"]
+    });
+    await service.close();
+  });
+});
+
+describe("reference action capabilities", () => {
+  const missingReference = {
+    id: "reference-1",
+    displayName: "source.png",
+    mediaType: "image/png",
+    state: "missing" as const,
+    originalPath: "C:\\source.png",
+    pathGrantId: "grant-1",
+    contentKey: null,
+    previewContentKey: null,
+    identity: null,
+    fingerprint: { byteLength: 1024, modifiedAt: 1, sampleSha256: "a".repeat(64) },
+    createdAt: "2026-07-18T00:00:00.000Z",
+    updatedAt: "2026-07-18T00:00:00.000Z"
+  };
+
+  it("enables only applicable recovery actions", () => {
+    expect(referenceCapabilities(missingReference, {
+      writable: true,
+      sourceAvailable: false,
+      hasMissingReferences: true
+    })).toEqual(["locate", "search-folder", "relink-all", "remove"]);
+    expect(referenceCapabilities({ ...missingReference, previewContentKey: "b".repeat(64) }, {
+      writable: true,
+      sourceAvailable: true,
+      hasMissingReferences: true
+    })).toEqual([
+      "locate",
+      "search-folder",
+      "relink-all",
+      "use-embedded-preview",
+      "embed-available-copy",
+      "remove"
+    ]);
+  });
+
+  it("disables every mutating reference action in read-only mode", () => {
+    expect(referenceCapabilities(missingReference, {
+      writable: false,
+      sourceAvailable: true,
+      hasMissingReferences: true
+    })).toEqual([]);
   });
 });
 
@@ -278,6 +459,96 @@ describe("autosave and event ordering", () => {
 
     expect(stale).toBe(current);
   });
+
+  it.each([
+    ["saving", null],
+    ["saved", null],
+    ["needs-attention", "The disk is full."]
+  ] as const)("delivers %s state and errors from snapshot-bearing events", (saveState, error) => {
+    const current = reduceDocumentSession({
+      snapshot: null,
+      revision: 2,
+      saveState: "saved",
+      error: "An older error"
+    }, {
+      kind: "snapshot",
+      revision: 3,
+      snapshot: { documentId: "document-1" },
+      saveState,
+      error
+    });
+
+    expect(current).toMatchObject({ revision: 3, saveState, error });
+  });
+
+  it("ignores stale snapshot state and error payloads", () => {
+    const current = {
+      snapshot: { documentId: "document-1" },
+      revision: 9,
+      saveState: "needs-attention" as const,
+      error: "Keep this error"
+    };
+
+    expect(reduceDocumentSession(current, {
+      kind: "snapshot",
+      revision: 8,
+      snapshot: { documentId: "document-1" },
+      saveState: "saved",
+      error: null
+    })).toBe(current);
+  });
+});
+
+describe("desktop reference path grants", () => {
+  it("binds grants to a document, operation, canonical path, and fingerprint", async () => {
+    const root = await tempRoot("ether-path-grant-");
+    const sourcePath = path.join(root, "Source image.png");
+    await writeFile(sourcePath, "reference bytes");
+    const canonicalPath = await realpath(sourcePath);
+    const authority = new DesktopPathGrantAuthority();
+    const grantId = authority.grant("document-1", "relink", sourcePath);
+    const base = { documentId: "document-1", operation: "relink" as const, grantId, path: canonicalPath };
+
+    expect(authority.authorizePath(base)).toBe(true);
+    expect(authority.authorizePath({ ...base, documentId: "document-2" })).toBe(false);
+    expect(authority.authorizePath({ ...base, operation: "resolve" })).toBe(false);
+    expect(authority.authorizePath({ ...base, path: path.join(root, "other.png") })).toBe(false);
+
+    const fingerprint = { byteLength: 15, sampleSha256: "fingerprint-1" };
+    expect(authority.validateFingerprint({ ...base, fingerprint })).toBe(true);
+    expect(authority.validateFingerprint({
+      ...base,
+      fingerprint: { ...fingerprint, sampleSha256: "fingerprint-2" }
+    })).toBe(false);
+    authority.revoke(grantId, "document-2");
+    expect(authority.authorizePath(base)).toBe(true);
+    authority.revoke(grantId, "document-1");
+    expect(authority.authorizePath(base)).toBe(false);
+  });
+
+  it("revokes every grant for a closing document without touching another document", async () => {
+    const root = await tempRoot("ether-path-grant-close-");
+    const sourcePath = path.join(root, "Source.png");
+    await writeFile(sourcePath, "reference bytes");
+    const authority = new DesktopPathGrantAuthority();
+    const firstId = authority.grant("document-1", "relink", sourcePath);
+    const secondId = authority.grant("document-2", "relink", sourcePath);
+
+    authority.revokeDocument("document-1");
+
+    expect(authority.authorizePath({
+      documentId: "document-1",
+      operation: "relink",
+      grantId: firstId,
+      path: sourcePath
+    })).toBe(false);
+    expect(authority.authorizePath({
+      documentId: "document-2",
+      operation: "relink",
+      grantId: secondId,
+      path: sourcePath
+    })).toBe(true);
+  });
 });
 
 describe("ether-asset protocol", () => {
@@ -291,8 +562,9 @@ describe("ether-asset protocol", () => {
         documentId === "document-1" && artifactId === "artifact-1" && variant === "original"
           ? { byteLength: png.length, contentHash: hash, mediaType: "image/png" }
           : null,
-      readRange: async (_documentId, _artifactId, _variant, start, endExclusive) =>
-        png.subarray(start, endExclusive)
+      streamRange: async function* (_documentId, _artifactId, _variant, start, endExclusive) {
+        yield png.subarray(start, endExclusive);
+      }
     };
   });
 
@@ -344,5 +616,41 @@ describe("ether-asset protocol", () => {
       "ether-asset://document-1/artifact-1/original",
       { method: "POST" }
     ))).status).toBe(405);
+  });
+
+  it("pulls a multi-megabyte open-ended range incrementally and cancels its source", async () => {
+    const byteLength = 6 * 1024 * 1024;
+    const chunkSize = 64 * 1024;
+    let reads = 0;
+    let cancelled = false;
+    const handler = createEtherAssetProtocolHandler({
+      authorize: async () => ({ byteLength, contentHash: "large-hash", mediaType: "video/mp4" }),
+      streamRange: async function* (_documentId, _artifactId, _variant, start, endExclusive) {
+        try {
+          for (let offset = start; offset < endExclusive; offset += chunkSize) {
+            reads += 1;
+            yield new Uint8Array(Math.min(chunkSize, endExclusive - offset));
+          }
+        } finally {
+          cancelled = true;
+        }
+      }
+    });
+
+    const response = await handler(new Request(
+      "ether-asset://document-1/artifact-1/original",
+      { headers: { Range: "bytes=0-" } }
+    ));
+    expect(response.status).toBe(206);
+    expect(response.body).toBeInstanceOf(ReadableStream);
+    expect(reads).toBe(0);
+
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(first.value?.byteLength).toBe(chunkSize);
+    expect(reads).toBe(1);
+    await reader.cancel();
+    expect(cancelled).toBe(true);
+    expect(reads).toBe(1);
   });
 });

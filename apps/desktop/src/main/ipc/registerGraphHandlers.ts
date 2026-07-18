@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
 
 import { desktopIpcChannels } from "../../shared/ipc/channels.js";
 import {
+  assertAuthorizedSenderFrame,
   assertTrustedIpcSender,
   desktopIpcContracts,
   normalizeDesktopError
@@ -45,6 +46,7 @@ export function registerGraphHandlers(options: {
 }
 
 function assertSender(event: IpcMainInvokeEvent, mainWindow: BrowserWindow, rendererUrl: string): void {
+  assertAuthorizedSenderFrame(event.senderFrame, mainWindow.webContents.mainFrame);
   const senderFrameUrl = event.senderFrame?.url ?? "";
   let origin = "";
   try {
@@ -54,7 +56,7 @@ function assertSender(event: IpcMainInvokeEvent, mainWindow: BrowserWindow, rend
     // Shared validation returns the normalized security error.
   }
   assertTrustedIpcSender(
-    { rendererUrl, webContentsId: event.sender.id, senderFrameUrl, origin },
+    { webContentsId: event.sender.id, senderFrameUrl, origin },
     { rendererUrl, webContentsId: mainWindow.webContents.id }
   );
 }

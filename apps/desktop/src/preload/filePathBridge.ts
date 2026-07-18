@@ -2,11 +2,12 @@ import { desktopIpcChannels } from "../shared/ipc/channels";
 import type {
   DesktopDocumentEvent,
   DesktopIpcChannel,
+  DesktopReference,
   DocumentDescriptor,
   NormalizedResult
 } from "../shared/ipc/contracts";
 import type { GraphTransaction } from "@ether/schema";
-import type { Artifact, EtherGraph, LinkedReference } from "@ether/schema";
+import type { Artifact, EtherGraph } from "@ether/schema";
 
 type BridgeTransport = {
   invoke(channel: DesktopIpcChannel, request: unknown): Promise<NormalizedResult<unknown>>;
@@ -33,7 +34,13 @@ export function createEtherBridge(transport: BridgeTransport) {
       saveAs: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.saveAs, documentId),
       saveCopy: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.saveCopy, documentId),
       compact: (documentId: string) => scoped<{ beforeBytes: number; afterBytes: number }>(desktopIpcChannels.document.compact, documentId),
-      makePortable: (documentId: string) => scoped<{ embeddedCount: number; missingReferenceIds: string[] }>(desktopIpcChannels.document.makePortable, documentId),
+      makePortable: (documentId: string) => scoped<{
+        cancelled: boolean;
+        embeddedCount: number;
+        expectedBytes: number;
+        expectedCount: number;
+        missingReferenceIds: string[];
+      }>(desktopIpcChannels.document.makePortable, documentId),
       close: (documentId: string) => scoped<null>(desktopIpcChannels.document.close, documentId),
       onEvent: (listener: (event: DesktopDocumentEvent) => void) =>
         transport.subscribe(desktopIpcChannels.document.event, (event) => listener(event as DesktopDocumentEvent))
@@ -50,9 +57,9 @@ export function createEtherBridge(transport: BridgeTransport) {
         scoped<Artifact[]>(desktopIpcChannels.artifacts.generateFake, documentId)
     },
     references: {
-      list: (documentId: string) => scoped<LinkedReference[]>(desktopIpcChannels.references.list, documentId),
+      list: (documentId: string) => scoped<DesktopReference[]>(desktopIpcChannels.references.list, documentId),
       act: (documentId: string, referenceId: string, action: string) =>
-        unwrap<LinkedReference[]>(transport.invoke(desktopIpcChannels.references.act, { documentId, referenceId, action }))
+        unwrap<DesktopReference[]>(transport.invoke(desktopIpcChannels.references.act, { documentId, referenceId, action }))
     },
     runtime: {
       versions: () => unwrap<{ electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {}))

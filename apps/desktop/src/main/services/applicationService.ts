@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
@@ -10,10 +11,12 @@ import type {
   WritableLocationCapabilityAdapter
 } from "@ether/document";
 import type { GenerationProvider } from "@ether/providers";
-import type { EtherGraph, GraphTransaction } from "@ether/schema";
+import type { EtherGraph, GraphTransaction, LinkedReference } from "@ether/schema";
 
 import type {
   DesktopDocumentEvent,
+  DesktopReference,
+  ReferenceAction,
   DocumentDescriptor
 } from "../../shared/ipc/contracts.js";
 
@@ -22,6 +25,7 @@ export interface NativeDialogPort {
   saveDocument(kind?: "save-as" | "save-copy"): Promise<string | null>;
   locateReference(referenceId: string): Promise<string | null>;
   searchReferenceFolder(referenceId: string): Promise<string | null>;
+  confirmPortable(input: { expectedBytes: number; expectedCount: number }): Promise<boolean>;
 }
 
 type SaveState = DocumentDescriptor["saveState"];
@@ -147,31 +151,85 @@ export class OpenDocumentCoordinator {
   }
 }
 
-class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
-  private readonly grants = new Map<string, { path: string; fingerprint?: string }>();
+export type OpenDocumentSource = "picker" | "drop" | "argv" | "second-instance" | "open-file";
 
-  grant(filePath: string): string {
+export class OpenDocumentController {
+  constructor(
+    private readonly coordinator: OpenDocumentCoordinator,
+    private readonly selectDocument: () => Promise<string | null>
+  ) {}
+
+  async request(source: OpenDocumentSource, filePath?: string): Promise<boolean> {
+    const requestedPath = source === "picker" ? await this.selectDocument() : filePath;
+    if (requestedPath === null) return false;
+    if (requestedPath === undefined) {
+      throw codedError("INVALID_DOCUMENT_PATH", `The ${source} open request has no document path.`);
+    }
+    await this.coordinator.request(requestedPath);
+    return true;
+  }
+}
+
+export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
+  private readonly grants = new Map<string, {
+    documentId: string;
+    operation: ReferenceGrantPathRequest["operation"];
+    path: string;
+    fingerprint?: string;
+  }>();
+
+  grant(documentId: string, operation: ReferenceGrantPathRequest["operation"], filePath: string): string {
     const grantId = randomUUID();
-    this.grants.set(grantId, { path: path.resolve(filePath) });
+    this.grants.set(grantId, { documentId, operation, path: canonicalGrantPath(filePath) });
     return grantId;
   }
 
   authorizePath(request: ReferenceGrantPathRequest): boolean {
-    return this.grants.get(request.grantId)?.path === path.resolve(request.path);
+    const grant = this.grants.get(request.grantId);
+    return grant !== undefined &&
+      grant.documentId === request.documentId &&
+      grant.operation === request.operation &&
+      grant.path === tryCanonicalGrantPath(request.path);
   }
 
   validateFingerprint(request: ReferenceGrantFingerprintRequest): boolean {
     const grant = this.grants.get(request.grantId);
-    if (grant === undefined || grant.path !== path.resolve(request.path)) return false;
+    if (
+      grant === undefined ||
+      grant.documentId !== request.documentId ||
+      grant.operation !== request.operation ||
+      grant.path !== tryCanonicalGrantPath(request.path)
+    ) return false;
     const fingerprint = `${request.fingerprint.byteLength}:${request.fingerprint.sampleSha256}`;
     if (grant.fingerprint !== undefined && grant.fingerprint !== fingerprint) return false;
     grant.fingerprint = fingerprint;
     return true;
   }
 
-  revoke(grantId: string): void {
-    this.grants.delete(grantId);
+  allowResolve(grantId: string, documentId: string): void {
+    const grant = this.grants.get(grantId);
+    if (grant?.documentId === documentId) grant.operation = "resolve";
   }
+
+  revoke(grantId: string, documentId: string): void {
+    if (this.grants.get(grantId)?.documentId === documentId) this.grants.delete(grantId);
+  }
+
+  revokeDocument(documentId: string): void {
+    for (const [grantId, grant] of this.grants) {
+      if (grant.documentId === documentId) this.grants.delete(grantId);
+    }
+  }
+}
+
+export interface DesktopApplicationServiceOptions {
+  appDataRoot: string;
+  appVersion: string;
+  dialogs: NativeDialogPort;
+  provider: GenerationProvider;
+  locationCapability?: WritableLocationCapabilityAdapter;
+  simulationMode?: boolean;
+  autosaveOperation?: (application: EtherApplication) => Promise<void>;
 }
 
 export class DesktopApplicationService {
@@ -183,14 +241,9 @@ export class DesktopApplicationService {
   private readonly listeners = new Set<(event: DesktopDocumentEvent) => void>();
   private autosaveCoordinator: AutosaveCoordinator | null = null;
   private readonly pathGrants = new DesktopPathGrantAuthority();
+  private refreshTail: Promise<void> = Promise.resolve();
 
-  constructor(private readonly options: {
-    appDataRoot: string;
-    appVersion: string;
-    dialogs: NativeDialogPort;
-    provider: GenerationProvider;
-    locationCapability?: WritableLocationCapabilityAdapter;
-  }) {}
+  constructor(private readonly options: DesktopApplicationServiceOptions) {}
 
   subscribe(listener: (event: DesktopDocumentEvent) => void): () => void {
     this.listeners.add(listener);
@@ -287,9 +340,26 @@ export class DesktopApplicationService {
     return result;
   }
 
-  async makePortable(documentId: string): Promise<{ embeddedCount: number; missingReferenceIds: string[] }> {
+  async makePortable(documentId: string): Promise<{
+    cancelled: boolean;
+    embeddedCount: number;
+    expectedBytes: number;
+    expectedCount: number;
+    missingReferenceIds: string[];
+  }> {
     this.assertScope(documentId);
-    return this.requireApplication().makeDocumentPortable();
+    const application = this.requireApplication();
+    const preflight = await application.preflightDocumentPortable();
+    if (!await this.options.dialogs.confirmPortable({
+      expectedBytes: preflight.expectedBytes,
+      expectedCount: preflight.expectedCount
+    })) {
+      return { cancelled: true, embeddedCount: 0, ...preflight };
+    }
+    const result = await application.makeDocumentPortable();
+    await this.refresh("references", "saving");
+    this.autosaveCoordinator?.markDirty();
+    return { cancelled: false, ...preflight, ...result };
   }
 
   async graphSnapshot(documentId: string) {
@@ -313,6 +383,9 @@ export class DesktopApplicationService {
 
   async generateFakeArtifact(documentId: string) {
     this.assertScope(documentId);
+    if (this.options.simulationMode !== true) {
+      throw codedError("SIMULATION_DISABLED", "Simulation output is available only in diagnostic test mode.");
+    }
     const application = this.requireApplication();
     let snapshot = this.requireSnapshot();
     let graph = await application.queryGraph(snapshot.graphId);
@@ -411,22 +484,47 @@ export class DesktopApplicationService {
     return (await application.searchArtifacts({ text: "" })).filter((artifact) => !before.has(artifact.id));
   }
 
-  async listReferences(documentId: string) {
+  async listReferences(documentId: string): Promise<DesktopReference[]> {
     this.assertScope(documentId);
-    return this.requireApplication().queryReferences();
+    const references = await this.requireApplication().queryReferences();
+    const writable = this.requireSnapshot().mode === "writable";
+    const hasMissingReferences = references.some((reference) => reference.state === "missing");
+    return Promise.all(references.map(async (reference) => ({
+      id: reference.id,
+      displayName: reference.displayName,
+      mediaType: reference.mediaType,
+      state: reference.state,
+      actions: referenceCapabilities(reference, {
+        writable,
+        sourceAvailable: await referenceSourceAvailable(reference),
+        hasMissingReferences
+      })
+    })));
   }
 
   async actOnReference(documentId: string, referenceId: string, action: string) {
     this.assertScope(documentId);
     const application = this.requireApplication();
+    const reference = (await this.listReferences(documentId)).find((candidate) => candidate.id === referenceId);
+    if (reference === undefined) throw codedError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+    if (!reference.actions.includes(action as ReferenceAction)) {
+      throw codedError("REFERENCE_ACTION_UNAVAILABLE", "That recovery action is not currently available.");
+    }
     if (action === "locate") {
       const selected = await this.options.dialogs.locateReference(referenceId);
       if (selected !== null) {
-        await application.relinkDocumentReference({
-          referenceId,
-          sourcePath: selected,
-          pathGrantId: this.pathGrants.grant(selected)
-        });
+        const grantId = this.pathGrants.grant(documentId, "relink", selected);
+        try {
+          await application.relinkDocumentReference({
+            referenceId,
+            sourcePath: selected,
+            pathGrantId: grantId
+          });
+          this.pathGrants.allowResolve(grantId, documentId);
+        } catch (error) {
+          this.pathGrants.revoke(grantId, documentId);
+          throw error;
+        }
       }
     } else if (action === "search-folder" || action === "relink-all") {
       const folder = await this.options.dialogs.searchReferenceFolder(referenceId);
@@ -437,14 +535,17 @@ export class DesktopApplicationService {
         const candidates = await listFiles(folder);
         for (const target of targets) {
           for (const candidate of candidates) {
+            const grantId = this.pathGrants.grant(documentId, "relink", candidate);
             try {
               await application.relinkDocumentReference({
                 referenceId: target.id,
                 sourcePath: candidate,
-                pathGrantId: this.pathGrants.grant(candidate)
+                pathGrantId: grantId
               });
+              this.pathGrants.allowResolve(grantId, documentId);
               break;
             } catch (error) {
+              this.pathGrants.revoke(grantId, documentId);
               const code = (error as { code?: unknown } | null)?.code;
               if (code !== "REFERENCE_IDENTITY_MISMATCH" && code !== "MIME_MISMATCH") throw error;
             }
@@ -462,7 +563,7 @@ export class DesktopApplicationService {
     }
     await this.refresh("references", "saving");
     this.autosaveCoordinator?.markDirty();
-    return application.queryReferences();
+    return this.listReferences(documentId);
   }
 
   async artifactDescriptor(documentId: string, artifactId: string) {
@@ -480,6 +581,16 @@ export class DesktopApplicationService {
     return this.requireApplication().readArtifactRange(artifactId, start, endExclusive);
   }
 
+  streamArtifactRange(
+    documentId: string,
+    artifactId: string,
+    start: number,
+    endExclusive: number
+  ) {
+    this.assertScope(documentId);
+    return this.requireApplication().streamArtifactRange(artifactId, start, endExclusive);
+  }
+
   snapshot(): DocumentDescriptor {
     return this.requireSnapshot();
   }
@@ -489,9 +600,12 @@ export class DesktopApplicationService {
   }
 
   async close(): Promise<void> {
+    const closingDocumentId = this.current?.documentId;
     this.autosaveCoordinator?.dispose();
     this.autosaveCoordinator = null;
+    await this.refreshTail;
     if (this.application !== null) await this.application.closeDocument();
+    if (closingDocumentId !== undefined) this.pathGrants.revokeDocument(closingDocumentId);
     this.application = null;
     this.current = null;
     this.currentPath = null;
@@ -514,19 +628,30 @@ export class DesktopApplicationService {
       if (this.current !== null) void this.refresh("state");
     });
     this.autosaveCoordinator = new AutosaveCoordinator(
-      () => application.autosaveDocument(),
+      () => this.options.autosaveOperation?.(application) ?? application.autosaveDocument(),
       (state) => {
         if (this.current !== null) {
-          void this.refresh("state", state.saveState).catch((error) => this.emitAttention(error));
+          if (state.error !== undefined) this.emitAttention(state.error);
+          else void this.refresh("state", state.saveState).catch((error) => this.emitAttention(error));
         }
       }
     );
     return application;
   }
 
-  private async refresh(
+  private refresh(
     kind: DesktopDocumentEvent["kind"],
-    saveState: SaveState = "saved",
+    saveState?: SaveState,
+    displayNameOverride?: string
+  ): Promise<DocumentDescriptor> {
+    const operation = this.refreshTail.then(() => this.performRefresh(kind, saveState, displayNameOverride));
+    this.refreshTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async performRefresh(
+    kind: DesktopDocumentEvent["kind"],
+    saveState?: SaveState,
     displayNameOverride?: string
   ): Promise<DocumentDescriptor> {
     const application = this.requireApplication();
@@ -544,10 +669,11 @@ export class DesktopApplicationService {
       readOnlyReason: mode === "read-only"
         ? (await this.readOnlyReason())
         : null,
-      saveState,
+      saveState: saveState ?? this.current?.saveState ?? "saved",
       documentRevisionId: document.documentRevisionId,
       graphId,
       graphRevisionId: document.graphRevisions[graphId]!,
+      simulationEnabled: this.options.simulationMode === true,
       revision: this.revision
     };
     const event: DesktopDocumentEvent = { kind, documentId: this.current.documentId, revision: this.revision, snapshot: this.current };
@@ -557,24 +683,27 @@ export class DesktopApplicationService {
   }
 
   private emitAttention(error: unknown): void {
-    if (this.current === null) return;
-    this.revision += 1;
-    this.current = { ...this.current, saveState: "needs-attention", revision: this.revision };
-    const candidateCode = (error as { code?: unknown } | null)?.code;
-    const event: DesktopDocumentEvent = {
-      kind: "state",
-      documentId: this.current.documentId,
-      revision: this.revision,
-      saveState: "needs-attention",
-      snapshot: this.current,
-      error: {
-        code: typeof candidateCode === "string" ? candidateCode : "AUTOSAVE_FAILED",
-        category: "document",
-        message: error instanceof Error ? error.message : "Autosave failed.",
-        retryable: true
-      }
-    };
-    for (const listener of this.listeners) listener(structuredClone(event));
+    const operation = this.refreshTail.then(() => {
+      if (this.current === null) return;
+      this.revision += 1;
+      this.current = { ...this.current, saveState: "needs-attention", revision: this.revision };
+      const candidateCode = (error as { code?: unknown } | null)?.code;
+      const event: DesktopDocumentEvent = {
+        kind: "state",
+        documentId: this.current.documentId,
+        revision: this.revision,
+        saveState: "needs-attention",
+        snapshot: this.current,
+        error: {
+          code: typeof candidateCode === "string" ? candidateCode : "AUTOSAVE_FAILED",
+          category: "document",
+          message: error instanceof Error ? error.message : "Autosave failed.",
+          retryable: true
+        }
+      };
+      for (const listener of this.listeners) listener(structuredClone(event));
+    });
+    this.refreshTail = operation.then(() => undefined, () => undefined);
   }
 
   private async readOnlyReason(): Promise<DocumentDescriptor["readOnlyReason"]> {
@@ -611,6 +740,19 @@ function codedError(code: string, message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code });
 }
 
+function canonicalGrantPath(filePath: string): string {
+  const canonical = realpathSync.native(filePath);
+  return process.platform === "win32" ? canonical.toLocaleLowerCase() : canonical;
+}
+
+function tryCanonicalGrantPath(filePath: string): string | null {
+  try {
+    return canonicalGrantPath(filePath);
+  } catch {
+    return null;
+  }
+}
+
 async function listFiles(root: string): Promise<string[]> {
   const files: string[] = [];
   const pending = [path.resolve(root)];
@@ -623,4 +765,30 @@ async function listFiles(root: string): Promise<string[]> {
     }
   }
   return files;
+}
+
+export function referenceCapabilities(
+  reference: LinkedReference,
+  state: { writable: boolean; sourceAvailable: boolean; hasMissingReferences: boolean }
+): ReferenceAction[] {
+  if (!state.writable) return [];
+  const actions: ReferenceAction[] = [];
+  if (reference.state === "missing") {
+    actions.push("locate", "search-folder");
+    if (state.hasMissingReferences) actions.push("relink-all");
+    if (reference.previewContentKey !== null) actions.push("use-embedded-preview");
+  }
+  if (reference.state !== "embedded" && state.sourceAvailable) actions.push("embed-available-copy");
+  actions.push("remove");
+  return actions;
+}
+
+async function referenceSourceAvailable(reference: LinkedReference): Promise<boolean> {
+  if (reference.originalPath === null) return false;
+  try {
+    const source = await lstat(reference.originalPath);
+    return source.isFile() && source.size === reference.fingerprint.byteLength;
+  } catch {
+    return false;
+  }
 }
