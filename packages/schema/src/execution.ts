@@ -28,7 +28,20 @@ export const PlanStepSchema = z
     executor: NodeExecutorKindSchema,
     dependencyStepIds: z.array(z.string().min(1)),
     inputPayloadIds: z.array(z.string().min(1)),
-    workItemIds: z.array(z.string().min(1))
+    workItemIds: z.array(z.string().min(1)),
+    compiledPrompt: z.string(),
+    compiledContext: JsonObjectSchema,
+    parameters: JsonObjectSchema,
+    selectors: z.array(JsonObjectSchema),
+    provider: z
+      .object({
+        providerId: z.string().min(1),
+        profileId: z.string().min(1),
+        modelId: z.string().min(1),
+        settings: JsonObjectSchema,
+        capabilitySnapshot: ProviderCapabilitySchema
+      })
+      .strict()
   })
   .strict();
 export type PlanStep = z.infer<typeof PlanStepSchema>;
@@ -67,7 +80,10 @@ export type PlanWarning = z.infer<typeof PlanWarningSchema>;
 export const ExecutionPlanSchema = z
   .object({
     id: z.string().min(1),
+    capsuleVersion: z.literal(1),
+    hashVersion: z.literal("sha256-v1"),
     documentId: z.string().min(1),
+    documentRevisionId: z.string().min(1),
     graphId: z.string().min(1),
     graphRevisionId: z.string().min(1),
     scope: ExecutionScopeSchema,
@@ -76,7 +92,8 @@ export const ExecutionPlanSchema = z
     providerCapabilitySnapshots: z.array(ProviderCapabilitySchema),
     estimatedCalls: z.number().int().nonnegative(),
     warnings: z.array(PlanWarningSchema),
-    contentHash: z.string().min(1)
+    contentHash: z.string().regex(/^sha256:v1:[a-f0-9]{64}$/),
+    createdAt: TimestampSchema
   })
   .strict();
 export type ExecutionPlan = z.infer<typeof ExecutionPlanSchema>;

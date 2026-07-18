@@ -50,6 +50,7 @@ import { createRepositoryContext, GraphRepository } from "./repositories/graphs.
 import { ArtifactRepository } from "./repositories/artifacts.js";
 import { BlobRepository } from "./repositories/blobs.js";
 import { OutputRepository } from "./repositories/outputs.js";
+import { ExecutionRepository } from "./repositories/execution.js";
 import { ReferenceRepository } from "./repositories/references.js";
 import {
   type CommitResult,
@@ -87,7 +88,11 @@ export interface ReadDocumentRepositories {
   artifacts: Pick<ArtifactRepository, "get" | "list">;
   blobs: Pick<BlobRepository, "get" | "list">;
   graphs: Pick<GraphRepository, "get" | "list">;
-  outputs: Pick<OutputRepository, "getPayload" | "getVersion">;
+  outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "listByNode">;
+  execution: Pick<
+    ExecutionRepository,
+    "getJob" | "getLineage" | "getPlan" | "listAttempts" | "listWorkItems"
+  >;
   revisions: Pick<
     RevisionRepository,
     | "canRedo"
@@ -101,13 +106,32 @@ export interface ReadDocumentRepositories {
   references: Pick<ReferenceRepository, "get" | "list">;
 }
 
+type WriteExecutionRepository = Pick<
+  ExecutionRepository,
+  | "acceptProviderOutput"
+  | "cancelJob"
+  | "claimNext"
+  | "failAttempt"
+  | "getJob"
+  | "getLineage"
+  | "getPlan"
+  | "grantRunPermit"
+  | "listAttempts"
+  | "listWorkItems"
+  | "recoverProcessLost"
+  | "retryFailed"
+  | "savePlan"
+  | "startJob"
+>;
+
 export interface DocumentRepositories extends ReadDocumentRepositories {
   artifacts: Pick<ArtifactRepository, "attach" | "get" | "list">;
   blobs: Pick<
     BlobRepository,
     "get" | "list"
   >;
-  outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert">;
+  outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert" | "listByNode">;
+  execution: WriteExecutionRepository;
   revisions: Pick<
     RevisionRepository,
     | "canRedo"
@@ -133,6 +157,7 @@ interface InternalDocumentRepositories {
   blobs: BlobRepository;
   graphs: GraphRepository;
   outputs: OutputRepository;
+  execution: ExecutionRepository;
   revisions: RevisionRepository;
   settings: SettingsRepository;
   references: ReferenceRepository;
@@ -612,6 +637,7 @@ export class DocumentStore {
       blobs: new BlobRepository(context),
       graphs,
       outputs: new OutputRepository(context),
+      execution: new ExecutionRepository(context),
       revisions: new RevisionRepository(context, graphs),
       settings: new SettingsRepository(context),
       references: new ReferenceRepository(context)
@@ -649,7 +675,15 @@ export class DocumentStore {
         },
         outputs: {
           getPayload: (id) => invoke(() => repositories.outputs.getPayload(id)),
-          getVersion: (id) => invoke(() => repositories.outputs.getVersion(id))
+          getVersion: (id) => invoke(() => repositories.outputs.getVersion(id)),
+          listByNode: (id) => invoke(() => repositories.outputs.listByNode(id))
+        },
+        execution: {
+          getJob: (id) => invoke(() => repositories.execution.getJob(id)),
+          getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
+          getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
+          listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
+          listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id))
         },
         revisions: {
           canRedo: () => invoke(() => repositories.revisions.canRedo()),
@@ -701,7 +735,25 @@ export class DocumentStore {
       outputs: {
         getPayload: (id) => invoke(() => repositories.outputs.getPayload(id)),
         getVersion: (id) => invoke(() => repositories.outputs.getVersion(id)),
-        insert: (version, payloads) => invoke(() => repositories.outputs.insert(version, payloads))
+        insert: (version, payloads) => invoke(() => repositories.outputs.insert(version, payloads)),
+        listByNode: (id) => invoke(() => repositories.outputs.listByNode(id))
+      },
+      execution: {
+        acceptProviderOutput: (input) => invoke(() => repositories.execution.acceptProviderOutput(input)),
+        cancelJob: (id) => invoke(() => repositories.execution.cancelJob(id)),
+        claimNext: (id, token) => invoke(() => repositories.execution.claimNext(id, token)),
+        failAttempt: (id, code, message, retryable) =>
+          invoke(() => repositories.execution.failAttempt(id, code, message, retryable)),
+        getJob: (id) => invoke(() => repositories.execution.getJob(id)),
+        getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
+        getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
+        grantRunPermit: (id, hash) => invoke(() => repositories.execution.grantRunPermit(id, hash)),
+        listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
+        listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id)),
+        recoverProcessLost: () => invoke(() => repositories.execution.recoverProcessLost()),
+        retryFailed: (id, workItemIds) => invoke(() => repositories.execution.retryFailed(id, workItemIds)),
+        savePlan: (plan) => invoke(() => repositories.execution.savePlan(plan)),
+        startJob: (input) => invoke(() => repositories.execution.startJob(input))
       },
       revisions: {
         canRedo: () => invoke(() => repositories.revisions.canRedo()),

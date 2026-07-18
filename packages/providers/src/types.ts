@@ -375,6 +375,13 @@ export type ProviderProcessResult = {
   exitCode: number;
 };
 
+export type ProviderExecutionContext = {
+  signal: AbortSignal;
+  providerAttemptId: string;
+  attemptOrdinal: number;
+  stagingDirectory: string;
+};
+
 export type ProviderProcessRunner = (
   call: ProviderProcessCall
 ) => Promise<ProviderProcessResult>;
@@ -382,8 +389,14 @@ export type ProviderProcessRunner = (
 export interface GenerationProvider {
   readonly descriptor: ProviderDescriptor;
   diagnose(context?: ProviderDiagnosticContext): Promise<ProviderDiagnostic> | ProviderDiagnostic;
-  generate(input: GenerationProviderInput): Promise<ProviderGenerationResult>;
-  edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult>;
+  generate(
+    input: GenerationProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult>;
+  edit(
+    input: ImageEditProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult>;
 }
 
 export interface AssistantProvider {

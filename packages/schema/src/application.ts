@@ -96,6 +96,7 @@ export const applicationQueryNames = [
   "node.compiledInputPreview",
   "provider.capabilities",
   "provider.health",
+  "plan.summary",
   "job.summary",
   "job.timeline",
   "job.workItems",
@@ -155,6 +156,7 @@ export type StrictEmptyPayload = z.infer<typeof StrictEmptyPayloadSchema>;
 
 const idSchema = z.string().min(1);
 const graphIdPayloadSchema = z.object({ graphId: idSchema }).strict();
+const planIdPayloadSchema = z.object({ planId: idSchema }).strict();
 const jobIdPayloadSchema = z.object({ jobId: idSchema }).strict();
 const referenceIdPayloadSchema = z.object({ referenceId: idSchema }).strict();
 
@@ -263,6 +265,7 @@ export const applicationQueryPayloadSchemas = {
   "node.compiledInputPreview": z.object({ nodeId: idSchema }).strict(),
   "provider.capabilities": z.object({ providerId: idSchema.optional() }).strict(),
   "provider.health": z.object({ providerId: idSchema.optional() }).strict(),
+  "plan.summary": planIdPayloadSchema,
   "job.summary": jobIdPayloadSchema,
   "job.timeline": jobIdPayloadSchema,
   "job.workItems": jobIdPayloadSchema,
@@ -528,6 +531,7 @@ export const ApplicationQuerySchema = z.discriminatedUnion("name", [
   queryMessage("node.compiledInputPreview", applicationQueryPayloadSchemas["node.compiledInputPreview"]),
   globalQueryMessage("provider.capabilities", applicationQueryPayloadSchemas["provider.capabilities"]),
   globalQueryMessage("provider.health", applicationQueryPayloadSchemas["provider.health"]),
+  queryMessage("plan.summary", applicationQueryPayloadSchemas["plan.summary"]),
   queryMessage("job.summary", applicationQueryPayloadSchemas["job.summary"]),
   queryMessage("job.timeline", applicationQueryPayloadSchemas["job.timeline"]),
   queryMessage("job.workItems", applicationQueryPayloadSchemas["job.workItems"]),
@@ -716,6 +720,7 @@ const providerCapabilitiesResponseSchema = z
 const providerHealthResponseSchema = z
   .object({ providers: z.array(ProviderHealthResultSchema) })
   .strict();
+const planSummaryResponseSchema = z.object({ plan: ExecutionPlanSchema }).strict();
 const jobSummaryResponseSchema = z.object({ job: ExecutionJobSchema }).strict();
 const jobTimelineEntrySchema = z
   .object({
@@ -821,6 +826,7 @@ export const applicationResponsePayloadSchemas = {
   "node.compiledInputPreview": compiledInputPreviewResponseSchema,
   "provider.capabilities": providerCapabilitiesResponseSchema,
   "provider.health": providerHealthResponseSchema,
+  "plan.summary": planSummaryResponseSchema,
   "job.summary": jobSummaryResponseSchema,
   "job.timeline": jobTimelineResponseSchema,
   "job.workItems": jobWorkItemsResponseSchema,
@@ -987,6 +993,7 @@ export const ApplicationQueryResponseSchema = z.discriminatedUnion("name", [
     applicationResponsePayloadSchemas["provider.capabilities"]
   ),
   globalResponseMessage("provider.health", applicationResponsePayloadSchemas["provider.health"]),
+  responseMessage("plan.summary", applicationResponsePayloadSchemas["plan.summary"]),
   responseMessage("job.summary", applicationResponsePayloadSchemas["job.summary"]),
   responseMessage("job.timeline", applicationResponsePayloadSchemas["job.timeline"]),
   responseMessage("job.workItems", applicationResponsePayloadSchemas["job.workItems"]),

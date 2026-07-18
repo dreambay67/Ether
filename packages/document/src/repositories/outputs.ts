@@ -216,6 +216,17 @@ export class OutputRepository {
     });
   }
 
+  listByNode(nodeId: string): NodeOutputVersion[] {
+    const rows = this.context.database
+      .prepare(
+        "SELECT output_version_id FROM node_output_versions WHERE node_id = ? ORDER BY created_at, output_version_id"
+      )
+      .all(nodeId) as unknown as Array<{ output_version_id: string }>;
+    return rows
+      .map((row) => this.getVersion(row.output_version_id))
+      .filter((value): value is NodeOutputVersion => value !== undefined);
+  }
+
   getPayload(id: string): PayloadEnvelope | undefined {
     const row = this.context.database
       .prepare(

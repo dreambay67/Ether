@@ -81,3 +81,10 @@ export {
   type StagedBlobChunk,
   type StoredBlobPart
 } from "./repositories/blobs.js";
+export {
+  ExecutionRepository,
+  ExecutionRepositoryError,
+  type ArtifactLineageSnapshot,
+  type ClaimedExecution,
+  type ProviderRunSnapshot
+} from "./repositories/execution.js";

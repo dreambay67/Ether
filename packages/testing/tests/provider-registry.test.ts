@@ -487,11 +487,13 @@ describe("generation provider registry", () => {
     expect(first.providerId).toBe("ether-fake-local");
     expect(first.artifacts).toHaveLength(1);
     expect(first.artifacts[0]).toMatchObject({
-      fileName: "fake-output-generation-2.svg",
-      mimeType: "image/svg+xml"
+      fileName: "fake-output-generation-2.png",
+      mimeType: "image/png"
     });
-    expect(String(first.artifacts[0]?.content)).toContain("ETHER_FAKE_GENERATED_IMAGE");
-    expect(String(first.artifacts[0]?.content)).toContain("glass bottle under crisp studio light");
+    expect(Buffer.from(first.artifacts[0]?.content as Uint8Array).subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    );
+    expect(Buffer.from(first.artifacts[0]?.content as Uint8Array).includes(Buffer.from("IEND"))).toBe(true);
   });
 
   it("produces deterministic fake edit artifacts for offline edit and upscale tests", async () => {
@@ -530,8 +532,8 @@ describe("generation provider registry", () => {
     expect(first.providerId).toBe("ether-fake-local");
     expect(first.artifacts).toHaveLength(1);
     expect(first.artifacts[0]).toMatchObject({
-      fileName: "fake-edit-edit-upscale-upscale-1.svg",
-      mimeType: "image/svg+xml",
+      fileName: "fake-edit-edit-upscale-upscale-1.png",
+      mimeType: "image/png",
       metadata: {
         deterministic: true,
         operation: "upscale",
@@ -541,8 +543,33 @@ describe("generation provider registry", () => {
         }
       }
     });
-    expect(String(first.artifacts[0]?.content)).toContain("ETHER_FAKE_EDITED_IMAGE");
-    expect(String(first.artifacts[0]?.content)).toContain("parent-asset-1");
+    expect(Buffer.from(first.artifacts[0]?.content as Uint8Array).subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    );
+  });
+
+  it("supports deterministic retryable failure and cancellation", async () => {
+    const projectPath = await createTempRoot();
+    const failing = new FakeImageProvider({ failAttempts: [1] });
+    await expect(
+      failing.generate(providerInput(projectPath), {
+        signal: new AbortController().signal,
+        providerAttemptId: "attempt-one",
+        attemptOrdinal: 1,
+        stagingDirectory: projectPath
+      })
+    ).rejects.toMatchObject({ code: "FAKE_RETRYABLE_FAILURE", retryable: true });
+
+    const controller = new AbortController();
+    const delayed = new FakeImageProvider({ delayMs: 100 });
+    const pending = delayed.generate(providerInput(projectPath), {
+      signal: controller.signal,
+      providerAttemptId: "attempt-cancelled",
+      attemptOrdinal: 2,
+      stagingDirectory: projectPath
+    });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("builds a Codex CLI image invocation and withholds OpenAI API keys from the child process", async () => {

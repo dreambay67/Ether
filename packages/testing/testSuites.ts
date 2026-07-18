@@ -19,6 +19,8 @@ export const testSuites = {
     "tests/schema-4.0.test.ts"
   ],
   integration: [
+    "tests/application-vertical-slice.test.ts",
+    "tests/application-durability.test.ts",
     "tests/artifact-store.test.ts",
     "tests/assets.test.ts",
     "tests/desktop-settings-store.test.ts",

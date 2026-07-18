@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @ether/providers build && pnpm --filter @ether/graph-kernel build && pnpm --filter @ether/document build && pnpm --filter @ether/engine build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/desktop build",
-    "test": "pnpm --filter @ether/providers build && pnpm --filter @ether/engine build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/codex-plugin validate && pnpm run test:unit && pnpm run test:integration && pnpm --filter @ether/testing test:contracts && pnpm run test:smoke",
+    "build": "pnpm --filter @ether/providers build && pnpm --filter @ether/graph-kernel build && pnpm --filter @ether/document build && pnpm --filter @ether/execution build && pnpm --filter @ether/application build && pnpm --filter @ether/engine build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/desktop build",
+    "test": "pnpm --filter @ether/application build && pnpm --filter @ether/engine build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/codex-plugin validate && pnpm run test:unit && pnpm run test:integration && pnpm --filter @ether/testing test:contracts && pnpm run test:smoke",
     "test:unit": "pnpm --filter @ether/testing test:unit",
     "test:integration": "pnpm --filter @ether/testing test:integration",
     "test:packaged": "pnpm --filter @ether/testing test:packaged",

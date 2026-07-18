@@ -252,8 +252,9 @@ CREATE TABLE node_output_versions (
   FOREIGN KEY (graph_id, graph_revision_id) REFERENCES graph_revisions(graph_id, revision_id),
   FOREIGN KEY (graph_id, node_id, parent_output_version_id)
     REFERENCES node_output_versions(graph_id, node_id, output_version_id) ON DELETE RESTRICT,
-  FOREIGN KEY (run_id, step_id, work_item_id, attempt_id)
-    REFERENCES provider_runs(provider_run_id, step_id, work_item_id, attempt_id) ON DELETE RESTRICT
+  FOREIGN KEY (run_id) REFERENCES execution_jobs(job_id) ON DELETE RESTRICT,
+  FOREIGN KEY (work_item_id) REFERENCES work_items(work_item_id) ON DELETE RESTRICT,
+  FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE node_output_payloads (
@@ -264,7 +265,7 @@ CREATE TABLE node_output_payloads (
   content_text TEXT,
   content_json TEXT NOT NULL CHECK (json_valid(content_json)),
   source_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(source_json)),
-  artifact_id TEXT REFERENCES artifacts(artifact_id) ON DELETE SET NULL,
+  artifact_id TEXT REFERENCES artifacts(artifact_id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
   metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
   created_at TEXT NOT NULL,
   UNIQUE (output_version_id, payload_id)
@@ -281,13 +282,19 @@ CREATE TABLE approvals (
 
 CREATE TABLE execution_plans (
   plan_id TEXT PRIMARY KEY,
-  document_revision_id TEXT REFERENCES document_revisions(document_revision_id),
-  status TEXT NOT NULL CHECK (status IN ('draft', 'ready', 'running', 'succeeded', 'failed', 'cancelled')),
-  policy_json TEXT NOT NULL CHECK (json_valid(policy_json)),
-  inputs_json TEXT NOT NULL CHECK (json_valid(inputs_json)),
-  metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+  document_revision_id TEXT NOT NULL REFERENCES document_revisions(document_revision_id),
+  graph_id TEXT NOT NULL REFERENCES graphs(graph_id),
+  graph_revision_id TEXT NOT NULL,
+  capsule_version INTEGER NOT NULL CHECK (capsule_version = 1),
+  hash_version TEXT NOT NULL CHECK (hash_version = 'sha256-v1'),
+  content_hash TEXT NOT NULL UNIQUE,
+  scope_json TEXT NOT NULL CHECK (json_valid(scope_json)),
+  capsule_json TEXT NOT NULL CHECK (json_valid(capsule_json)),
+  status TEXT NOT NULL CHECK (status IN ('previewed', 'started', 'completed', 'failed', 'cancelled', 'invalidated')),
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (graph_id, graph_revision_id)
+    REFERENCES graph_revisions(graph_id, revision_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE plan_steps (
@@ -314,33 +321,85 @@ CREATE TABLE batches (
   FOREIGN KEY (plan_id, step_id) REFERENCES plan_steps(plan_id, step_id) ON DELETE CASCADE
 ) STRICT;
 
+CREATE TABLE run_permits (
+  permit_id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES execution_plans(plan_id) ON DELETE CASCADE,
+  content_hash TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('granted', 'consumed', 'revoked')),
+  created_at TEXT NOT NULL,
+  consumed_at TEXT,
+  UNIQUE (plan_id, content_hash, permit_id)
+) STRICT;
+
+CREATE TABLE execution_jobs (
+  job_id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL UNIQUE REFERENCES execution_plans(plan_id) ON DELETE RESTRICT,
+  plan_content_hash TEXT NOT NULL,
+  start_command_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('planned', 'queued', 'running', 'completed', 'failed', 'cancelled', 'needs-attention')),
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  cancellation_requested_at TEXT
+) STRICT;
+
 CREATE TABLE work_items (
   work_item_id TEXT PRIMARY KEY,
-  batch_id TEXT NOT NULL,
-  step_id TEXT NOT NULL,
+  job_id TEXT NOT NULL REFERENCES execution_jobs(job_id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL REFERENCES plan_steps(step_id) ON DELETE RESTRICT,
+  planned_work_item_id TEXT NOT NULL,
   item_index INTEGER NOT NULL CHECK (item_index >= 0),
   input_json TEXT NOT NULL CHECK (json_valid(input_json)),
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'accepted', 'failed', 'cancelled')),
+  accepted_attempt_id TEXT,
+  claim_token TEXT,
+  claimed_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE (batch_id, step_id, item_index),
-  UNIQUE (step_id, work_item_id),
-  FOREIGN KEY (batch_id, step_id) REFERENCES batches(batch_id, step_id) ON DELETE CASCADE
+  UNIQUE (job_id, planned_work_item_id),
+  UNIQUE (job_id, step_id, item_index)
 ) STRICT;
 
 CREATE TABLE attempts (
   attempt_id TEXT PRIMARY KEY,
   work_item_id TEXT NOT NULL REFERENCES work_items(work_item_id) ON DELETE CASCADE,
   attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
-  provider_run_id TEXT,
-  status TEXT NOT NULL,
+  provider_attempt_id TEXT NOT NULL UNIQUE,
+  provider_run_id TEXT REFERENCES provider_runs(provider_run_id) ON DELETE RESTRICT,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'accepted', 'failed', 'cancelled')),
+  output_version_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(output_version_ids_json)),
   error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
-  started_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
   completed_at TEXT,
-  UNIQUE (work_item_id, attempt_number),
-  UNIQUE (work_item_id, attempt_id),
-  FOREIGN KEY (provider_run_id, work_item_id, attempt_id)
-    REFERENCES provider_runs(provider_run_id, work_item_id, attempt_id) ON DELETE RESTRICT
+  UNIQUE (work_item_id, attempt_number)
+) STRICT;
+
+CREATE TABLE command_receipts (
+  command_id TEXT PRIMARY KEY,
+  command_name TEXT NOT NULL,
+  result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+  created_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE execution_timeline (
+  event_id TEXT PRIMARY KEY,
+  job_id TEXT REFERENCES execution_jobs(job_id) ON DELETE CASCADE,
+  work_item_id TEXT REFERENCES work_items(work_item_id) ON DELETE CASCADE,
+  attempt_id TEXT REFERENCES attempts(attempt_id) ON DELETE CASCADE,
+  event_name TEXT NOT NULL,
+  state TEXT NOT NULL,
+  payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+  occurred_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE event_outbox (
+  event_id TEXT PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+  occurred_at TEXT NOT NULL,
+  delivered_at TEXT
 ) STRICT;
 
 CREATE TABLE blobs (
@@ -507,6 +566,7 @@ CREATE TABLE provider_runs (
   step_id TEXT,
   work_item_id TEXT,
   attempt_id TEXT,
+  provider_attempt_id TEXT UNIQUE,
   provider_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
   status TEXT NOT NULL,
@@ -520,11 +580,12 @@ CREATE TABLE provider_runs (
     (step_id IS NOT NULL AND work_item_id IS NOT NULL AND attempt_id IS NOT NULL)
   ),
   CHECK (step_id IS NULL OR plan_id IS NOT NULL),
+  CHECK (step_id IS NULL OR provider_attempt_id IS NOT NULL),
+  UNIQUE (work_item_id, attempt_id),
   UNIQUE (provider_run_id, step_id, work_item_id, attempt_id),
-  UNIQUE (provider_run_id, work_item_id, attempt_id),
   FOREIGN KEY (plan_id, step_id) REFERENCES plan_steps(plan_id, step_id) ON DELETE RESTRICT,
-  FOREIGN KEY (step_id, work_item_id) REFERENCES work_items(step_id, work_item_id) ON DELETE RESTRICT,
-  FOREIGN KEY (work_item_id, attempt_id) REFERENCES attempts(work_item_id, attempt_id) ON DELETE RESTRICT
+  FOREIGN KEY (work_item_id) REFERENCES work_items(work_item_id) ON DELETE RESTRICT,
+  FOREIGN KEY (attempt_id) REFERENCES attempts(attempt_id) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE live_output_settings (
@@ -589,6 +650,51 @@ BEGIN
   SELECT RAISE(ABORT, 'module internal graph kind constraint failed');
 END;
 
+CREATE TRIGGER work_items_plan_step_insert
+BEFORE INSERT ON work_items
+WHEN coalesce((SELECT plan_id FROM execution_jobs WHERE job_id = NEW.job_id), '') <>
+     coalesce((SELECT plan_id FROM plan_steps WHERE step_id = NEW.step_id), '')
+BEGIN
+  SELECT RAISE(ABORT, 'work item plan step ownership constraint failed');
+END;
+CREATE TRIGGER work_items_plan_step_update
+BEFORE UPDATE OF job_id, step_id ON work_items
+WHEN coalesce((SELECT plan_id FROM execution_jobs WHERE job_id = NEW.job_id), '') <>
+     coalesce((SELECT plan_id FROM plan_steps WHERE step_id = NEW.step_id), '')
+BEGIN
+  SELECT RAISE(ABORT, 'work item plan step ownership constraint failed');
+END;
+CREATE TRIGGER provider_runs_scope_insert
+BEFORE INSERT ON provider_runs
+WHEN NEW.step_id IS NOT NULL AND (
+  coalesce((SELECT plan_id FROM plan_steps WHERE step_id = NEW.step_id), '') <> NEW.plan_id OR
+  coalesce((SELECT j.plan_id FROM work_items w JOIN execution_jobs j ON j.job_id = w.job_id
+            WHERE w.work_item_id = NEW.work_item_id), '') <> NEW.plan_id OR
+  coalesce((SELECT work_item_id FROM attempts WHERE attempt_id = NEW.attempt_id), '') <> NEW.work_item_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'provider run execution ownership constraint failed');
+END;
+CREATE TRIGGER attempts_provider_run_update
+BEFORE UPDATE OF provider_run_id ON attempts
+WHEN NEW.provider_run_id IS NOT NULL AND (
+  coalesce((SELECT attempt_id FROM provider_runs WHERE provider_run_id = NEW.provider_run_id), '') <> NEW.attempt_id OR
+  coalesce((SELECT work_item_id FROM provider_runs WHERE provider_run_id = NEW.provider_run_id), '') <> NEW.work_item_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'attempt provider run ownership constraint failed');
+END;
+CREATE TRIGGER node_output_execution_provenance_insert
+BEFORE INSERT ON node_output_versions
+WHEN NEW.run_id IS NOT NULL AND (
+  coalesce((SELECT job_id FROM work_items WHERE work_item_id = NEW.work_item_id), '') <> NEW.run_id OR
+  coalesce((SELECT step_id FROM work_items WHERE work_item_id = NEW.work_item_id), '') <> NEW.step_id OR
+  coalesce((SELECT work_item_id FROM attempts WHERE attempt_id = NEW.attempt_id), '') <> NEW.work_item_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'output execution provenance constraint failed');
+END;
+
 CREATE TRIGGER node_output_versions_immutable_update
 BEFORE UPDATE ON node_output_versions BEGIN
   SELECT RAISE(ABORT, 'immutable output version');
@@ -612,6 +718,31 @@ END;
 CREATE TRIGGER approvals_immutable_delete
 BEFORE DELETE ON approvals BEGIN
   SELECT RAISE(ABORT, 'immutable approval');
+END;
+CREATE TRIGGER execution_plan_capsule_immutable_update
+BEFORE UPDATE ON execution_plans
+WHEN NEW.document_revision_id <> OLD.document_revision_id
+  OR NEW.graph_id <> OLD.graph_id
+  OR NEW.graph_revision_id <> OLD.graph_revision_id
+  OR NEW.capsule_version <> OLD.capsule_version
+  OR NEW.hash_version <> OLD.hash_version
+  OR NEW.content_hash <> OLD.content_hash
+  OR NEW.scope_json <> OLD.scope_json
+  OR NEW.capsule_json <> OLD.capsule_json
+BEGIN
+  SELECT RAISE(ABORT, 'immutable plan capsule');
+END;
+CREATE TRIGGER execution_plan_delete_guard
+BEFORE DELETE ON execution_plans BEGIN
+  SELECT RAISE(ABORT, 'immutable plan capsule');
+END;
+CREATE TRIGGER plan_steps_immutable_update
+BEFORE UPDATE ON plan_steps BEGIN
+  SELECT RAISE(ABORT, 'immutable plan step');
+END;
+CREATE TRIGGER plan_steps_immutable_delete
+BEFORE DELETE ON plan_steps BEGIN
+  SELECT RAISE(ABORT, 'immutable plan step');
 END;
 
 CREATE INDEX nodes_graph_id_idx ON nodes(graph_id);
@@ -653,18 +784,26 @@ CREATE INDEX node_output_versions_graph_revision_idx
   ON node_output_versions(graph_id, graph_revision_id);
 CREATE INDEX node_output_versions_run_provenance_idx
   ON node_output_versions(run_id, step_id, work_item_id, attempt_id);
+CREATE INDEX node_output_versions_attempt_idx
+  ON node_output_versions(attempt_id);
+CREATE INDEX node_output_versions_work_item_idx
+  ON node_output_versions(work_item_id);
 CREATE INDEX node_output_payloads_output_version_idx ON node_output_payloads(output_version_id);
 CREATE INDEX node_output_payloads_artifact_idx ON node_output_payloads(artifact_id);
 CREATE INDEX approvals_output_version_idx ON approvals(output_version_id);
 CREATE INDEX execution_plans_document_revision_idx ON execution_plans(document_revision_id);
+CREATE INDEX execution_plans_graph_revision_idx ON execution_plans(graph_id, graph_revision_id);
 CREATE INDEX plan_steps_plan_id_idx ON plan_steps(plan_id);
 CREATE INDEX plan_steps_node_id_idx ON plan_steps(node_id);
 CREATE INDEX batches_plan_id_idx ON batches(plan_id);
 CREATE INDEX batches_plan_step_idx ON batches(plan_id, step_id);
-CREATE INDEX work_items_batch_step_idx ON work_items(batch_id, step_id);
+CREATE INDEX work_items_job_step_idx ON work_items(job_id, step_id);
+CREATE INDEX work_items_step_idx ON work_items(step_id);
 CREATE INDEX attempts_work_item_id_idx ON attempts(work_item_id);
-CREATE INDEX attempts_provider_run_ownership_idx
-  ON attempts(provider_run_id, work_item_id, attempt_id);
+CREATE INDEX attempts_provider_run_idx ON attempts(provider_run_id);
+CREATE INDEX execution_timeline_job_idx ON execution_timeline(job_id);
+CREATE INDEX execution_timeline_work_idx ON execution_timeline(work_item_id);
+CREATE INDEX execution_timeline_attempt_idx ON execution_timeline(attempt_id);
 CREATE INDEX blob_imports_content_key_idx ON blob_imports(content_key);
 CREATE INDEX linked_references_content_key_idx ON linked_references(content_key);
 CREATE INDEX linked_references_preview_content_key_idx ON linked_references(preview_content_key);
@@ -682,6 +821,7 @@ CREATE INDEX provider_runs_capability_snapshot_idx ON provider_runs(capability_s
 CREATE INDEX provider_runs_plan_step_idx ON provider_runs(plan_id, step_id);
 CREATE INDEX provider_runs_step_work_item_idx ON provider_runs(step_id, work_item_id);
 CREATE INDEX provider_runs_work_item_attempt_idx ON provider_runs(work_item_id, attempt_id);
+CREATE INDEX provider_runs_attempt_idx ON provider_runs(attempt_id);
 CREATE INDEX live_output_entries_artifact_id_idx ON live_output_entries(artifact_id);
 CREATE INDEX live_output_entries_collection_id_idx ON live_output_entries(collection_id);
 CREATE INDEX live_output_operations_entry_id_idx ON live_output_operations(entry_id);

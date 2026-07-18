@@ -81,6 +81,24 @@ importers:
         specifier: ^1.18.0
         version: 1.18.0(react@19.2.7)
 
+  packages/application:
+    dependencies:
+      '@ether/document':
+        specifier: workspace:*
+        version: link:../document
+      '@ether/execution':
+        specifier: workspace:*
+        version: link:../execution
+      '@ether/graph-kernel':
+        specifier: workspace:*
+        version: link:../graph-kernel
+      '@ether/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@ether/schema':
+        specifier: workspace:*
+        version: link:../schema
+
   packages/brand: {}
 
   packages/codex-plugin: {}
@@ -102,6 +120,21 @@ importers:
       zod:
         specifier: ^3.25.67
         version: 3.25.76
+
+  packages/execution:
+    dependencies:
+      '@ether/document':
+        specifier: workspace:*
+        version: link:../document
+      '@ether/graph-kernel':
+        specifier: workspace:*
+        version: link:../graph-kernel
+      '@ether/providers':
+        specifier: workspace:*
+        version: link:../providers
+      '@ether/schema':
+        specifier: workspace:*
+        version: link:../schema
 
   packages/graph-kernel:
     dependencies:
@@ -129,6 +162,9 @@ importers:
 
   packages/testing:
     dependencies:
+      '@ether/application':
+        specifier: workspace:*
+        version: link:../application
       '@ether/brand':
         specifier: workspace:*
         version: link:../brand
@@ -138,6 +174,9 @@ importers:
       '@ether/engine':
         specifier: workspace:*
         version: link:../engine
+      '@ether/execution':
+        specifier: workspace:*
+        version: link:../execution
       '@ether/graph-kernel':
         specifier: workspace:*
         version: link:../graph-kernel

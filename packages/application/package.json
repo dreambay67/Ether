@@ -1,0 +1,28 @@
+{
+  "name": "@ether/application",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "prebuild": "pnpm --filter @ether/execution build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ether/execution build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings=0"
+  },
+  "dependencies": {
+    "@ether/document": "workspace:*",
+    "@ether/execution": "workspace:*",
+    "@ether/graph-kernel": "workspace:*",
+    "@ether/providers": "workspace:*",
+    "@ether/schema": "workspace:*"
+  }
+}

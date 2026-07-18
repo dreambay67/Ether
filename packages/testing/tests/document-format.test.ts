@@ -516,8 +516,8 @@ describe("Ether 4.0 document format", () => {
       );
       expect(foreignKeys.get("work_items")).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ from: "batch_id", table: "batches", to: "batch_id" }),
-          expect.objectContaining({ from: "step_id", table: "batches", to: "step_id" })
+          expect.objectContaining({ from: "job_id", table: "execution_jobs", to: "job_id" }),
+          expect.objectContaining({ from: "step_id", table: "plan_steps", to: "step_id" })
         ])
       );
       expect(foreignKeys.get("provider_runs")).toEqual(
@@ -679,58 +679,79 @@ describe("Ether 4.0 document format", () => {
 
       database.exec(`
         INSERT INTO execution_plans (
-          plan_id, document_revision_id, status, policy_json, inputs_json, metadata_json, created_at, updated_at
+          plan_id, document_revision_id, graph_id, graph_revision_id, capsule_version,
+          hash_version, content_hash, scope_json, capsule_json, status, created_at, updated_at
         ) VALUES
-          ('plan-1', NULL, 'draft', '{}', '{}', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
-          ('plan-2', NULL, 'draft', '{}', '{}', '{}', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+          ('plan-1', 'document-revision-1', 'graph-1', 'revision-1', 1, 'sha256-v1',
+           'sha256:v1:1111111111111111111111111111111111111111111111111111111111111111',
+           '{"kind":"graph"}', '{"id":"plan-1"}', 'previewed',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
+          ('plan-2', 'document-revision-1', 'graph-1', 'revision-1', 1, 'sha256-v1',
+           'sha256:v1:2222222222222222222222222222222222222222222222222222222222222222',
+           '{"kind":"graph"}', '{"id":"plan-2"}', 'previewed',
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
         INSERT INTO plan_steps (
           step_id, plan_id, node_id, step_order, dependencies_json, config_json, status
         ) VALUES
           ('step-1', 'plan-1', 'node-1', 0, '[]', '{}', 'ready'),
           ('step-2', 'plan-2', 'node-1', 0, '[]', '{}', 'ready');
-        INSERT INTO batches (batch_id, plan_id, step_id, dimensions_json, status, created_at, updated_at) VALUES
-          ('batch-1', 'plan-1', 'step-1', '{}', 'ready', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
-          ('batch-2', 'plan-2', 'step-2', '{}', 'ready', '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
+        INSERT INTO execution_jobs (
+          job_id, plan_id, plan_content_hash, start_command_id, status, created_at
+        ) VALUES
+          ('job-1', 'plan-1', 'sha256:v1:1111111111111111111111111111111111111111111111111111111111111111',
+           'start-1', 'queued', '2026-07-17T10:00:00.000Z'),
+          ('job-2', 'plan-2', 'sha256:v1:2222222222222222222222222222222222222222222222222222222222222222',
+           'start-2', 'queued', '2026-07-17T10:00:00.000Z');
       `);
 
       expectConstraintViolation(
         database,
         `INSERT INTO work_items (
-           work_item_id, batch_id, step_id, item_index, input_json, status, created_at, updated_at
-         ) VALUES ('work-cross-plan', 'batch-1', 'step-2', 0, '{}', 'ready',
+           work_item_id, job_id, step_id, planned_work_item_id, item_index, input_json,
+           status, created_at, updated_at
+         ) VALUES ('work-cross-plan', 'job-1', 'step-2', 'planned-cross', 0, '{}', 'queued',
                    '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z')`
       );
 
       database.exec(`
         INSERT INTO work_items (
-          work_item_id, batch_id, step_id, item_index, input_json, status, created_at, updated_at
+          work_item_id, job_id, step_id, planned_work_item_id, item_index, input_json,
+          status, created_at, updated_at
         ) VALUES
-          ('work-1', 'batch-1', 'step-1', 0, '{}', 'ready',
+          ('work-1', 'job-1', 'step-1', 'planned-1', 0, '{}', 'running',
            '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z'),
-          ('work-2', 'batch-1', 'step-1', 1, '{}', 'ready',
+          ('work-2', 'job-1', 'step-1', 'planned-2', 1, '{}', 'queued',
            '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z');
         INSERT INTO attempts (
-          attempt_id, work_item_id, attempt_number, provider_run_id, status, error_json, started_at, completed_at
+          attempt_id, work_item_id, attempt_number, provider_attempt_id, provider_run_id,
+          status, output_version_ids_json, error_json, created_at, started_at, completed_at
         ) VALUES
-          ('attempt-1', 'work-1', 1, NULL, 'running', NULL, '2026-07-17T10:00:00.000Z', NULL),
-          ('attempt-2', 'work-1', 2, NULL, 'queued', NULL, '2026-07-17T10:00:00.000Z', NULL),
-          ('attempt-3', 'work-2', 1, NULL, 'queued', NULL, '2026-07-17T10:00:00.000Z', NULL);
+          ('attempt-1', 'work-1', 1, 'provider-attempt-1', NULL, 'running', '[]', NULL,
+           '2026-07-17T10:00:00.000Z', '2026-07-17T10:00:00.000Z', NULL),
+          ('attempt-2', 'work-1', 2, 'provider-attempt-2', NULL, 'queued', '[]', NULL,
+           '2026-07-17T10:00:00.000Z', NULL, NULL),
+          ('attempt-3', 'work-2', 1, 'provider-attempt-3', NULL, 'queued', '[]', NULL,
+           '2026-07-17T10:00:00.000Z', NULL, NULL);
       `);
 
       expectConstraintViolation(
         database,
         `INSERT INTO provider_runs (
-           provider_run_id, plan_id, step_id, work_item_id, attempt_id, provider_id, model_id,
+           provider_run_id, plan_id, step_id, work_item_id, attempt_id, provider_attempt_id,
+           provider_id, model_id,
            status, request_json, response_json, metadata_json, started_at, completed_at
-         ) VALUES ('run-cross-job', 'plan-1', 'step-2', 'work-1', 'attempt-1', 'codex', 'model',
+         ) VALUES ('run-cross-job', 'plan-1', 'step-2', 'work-1', 'attempt-1',
+                   'provider-attempt-cross', 'codex', 'model',
                    'running', '{}', NULL, '{}', '2026-07-17T10:00:00.000Z', NULL)`
       );
 
       database.exec(`
         INSERT INTO provider_runs (
-          provider_run_id, plan_id, step_id, work_item_id, attempt_id, provider_id, model_id,
+          provider_run_id, plan_id, step_id, work_item_id, attempt_id, provider_attempt_id,
+          provider_id, model_id,
           status, request_json, response_json, metadata_json, started_at, completed_at
-        ) VALUES ('run-1', 'plan-1', 'step-1', 'work-1', 'attempt-1', 'codex', 'model',
+        ) VALUES ('run-1', 'plan-1', 'step-1', 'work-1', 'attempt-1', 'provider-attempt-1',
+                  'codex', 'model',
                   'running', '{}', NULL, '{}', '2026-07-17T10:00:00.000Z', NULL);
       `);
       expectConstraintViolation(
@@ -741,7 +762,7 @@ describe("Ether 4.0 document format", () => {
            compiled_context_hash, run_id, step_id, work_item_id, attempt_id, timing_json, created_at
          ) VALUES ('output-cross-run', 'node-1', 'graph-1', 'revision-1', NULL,
                    '{"kind":"provider"}', '[]', '[]', 'sha256:context',
-                   'run-1', 'step-2', 'work-1', 'attempt-1', '{}',
+                   'job-1', 'step-2', 'work-1', 'attempt-1', '{}',
                    '2026-07-17T10:00:00.000Z')`
       );
 
@@ -762,11 +783,13 @@ describe("Ether 4.0 document format", () => {
           compiled_context_hash, run_id, step_id, work_item_id, attempt_id, timing_json, created_at
         ) VALUES ('output-run-1', 'node-1', 'graph-1', 'revision-1', NULL,
                   '{"kind":"provider"}', '[]', '[]', 'sha256:run-1',
-                  'run-1', 'step-1', 'work-1', 'attempt-1', '{}',
+                  'job-1', 'step-1', 'work-1', 'attempt-1', '{}',
                   '2026-07-17T10:00:00.000Z');
       `);
       expectConstraintViolation(database, "DELETE FROM work_items WHERE work_item_id = 'work-1'");
-      expectConstraintViolation(database, "DELETE FROM execution_plans WHERE plan_id = 'plan-1'");
+      expect(() =>
+        database.exec("DELETE FROM execution_plans WHERE plan_id = 'plan-1'")
+      ).toThrow(/immutable plan capsule/i);
       expectConstraintViolation(database, "DELETE FROM provider_runs WHERE provider_run_id = 'run-1'");
       expect(
         database

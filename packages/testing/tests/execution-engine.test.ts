@@ -29,6 +29,17 @@ import {
 } from "@ether/engine";
 
 const tempRoots: string[] = [];
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+async function expectPng(filePath: string, dimensions?: { width: number; height: number }) {
+  const bytes = await readFile(filePath);
+  expect(bytes.subarray(0, PNG_SIGNATURE.length)).toEqual(PNG_SIGNATURE);
+  expect(bytes.toString("ascii", 12, 16)).toBe("IHDR");
+  if (dimensions !== undefined) {
+    expect({ width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }).toEqual(dimensions);
+  }
+  return bytes;
+}
 
 async function createTempRoot() {
   const root = await mkdtemp(path.join(os.tmpdir(), "ether-execution-"));
@@ -2297,7 +2308,7 @@ describe("fake local execution", () => {
         height: 1536
       }
     });
-    await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain('width="864" height="1536"');
+    await expectPng(generatedAsset!.path, { width: 864, height: 1536 });
   });
 
   it("runs an Inpaint edit with the fake provider and records parent lineage", async () => {
@@ -2429,7 +2440,7 @@ describe("fake local execution", () => {
         sourceEdgeId: "edge-prompt-edit"
       })
     ]);
-    await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain("ETHER_FAKE_EDITED_IMAGE");
+    await expectPng(editedAsset!.path);
   });
 
   it("records a failed provider run when Codex edit fails after invocation", async () => {
@@ -2633,8 +2644,7 @@ describe("fake local execution", () => {
     const editedLineage = recordValue(editedAsset?.metadata.lineage, "edited asset lineage");
     expect(editedLineage.references).toEqual([]);
     expect(editedLineage.edgeRoles).toEqual([]);
-    await expect(readFile(editedAsset!.path, "utf8")).resolves.toContain(freshParentAsset!.id);
-    await expect(readFile(editedAsset!.path, "utf8")).resolves.not.toContain(staleParentAsset.id);
+    await expectPng(editedAsset!.path);
   });
 
   it("reports a missing edit provider without writing generated edit assets", async () => {
@@ -2797,10 +2807,10 @@ describe("fake local execution", () => {
         }
       }
     });
-    expect(generatedAsset?.path.endsWith(".svg")).toBe(true);
+    expect(generatedAsset?.path.endsWith(".png")).toBe(true);
     expect(generatedAsset?.metadata).toMatchObject({
       provider: "ether-fake-local",
-      mimeType: "image/svg+xml",
+      mimeType: "image/png",
       lineage: {
         provider: {
           id: "ether-fake-local",
@@ -2811,14 +2821,12 @@ describe("fake local execution", () => {
         prompt: "General: deterministic electric blue product render"
       }
     });
-    await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain(
-      "ETHER_FAKE_GENERATED_IMAGE"
-    );
+    await expectPng(generatedAsset!.path);
     expect(providerRuns).toEqual([
       expect.objectContaining({
         runId: expect.any(String),
         providerId: "ether-fake-local",
-        model: "deterministic-svg",
+        model: "deterministic-png-v1",
         status: "complete",
         request: expect.objectContaining({
           operation: "image.generate",
@@ -3211,9 +3219,7 @@ describe("fake local execution", () => {
         negativePrompt: "Negative: no warped labels"
       }
     });
-    await expect(readFile(generatedAsset!.path, "utf8")).resolves.toContain(
-      "glass bottle under crisp studio light"
-    );
+    await expectPng(generatedAsset!.path);
   });
 
   it("sends channel and role payload envelopes to image generation providers", async () => {

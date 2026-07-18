@@ -4,16 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "pretypecheck": "pnpm --filter @ether/schema build && pnpm --filter @ether/graph-kernel build && pnpm --filter @ether/document build && pnpm --filter @ether/mcp-server build",
+    "pretypecheck": "pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint . --max-warnings=0",
     "pretest:unit": "pnpm --filter @ether/schema build && pnpm --filter @ether/graph-kernel build",
     "test:unit": "vitest run --config vitest.config.ts",
-    "pretest:integration": "pnpm --filter @ether/schema build && pnpm --filter @ether/document build",
+    "pretest:integration": "pnpm --filter @ether/application build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "pretest:performance": "pnpm --filter @ether/schema build",
     "test:performance": "vitest run --config vitest.performance.config.ts",
-    "pretest:contracts": "pnpm --filter @ether/schema build",
+    "pretest:contracts": "pnpm --filter @ether/providers build",
     "test:contracts": "cross-env ETHER_TEST_SUITE=contracts vitest run --config vitest.integration.config.ts",
     "pretest:conformance:codex": "pnpm --filter @ether/schema build",
     "test:conformance:codex": "cross-env ETHER_TEST_SUITE=conformance:codex vitest run --config vitest.integration.config.ts",
@@ -24,9 +24,11 @@
     "test:acceptance": "pnpm run test:smoke && pnpm run test:packaged"
   },
   "dependencies": {
+    "@ether/application": "workspace:*",
     "@ether/brand": "workspace:*",
     "@ether/document": "workspace:*",
     "@ether/engine": "workspace:*",
+    "@ether/execution": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
     "@ether/providers": "workspace:*",
     "@ether/schema": "workspace:*"

@@ -42,7 +42,12 @@ export {
   sanitizeProviderEnv
 } from "./env.js";
 export { ApiProviderUnavailableError, ProviderNotFoundError, ProviderUnavailableError } from "./errors.js";
-export { FAKE_PROVIDER_ID, FakeImageProvider } from "./fake.js";
+export {
+  FAKE_PROVIDER_ID,
+  FakeImageProvider,
+  FakeProviderError,
+  type FakeImageProviderOptions
+} from "./fake.js";
 export {
   AssistantProviderRegistry,
   GenerationProviderRegistry,
@@ -78,6 +83,7 @@ export type {
   ProviderDescriptor,
   ProviderDiagnostic,
   ProviderDiagnosticContext,
+  ProviderExecutionContext,
   ProviderGenerationResult,
   ProviderMediaLimits,
   ProviderMatrixStatus,

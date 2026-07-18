@@ -919,7 +919,10 @@ describe("Ether 4.0 schema", () => {
 
     const plan = {
       id: "plan-1",
+      capsuleVersion: 1,
+      hashVersion: "sha256-v1",
       documentId: "document-1",
+      documentRevisionId: "document-revision-1",
       graphId: "graph-root",
       graphRevisionId: "graph-revision-1",
       scope: { kind: "selected", nodeIds: ["node-1"] },
@@ -930,7 +933,18 @@ describe("Ether 4.0 schema", () => {
           executor: "image-provider",
           dependencyStepIds: [],
           inputPayloadIds: ["payload-input"],
-          workItemIds: ["work-1"]
+          workItemIds: ["work-1"],
+          compiledPrompt: "Subject: Campaign image",
+          compiledContext: { sourceEdgeIds: ["edge-1"] },
+          parameters: { outputCount: 1 },
+          selectors: [{ kind: "latest-approved" }],
+          provider: {
+            providerId: providerCapability.providerId,
+            profileId: providerCapability.profileId,
+            modelId: "fake-v1",
+            settings: { outputCount: 1 },
+            capabilitySnapshot: providerCapability
+          }
         }
       ],
       workItems: [
@@ -945,7 +959,8 @@ describe("Ether 4.0 schema", () => {
       providerCapabilitySnapshots: [providerCapability],
       estimatedCalls: 1,
       warnings: [],
-      contentHash: "sha256:plan"
+      contentHash: `sha256:v1:${"a".repeat(64)}`,
+      createdAt: "2026-07-17T08:00:00.000Z"
     } as const;
 
     expect(parseExecutionPlan(plan)).toEqual(plan);
