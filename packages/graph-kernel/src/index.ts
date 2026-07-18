@@ -4,6 +4,7 @@ export * from "./canvasGeometry.js";
 export * from "./connectionValidator.js";
 export * from "./consequenceMatrix.js";
 export * from "./contextAssembly.js";
+export * from "./lineageIdentity.js";
 export * from "./modules.js";
 export * from "./outputSelectors.js";
 export * from "./registry.js";

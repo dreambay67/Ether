@@ -8,6 +8,8 @@ export type WorkerOutputIssueCode =
   | "INVALID_JSON"
   | "UNKNOWN_OUTPUT_SCHEMA"
   | "INVALID_OUTPUT_SCHEMA"
+  | "OUTPUT_LIMIT_EXCEEDED"
+  | "INVALID_VALIDATION_ATTEMPT"
   | "SCHEMA_INVALID"
   | "CONVERSATIONAL_PREFACE"
   | "CHANGE_NARRATION";
@@ -18,7 +20,7 @@ export type WorkerOutputIssue = {
   path?: string;
 };
 
-const conversationalPreface = /^(?:sure\b|certainly\b|of course\b|here(?:'s| is)\b|i(?:'ve| have)\b|the revised\b|updated (?:content|prompt)\b)[\s,:-]*/i;
+const conversationalPreface = /^(?:(?:sure|certainly|of course)\b[\s,!:;-]*(?:here(?:'s| is)\b[\s,!:;-]*)?|i(?:'ve| have)\s+(?:revised|updated|corrected)\b|(?:the\s+)?(?:revised|updated|corrected)\s+(?:content|prompt|text|result)\b)/i;
 const contrastiveNarration = /\binstead\s+of\b/i;
 
 function inspectString(config: PromptWorkerConfig, output: string, path?: string): WorkerOutputIssue[] {
@@ -78,15 +80,35 @@ export function inspectStructuredTransformationOutput(
   path = "$"
 ): WorkerOutputIssue[] {
   if (!isTransformationBehavior(config.behavior)) return [];
+  if (!hasSubstantiveValue(output)) {
+    return [{ code: "EMPTY_OUTPUT", message: "The worker returned no substantive content.", path }];
+  }
+  return inspectStructuredStringLeaves(config, output, path);
+}
+
+function hasSubstantiveValue(value: JsonValue): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (value === null) return false;
+  if (Array.isArray(value)) return value.some(hasSubstantiveValue);
+  return Object.values(value).some(hasSubstantiveValue);
+}
+
+function inspectStructuredStringLeaves(
+  config: PromptWorkerConfig,
+  output: JsonValue,
+  path: string
+): WorkerOutputIssue[] {
   if (typeof output === "string") return inspectString(config, output, path);
   if (Array.isArray(output)) {
     return deduplicateWorkerOutputIssues(output.flatMap((value, index) =>
-      inspectStructuredTransformationOutput(config, value, `${path}[${index}]`)
+      inspectStructuredStringLeaves(config, value, `${path}[${index}]`)
     ));
   }
   if (typeof output === "object" && output !== null) {
     return deduplicateWorkerOutputIssues(Object.keys(output).sort().flatMap((property) =>
-      inspectStructuredTransformationOutput(config, output[property]!, propertyPath(path, property))
+      inspectStructuredStringLeaves(config, output[property]!, propertyPath(path, property))
     ));
   }
   return [];

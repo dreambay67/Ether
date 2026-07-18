@@ -12,7 +12,12 @@ import type {
 import { assembleExecutorContext, validateConnection } from "@ether/graph-kernel";
 
 import { behaviorInstructions, compileBehaviorInstruction } from "./behaviors.js";
-import { inspectStructuredOutputSchema, type StructuredOutputSchema } from "./outputValidation.js";
+import {
+  indexStructuredOutputSchemas,
+  inspectIndexedStructuredOutputSchema,
+  resolveStructuredOutputSchema,
+  type StructuredOutputSchema
+} from "./outputValidation.js";
 import {
   resolveWorkerProfile,
   WorkerProfileResolutionError,
@@ -51,6 +56,7 @@ export type ContextManifest = {
   inputs: readonly ContextManifestInput[];
   downstream: DownstreamCapabilitySummary | null;
   outputSchemaId: string | null;
+  outputSchemaFingerprint: string | null;
   budget: {
     textTokens: { included: number; maximum: number };
     mediaReferences: { included: number; maximum: number };
@@ -75,15 +81,28 @@ export class WorkerContextCompilationError extends Error {
   readonly manifest: ContextManifest;
 
   constructor(manifest: ContextManifest) {
-    const firstBlocking = manifest.diagnostics.find((diagnostic) => diagnostic.blocking);
+    const snapshot = deepFreezeSnapshot(manifest);
+    const firstBlocking = snapshot.diagnostics.find((diagnostic) => diagnostic.blocking);
     super(firstBlocking?.message ?? "Worker context is not dispatchable.");
     this.name = "WorkerContextCompilationError";
     this.code = firstBlocking?.code ?? "CONTEXT_NOT_DISPATCHABLE";
-    this.manifest = manifest;
+    this.manifest = snapshot;
   }
 }
 
 const mediaChannels = new Set<PayloadChannel>(["image", "mask", "audio", "video"]);
+
+function deepFreezeSnapshot<T>(input: T): T {
+  return freeze(structuredClone(input));
+}
+
+function freeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -116,6 +135,7 @@ function emptyManifest(targetNodeId: string, config: PromptWorkerConfig): Contex
     inputs: [],
     downstream: null,
     outputSchemaId: config.outputContract.schemaId ?? null,
+    outputSchemaFingerprint: null,
     budget: {
       textTokens: { included: 0, maximum: config.contextPolicy.maxTokens },
       mediaReferences: { included: 0, maximum: 0 }
@@ -208,7 +228,7 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
     }
   };
 
-  const connectionDiagnostic = unresolvedConnectionDiagnostic(input);
+  const connectionDiagnostic = config.contextPolicy.includeUpstream ? unresolvedConnectionDiagnostic(input) : null;
   if (connectionDiagnostic !== null) {
     throw new WorkerContextCompilationError(withDiagnostic(manifest, connectionDiagnostic));
   }
@@ -220,7 +240,8 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
       targetNodeId: input.targetNodeId,
       versions: input.versions,
       payloads: input.payloads,
-      capabilities: input.adapterCapabilities
+      capabilities: input.adapterCapabilities,
+      includeUpstream: config.contextPolicy.includeUpstream
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Context assembly failed.";
@@ -235,10 +256,15 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
   const diagnostics: ContextDiagnostic[] = assembled.diagnostics.map((diagnostic) => ({
     code: diagnostic.code,
     message: diagnostic.message,
-    blocking: true,
+    blocking: diagnostic.code !== "UPSTREAM_DISABLED",
     details: {
+      edgeId: diagnostic.edgeId,
+      selector: diagnostic.selector,
+      sourceNodeId: diagnostic.sourceNodeId,
+      role: diagnostic.role,
+      order: diagnostic.order,
+      channel: diagnostic.channel,
       ...(diagnostic.outputVersionId === undefined ? {} : { outputVersionId: diagnostic.outputVersionId }),
-      ...(diagnostic.channel === undefined ? {} : { channel: diagnostic.channel })
     }
   }));
   const ranks = versionRanks(input.versions);
@@ -297,18 +323,27 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
       details: { channel: config.outputContract.channel }
     });
   }
+  const schemaIndex = indexStructuredOutputSchemas(input.schemaCatalog);
+  diagnostics.push(...schemaIndex.issues.map((issue) => ({
+    code: issue.code,
+    message: issue.message,
+    blocking: true,
+    details: { path: issue.path ?? "$" }
+  })));
   const schemaId = config.outputContract.schemaId;
-  if (schemaId !== undefined) {
-    const schema = input.schemaCatalog.find((candidate) => candidate.id === schemaId);
-    if (schema === undefined) {
+  let outputSchemaFingerprint: string | null = null;
+  if (schemaId !== undefined && schemaIndex.issues.length === 0) {
+    const resolution = resolveStructuredOutputSchema(schemaIndex, schemaId);
+    if (resolution.issue !== null) {
       diagnostics.push({
-        code: "UNKNOWN_OUTPUT_SCHEMA",
-        message: `Unknown structured output schema: ${schemaId}.`,
+        code: resolution.issue.code,
+        message: resolution.issue.message,
         blocking: true,
-        details: { schemaId }
+        details: { schemaId, path: resolution.issue.path ?? "$" }
       });
     } else {
-      const schemaIssue = inspectStructuredOutputSchema(schema);
+      outputSchemaFingerprint = resolution.schema!.fingerprint;
+      const schemaIssue = inspectIndexedStructuredOutputSchema(resolution.schema!);
       if (schemaIssue !== null) {
         diagnostics.push({
           code: schemaIssue.code,
@@ -327,6 +362,7 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
     selectedOutputVersionIds: [...new Set(orderedInputs.map((item) => item.payload.source.outputVersionId))],
     inputs: manifestInputs,
     downstream,
+    outputSchemaFingerprint,
     budget: {
       textTokens: { included: includedTextTokens, maximum: config.contextPolicy.maxTokens },
       mediaReferences: { included: includedMediaReferences, maximum: resolvedProfile.capability.maxReferences }
@@ -336,7 +372,7 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
   };
   if (!manifest.dispatchable) throw new WorkerContextCompilationError(manifest);
 
-  return {
+  return deepFreezeSnapshot({
     request: {
       behavior: config.behavior,
       instruction: compileBehaviorInstruction(config.behavior, config.instruction),
@@ -351,5 +387,5 @@ export function compileWorkerContext(input: CompileWorkerContextInput): {
       downstream
     },
     manifest
-  };
+  });
 }

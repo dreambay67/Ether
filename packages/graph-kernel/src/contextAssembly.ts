@@ -1,4 +1,4 @@
-import type { EtherGraph, InputConsequence, NodeOutputVersion, PayloadEnvelope } from "@ether/schema";
+import type { ConnectionRole, EtherGraph, InputConsequence, NodeOutputVersion, OutputSelector, PayloadChannel, PayloadEnvelope } from "@ether/schema";
 import { resolveAdapter } from "./adapters.js";
 import { validateConnection } from "./connectionValidator.js";
 import { getNodeDefinition } from "./registry.js";
@@ -25,6 +25,18 @@ export type ExecutorManifest = {
   inputs: ExecutorManifestInput[];
 };
 
+export type ExecutorContextDiagnostic = {
+  code: OutputSelectorDiagnostic["code"] | "UPSTREAM_DISABLED";
+  message: string;
+  edgeId: string;
+  selector: OutputSelector;
+  sourceNodeId: string;
+  role: ConnectionRole;
+  order: number;
+  channel: PayloadChannel;
+  outputVersionId?: string;
+};
+
 function targetInstruction(config: object): string {
   const value = Reflect.get(config, "instruction");
   return typeof value === "string" ? value : "";
@@ -49,22 +61,40 @@ export function assembleExecutorContext(input: {
   versions: readonly NodeOutputVersion[];
   payloads: readonly PayloadEnvelope[];
   capabilities: readonly string[];
-}): { trace: readonly string[]; diagnostics: OutputSelectorDiagnostic[]; manifest: ExecutorManifest } {
+  includeUpstream?: boolean;
+}): { trace: readonly string[]; diagnostics: ExecutorContextDiagnostic[]; manifest: ExecutorManifest } {
   const target = input.graph.nodes.find((node) => node.id === input.targetNodeId);
   if (target === undefined) throw new Error(`Unknown target node: ${input.targetNodeId}`);
   const directEdges = input.graph.edges.filter((edge) => edge.enabled && edge.to.kind === "node" && edge.to.nodeId === target.id && edge.from.kind === "node");
   const lanes = numberDirectRoles(directEdges.map((edge) => ({ edgeId: edge.id, role: edge.role, order: edge.order, edge })));
-  const diagnostics: OutputSelectorDiagnostic[] = [];
+  const diagnostics: ExecutorContextDiagnostic[] = [];
   const assembledLanes: Array<{ edgeId: string; payloads: PayloadEnvelope[] }> = [];
   const manifestInputs: ExecutorManifestInput[] = [];
   for (const lane of lanes) {
     const edge = lane.edge;
     if (edge.from.kind !== "node" || edge.to.kind !== "node") continue;
     const sourceNodeId = edge.from.nodeId;
+    const provenance = {
+      edgeId: edge.id,
+      selector: edge.selector,
+      sourceNodeId,
+      role: edge.role,
+      order: edge.order,
+      channel: edge.from.channel
+    };
+    if (input.includeUpstream === false) {
+      diagnostics.push({
+        code: "UPSTREAM_DISABLED",
+        message: "Upstream context is disabled by the worker context policy.",
+        ...provenance
+      });
+      assembledLanes.push({ edgeId: edge.id, payloads: [] });
+      continue;
+    }
     const source = input.graph.nodes.find((node) => node.id === sourceNodeId);
     if (source === undefined) throw new Error(`Unknown source node: ${sourceNodeId}`);
     const selection = resolveOutputSelector({ selector: edge.selector, nodeId: source.id, channel: edge.from.channel, versions: input.versions, payloads: input.payloads });
-    diagnostics.push(...selection.diagnostics);
+    diagnostics.push(...selection.diagnostics.map((diagnostic) => ({ ...diagnostic, ...provenance })));
     const selectedVersions = new Set(selection.versionIds);
     const channelPayloads = input.payloads.filter((payload) => selectedVersions.has(payload.source.outputVersionId) && payload.source.nodeId === source.id && payload.channel === edge.from.channel);
     const decision = validateConnection({ sourceDefinitionId: source.definitionId, sourceChannel: edge.from.channel, targetDefinitionId: target.definitionId, targetChannel: edge.to.channel, role: edge.role, adapter: edge.adapter, capabilities: input.capabilities });

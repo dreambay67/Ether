@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+import * as intelligenceApi from "../../intelligence/src/index.js";
 import type {
   EtherEdge,
   EtherGraph,
@@ -272,7 +273,7 @@ function constrainedSchema(): StructuredOutputSchema {
           type: "array",
           minItems: 2,
           uniqueItems: true,
-          items: { type: "string", pattern: "^[a-z]+$" }
+          items: { type: "string", minLength: 2 }
         },
         mode: {
           anyOf: [{ const: "draft" }, { const: "final" }]
@@ -349,6 +350,51 @@ describe("deterministic worker context compilation", () => {
     expect(first.manifest.authoredInstruction).toBe("Replace the fruit with a pineapple.");
     expect(first.manifest.lineageKey).toBe("lineage-subject");
     expect(first.manifest.dispatchable).toBe(true);
+  });
+
+  it("returns detached, deeply frozen request and manifest snapshots", () => {
+    const lane = edge({ id: "edge-snapshot", sourceNodeId: "snapshot", role: "subject" });
+    const upstream = payload({ id: "payload-snapshot", nodeId: "snapshot", versionId: "version-snapshot", value: "original" });
+    upstream.metadata = { nested: { label: "original" } };
+    const downstream = {
+      requiredChannels: ["image" as const],
+      providerProfileIds: ["runtime-image"],
+      limitations: ["original limitation"]
+    };
+    const input = compileInput({
+      edges: [lane],
+      payloads: [upstream],
+      versions: [version({ id: "version-snapshot", nodeId: "snapshot", payloadIds: [upstream.id] })],
+      downstream
+    });
+    const compiled = compileWorkerContext(input);
+
+    expect(Object.isFrozen(compiled.request)).toBe(true);
+    expect(Object.isFrozen(compiled.request.inputs[0]?.content)).toBe(true);
+    expect(Object.isFrozen(compiled.request.inputs[0]?.metadata.nested)).toBe(true);
+    expect(Object.isFrozen(compiled.request.contextPolicy)).toBe(true);
+    expect(Object.isFrozen(compiled.request.outputContract)).toBe(true);
+    expect(Object.isFrozen(compiled.manifest)).toBe(true);
+    expect(Object.isFrozen(compiled.manifest.resolvedProfile?.capability)).toBe(true);
+    expect(Object.isFrozen(compiled.manifest.downstream?.limitations)).toBe(true);
+
+    if (input.payloads[0]?.content.kind === "text") input.payloads[0].content.value = "mutated input";
+    (input.payloads[0]?.metadata.nested as JsonObject).label = "mutated input";
+    input.downstream?.limitations.push("mutated input");
+    const inputWorker = input.graph.nodes.find((node) => node.id === "worker");
+    if (inputWorker?.definitionId !== "prompt.worker") throw new Error("Expected prompt.worker fixture.");
+    inputWorker.config.contextPolicy.maxTokens = 1;
+
+    expect(compiled.request.inputs[0]).toMatchObject({
+      content: { kind: "text", value: "original" },
+      metadata: { nested: { label: "original" } }
+    });
+    expect(compiled.request.contextPolicy.maxTokens).toBe(8_000);
+    expect(compiled.request.downstream).toEqual(compiled.manifest.downstream);
+    expect(compiled.request.downstream?.limitations).toEqual(["original limitation"]);
+    expect(() => {
+      (compiled.request.contextPolicy as { maxTokens: number }).maxTokens = 2;
+    }).toThrow(TypeError);
   });
 
   it("sorts direct lanes by order then edge ID and numbers repeated direct roles", () => {
@@ -463,6 +509,45 @@ describe("deterministic worker context compilation", () => {
     expectCompilationDiagnostic(compileInput({ edges: [lane], payloads, versions }), code);
   });
 
+  it("preserves complete selector provenance for multiple failed lanes", () => {
+    const edges = [
+      edge({ id: "selector-b", sourceNodeId: "source-b", role: "style", order: 2, selector: { kind: "latest-approved" } }),
+      edge({ id: "selector-a", sourceNodeId: "source-a", role: "subject", order: 1, selector: { kind: "pinned", outputVersionId: "missing-a" } })
+    ];
+
+    try {
+      compileWorkerContext(compileInput({ edges }));
+      throw new Error("Expected selector failures to block compilation.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkerContextCompilationError);
+      expect((error as WorkerContextCompilationError).manifest.diagnostics).toEqual([
+        expect.objectContaining({
+          code: "PINNED_VERSION_NOT_FOUND",
+          details: {
+            edgeId: "selector-a",
+            selector: { kind: "pinned", outputVersionId: "missing-a" },
+            sourceNodeId: "source-a",
+            role: "subject",
+            order: 1,
+            channel: "text",
+            outputVersionId: "missing-a"
+          }
+        }),
+        expect.objectContaining({
+          code: "NO_OUTPUT_VERSION",
+          details: {
+            edgeId: "selector-b",
+            selector: { kind: "latest-approved" },
+            sourceNodeId: "source-b",
+            role: "style",
+            order: 2,
+            channel: "text"
+          }
+        })
+      ]);
+    }
+  });
+
   it("omits upstream inputs when includeUpstream is false", () => {
     const config = workerConfig({
       contextPolicy: { includeUpstream: false, includeDownstreamCapabilities: true, maxTokens: 8_000 }
@@ -476,7 +561,47 @@ describe("deterministic worker context compilation", () => {
       versions: [version({ id: "version-upstream", nodeId: "source", payloadIds: [upstream.id] })]
     }));
     expect(compiled.request.inputs).toEqual([]);
-    expect(compiled.manifest.inputs).toEqual([expect.objectContaining({ included: false, exclusionCode: "UPSTREAM_DISABLED" })]);
+    expect(compiled.manifest.inputs).toEqual([]);
+    expect(compiled.manifest.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "UPSTREAM_DISABLED",
+        blocking: false,
+        details: {
+          edgeId: "edge-upstream",
+          selector: { kind: "latest" },
+          sourceNodeId: "source",
+          role: "general",
+          order: 0,
+          channel: "text"
+        }
+      })
+    ]);
+  });
+
+  it("skips selector and adapter resolution for every disabled upstream lane", () => {
+    const config = workerConfig({
+      contextPolicy: { includeUpstream: false, includeDownstreamCapabilities: true, maxTokens: 8_000 }
+    });
+    const missingPin = edge({
+      id: "disabled-pin",
+      sourceNodeId: "text-source",
+      role: "subject",
+      order: 1,
+      selector: { kind: "pinned", outputVersionId: "missing-version" }
+    });
+    const missingCapability = {
+      ...edge({ id: "disabled-adapter", sourceNodeId: "image-source", channel: "image", role: "style", order: 2 }),
+      to: { kind: "node" as const, nodeId: "worker", channel: "text" as const }
+    };
+
+    const compiled = compileWorkerContext(compileInput({ config, edges: [missingCapability, missingPin] }));
+
+    expect(compiled.manifest.dispatchable).toBe(true);
+    expect(compiled.request.inputs).toEqual([]);
+    expect(compiled.manifest.diagnostics).toEqual([
+      expect.objectContaining({ code: "UPSTREAM_DISABLED", blocking: false, details: expect.objectContaining({ edgeId: "disabled-pin", sourceNodeId: "text-source" }) }),
+      expect.objectContaining({ code: "UPSTREAM_DISABLED", blocking: false, details: expect.objectContaining({ edgeId: "disabled-adapter", sourceNodeId: "image-source" }) })
+    ]);
   });
 
   it("includes or suppresses the injected downstream summary according to context policy", () => {
@@ -593,6 +718,37 @@ describe("deterministic worker context compilation", () => {
     expectCompilationDiagnostic(compileInput({ config }), "UNKNOWN_OUTPUT_SCHEMA");
   });
 
+  it("deduplicates identical schema IDs and records the selected schema fingerprint", () => {
+    const config = workerConfig({
+      outputContract: { channel: "data", schemaId: "campaign-brief", count: 1, selectionPolicy: "latest" }
+    });
+    const first = structuredSchema();
+    const duplicate = structuredClone(first);
+    const compiled = compileWorkerContext(compileInput({ config, schemas: [duplicate, first] }));
+
+    expect(compiled.manifest.outputSchemaFingerprint).toMatch(/^sha256:v1:[a-f0-9]{64}$/);
+    expect(compileWorkerContext(compileInput({ config, schemas: [first, duplicate] })).manifest.outputSchemaFingerprint)
+      .toBe(compiled.manifest.outputSchemaFingerprint);
+  });
+
+  it("rejects conflicting duplicate schema IDs deterministically", () => {
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: "duplicate", count: 1, selectionPolicy: "latest" }
+    });
+    const schemas: StructuredOutputSchema[] = [
+      { id: "duplicate", schema: { type: "string" } },
+      { id: "duplicate", schema: { type: "number" } }
+    ];
+
+    expectCompilationDiagnostic(compileInput({ config, schemas }), "INVALID_OUTPUT_SCHEMA");
+    expect(validateWorkerOutput({ config, output: "value", schemaCatalog: schemas, attempt: 0 })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "INVALID_OUTPUT_SCHEMA", path: "$.schemaCatalog.duplicate" })],
+      correctiveRetry: null
+    });
+  });
+
   it("blocks missing runtime model capabilities and unsupported output channels", () => {
     const missingCatalog = runtimeCatalog({ models: [] });
     expectCompilationDiagnostic(compileInput({ catalog: missingCatalog }), "MODEL_REASONING_PAIR_UNAVAILABLE");
@@ -644,6 +800,9 @@ describe("deterministic worker context compilation", () => {
           remedies: [{ kind: "enable-capability", capability: "codex.vision" }]
         }
       });
+      expect(Object.isFrozen((error as WorkerContextCompilationError).manifest.diagnostics)).toBe(true);
+      expect(Object.isFrozen((error as WorkerContextCompilationError).manifest.diagnostics[0]?.details)).toBe(true);
+      expect(Object.isFrozen((error as WorkerContextCompilationError).manifest.diagnostics[0]?.details.remedies)).toBe(true);
     }
   });
 
@@ -738,7 +897,7 @@ describe("worker output validation and transformation guard", () => {
     const invalidInput = {
       title: "tiny",
       score: 10.25,
-      tags: ["Summer", "Summer"],
+      tags: ["x", "x"],
       mode: "unknown",
       extra: true
     };
@@ -784,8 +943,125 @@ describe("worker output validation and transformation guard", () => {
     })).toMatchObject({
       accepted: false,
       issues: [expect.objectContaining({ code: "INVALID_OUTPUT_SCHEMA" })],
-      correctiveRetry: { attempt: 1, maximumAttempts: 1 }
+      correctiveRetry: null
     });
+  });
+
+  it.each([
+    ["pattern", { type: "string", pattern: "^(a+)+$" }],
+    ["patternProperties", { type: "object", patternProperties: { "^(a+)+$": { type: "string" } } }],
+    ["local ref", { $defs: { text: { type: "string" } }, $ref: "#/$defs/text" }],
+    ["dynamic ref", { $dynamicRef: "#value" }],
+    ["recursive ref", { $recursiveRef: "#" }],
+    ["format", { type: "string", format: "email" }]
+  ] as const)("rejects hazardous or externally resolving schema keyword: %s", (_name, definition) => {
+    const schema: StructuredOutputSchema = { id: "hazardous", schema: definition };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+    const result = validateWorkerOutput({ config, output: "aaaa", schemaCatalog: [schema], attempt: 0 });
+
+    expect(result).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "INVALID_OUTPUT_SCHEMA", path: expect.stringContaining("$") })],
+      correctiveRetry: null
+    });
+  });
+
+  it("bounds schema and output bytes, depth, node count, and validation errors", () => {
+    const oversizedSchema: StructuredOutputSchema = {
+      id: "oversized",
+      schema: { type: "string", description: "x".repeat(70_000) }
+    };
+    const schemaConfig = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: oversizedSchema.id, count: 1, selectionPolicy: "latest" }
+    });
+    expect(validateWorkerOutput({ config: schemaConfig, output: "value", schemaCatalog: [oversizedSchema], attempt: 0 })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "OUTPUT_LIMIT_EXCEEDED" })],
+      correctiveRetry: null
+    });
+
+    expect(validateWorkerOutput({
+      config: workerConfig(),
+      output: "x".repeat(1_100_000),
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "OUTPUT_LIMIT_EXCEEDED", path: "$" })],
+      correctiveRetry: null
+    });
+
+    let deeplyNested: JsonValue = "value";
+    for (let depth = 0; depth < 70; depth += 1) deeplyNested = [deeplyNested];
+    expect(validateWorkerOutput({
+      config: workerConfig({ outputContract: { channel: "data", count: 1, selectionPolicy: "latest" } }),
+      output: deeplyNested,
+      schemaCatalog: [],
+      attempt: 0
+    }).issues).toContainEqual(expect.objectContaining({ code: "OUTPUT_LIMIT_EXCEEDED", path: "$" }));
+
+    expect(validateWorkerOutput({
+      config: workerConfig({ outputContract: { channel: "data", count: 1, selectionPolicy: "latest" } }),
+      output: Array.from({ length: 10_001 }, (_, index) => index),
+      schemaCatalog: [],
+      attempt: 0
+    }).issues).toContainEqual(expect.objectContaining({ code: "OUTPUT_LIMIT_EXCEEDED", path: "$" }));
+
+    const required = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`field${index}`, { type: "string" }]));
+    const boundedErrors: StructuredOutputSchema = {
+      id: "bounded-errors",
+      schema: { type: "object", required: Object.keys(required), properties: required, additionalProperties: false }
+    };
+    const errorResult = validateWorkerOutput({
+      config: workerConfig({
+        behavior: "extract",
+        outputContract: { channel: "data", schemaId: boundedErrors.id, count: 1, selectionPolicy: "latest" }
+      }),
+      output: {},
+      schemaCatalog: [boundedErrors],
+      attempt: 0
+    });
+    expect(errorResult.issues).toHaveLength(32);
+  });
+
+  it("uses a bounded deterministic LRU schema cache with explicit lifecycle controls", () => {
+    const api = intelligenceApi as typeof intelligenceApi & {
+      clearStructuredSchemaCache(): void;
+      getStructuredSchemaCacheStats(): { capacity: number; size: number; hits: number; misses: number; evictions: number };
+    };
+    expect(typeof api.clearStructuredSchemaCache).toBe("function");
+    expect(typeof api.getStructuredSchemaCacheStats).toBe("function");
+    api.clearStructuredSchemaCache();
+    const capacity = api.getStructuredSchemaCacheStats().capacity;
+
+    for (let index = 0; index <= capacity; index += 1) {
+      const schema: StructuredOutputSchema = { id: `cache-${index}`, schema: { type: "string", minLength: index } };
+      validateWorkerOutput({
+        config: workerConfig({
+          behavior: "extract",
+          outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+        }),
+        output: "x".repeat(index),
+        schemaCatalog: [schema],
+        attempt: 0
+      });
+    }
+
+    expect(api.getStructuredSchemaCacheStats()).toEqual({ capacity, size: capacity, hits: 0, misses: capacity + 1, evictions: 1 });
+    const evicted: StructuredOutputSchema = { id: "cache-0", schema: { type: "string", minLength: 0 } };
+    validateWorkerOutput({
+      config: workerConfig({ behavior: "extract", outputContract: { channel: "data", schemaId: evicted.id, count: 1, selectionPolicy: "latest" } }),
+      output: "",
+      schemaCatalog: [evicted],
+      attempt: 0
+    });
+    expect(api.getStructuredSchemaCacheStats()).toEqual({ capacity, size: capacity, hits: 0, misses: capacity + 2, evictions: 2 });
+    api.clearStructuredSchemaCache();
+    expect(api.getStructuredSchemaCacheStats()).toEqual({ capacity, size: 0, hits: 0, misses: 0, evictions: 0 });
   });
 
   it("validates JSON null instead of treating it as a parse-failure sentinel", () => {
@@ -805,6 +1081,35 @@ describe("worker output validation and transformation guard", () => {
     });
   });
 
+  it.each([
+    null,
+    [],
+    {},
+    ["   "],
+    { nested: { value: "\n\t" } },
+    [{}, [" "]]
+  ] as JsonValue[])("rejects an empty structured transformation at the tree root: %j", (output) => {
+    expect(validateWorkerOutput({
+      config: workerConfig({ outputContract: { channel: "data", count: 1, selectionPolicy: "latest" } }),
+      output,
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "EMPTY_OUTPUT", path: "$" })],
+      correctiveRetry: { attempt: 1, maximumAttempts: 1 }
+    });
+  });
+
+  it.each([0, false, { value: 0 }, [false]] as JsonValue[])("accepts substantive structured scalar content: %j", (output) => {
+    expect(validateWorkerOutput({
+      config: workerConfig({ outputContract: { channel: "data", count: 1, selectionPolicy: "latest" } }),
+      output,
+      schemaCatalog: [],
+      attempt: 0
+    }).accepted).toBe(true);
+  });
+
   it.each(["rewrite", "mutate"] as const)("adds a content-only contract for %s", (behavior) => {
     const compiled = compileWorkerContext(compileInput({ config: workerConfig({ behavior }) }));
     expect(compiled.request.instruction).toContain("Return transformed content only.");
@@ -822,6 +1127,15 @@ describe("worker output validation and transformation guard", () => {
       issues: [expect.objectContaining({ code })],
       correctiveRetry: { attempt: 1, maximumAttempts: 1 }
     });
+  });
+
+  it("accepts an ordinary content sentence beginning with Here is", () => {
+    expect(validateWorkerOutput({
+      config: workerConfig(),
+      output: "Here is the launch schedule for the summer campaign.",
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({ accepted: true, issues: [] });
   });
 
   it("accepts corrected transformed content and permits contrastive narration only when explicitly requested", () => {
@@ -889,13 +1203,63 @@ describe("worker output validation and transformation guard", () => {
     expect(first.correctiveRetry?.instruction).toContain("Return corrected content only.");
     expect(second.correctiveRetry).toBeNull();
   });
+
+  it.each([Number.NaN, -1, 2, 1.5, Number.POSITIVE_INFINITY])("rejects invalid validation attempt values: %s", (attempt) => {
+    expect(validateWorkerOutput({
+      config: workerConfig(),
+      output: "A corrected studio portrait.",
+      schemaCatalog: [],
+      attempt
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "INVALID_VALIDATION_ATTEMPT", path: "$.attempt" })],
+      correctiveRetry: null
+    });
+  });
+
+  it("does not retry unknown schemas or invalid schema configuration", () => {
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: "missing", count: 1, selectionPolicy: "latest" }
+    });
+    expect(validateWorkerOutput({ config, output: {}, schemaCatalog: [], attempt: 0 }).correctiveRetry).toBeNull();
+    expect(validateWorkerOutput({
+      config,
+      output: {},
+      schemaCatalog: [{ id: "missing", schema: { type: "invalid" } }],
+      attempt: 0
+    }).correctiveRetry).toBeNull();
+  });
 });
 
 describe("worker memory policy", () => {
-  it("resolves stateless, per-node, and per-branch scope keys", () => {
-    expect(resolveMemoryScopeKey({ mode: "stateless" }, "worker", "branch-a")).toBeNull();
-    expect(resolveMemoryScopeKey({ mode: "per-node" }, "worker", "branch-a")).toBe("node:worker");
-    expect(resolveMemoryScopeKey({ mode: "per-branch" }, "worker", "branch-a")).toBe("branch:branch-a");
+  const scope = { documentId: "document", graphId: "graph", nodeId: "worker", lineageKey: "branch-a" };
+
+  it("resolves stateless, per-node, and per-branch scope keys with full scope identity", () => {
+    expect(resolveMemoryScopeKey({ mode: "stateless" }, scope)).toBeNull();
+    expect(resolveMemoryScopeKey({ mode: "per-node" }, scope)).toMatch(/^memory:v1:node:sha256:[a-f0-9]{64}$/);
+    expect(resolveMemoryScopeKey({ mode: "per-branch" }, scope)).toMatch(/^memory:v1:branch:sha256:[a-f0-9]{64}$/);
+    expect(resolveMemoryScopeKey({ mode: "per-node" }, { ...scope, lineageKey: "other" }))
+      .toBe(resolveMemoryScopeKey({ mode: "per-node" }, scope));
+  });
+
+  it("prevents cross-document, cross-graph, and delimiter or empty-lineage collisions", () => {
+    const base = resolveMemoryScopeKey({ mode: "per-branch" }, scope);
+    expect(resolveMemoryScopeKey({ mode: "per-branch" }, { ...scope, documentId: "other" })).not.toBe(base);
+    expect(resolveMemoryScopeKey({ mode: "per-branch" }, { ...scope, graphId: "other" })).not.toBe(base);
+    expect(resolveMemoryScopeKey({ mode: "per-branch" }, { ...scope, nodeId: "other" })).not.toBe(base);
+    expect(resolveMemoryScopeKey({ mode: "per-branch" }, { ...scope, lineageKey: "" })).not.toBe(base);
+    expect(resolveMemoryScopeKey({ mode: "per-branch" }, { documentId: "a|b", graphId: "c", nodeId: "d", lineageKey: "" })).not.toBe(
+      resolveMemoryScopeKey({ mode: "per-branch" }, { documentId: "a", graphId: "b|c", nodeId: "d", lineageKey: "" })
+    );
+  });
+
+  it("does not expose the collision-prone positional overload", () => {
+    if (false) {
+      // @ts-expect-error Positional memory identity is intentionally unsupported.
+      resolveMemoryScopeKey({ mode: "per-node" }, "worker", "branch-a");
+    }
+    expect(resolveMemoryScopeKey.length).toBe(2);
   });
 });
 
@@ -928,9 +1292,9 @@ describe("intelligence package boundary", () => {
     const output = execFileSync(process.execPath, [
       "--input-type=module",
       "--eval",
-      "import('@ether/intelligence').then(m => console.log([typeof m.compileWorkerContext, typeof m.resolveWorkerProfile, typeof m.resolveMemoryScopeKey, typeof m.validateWorkerOutput].join(',')))"
+      "import('@ether/intelligence').then(m => console.log([typeof m.compileWorkerContext, typeof m.resolveWorkerProfile, typeof m.resolveMemoryScopeKey, typeof m.validateWorkerOutput, typeof m.clearStructuredSchemaCache, typeof m.getStructuredSchemaCacheStats].join(',')))"
     ], { cwd: `${workspaceRoot}/packages/testing`, encoding: "utf8" }).trim();
-    expect(output).toBe("function,function,function,function");
+    expect(output).toBe("function,function,function,function,function,function");
   }, 30_000);
 });
 

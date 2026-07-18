@@ -532,6 +532,43 @@ describe("immutable selectors and context assembly", () => {
     expect(result.diagnostics).toEqual([{ code: "NO_OUTPUT_FOR_CHANNEL", message: "The source node has no immutable output version for text.", channel: "text" }]);
   });
 
+  it("attaches complete lane provenance to every assembly selector diagnostic", () => {
+    const target = workerNode("target");
+    const a = promptNode("a");
+    const b = promptNode("b");
+    const first = { ...edge("edge-b", b.id, target.id, "style", 2), selector: { kind: "latest-approved" as const } };
+    const second = { ...edge("edge-a", a.id, target.id, "subject", 1), selector: { kind: "pinned" as const, outputVersionId: "missing" } };
+
+    const result = assembleExecutorContext({
+      graph: { ...graph("root", "root", [a, b, target]), edges: [first, second] },
+      targetNodeId: target.id,
+      versions: [],
+      payloads: [],
+      capabilities: FULL_ADAPTER_CAPABILITIES
+    });
+
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "PINNED_VERSION_NOT_FOUND",
+        edgeId: "edge-a",
+        selector: { kind: "pinned", outputVersionId: "missing" },
+        sourceNodeId: "a",
+        role: "subject",
+        order: 1,
+        channel: "text"
+      }),
+      expect.objectContaining({
+        code: "NO_OUTPUT_VERSION",
+        edgeId: "edge-b",
+        selector: { kind: "latest-approved" },
+        sourceNodeId: "b",
+        role: "style",
+        order: 2,
+        channel: "text"
+      })
+    ]);
+  });
+
   it("runs selector, payload, adapter, role/order, consequence, and manifest stages in order", () => {
     const target = workerNode("target", "Keep this target instruction separate");
     const source = promptNode("source");
