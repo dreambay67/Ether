@@ -909,14 +909,25 @@ describe("worker output validation and transformation guard", () => {
       (left.path ?? "$ ").localeCompare(right.path ?? "$ ")
       || left.message.localeCompare(right.message)
     ));
-    expect(first.issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.title" }),
-      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.score" }),
-      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.tags" }),
-      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.mode" }),
-      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.extra" })
-    ]));
-    expect(first.issues.find((issue) => issue.path === "$.title")?.message).toContain("minLength");
+    expect(first.issues).toEqual([
+      expect.objectContaining({ code: "SCHEMA_INVALID", path: "$.extra", message: expect.stringContaining("additionalProperties") })
+    ]);
+
+    const validInput = { title: "Launch brief", score: 8.5, tags: ["summer", "studio"], mode: "final" };
+    const representativeFailures: Array<[JsonObject, string]> = [
+      [{ ...validInput, title: "tiny" }, "$.title"],
+      [{ ...validInput, score: 10.25 }, "$.score"],
+      [{ ...validInput, tags: ["x", "x"] }, "$.tags"],
+      [{ ...validInput, mode: "unknown" }, "$.mode"]
+    ];
+    for (const [output, pathPrefix] of representativeFailures) {
+      const result = validateWorkerOutput({ config, output, schemaCatalog: [schema], attempt: 0 });
+      expect(result.accepted).toBe(false);
+      expect(result.issues[0]).toEqual(expect.objectContaining({ code: "SCHEMA_INVALID" }));
+      expect(result.issues[0]?.path?.startsWith(pathPrefix)).toBe(true);
+    }
+    expect(validateWorkerOutput({ config, output: representativeFailures[0][0], schemaCatalog: [schema], attempt: 0 }).issues[0]?.message)
+      .toContain("minLength");
     expect(JSON.stringify(schema)).toBe(snapshot);
   });
 
@@ -967,6 +978,135 @@ describe("worker output validation and transformation guard", () => {
       issues: [expect.objectContaining({ code: "INVALID_OUTPUT_SCHEMA", path: expect.stringContaining("$") })],
       correctiveRetry: null
     });
+  });
+
+  it.each(["format", "pattern", "$ref"])("accepts %s as a literal instance property name", (propertyName) => {
+    const schema: StructuredOutputSchema = {
+      id: `literal-${propertyName}`,
+      schema: {
+        type: "object",
+        required: [propertyName],
+        properties: { [propertyName]: { type: "string", minLength: 1 } },
+        additionalProperties: false
+      }
+    };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+
+    expect(validateWorkerOutput({
+      config,
+      output: { [propertyName]: "literal content" },
+      schemaCatalog: [schema],
+      attempt: 0
+    })).toMatchObject({ accepted: true, issues: [] });
+  });
+
+  it.each([
+    ["format", { type: "string", format: "email" }],
+    ["pattern", { type: "string", pattern: "^(a+)+$" }],
+    ["$ref", { $ref: "#/$defs/text" }]
+  ] as const)("rejects an actual nested %s schema keyword below a literal property map", (keyword, propertySchema) => {
+    const schema: StructuredOutputSchema = {
+      id: `nested-${keyword}`,
+      schema: {
+        type: "object",
+        properties: { [keyword]: propertySchema },
+        $defs: { text: { type: "string" } }
+      }
+    };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+    const expectedPath = `$.schemaCatalog[${JSON.stringify(schema.id)}].schema.properties.${keyword}.${keyword}`;
+
+    expect(validateWorkerOutput({ config, output: { [keyword]: "value" }, schemaCatalog: [schema], attempt: 0 })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "INVALID_OUTPUT_SCHEMA", path: expectedPath })],
+      correctiveRetry: null
+    });
+  });
+
+  it("rejects schema and output validation products that can amplify Ajv errors", () => {
+    const schema: StructuredOutputSchema = {
+      id: "amplification",
+      schema: {
+        type: "array",
+        maxItems: 1_000,
+        allOf: Array.from({ length: 48 }, (_, branch) => ({
+          items: { type: "number", minimum: branch + 1 }
+        }))
+      }
+    };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+    const result = validateWorkerOutput({
+      config,
+      output: Array.from({ length: 512 }, () => 0),
+      schemaCatalog: [schema],
+      attempt: 0
+    });
+
+    expect(result).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "OUTPUT_LIMIT_EXCEEDED", path: "$" })],
+      correctiveRetry: null
+    });
+    expect(result.issues.some((issue) => issue.code === "SCHEMA_INVALID")).toBe(false);
+  });
+
+  it("bounds combinator branch counts before schema compilation", () => {
+    const schema: StructuredOutputSchema = {
+      id: "too-many-branches",
+      schema: {
+        allOf: Array.from({ length: 65 }, () => ({ type: "number" }))
+      }
+    };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+
+    expect(validateWorkerOutput({ config, output: 1, schemaCatalog: [schema], attempt: 0 })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "OUTPUT_LIMIT_EXCEEDED", path: expect.stringContaining(".allOf") })],
+      correctiveRetry: null
+    });
+  });
+
+  it("keeps ordinary representative arrays below the validation complexity budget", () => {
+    const schema: StructuredOutputSchema = {
+      id: "ordinary-array",
+      schema: {
+        type: "array",
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: "object",
+          required: ["name", "score"],
+          properties: {
+            name: { type: "string", minLength: 2 },
+            score: { type: "number", minimum: 0, maximum: 10 }
+          },
+          additionalProperties: false
+        }
+      }
+    };
+    const config = workerConfig({
+      behavior: "extract",
+      outputContract: { channel: "data", schemaId: schema.id, count: 1, selectionPolicy: "latest" }
+    });
+
+    expect(validateWorkerOutput({
+      config,
+      output: [{ name: "Alpha", score: 8 }, { name: "Beta", score: 9 }],
+      schemaCatalog: [schema],
+      attempt: 0
+    })).toMatchObject({ accepted: true, issues: [] });
   });
 
   it("bounds schema and output bytes, depth, node count, and validation errors", () => {
@@ -1025,7 +1165,7 @@ describe("worker output validation and transformation guard", () => {
       schemaCatalog: [boundedErrors],
       attempt: 0
     });
-    expect(errorResult.issues).toHaveLength(32);
+    expect(errorResult.issues).toHaveLength(1);
   });
 
   it("uses a bounded deterministic LRU schema cache with explicit lifecycle controls", () => {
@@ -1136,6 +1276,31 @@ describe("worker output validation and transformation guard", () => {
       schemaCatalog: [],
       attempt: 0
     })).toMatchObject({ accepted: true, issues: [] });
+  });
+
+  it.each([
+    "Sure-footed composition anchors the campaign.",
+    "Certainly-crafted details sharpen the launch image.",
+    "Of course-inspired typography gives the poster momentum."
+  ])("accepts hyphenated content rather than treating it as an assistant preface: %s", (output) => {
+    expect(validateWorkerOutput({
+      config: workerConfig(),
+      output,
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({ accepted: true, issues: [] });
+  });
+
+  it("still rejects a standalone Sure interjection before a revised-content preface", () => {
+    expect(validateWorkerOutput({
+      config: workerConfig(),
+      output: "Sure, here is the revised prompt: A pineapple on a marble counter.",
+      schemaCatalog: [],
+      attempt: 0
+    })).toMatchObject({
+      accepted: false,
+      issues: [expect.objectContaining({ code: "CONVERSATIONAL_PREFACE" })]
+    });
   });
 
   it("accepts corrected transformed content and permits contrastive narration only when explicitly requested", () => {

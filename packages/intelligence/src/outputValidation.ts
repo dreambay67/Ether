@@ -18,6 +18,7 @@ export type StructuredOutputSchema = {
 export type IndexedStructuredOutputSchema = StructuredOutputSchema & {
   canonicalSchema: string;
   fingerprint: string;
+  validationComplexity: number;
 };
 
 export type StructuredOutputSchemaIndex = {
@@ -51,6 +52,8 @@ export const structuredOutputLimits = Object.freeze({
   nestingDepth: 64,
   valueNodes: 10_000,
   validationErrors: 32,
+  combinatorBranches: 64,
+  validationComplexityProduct: 50_000,
   schemaCacheEntries: 64
 });
 
@@ -64,7 +67,7 @@ export type StructuredSchemaCacheStats = {
 
 const ajv = new Ajv({
   addUsedSchema: false,
-  allErrors: true,
+  allErrors: false,
   coerceTypes: false,
   messages: true,
   removeAdditional: false,
@@ -104,6 +107,62 @@ const hazardousSchemaKeywords = new Set([
   "patternProperties"
 ]);
 
+const schemaMapKeywords = new Set([
+  "$defs",
+  "definitions",
+  "dependentSchemas",
+  "properties"
+]);
+
+const schemaValueKeywords = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "contains",
+  "else",
+  "if",
+  "not",
+  "propertyNames",
+  "then",
+  "unevaluatedItems",
+  "unevaluatedProperties"
+]);
+
+const schemaArrayKeywords = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+
+const validationKeywords = new Set([
+  "additionalItems",
+  "additionalProperties",
+  "const",
+  "contains",
+  "dependentRequired",
+  "dependencies",
+  "else",
+  "enum",
+  "exclusiveMaximum",
+  "exclusiveMinimum",
+  "if",
+  "items",
+  "maxContains",
+  "maxItems",
+  "maxLength",
+  "maxProperties",
+  "maximum",
+  "minContains",
+  "minItems",
+  "minLength",
+  "minProperties",
+  "minimum",
+  "multipleOf",
+  "not",
+  "propertyNames",
+  "required",
+  "then",
+  "type",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+  "uniqueItems"
+]);
+
 const correctableIssueCodes = new Set<WorkerOutputIssueCode>([
   "EMPTY_OUTPUT",
   "OUTPUT_CHANNEL_MISMATCH",
@@ -138,7 +197,7 @@ function inspectJsonStructure(
   value: unknown,
   kind: "schema" | "output",
   rootPath: string
-): WorkerOutputIssue | null {
+): { issue: WorkerOutputIssue | null; nodeCount: number } {
   type Frame = { value: unknown; depth: number; path: string; leaving: boolean };
   const active = new WeakSet<object>();
   const stack: Frame[] = [{ value, depth: 0, path: rootPath, leaving: false }];
@@ -152,35 +211,41 @@ function inspectJsonStructure(
     }
     nodes += 1;
     if (nodes > structuredOutputLimits.valueNodes) {
-      return limitIssue(`${kind === "schema" ? "Structured output schema" : "Worker output"} exceeds the ${structuredOutputLimits.valueNodes} node limit.`, rootPath);
+      return {
+        issue: limitIssue(`${kind === "schema" ? "Structured output schema" : "Worker output"} exceeds the ${structuredOutputLimits.valueNodes} node limit.`, rootPath),
+        nodeCount: nodes
+      };
     }
     if (frame.depth > structuredOutputLimits.nestingDepth) {
-      return limitIssue(`${kind === "schema" ? "Structured output schema" : "Worker output"} exceeds the ${structuredOutputLimits.nestingDepth} level nesting limit.`, rootPath);
+      return {
+        issue: limitIssue(`${kind === "schema" ? "Structured output schema" : "Worker output"} exceeds the ${structuredOutputLimits.nestingDepth} level nesting limit.`, rootPath),
+        nodeCount: nodes
+      };
     }
     if (frame.value === null || typeof frame.value === "string" || typeof frame.value === "boolean") continue;
     if (typeof frame.value === "number") {
       if (Number.isFinite(frame.value)) continue;
-      return {
-        code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
-        message: `${kind === "schema" ? "Structured output schemas" : "Structured worker outputs"} require finite JSON numbers.`,
-        path: frame.path
-      };
+      return { issue: {
+          code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
+          message: `${kind === "schema" ? "Structured output schemas" : "Structured worker outputs"} require finite JSON numbers.`,
+          path: frame.path
+        }, nodeCount: nodes };
     }
     if (typeof frame.value !== "object") {
-      return {
-        code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
-        message: `${kind === "schema" ? "Structured output schema" : "Structured worker output"} is not a JSON value.`,
-        path: frame.path
-      };
+      return { issue: {
+          code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
+          message: `${kind === "schema" ? "Structured output schema" : "Structured worker output"} is not a JSON value.`,
+          path: frame.path
+        }, nodeCount: nodes };
     }
 
     const objectValue = frame.value as object;
     if (active.has(objectValue)) {
-      return {
-        code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
-        message: `${kind === "schema" ? "Structured output schema" : "Structured worker output"} must not contain cycles.`,
-        path: frame.path
-      };
+      return { issue: {
+          code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
+          message: `${kind === "schema" ? "Structured output schema" : "Structured worker output"} must not contain cycles.`,
+          path: frame.path
+        }, nodeCount: nodes };
     }
     active.add(objectValue);
     stack.push({ ...frame, leaving: true });
@@ -194,28 +259,106 @@ function inspectJsonStructure(
 
     const prototype = Object.getPrototypeOf(frame.value);
     if (prototype !== Object.prototype && prototype !== null) {
-      return {
-        code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
-        message: `${kind === "schema" ? "Structured output schema" : "Structured worker output"} must use plain JSON objects.`,
-        path: frame.path
-      };
+      return { issue: {
+          code: kind === "schema" ? "INVALID_OUTPUT_SCHEMA" : "OUTPUT_CHANNEL_MISMATCH",
+          message: `${kind === "schema" ? "Structured output schema" : "Structured worker output"} must use plain JSON objects.`,
+          path: frame.path
+        }, nodeCount: nodes };
     }
     const record = frame.value as Record<string, unknown>;
     const keys = Object.keys(record).sort();
     for (let index = keys.length - 1; index >= 0; index -= 1) {
       const key = keys[index]!;
-      const childPath = appendJsonPath(frame.path, key);
-      if (kind === "schema" && hazardousSchemaKeywords.has(key)) {
-        return {
-          code: "INVALID_OUTPUT_SCHEMA",
-          message: `Unsupported structured output schema keyword: ${key}.`,
-          path: childPath
-        };
-      }
-      stack.push({ value: record[key], depth: frame.depth + 1, path: childPath, leaving: false });
+      stack.push({ value: record[key], depth: frame.depth + 1, path: appendJsonPath(frame.path, key), leaving: false });
     }
   }
-  return null;
+  return { issue: null, nodeCount: nodes };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function inspectSchemaSafety(
+  root: JsonObject,
+  rootPath: string
+): { issue: WorkerOutputIssue | null; validationComplexity: number } {
+  type SchemaFrame = { value: unknown; path: string };
+  const stack: SchemaFrame[] = [{ value: root, path: rootPath }];
+  let validationComplexity = 0;
+
+  const pushSchemaArray = (value: unknown, path: string): WorkerOutputIssue | null => {
+    if (!Array.isArray(value)) return null;
+    if (value.length > structuredOutputLimits.combinatorBranches) {
+      return limitIssue(`Structured output schema exceeds the ${structuredOutputLimits.combinatorBranches} branch applicator limit.`, path);
+    }
+    validationComplexity += value.length;
+    for (let index = value.length - 1; index >= 0; index -= 1) {
+      stack.push({ value: value[index], path: `${path}[${index}]` });
+    }
+    return null;
+  };
+
+  const pushSchemaMap = (value: unknown, path: string): void => {
+    if (!isJsonObject(value)) return;
+    const names = Object.keys(value).sort();
+    for (let index = names.length - 1; index >= 0; index -= 1) {
+      const name = names[index]!;
+      stack.push({ value: value[name], path: appendJsonPath(path, name) });
+    }
+  };
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    if (typeof frame.value === "boolean") {
+      validationComplexity += 1;
+      continue;
+    }
+    if (!isJsonObject(frame.value)) continue;
+    validationComplexity += 1;
+
+    for (const keyword of Object.keys(frame.value).sort()) {
+      const keywordPath = appendJsonPath(frame.path, keyword);
+      const keywordValue = frame.value[keyword];
+      if (hazardousSchemaKeywords.has(keyword)) {
+        return {
+          issue: {
+            code: "INVALID_OUTPUT_SCHEMA",
+            message: `Unsupported structured output schema keyword: ${keyword}.`,
+            path: keywordPath
+          },
+          validationComplexity
+        };
+      }
+      if (validationKeywords.has(keyword)) validationComplexity += 1;
+
+      if (schemaArrayKeywords.has(keyword)) {
+        const issue = pushSchemaArray(keywordValue, keywordPath);
+        if (issue !== null) return { issue, validationComplexity };
+      } else if (keyword === "items") {
+        if (Array.isArray(keywordValue)) {
+          const issue = pushSchemaArray(keywordValue, keywordPath);
+          if (issue !== null) return { issue, validationComplexity };
+        } else {
+          stack.push({ value: keywordValue, path: keywordPath });
+        }
+      } else if (schemaMapKeywords.has(keyword)) {
+        pushSchemaMap(keywordValue, keywordPath);
+      } else if (keyword === "dependencies" && isJsonObject(keywordValue)) {
+        const names = Object.keys(keywordValue).sort();
+        for (let index = names.length - 1; index >= 0; index -= 1) {
+          const name = names[index]!;
+          const dependency = keywordValue[name];
+          if (!Array.isArray(dependency)) {
+            stack.push({ value: dependency, path: appendJsonPath(keywordPath, name) });
+          }
+        }
+      } else if (schemaValueKeywords.has(keyword)) {
+        stack.push({ value: keywordValue, path: keywordPath });
+      }
+    }
+  }
+  return { issue: null, validationComplexity };
 }
 
 function schemaCatalogPath(id: string): string {
@@ -229,8 +372,10 @@ function inspectSchemaCandidate(schema: StructuredOutputSchema):
     return { indexed: null, issue: { code: "INVALID_OUTPUT_SCHEMA", message: "Structured output schema IDs must be non-empty strings.", path: "$.schemaCatalog" } };
   }
   const rootPath = `${schemaCatalogPath(schema.id)}.schema`;
-  const structureIssue = inspectJsonStructure(schema.schema, "schema", rootPath);
-  if (structureIssue !== null) return { indexed: null, issue: structureIssue };
+  const structure = inspectJsonStructure(schema.schema, "schema", rootPath);
+  if (structure.issue !== null) return { indexed: null, issue: structure.issue };
+  const safety = inspectSchemaSafety(schema.schema, rootPath);
+  if (safety.issue !== null) return { indexed: null, issue: safety.issue };
   const canonicalSchema = stableJson(schema.schema);
   if (byteLength(canonicalSchema) > structuredOutputLimits.schemaBytes) {
     return {
@@ -243,7 +388,8 @@ function inspectSchemaCandidate(schema: StructuredOutputSchema):
       id: schema.id,
       schema: JSON.parse(canonicalSchema) as JsonObject,
       canonicalSchema,
-      fingerprint: `sha256:v1:${sha256Hex(textEncoder.encode(canonicalSchema))}`
+      fingerprint: `sha256:v1:${sha256Hex(textEncoder.encode(canonicalSchema))}`,
+      validationComplexity: safety.validationComplexity
     },
     issue: null
   };
@@ -400,8 +546,22 @@ function validateJsonSchema(value: JsonValue, compiled: Extract<CompiledSchema, 
   return compiled.validator(value) ? [] : normalizeSchemaErrors(compiled.validator.errors);
 }
 
+function validationComplexityIssue(
+  schema: IndexedStructuredOutputSchema,
+  outputNodeCount: number
+): WorkerOutputIssue | null {
+  const boundedNodeCount = Math.max(1, outputNodeCount);
+  if (schema.validationComplexity <= Math.floor(structuredOutputLimits.validationComplexityProduct / boundedNodeCount)) {
+    return null;
+  }
+  return limitIssue(
+    `Structured output validation exceeds the ${structuredOutputLimits.validationComplexityProduct} schema-output complexity limit.`,
+    "$"
+  );
+}
+
 function parseStructuredOutput(output: string | JsonValue):
-  | { success: true; value: JsonValue; issues: [] }
+  | { success: true; value: JsonValue; nodeCount: number; issues: [] }
   | { success: false; value: null; issues: WorkerOutputIssue[] } {
   let candidate: unknown = output;
   if (typeof output === "string") {
@@ -414,8 +574,8 @@ function parseStructuredOutput(output: string | JsonValue):
       return { success: false, value: null, issues: [{ code: "INVALID_JSON", message: "Structured worker output must be valid JSON." }] };
     }
   }
-  const structureIssue = inspectJsonStructure(candidate, "output", "$");
-  if (structureIssue !== null) return { success: false, value: null, issues: [structureIssue] };
+  const structure = inspectJsonStructure(candidate, "output", "$");
+  if (structure.issue !== null) return { success: false, value: null, issues: [structure.issue] };
   const parsed = JsonValueSchema.safeParse(candidate);
   if (!parsed.success) {
     return { success: false, value: null, issues: [{ code: "OUTPUT_CHANNEL_MISMATCH", message: "Structured output is not a JSON value." }] };
@@ -423,7 +583,7 @@ function parseStructuredOutput(output: string | JsonValue):
   if (byteLength(stableJson(parsed.data)) > structuredOutputLimits.outputBytes) {
     return { success: false, value: null, issues: [limitIssue(`Worker output exceeds the ${structuredOutputLimits.outputBytes} byte limit.`, "$")] };
   }
-  return { success: true, value: parsed.data, issues: [] };
+  return { success: true, value: parsed.data, nodeCount: structure.nodeCount, issues: [] };
 }
 
 function correctiveRetry(issues: readonly WorkerOutputIssue[], attempt: 0 | 1): CorrectiveRetryContract | null {
@@ -480,11 +640,13 @@ export function validateWorkerOutput(input: ValidateWorkerOutputInput): WorkerOu
   if (schemaIndex.issues.length > 0) return validationResult(schemaIndex.issues, null, input.attempt);
 
   let compiledSchema: Extract<CompiledSchema, { valid: true }> | null = null;
+  let selectedSchema: IndexedStructuredOutputSchema | null = null;
   const schemaId = input.config.outputContract.schemaId;
   if (schemaId !== undefined) {
     const resolution = resolveStructuredOutputSchema(schemaIndex, schemaId);
     if (resolution.issue !== null) return validationResult([resolution.issue], null, input.attempt);
-    const compiled = compileSchema(resolution.schema!);
+    selectedSchema = resolution.schema!;
+    const compiled = compileSchema(selectedSchema);
     if (!compiled.valid) return validationResult([compiled.issue], null, input.attempt);
     compiledSchema = compiled;
   }
@@ -494,7 +656,11 @@ export function validateWorkerOutput(input: ValidateWorkerOutputInput): WorkerOu
   issues.push(...parsed.issues);
   if (parsed.success) {
     issues.push(...inspectStructuredTransformationOutput(input.config, parsed.value));
-    if (compiledSchema !== null) issues.push(...validateJsonSchema(parsed.value, compiledSchema));
+    if (compiledSchema !== null && selectedSchema !== null) {
+      const complexityIssue = validationComplexityIssue(selectedSchema, parsed.nodeCount);
+      if (complexityIssue !== null) issues.push(complexityIssue);
+      else issues.push(...validateJsonSchema(parsed.value, compiledSchema));
+    }
   }
   return validationResult(issues, value, input.attempt);
 }
