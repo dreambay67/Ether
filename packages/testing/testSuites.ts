@@ -13,6 +13,7 @@ export const testSuites = {
     "tests/graph-catalog.test.ts",
     "tests/graph-channels.test.ts",
     "tests/graph-edge-semantics.test.ts",
+    "tests/intelligence-context.test.ts",
     "tests/graph-taxonomy-25.test.ts",
     "tests/connection-matrix-4.0.test.ts",
     "tests/legacy-isolation-4.0.test.ts",

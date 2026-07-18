@@ -157,6 +157,15 @@ importers:
         specifier: workspace:*
         version: link:../schema
 
+  packages/intelligence:
+    dependencies:
+      '@ether/graph-kernel':
+        specifier: workspace:*
+        version: link:../graph-kernel
+      '@ether/schema':
+        specifier: workspace:*
+        version: link:../schema
+
   packages/mcp-server:
     dependencies:
       '@ether/engine':
@@ -195,6 +204,9 @@ importers:
       '@ether/graph-kernel':
         specifier: workspace:*
         version: link:../graph-kernel
+      '@ether/intelligence':
+        specifier: workspace:*
+        version: link:../intelligence
       '@ether/providers':
         specifier: workspace:*
         version: link:../providers

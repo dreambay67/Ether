@@ -1,0 +1,25 @@
+{
+  "name": "@ether/intelligence",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "prebuild": "pnpm --filter @ether/graph-kernel build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ether/graph-kernel build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings=0"
+  },
+  "dependencies": {
+    "@ether/graph-kernel": "workspace:*",
+    "@ether/schema": "workspace:*"
+  }
+}
