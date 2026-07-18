@@ -62,6 +62,7 @@ export const ETHER_SCHEMA_TABLES = [
   "plan_steps",
   "prompt_output_fts",
   "provider_capability_snapshots",
+  "provider_completion_intents",
   "provider_runs",
   "recipe_instances",
   "recipes",

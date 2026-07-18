@@ -375,6 +375,19 @@ CREATE TABLE attempts (
   UNIQUE (work_item_id, attempt_number)
 ) STRICT;
 
+CREATE TABLE provider_completion_intents (
+  attempt_id TEXT PRIMARY KEY REFERENCES attempts(attempt_id) ON DELETE CASCADE,
+  provider_attempt_id TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK (state IN ('prepared', 'staged', 'accepted')),
+  expected_output_count INTEGER NOT NULL CHECK (expected_output_count > 0),
+  identifiers_json TEXT NOT NULL CHECK (json_valid(identifiers_json)),
+  completion_json TEXT CHECK (completion_json IS NULL OR json_valid(completion_json)),
+  staging_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  accepted_at TEXT
+) STRICT;
+
 CREATE TABLE command_receipts (
   command_id TEXT PRIMARY KEY,
   command_name TEXT NOT NULL,

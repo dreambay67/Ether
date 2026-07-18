@@ -1,5 +1,6 @@
 export * from "./application.js";
 export * from "./artifacts.js";
+export * from "./canonical.js";
 export * from "./document.js";
 export * from "./execution.js";
 export * from "./graph.js";

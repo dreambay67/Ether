@@ -61,11 +61,44 @@ export const LinkedReferenceSchema = z
   .strict();
 export type LinkedReference = z.infer<typeof LinkedReferenceSchema>;
 
+export const ProviderCompletionRecoverySchema = z
+  .object({
+    attemptId: z.string().min(1),
+    providerAttemptId: z.string().min(1),
+    expectedOutputCount: z.number().int().positive(),
+    providerRunId: z.string().min(1),
+    capabilitySnapshotId: z.string().min(1),
+    acceptedAt: TimestampSchema,
+    providerId: z.string().min(1),
+    modelId: z.string().min(1),
+    capabilitySnapshot: z.record(z.unknown()),
+    request: z.record(z.unknown()),
+    response: z.record(z.unknown()).nullable(),
+    metadata: z.record(z.unknown()).nullable(),
+    outputs: z.array(
+      z
+        .object({
+          ordinal: z.number().int().nonnegative(),
+          artifactId: z.string().min(1),
+          outputVersionId: z.string().min(1),
+          payloadId: z.string().min(1),
+          importId: z.string().min(1),
+          stagedPath: z.string().min(1),
+          fileName: z.string().min(1),
+          mediaType: z.string().min(1),
+          artifactMetadata: z.record(z.unknown())
+        })
+        .strict()
+    )
+  })
+  .strict();
+export type ProviderCompletionRecovery = z.infer<typeof ProviderCompletionRecoverySchema>;
+
 export const RecoveryJournalEntrySchema = z
   .object({
     id: z.string().min(1),
     kind: z.enum(["blob-import", "document-repair", "provider-output"]),
-    state: z.enum(["staged", "validated", "publishing", "committed", "failed"]),
+    state: z.enum(["prepared", "staged", "validated", "publishing", "committed", "failed"]),
     documentId: z.string().min(1),
     documentPath: z.string().min(1),
     stagedPath: z.string().min(1),
@@ -74,6 +107,7 @@ export const RecoveryJournalEntrySchema = z
     sourceName: z.string().min(1),
     mediaType: z.string().min(1),
     artifact: ArtifactSchema.omit({ contentKey: true, byteLength: true }).optional(),
+    execution: ProviderCompletionRecoverySchema.optional(),
     contentKey: ContentKeySchema.optional(),
     byteLength: z.number().int().nonnegative().optional(),
     createdAt: TimestampSchema,
@@ -81,7 +115,7 @@ export const RecoveryJournalEntrySchema = z
   })
   .strict()
   .superRefine((entry, context) => {
-    if (entry.kind === "provider-output" && entry.artifact === undefined) {
+    if (entry.kind === "provider-output" && entry.artifact === undefined && entry.execution === undefined) {
       context.addIssue({
         code: "custom",
         message: "Provider recovery requires catalog artifact metadata.",

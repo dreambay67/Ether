@@ -3,6 +3,7 @@ import type {
   GenerationProviderInput,
   ImageEditProviderInput,
   ProviderDiagnosticContext,
+  ProviderExecutionContext,
   ProviderGenerationResult
 } from "../types.js";
 import { ApiProviderBase } from "./apiProviderBase.js";
@@ -30,7 +31,10 @@ export class ApiGenerationProvider extends ApiProviderBase implements Generation
     return super.diagnose(context);
   }
 
-  async generate(input: GenerationProviderInput): Promise<ProviderGenerationResult> {
+  async generate(
+    input: GenerationProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult> {
     await this.requireConfigured();
 
     if (!this.adapter) {
@@ -39,10 +43,15 @@ export class ApiGenerationProvider extends ApiProviderBase implements Generation
       );
     }
 
-    return this.adapter.generate(input);
+    const result = await this.adapter.generate(input);
+    await context?.complete(result);
+    return result;
   }
 
-  async edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult> {
+  async edit(
+    input: ImageEditProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult> {
     await this.requireConfigured();
 
     if (!this.adapter) {
@@ -51,7 +60,9 @@ export class ApiGenerationProvider extends ApiProviderBase implements Generation
       );
     }
 
-    return this.adapter.edit(input);
+    const result = await this.adapter.edit(input);
+    await context?.complete(result);
+    return result;
   }
 
   protected hasRunnableAdapter() {

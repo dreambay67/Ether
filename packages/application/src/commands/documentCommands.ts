@@ -1,4 +1,4 @@
-import { DocumentStore } from "@ether/document";
+import { DocumentStore, type DocumentStoreEnvironment } from "@ether/document";
 import type { EtherGraph } from "@ether/schema";
 
 export function createDocument(input: {
@@ -6,10 +6,12 @@ export function createDocument(input: {
   title: string;
   initialGraph: EtherGraph;
   appVersion: string;
+  environment?: DocumentStoreEnvironment;
 }): Promise<DocumentStore> {
   return DocumentStore.create(input.path, {
     appVersion: input.appVersion,
     title: input.title,
-    initialGraph: input.initialGraph
+    initialGraph: input.initialGraph,
+    environment: input.environment
   });
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { ProviderCapabilitySchema } from "@ether/schema";
 
 import { importBlob } from "../blob/importBlob.js";
 import { openEtherDocumentConnection } from "../database.js";
@@ -126,6 +127,76 @@ export async function reconcileStaging(
           result.removed.push(entry.id);
         }
         removeRecoveryJournal(journalPath, roots.appDataRoot);
+      } catch {
+        writeRecoveryJournal({
+          appDataRoot: roots.appDataRoot,
+          entry: { ...entry, state: "failed", updatedAt: new Date().toISOString() }
+        });
+        result.attention.push(entry.id);
+      }
+      continue;
+    }
+
+    if (entry.execution !== undefined) {
+      const completion = entry.execution;
+      try {
+        const snapshot = await store[DOCUMENT_STORE_INTERNAL]("read", ({ execution }) => ({
+          claim: execution.getClaimForAttempt(completion.attemptId),
+          intent: execution.getProviderCompletion(completion.attemptId)
+        }));
+        if (snapshot.claim === undefined || snapshot.claim.providerAttemptId !== completion.providerAttemptId) {
+          throw new Error("Provider completion does not match a persisted execution attempt.");
+        }
+        if (snapshot.claim.attempt.status === "accepted" || snapshot.intent?.state === "accepted") {
+          removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
+          removeRecoveryJournal(journalPath, roots.appDataRoot);
+          result.removed.push(entry.id);
+          continue;
+        }
+        if (entry.state === "prepared" || completion.outputs.length === 0) {
+          const containsOutput = existsSync(entry.stagedPath) && readdirSync(entry.stagedPath).length > 0;
+          if (containsOutput) {
+            await store[DOCUMENT_STORE_INTERNAL]("write", ({ execution }) =>
+              execution.failAttempt(
+                completion.attemptId,
+                "PROCESS_LOST_PARTIAL_OUTPUT",
+                "Provider output was interrupted before durable provenance was complete.",
+                false
+              )
+            );
+            result.attention.push(entry.id);
+          } else {
+            result.removed.push(entry.id);
+          }
+          removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
+          removeRecoveryJournal(journalPath, roots.appDataRoot);
+          continue;
+        }
+        const recoveredOutputs = completion.outputs.map((output) => {
+          assertDestructiveRecoveryPath(output.stagedPath, entry.stagedPath, roots.appDataRoot);
+          return { ...output, bytes: readFileSync(output.stagedPath) };
+        });
+        await store[DOCUMENT_STORE_INTERNAL]("write", ({ execution }) => {
+          execution.stageProviderCompletion(completion);
+          execution.acceptProviderOutput({
+            claim: snapshot.claim!,
+            identifiers: {
+              providerRunId: completion.providerRunId,
+              capabilitySnapshotId: completion.capabilitySnapshotId,
+              acceptedAt: completion.acceptedAt
+            },
+            outputs: recoveredOutputs,
+            providerId: completion.providerId,
+            modelId: completion.modelId,
+            capabilitySnapshot: ProviderCapabilitySchema.parse(completion.capabilitySnapshot),
+            request: completion.request,
+            response: completion.response ?? {},
+            metadata: completion.metadata ?? {}
+          });
+        });
+        removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
+        removeRecoveryJournal(journalPath, roots.appDataRoot);
+        result.recovered.push(entry.id);
       } catch {
         writeRecoveryJournal({
           appDataRoot: roots.appDataRoot,

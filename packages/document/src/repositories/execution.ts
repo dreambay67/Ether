@@ -1,5 +1,7 @@
 import {
   ArtifactSchema,
+  ApplicationEventSchema,
+  canonicalPlanJson,
   ExecutionAttemptSchema,
   ExecutionJobSchema,
   ExecutionPlanSchema,
@@ -8,11 +10,14 @@ import {
   PayloadEnvelopeSchema,
   ProviderCapabilitySchema,
   type Artifact,
+  type ApplicationEvent,
+  type ApplicationEventName,
   type ExecutionAttempt,
   type ExecutionJob,
   type ExecutionPlan,
   type ExecutionWorkItem,
   type NodeOutputVersion,
+  type ProviderCompletionRecovery,
   type ProviderCapability
 } from "@ether/schema";
 import { createHash } from "node:crypto";
@@ -83,6 +88,18 @@ export type ArtifactLineageSnapshot = {
   relations: Array<Record<string, unknown>>;
 };
 
+export type ProviderCompletionIntentSnapshot = {
+  state: "prepared" | "staged" | "accepted";
+  completion: ProviderCompletionRecovery;
+  stagingPath: string;
+};
+
+export type PendingApplicationEvent = {
+  name: ApplicationEventName;
+  payload: Record<string, unknown>;
+  occurredAt?: string;
+};
+
 export class ExecutionRepositoryError extends Error {
   readonly code: string;
 
@@ -95,6 +112,71 @@ export class ExecutionRepositoryError extends Error {
 
 export class ExecutionRepository {
   constructor(private readonly context: RepositoryTransactionContext) {}
+
+  getCommandResult(commandId: string, commandName: string): Record<string, unknown> | undefined {
+    if (typeof commandId !== "string" || commandId.length === 0) {
+      throw new ExecutionRepositoryError(
+        "COMMAND_ID_INVALID",
+        `Command ID must be a non-empty string; received ${String(commandId)}.`
+      );
+    }
+    const receipt = this.commandReceipt(commandId);
+    if (receipt === undefined) return undefined;
+    if (receipt.commandName !== commandName) {
+      throw new ExecutionRepositoryError(
+        "COMMAND_ID_CONFLICT",
+        `Command ID ${commandId} was already used for ${receipt.commandName}.`
+      );
+    }
+    return receipt.result;
+  }
+
+  completeCommand(
+    commandId: string,
+    commandName: string,
+    result: Record<string, unknown>,
+    events: readonly PendingApplicationEvent[] = []
+  ): Record<string, unknown> {
+    const existing = this.getCommandResult(commandId, commandName);
+    if (existing !== undefined) return existing;
+    const occurredAt = this.context.now();
+    this.saveCommandReceipt(commandId, commandName, result);
+    for (const event of events) {
+      this.recordOutbox(event.name, commandId, event.payload, event.occurredAt ?? occurredAt);
+    }
+    return result;
+  }
+
+  listPendingEvents(): ApplicationEvent[] {
+    const rows = this.context.database
+      .prepare(
+        `SELECT event_id, event_name, correlation_id, payload_json, occurred_at
+         FROM event_outbox WHERE delivered_at IS NULL ORDER BY occurred_at, rowid`
+      )
+      .all() as unknown as Array<{
+        event_id: string;
+        event_name: string;
+        correlation_id: string;
+        payload_json: string;
+        occurred_at: string;
+      }>;
+    const documentId = this.documentId();
+    return rows.map((row) => ApplicationEventSchema.parse({
+      kind: "event",
+      id: row.event_id,
+      correlationId: row.correlation_id,
+      name: row.event_name,
+      documentId,
+      occurredAt: row.occurred_at,
+      payload: JSON.parse(row.payload_json) as unknown
+    }));
+  }
+
+  markEventDelivered(eventId: string): boolean {
+    return this.context.database
+      .prepare("UPDATE event_outbox SET delivered_at = ? WHERE event_id = ? AND delivered_at IS NULL")
+      .run(this.context.now(), eventId).changes === 1;
+  }
 
   savePlan(input: ExecutionPlan): ExecutionPlan {
     const plan = ExecutionPlanSchema.parse(input);
@@ -151,7 +233,19 @@ export class ExecutionRepository {
     return plan;
   }
 
-  grantRunPermit(planId: string, contentHash: string): { id: string; planId: string; contentHash: string } {
+  grantRunPermit(
+    planId: string,
+    contentHash: string,
+    commandId: string
+  ): { id: string; planId: string; contentHash: string } {
+    const existing = this.getCommandResult(commandId, "permission.grantRun");
+    if (existing !== undefined) {
+      return {
+        id: String(existing.id),
+        planId: String(existing.planId),
+        contentHash: String(existing.contentHash)
+      };
+    }
     const plan = this.getPlan(planId);
     if (plan === undefined || plan.contentHash !== contentHash) {
       throw new ExecutionRepositoryError("STALE_PLAN", "Run permit does not match a persisted plan capsule.");
@@ -163,7 +257,12 @@ export class ExecutionRepository {
          VALUES (?, ?, ?, 'granted', ?, NULL)`
       )
       .run(id, planId, contentHash, this.context.now());
-    return { id, planId, contentHash };
+    const permit = { id, planId, contentHash };
+    this.completeCommand(commandId, "permission.grantRun", permit, [{
+      name: "permission.changed",
+      payload: { permitId: id, permission: "run", state: "granted" }
+    }]);
+    return permit;
   }
 
   startJob(input: {
@@ -172,23 +271,30 @@ export class ExecutionRepository {
     contentHash: string;
     runPermitId: string;
   }): ExecutionJob {
-    const receipt = this.commandReceipt(input.commandId);
-    if (receipt !== undefined) return this.requireJob(String(receipt.jobId));
+    const receipt = this.getCommandResult(input.commandId, "run.start");
+    if (receipt !== undefined) return ExecutionJobSchema.parse(receipt.job);
     const plan = this.getPlan(input.planId);
     if (plan === undefined || plan.contentHash !== input.contentHash) {
       throw new ExecutionRepositoryError("STALE_PLAN", "The persisted plan or content hash is no longer valid.");
     }
     const current = this.context.database
       .prepare(
-        `SELECT ds.current_document_revision_id AS document_revision_id,
+        `SELECT d.document_id,
+                ds.current_document_revision_id AS document_revision_id,
                 gh.graph_revision_id AS graph_revision_id
-         FROM document_state ds
+         FROM document d
+         JOIN document_state ds ON ds.singleton = d.singleton
          JOIN graph_heads gh ON gh.graph_id = ?
-         WHERE ds.singleton = 1`
+         WHERE d.singleton = 1`
       )
-      .get(plan.graphId) as { document_revision_id: string; graph_revision_id: string } | undefined;
+      .get(plan.graphId) as {
+        document_id: string;
+        document_revision_id: string;
+        graph_revision_id: string;
+      } | undefined;
     if (
       current === undefined ||
+      current.document_id !== plan.documentId ||
       current.document_revision_id !== plan.documentRevisionId ||
       current.graph_revision_id !== plan.graphRevisionId
     ) {
@@ -211,7 +317,7 @@ export class ExecutionRepository {
       .get(plan.id) as { job_id: string } | undefined;
     if (existing !== undefined) {
       const job = this.requireJob(existing.job_id);
-      this.saveCommandReceipt(input.commandId, "run.start", { jobId: job.id });
+      this.completeCommand(input.commandId, "run.start", { job });
       return job;
     }
     const now = this.context.now();
@@ -224,6 +330,7 @@ export class ExecutionRepository {
          ) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)`
       )
       .run(jobId, plan.id, plan.contentHash, input.commandId, now);
+    const queued: Array<{ workItemId: string; attemptId: string }> = [];
     for (const planned of plan.workItems) {
       const workItemId = this.context.createId("work");
       const attemptId = this.context.createId("attempt");
@@ -252,12 +359,32 @@ export class ExecutionRepository {
            ) VALUES (?, ?, 1, ?, NULL, 'queued', '[]', NULL, ?, NULL, NULL)`
         )
         .run(attemptId, workItemId, `${jobId}:${workItemId}:1`, now);
+      queued.push({ workItemId, attemptId });
     }
-    this.context.database
-      .prepare("UPDATE execution_plans SET status = 'started', updated_at = ? WHERE plan_id = ?")
+    const planStarted = this.context.database
+      .prepare(
+        "UPDATE execution_plans SET status = 'started', updated_at = ? WHERE plan_id = ? AND status = 'previewed'"
+      )
       .run(now, plan.id);
-    this.saveCommandReceipt(input.commandId, "run.start", { jobId });
-    return this.requireJob(jobId);
+    if (planStarted.changes !== 1) {
+      throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Plan is no longer previewed.");
+    }
+    const job = this.requireJob(jobId);
+    this.completeCommand(input.commandId, "run.start", { job }, [
+      { name: "plan.stateChanged", payload: { planId: plan.id, state: "started" } },
+      { name: "job.stateChanged", payload: { jobId, state: "queued" } },
+      ...queued.flatMap(({ workItemId, attemptId }): PendingApplicationEvent[] => [
+        {
+          name: "workItem.stateChanged",
+          payload: { jobId, workItemId, state: "queued" }
+        },
+        {
+          name: "attempt.stateChanged",
+          payload: { jobId, workItemId, attemptId, state: "queued" }
+        }
+      ])
+    ]);
+    return job;
   }
 
   claimNext(jobId: string, claimToken: string): ClaimedExecution | undefined {
@@ -297,6 +424,18 @@ export class ExecutionRepository {
       )
       .run(now, jobId);
     const job = this.requireJob(jobId);
+    this.recordOutbox("job.stateChanged", row.attempt_id, { jobId, state: "running" }, now);
+    this.recordOutbox("workItem.stateChanged", row.attempt_id, {
+      jobId,
+      workItemId: row.work_item_id,
+      state: "running"
+    }, now);
+    this.recordOutbox("attempt.stateChanged", row.attempt_id, {
+      jobId,
+      workItemId: row.work_item_id,
+      attemptId: row.attempt_id,
+      state: "running"
+    }, now);
     return {
       plan: this.requirePlanForJob(jobId),
       job,
@@ -306,28 +445,135 @@ export class ExecutionRepository {
     };
   }
 
+  prepareProviderCompletion(
+    completion: ProviderCompletionRecovery,
+    stagingPath: string
+  ): ProviderCompletionIntentSnapshot {
+    const current = this.getProviderCompletion(completion.attemptId);
+    if (current !== undefined) {
+      if (current.completion.providerAttemptId !== completion.providerAttemptId) {
+        throw new ExecutionRepositoryError(
+          "PROVIDER_ATTEMPT_CONFLICT",
+          "The attempt already has a different durable provider completion identity."
+        );
+      }
+      return current;
+    }
+    const attempt = this.requireAttempt(completion.attemptId);
+    if (attempt.status !== "running") {
+      throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Only a running attempt can prepare completion.");
+    }
+    const now = this.context.now();
+    this.context.database
+      .prepare(
+        `INSERT INTO provider_completion_intents (
+           attempt_id, provider_attempt_id, state, expected_output_count, identifiers_json,
+           completion_json, staging_path, created_at, updated_at, accepted_at
+         ) VALUES (?, ?, 'prepared', ?, ?, NULL, ?, ?, ?, NULL)`
+      )
+      .run(
+        completion.attemptId,
+        completion.providerAttemptId,
+        completion.expectedOutputCount,
+        JSON.stringify(completion),
+        stagingPath,
+        now,
+        now
+      );
+    return { state: "prepared", completion, stagingPath };
+  }
+
+  stageProviderCompletion(completion: ProviderCompletionRecovery): ProviderCompletionIntentSnapshot {
+    const staged = this.context.database
+      .prepare(
+        `UPDATE provider_completion_intents
+         SET state = 'staged', completion_json = ?, updated_at = ?
+         WHERE attempt_id = ? AND provider_attempt_id = ? AND state IN ('prepared', 'staged')`
+      )
+      .run(
+        JSON.stringify(completion),
+        this.context.now(),
+        completion.attemptId,
+        completion.providerAttemptId
+      );
+    if (staged.changes !== 1) {
+      const current = this.getProviderCompletion(completion.attemptId);
+      if (current?.state === "accepted") return current;
+      throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Provider completion intent is not stageable.");
+    }
+    return {
+      state: "staged",
+      completion,
+      stagingPath: this.requireCompletionStagingPath(completion.attemptId)
+    };
+  }
+
+  getProviderCompletion(attemptId: string): ProviderCompletionIntentSnapshot | undefined {
+    const row = this.context.database
+      .prepare(
+        `SELECT state, identifiers_json, completion_json, staging_path
+         FROM provider_completion_intents WHERE attempt_id = ?`
+      )
+      .get(attemptId) as
+      | {
+          state: "prepared" | "staged" | "accepted";
+          identifiers_json: string;
+          completion_json: string | null;
+          staging_path: string;
+        }
+      | undefined;
+    if (row === undefined) return undefined;
+    return {
+      state: row.state,
+      completion: JSON.parse(row.completion_json ?? row.identifiers_json) as ProviderCompletionRecovery,
+      stagingPath: row.staging_path
+    };
+  }
+
+  getClaimForAttempt(attemptId: string): ClaimedExecution | undefined {
+    const row = this.context.database
+      .prepare(
+        `SELECT w.job_id, w.work_item_id, a.provider_attempt_id
+         FROM attempts a JOIN work_items w ON w.work_item_id = a.work_item_id
+         WHERE a.attempt_id = ?`
+      )
+      .get(attemptId) as
+      | { job_id: string; work_item_id: string; provider_attempt_id: string }
+      | undefined;
+    if (row === undefined) return undefined;
+    return {
+      plan: this.requirePlanForJob(row.job_id),
+      job: this.requireJob(row.job_id),
+      workItem: this.requireWorkItem(row.work_item_id),
+      attempt: this.requireAttempt(attemptId),
+      providerAttemptId: row.provider_attempt_id
+    };
+  }
+
   acceptProviderOutput(input: {
     claim: ClaimedExecution;
     identifiers: {
+      providerRunId: string;
+      capabilitySnapshotId: string;
+      acceptedAt: string;
+    };
+    outputs: Array<{
       artifactId: string;
       outputVersionId: string;
       payloadId: string;
-      providerRunId: string;
-      capabilitySnapshotId: string;
       importId: string;
-      acceptedAt: string;
-    };
-    artifactMetadata: Record<string, unknown>;
-    bytes: Uint8Array;
-    fileName: string;
-    mediaType: string;
+      artifactMetadata: Record<string, unknown>;
+      bytes: Uint8Array;
+      fileName: string;
+      mediaType: string;
+    }>;
     providerId: string;
     modelId: string;
     capabilitySnapshot: ProviderCapability;
     request: Record<string, unknown>;
     response: Record<string, unknown>;
     metadata: Record<string, unknown>;
-  }): { artifact: Artifact; outputVersion: NodeOutputVersion; providerRun: ProviderRunSnapshot } {
+  }): { artifacts: Artifact[]; outputVersions: NodeOutputVersion[]; providerRun: ProviderRunSnapshot } {
     const current = this.context.database
       .prepare(
         `SELECT w.status AS work_status, a.status AS attempt_status,
@@ -349,6 +595,19 @@ export class ExecutionRepository {
     const step = input.claim.plan.steps.find((candidate) => candidate.id === input.claim.workItem.plannedWorkItemId.split(":")[0])
       ?? input.claim.plan.steps.find((candidate) => candidate.workItemIds.includes(input.claim.workItem.plannedWorkItemId));
     if (step === undefined) throw new ExecutionRepositoryError("PLAN_CORRUPT", "Claimed plan step is missing.");
+    if (input.providerId !== step.provider.providerId) {
+      throw new ExecutionRepositoryError(
+        "PROVIDER_MISMATCH",
+        `Completion provider ${input.providerId} does not match persisted provider ${step.provider.providerId}.`
+      );
+    }
+    const expectedOutputCount = Number(step.provider.settings.outputCount ?? 1);
+    if (input.outputs.length !== expectedOutputCount) {
+      throw new ExecutionRepositoryError(
+        "PROVIDER_OUTPUT_COUNT_MISMATCH",
+        `Provider returned ${input.outputs.length} artifacts; the persisted plan requires ${expectedOutputCount}.`
+      );
+    }
     const now = input.identifiers.acceptedAt;
     const capability = ProviderCapabilitySchema.parse(input.capabilitySnapshot);
     const capabilitySnapshotId = input.identifiers.capabilitySnapshotId;
@@ -391,88 +650,109 @@ export class ExecutionRepository {
         input.claim.attempt.startedAt,
         now
       );
-    const contentKey = createHash("sha256").update(input.bytes).digest("hex");
     const blobs = new BlobRepository(this.context);
-    const importId = input.identifiers.importId;
-    const ownership = blobs.beginImport({
-      importId,
-      contentKey,
-      byteLength: input.bytes.byteLength,
-      mediaType: input.mediaType,
-      sourceName: input.fileName
-    });
-    if (ownership === "owner") {
-      blobs.writeInline(importId, contentKey, input.bytes);
-      blobs.finalize(importId, contentKey);
-    } else if (ownership !== "ready") {
-      throw new ExecutionRepositoryError("BLOB_IMPORT_BUSY", "An incomplete duplicate blob import exists.");
-    }
-    const outputVersionId = input.identifiers.outputVersionId;
-    const payloadId = input.identifiers.payloadId;
-    const artifactId = input.identifiers.artifactId;
-    const outputVersion = NodeOutputVersionSchema.parse({
-      id: outputVersionId,
-      nodeId: step.nodeId,
-      graphId: input.claim.plan.graphId,
-      graphRevisionId: input.claim.plan.graphRevisionId,
-      inputPayloadIds: [],
-      selectedOutputVersionIds: [],
-      compiledContextHash: input.claim.plan.contentHash,
-      producer: {
-        kind: "provider",
-        providerId: input.providerId,
-        modelId: input.modelId,
-        profileId: capability.profileId,
-        capabilitySnapshot: capability
-      },
-      outputPayloadIds: [payloadId],
-      parentOutputVersionId: null,
-      approval: { state: "unreviewed" },
-      runId: input.claim.job.id,
-      stepId: step.id,
-      workItemId: input.claim.workItem.id,
-      attemptId: input.claim.attempt.id,
-      timing: { startedAt: input.claim.attempt.startedAt, completedAt: now },
-      failure: null,
-      createdAt: now
-    });
-    const payload = PayloadEnvelopeSchema.parse({
-      id: payloadId,
-      channel: "image",
-      role: "subject",
-      content: { kind: "artifact", artifactId },
-      source: {
+    const outputs = new OutputRepository(this.context);
+    const artifactsRepository = new ArtifactRepository(this.context);
+    const acceptedArtifacts: Artifact[] = [];
+    const acceptedOutputVersions: NodeOutputVersion[] = [];
+    for (const output of input.outputs) {
+      const contentKey = createHash("sha256").update(output.bytes).digest("hex");
+      const ownership = blobs.beginImport({
+        importId: output.importId,
+        contentKey,
+        byteLength: output.bytes.byteLength,
+        mediaType: output.mediaType,
+        sourceName: output.fileName
+      });
+      if (ownership === "owner") {
+        blobs.writeInline(output.importId, contentKey, output.bytes);
+        blobs.finalize(output.importId, contentKey);
+      } else if (ownership !== "ready") {
+        throw new ExecutionRepositoryError("BLOB_IMPORT_BUSY", "An incomplete duplicate blob import exists.");
+      }
+      const outputVersion = NodeOutputVersionSchema.parse({
+        id: output.outputVersionId,
         nodeId: step.nodeId,
-        outputVersionId,
-        lineageKey: `${input.claim.plan.graphId}:${step.nodeId}:${input.claim.workItem.id}`
-      },
-      metadata: { mediaType: input.mediaType, providerRunId }
-    });
-    new OutputRepository(this.context).insert(outputVersion, [payload]);
-    const artifact = ArtifactSchema.parse({
-      id: artifactId,
-      contentKey,
-      channel: "image",
-      mediaType: input.mediaType,
-      byteLength: input.bytes.byteLength,
-      source: { outputVersionId, payloadId },
-      createdAt: now,
-      metadata: input.artifactMetadata
-    });
-    new ArtifactRepository(this.context).attach(artifact);
-    this.context.database
+        graphId: input.claim.plan.graphId,
+        graphRevisionId: input.claim.plan.graphRevisionId,
+        inputPayloadIds: [],
+        selectedOutputVersionIds: [],
+        compiledContextHash: input.claim.plan.contentHash,
+        producer: {
+          kind: "provider",
+          providerId: input.providerId,
+          modelId: input.modelId,
+          profileId: capability.profileId,
+          capabilitySnapshot: capability
+        },
+        outputPayloadIds: [output.payloadId],
+        parentOutputVersionId: null,
+        approval: { state: "unreviewed" },
+        runId: input.claim.job.id,
+        stepId: step.id,
+        workItemId: input.claim.workItem.id,
+        attemptId: input.claim.attempt.id,
+        timing: { startedAt: input.claim.attempt.startedAt, completedAt: now },
+        failure: null,
+        createdAt: now
+      });
+      const payload = PayloadEnvelopeSchema.parse({
+        id: output.payloadId,
+        channel: "image",
+        role: "subject",
+        content: { kind: "artifact", artifactId: output.artifactId },
+        source: {
+          nodeId: step.nodeId,
+          outputVersionId: output.outputVersionId,
+          lineageKey: `${input.claim.plan.graphId}:${step.nodeId}:${input.claim.workItem.id}:${acceptedArtifacts.length}`
+        },
+        metadata: { mediaType: output.mediaType, providerRunId }
+      });
+      outputs.insert(outputVersion, [payload]);
+      const artifact = ArtifactSchema.parse({
+        id: output.artifactId,
+        contentKey,
+        channel: "image",
+        mediaType: output.mediaType,
+        byteLength: output.bytes.byteLength,
+        source: { outputVersionId: output.outputVersionId, payloadId: output.payloadId },
+        createdAt: now,
+        metadata: output.artifactMetadata
+      });
+      artifactsRepository.attach(artifact);
+      acceptedArtifacts.push(artifact);
+      acceptedOutputVersions.push(outputVersion);
+    }
+    const attemptAccepted = this.context.database
       .prepare(
         `UPDATE attempts SET status = 'accepted', provider_run_id = ?,
                 output_version_ids_json = ?, completed_at = ?
          WHERE attempt_id = ? AND status = 'running'`
       )
-      .run(providerRunId, JSON.stringify([outputVersionId]), now, input.claim.attempt.id);
-    this.context.database
+      .run(
+        providerRunId,
+        JSON.stringify(acceptedOutputVersions.map((output) => output.id)),
+        now,
+        input.claim.attempt.id
+      );
+    if (attemptAccepted.changes !== 1) {
+      throw new ExecutionRepositoryError("CANCELLED", "Provider completion lost the attempt transition race.");
+    }
+    const workAccepted = this.context.database
       .prepare(
         `UPDATE work_items SET status = 'accepted', accepted_attempt_id = ?, updated_at = ?
          WHERE work_item_id = ? AND status = 'running'`
       )
       .run(input.claim.attempt.id, now, input.claim.workItem.id);
+    if (workAccepted.changes !== 1) {
+      throw new ExecutionRepositoryError("CANCELLED", "Provider completion lost the work transition race.");
+    }
+    this.context.database
+      .prepare(
+        `UPDATE provider_completion_intents SET state = 'accepted', accepted_at = ?, updated_at = ?
+         WHERE attempt_id = ? AND state IN ('prepared', 'staged')`
+      )
+      .run(now, now, input.claim.attempt.id);
     this.recomputeJob(input.claim.job.id, now);
     this.recordTimeline({
       jobId: input.claim.job.id,
@@ -480,51 +760,150 @@ export class ExecutionRepository {
       attemptId: input.claim.attempt.id,
       eventName: "artifact.accepted",
       state: "accepted",
-      payload: { artifactId, outputVersionId },
+      payload: {
+        artifactIds: acceptedArtifacts.map((artifact) => artifact.id),
+        outputVersionIds: acceptedOutputVersions.map((output) => output.id)
+      },
       occurredAt: now
     });
-    this.recordOutbox("artifact.accepted", input.claim.attempt.id, { artifactId, outputVersionId }, now);
-    return { artifact, outputVersion, providerRun: this.requireProviderRun(providerRunId) };
+    this.recordOutbox("attempt.stateChanged", input.claim.attempt.id, {
+      jobId: input.claim.job.id,
+      workItemId: input.claim.workItem.id,
+      attemptId: input.claim.attempt.id,
+      state: "accepted"
+    }, now);
+    this.recordOutbox("workItem.stateChanged", input.claim.attempt.id, {
+      jobId: input.claim.job.id,
+      workItemId: input.claim.workItem.id,
+      state: "accepted"
+    }, now);
+    for (let index = 0; index < acceptedArtifacts.length; index += 1) {
+      this.recordOutbox("artifact.accepted", input.claim.attempt.id, {
+        artifactId: acceptedArtifacts[index]!.id,
+        outputVersionId: acceptedOutputVersions[index]!.id
+      }, now);
+    }
+    const acceptedJob = this.requireJob(input.claim.job.id);
+    this.recordOutbox("job.stateChanged", input.claim.attempt.id, {
+      jobId: input.claim.job.id,
+      state: acceptedJob.status
+    }, now);
+    if (acceptedJob.status === "completed") {
+      this.recordOutbox("plan.stateChanged", input.claim.attempt.id, {
+        planId: input.claim.plan.id,
+        state: "completed"
+      }, now);
+    }
+    return {
+      artifacts: acceptedArtifacts,
+      outputVersions: acceptedOutputVersions,
+      providerRun: this.requireProviderRun(providerRunId)
+    };
   }
 
-  failAttempt(attemptId: string, code: string, message: string, retryable: boolean): void {
+  failAttempt(attemptId: string, code: string, message: string, retryable: boolean): boolean {
     const now = this.context.now();
     const attempt = this.requireAttempt(attemptId);
-    this.context.database
+    const failed = this.context.database
       .prepare(
         `UPDATE attempts SET status = 'failed', error_json = ?, completed_at = ?
          WHERE attempt_id = ? AND status = 'running'`
       )
       .run(JSON.stringify({ code, message, retryable, details: {} }), now, attemptId);
-    this.context.database
-      .prepare("UPDATE work_items SET status = 'failed', updated_at = ? WHERE work_item_id = ?")
+    if (failed.changes !== 1) return false;
+    const workFailed = this.context.database
+      .prepare(
+        "UPDATE work_items SET status = 'failed', updated_at = ? WHERE work_item_id = ? AND status = 'running'"
+      )
       .run(now, attempt.workItemId);
+    if (workFailed.changes !== 1) {
+      throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Attempt failure lost ownership of its work item.");
+    }
     const work = this.requireWorkItem(attempt.workItemId);
     this.recomputeJob(work.jobId, now);
+    this.recordOutbox("attempt.stateChanged", attemptId, {
+      jobId: work.jobId,
+      workItemId: work.id,
+      attemptId,
+      state: "failed"
+    }, now);
+    this.recordOutbox("workItem.stateChanged", attemptId, {
+      jobId: work.jobId,
+      workItemId: work.id,
+      state: "failed"
+    }, now);
+    this.recordOutbox("job.stateChanged", attemptId, {
+      jobId: work.jobId,
+      state: this.requireJob(work.jobId).status
+    }, now);
+    this.recordOutbox("plan.stateChanged", attemptId, {
+      planId: this.requirePlanForJob(work.jobId).id,
+      state: "failed"
+    }, now);
+    return true;
   }
 
-  cancelJob(jobId: string): ExecutionJob {
+  cancelJob(jobId: string, commandId: string): ExecutionJob {
+    const existing = this.getCommandResult(commandId, "run.cancel");
+    if (existing !== undefined) return ExecutionJobSchema.parse(existing.job);
     const now = this.context.now();
-    this.context.database
+    const affected = this.context.database
+      .prepare(
+        `SELECT w.work_item_id, a.attempt_id
+         FROM work_items w JOIN attempts a ON a.work_item_id = w.work_item_id
+         WHERE w.job_id = ? AND w.status IN ('queued', 'running')
+           AND a.status IN ('queued', 'running')`
+      )
+      .all(jobId) as unknown as Array<{ work_item_id: string; attempt_id: string }>;
+    const cancelled = this.context.database
       .prepare(
         `UPDATE execution_jobs SET cancellation_requested_at = ?, status = 'cancelled', completed_at = ?
          WHERE job_id = ? AND status IN ('planned', 'queued', 'running')`
       )
       .run(now, now, jobId);
-    this.context.database
-      .prepare("UPDATE work_items SET status = 'cancelled', updated_at = ? WHERE job_id = ? AND status IN ('queued', 'running')")
-      .run(now, jobId);
-    this.context.database
-      .prepare(
-        `UPDATE attempts SET status = 'cancelled', completed_at = ?
-         WHERE work_item_id IN (SELECT work_item_id FROM work_items WHERE job_id = ?)
-           AND status IN ('queued', 'running')`
-      )
-      .run(now, jobId);
-    return this.requireJob(jobId);
+    if (cancelled.changes === 1) {
+      const cancelledWork = this.context.database
+        .prepare("UPDATE work_items SET status = 'cancelled', updated_at = ? WHERE job_id = ? AND status IN ('queued', 'running')")
+        .run(now, jobId);
+      const cancelledAttempts = this.context.database
+        .prepare(
+          `UPDATE attempts SET status = 'cancelled', completed_at = ?
+           WHERE work_item_id IN (SELECT work_item_id FROM work_items WHERE job_id = ?)
+             AND status IN ('queued', 'running')`
+        )
+        .run(now, jobId);
+      const expectedWork = new Set(affected.map((row) => row.work_item_id)).size;
+      if (cancelledWork.changes !== expectedWork || cancelledAttempts.changes !== affected.length) {
+        throw new ExecutionRepositoryError(
+          "TRANSITION_CONFLICT",
+          "Cancellation did not own every selected work and attempt transition."
+        );
+      }
+      this.context.database
+        .prepare(
+          `UPDATE execution_plans SET status = 'cancelled', updated_at = ?
+           WHERE plan_id = (SELECT plan_id FROM execution_jobs WHERE job_id = ?)`
+        )
+        .run(now, jobId);
+    }
+    const job = this.requireJob(jobId);
+    this.completeCommand(commandId, "run.cancel", { job }, cancelled.changes === 1 ? [
+      ...affected.flatMap(({ work_item_id: workItemId, attempt_id: attemptId }): PendingApplicationEvent[] => [
+        { name: "attempt.stateChanged", payload: { jobId, workItemId, attemptId, state: "cancelled" } },
+        { name: "workItem.stateChanged", payload: { jobId, workItemId, state: "cancelled" } }
+      ]),
+      { name: "job.stateChanged", payload: { jobId, state: "cancelled" } },
+      {
+        name: "plan.stateChanged",
+        payload: { planId: this.requirePlanForJob(jobId).id, state: "cancelled" }
+      }
+    ] : []);
+    return job;
   }
 
-  retryFailed(jobId: string, workItemIds?: readonly string[]): ExecutionJob {
+  retryFailed(jobId: string, workItemIds: readonly string[] | undefined, commandId: string): ExecutionJob {
+    const existing = this.getCommandResult(commandId, "run.retry");
+    if (existing !== undefined) return ExecutionJobSchema.parse(existing.job);
     const selected = this.listWorkItems(jobId).filter(
       (item) => item.status === "failed" && (workItemIds === undefined || workItemIds.includes(item.id))
     );
@@ -532,6 +911,7 @@ export class ExecutionRepository {
       throw new ExecutionRepositoryError("NOT_RETRYABLE", "No selected failed work items can be retried.");
     }
     const now = this.context.now();
+    const retried: Array<{ workItemId: string; attemptId: string }> = [];
     for (const work of selected) {
       const maximum = this.context.database
         .prepare("SELECT max(attempt_number) AS ordinal FROM attempts WHERE work_item_id = ?")
@@ -546,44 +926,102 @@ export class ExecutionRepository {
            ) VALUES (?, ?, ?, ?, NULL, 'queued', '[]', NULL, ?, NULL, NULL)`
         )
         .run(attemptId, work.id, ordinal, `${jobId}:${work.id}:${ordinal}`, now);
-      this.context.database
+      const workQueued = this.context.database
         .prepare(
           `UPDATE work_items SET status = 'queued', accepted_attempt_id = NULL,
-                  claim_token = NULL, claimed_at = NULL, updated_at = ? WHERE work_item_id = ?`
+                  claim_token = NULL, claimed_at = NULL, updated_at = ?
+            WHERE work_item_id = ? AND status = 'failed'`
         )
         .run(now, work.id);
+      if (workQueued.changes !== 1) {
+        throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Failed work item is no longer retryable.");
+      }
+      retried.push({ workItemId: work.id, attemptId });
+    }
+    const jobQueued = this.context.database
+      .prepare(
+        `UPDATE execution_jobs SET status = 'queued', started_at = NULL, completed_at = NULL,
+                cancellation_requested_at = NULL WHERE job_id = ? AND status = 'failed'`
+      )
+      .run(jobId);
+    if (jobQueued.changes !== 1) {
+      throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Failed job is no longer retryable.");
     }
     this.context.database
       .prepare(
-        `UPDATE execution_jobs SET status = 'queued', started_at = NULL, completed_at = NULL,
-                cancellation_requested_at = NULL WHERE job_id = ?`
+        `UPDATE execution_plans SET status = 'started', updated_at = ?
+         WHERE plan_id = (SELECT plan_id FROM execution_jobs WHERE job_id = ?)`
       )
-      .run(jobId);
-    return this.requireJob(jobId);
+      .run(now, jobId);
+    const job = this.requireJob(jobId);
+    this.completeCommand(commandId, "run.retry", { job }, [
+      ...retried.flatMap(({ workItemId, attemptId }): PendingApplicationEvent[] => [
+        { name: "workItem.stateChanged", payload: { jobId, workItemId, state: "queued" } },
+        { name: "attempt.stateChanged", payload: { jobId, workItemId, attemptId, state: "queued" } }
+      ]),
+      { name: "job.stateChanged", payload: { jobId, state: "queued" } },
+      {
+        name: "plan.stateChanged",
+        payload: { planId: this.requirePlanForJob(jobId).id, state: "started" }
+      }
+    ]);
+    return job;
   }
 
   recoverProcessLost(): string[] {
     const rows = this.context.database
-      .prepare("SELECT job_id FROM execution_jobs WHERE status IN ('queued', 'running')")
-      .all() as unknown as Array<{ job_id: string }>;
+      .prepare("SELECT job_id, status FROM execution_jobs WHERE status IN ('queued', 'running')")
+      .all() as unknown as Array<{ job_id: string; status: string }>;
     const now = this.context.now();
-    for (const { job_id } of rows) {
-      this.context.database
+    for (const { job_id, status } of rows) {
+      const reset = this.context.database
+        .prepare(
+          `SELECT w.work_item_id, a.attempt_id
+           FROM work_items w JOIN attempts a ON a.work_item_id = w.work_item_id
+           WHERE w.job_id = ? AND w.status = 'running' AND a.status = 'running'`
+        )
+        .all(job_id) as unknown as Array<{ work_item_id: string; attempt_id: string }>;
+      const attemptsReset = this.context.database
         .prepare(
           `UPDATE attempts SET status = 'queued', started_at = NULL
            WHERE work_item_id IN (SELECT work_item_id FROM work_items WHERE job_id = ?)
              AND status = 'running'`
         )
         .run(job_id);
-      this.context.database
+      const workReset = this.context.database
         .prepare(
           `UPDATE work_items SET status = 'queued', claim_token = NULL, claimed_at = NULL,
                   updated_at = ? WHERE job_id = ? AND status = 'running'`
         )
         .run(now, job_id);
-      this.context.database
+      const jobReset = this.context.database
         .prepare("UPDATE execution_jobs SET status = 'queued', started_at = NULL WHERE job_id = ? AND status = 'running'")
         .run(job_id);
+      if (status === "running" && jobReset.changes === 1) {
+        if (attemptsReset.changes !== reset.length || workReset.changes !== reset.length) {
+          throw new ExecutionRepositoryError(
+            "TRANSITION_CONFLICT",
+            "Process-loss recovery did not own every running transition."
+          );
+        }
+        for (const { work_item_id: workItemId, attempt_id: attemptId } of reset) {
+          this.recordOutbox("attempt.stateChanged", `recovery:${attemptId}`, {
+            jobId: job_id,
+            workItemId,
+            attemptId,
+            state: "queued"
+          }, now);
+          this.recordOutbox("workItem.stateChanged", `recovery:${attemptId}`, {
+            jobId: job_id,
+            workItemId,
+            state: "queued"
+          }, now);
+        }
+        this.recordOutbox("job.stateChanged", `recovery:${job_id}`, {
+          jobId: job_id,
+          state: "queued"
+        }, now);
+      }
     }
     return rows.map((row) => row.job_id);
   }
@@ -627,11 +1065,18 @@ export class ExecutionRepository {
     return { artifact, outputVersion, providerRun: this.requireProviderRun(row.provider_run_id), relations };
   }
 
-  private commandReceipt(commandId: string): Record<string, unknown> | undefined {
+  private commandReceipt(commandId: string):
+    | { commandName: string; result: Record<string, unknown> }
+    | undefined {
     const row = this.context.database
-      .prepare("SELECT result_json FROM command_receipts WHERE command_id = ?")
-      .get(commandId) as { result_json: string } | undefined;
-    return row === undefined ? undefined : (JSON.parse(row.result_json) as Record<string, unknown>);
+      .prepare("SELECT command_name, result_json FROM command_receipts WHERE command_id = ?")
+      .get(commandId) as { command_name: string; result_json: string } | undefined;
+    return row === undefined
+      ? undefined
+      : {
+          commandName: row.command_name,
+          result: JSON.parse(row.result_json) as Record<string, unknown>
+        };
   }
 
   private recordTimeline(input: {
@@ -662,11 +1107,20 @@ export class ExecutionRepository {
   }
 
   private recordOutbox(
-    eventName: string,
+    eventName: ApplicationEventName,
     correlationId: string,
     payload: Record<string, unknown>,
     occurredAt: string
   ): void {
+    const event = ApplicationEventSchema.parse({
+      kind: "event",
+      id: this.context.createId("event"),
+      correlationId,
+      name: eventName,
+      documentId: this.documentId(),
+      occurredAt,
+      payload
+    });
     this.context.database
       .prepare(
         `INSERT INTO event_outbox (
@@ -674,12 +1128,22 @@ export class ExecutionRepository {
          ) VALUES (?, ?, ?, ?, ?, NULL)`
       )
       .run(
-        this.context.createId("event"),
-        eventName,
-        correlationId,
-        JSON.stringify(payload),
-        occurredAt
+        event.id,
+        event.name,
+        event.correlationId,
+        JSON.stringify(event.payload),
+        event.occurredAt
       );
+  }
+
+  private documentId(): string {
+    const row = this.context.database
+      .prepare("SELECT document_id FROM document WHERE singleton = 1")
+      .get() as { document_id: string } | undefined;
+    if (row === undefined) {
+      throw new ExecutionRepositoryError("DOCUMENT_INVALID", "The document identity row is missing.");
+    }
+    return row.document_id;
   }
 
   private saveCommandReceipt(commandId: string, commandName: string, result: Record<string, unknown>): void {
@@ -737,6 +1201,16 @@ export class ExecutionRepository {
     return workFromRow(row);
   }
 
+  private requireCompletionStagingPath(attemptId: string): string {
+    const row = this.context.database
+      .prepare("SELECT staging_path FROM provider_completion_intents WHERE attempt_id = ?")
+      .get(attemptId) as { staging_path: string } | undefined;
+    if (row === undefined) {
+      throw new ExecutionRepositoryError("COMPLETION_NOT_FOUND", "Provider completion intent is missing.");
+    }
+    return row.staging_path;
+  }
+
   private requireAttempt(attemptId: string): ExecutionAttempt {
     const row = this.context.database
       .prepare("SELECT * FROM attempts WHERE attempt_id = ?")
@@ -767,20 +1241,6 @@ export class ExecutionRepository {
 function verifyPlanContentHash(plan: ExecutionPlan): boolean {
   const digest = createHash("sha256").update(canonicalPlanJson(plan)).digest("hex");
   return plan.contentHash === `sha256:v1:${digest}`;
-}
-
-function canonicalPlanJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalPlanJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => key !== "contentHash")
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalPlanJson(item)}`)
-      .join(",")}}`;
-  }
-  const serialized = JSON.stringify(value);
-  if (serialized === undefined) throw new ExecutionRepositoryError("PLAN_HASH_INVALID", "Plan content is not JSON serializable.");
-  return serialized;
 }
 
 function jobFromRow(row: JobRow): ExecutionJob {

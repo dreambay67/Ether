@@ -91,7 +91,13 @@ export interface ReadDocumentRepositories {
   outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "listByNode">;
   execution: Pick<
     ExecutionRepository,
-    "getJob" | "getLineage" | "getPlan" | "listAttempts" | "listWorkItems"
+    | "getCommandResult"
+    | "getJob"
+    | "getLineage"
+    | "getPlan"
+    | "listAttempts"
+    | "listPendingEvents"
+    | "listWorkItems"
   >;
   revisions: Pick<
     RevisionRepository,
@@ -111,16 +117,23 @@ type WriteExecutionRepository = Pick<
   | "acceptProviderOutput"
   | "cancelJob"
   | "claimNext"
+  | "completeCommand"
   | "failAttempt"
+  | "getCommandResult"
   | "getJob"
   | "getLineage"
   | "getPlan"
   | "grantRunPermit"
+  | "getProviderCompletion"
   | "listAttempts"
+  | "listPendingEvents"
   | "listWorkItems"
+  | "markEventDelivered"
   | "recoverProcessLost"
   | "retryFailed"
+  | "prepareProviderCompletion"
   | "savePlan"
+  | "stageProviderCompletion"
   | "startJob"
 >;
 
@@ -679,10 +692,12 @@ export class DocumentStore {
           listByNode: (id) => invoke(() => repositories.outputs.listByNode(id))
         },
         execution: {
+          getCommandResult: (id, name) => invoke(() => repositories.execution.getCommandResult(id, name)),
           getJob: (id) => invoke(() => repositories.execution.getJob(id)),
           getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
           getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
           listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
+          listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),
           listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id))
         },
         revisions: {
@@ -740,19 +755,31 @@ export class DocumentStore {
       },
       execution: {
         acceptProviderOutput: (input) => invoke(() => repositories.execution.acceptProviderOutput(input)),
-        cancelJob: (id) => invoke(() => repositories.execution.cancelJob(id)),
+        cancelJob: (id, commandId) => invoke(() => repositories.execution.cancelJob(id, commandId)),
         claimNext: (id, token) => invoke(() => repositories.execution.claimNext(id, token)),
+        completeCommand: (id, name, result, events) =>
+          invoke(() => repositories.execution.completeCommand(id, name, result, events)),
         failAttempt: (id, code, message, retryable) =>
           invoke(() => repositories.execution.failAttempt(id, code, message, retryable)),
+        getCommandResult: (id, name) => invoke(() => repositories.execution.getCommandResult(id, name)),
         getJob: (id) => invoke(() => repositories.execution.getJob(id)),
         getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
         getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
-        grantRunPermit: (id, hash) => invoke(() => repositories.execution.grantRunPermit(id, hash)),
+        getProviderCompletion: (id) => invoke(() => repositories.execution.getProviderCompletion(id)),
+        grantRunPermit: (id, hash, commandId) =>
+          invoke(() => repositories.execution.grantRunPermit(id, hash, commandId)),
         listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
+        listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),
         listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id)),
+        markEventDelivered: (id) => invoke(() => repositories.execution.markEventDelivered(id)),
         recoverProcessLost: () => invoke(() => repositories.execution.recoverProcessLost()),
-        retryFailed: (id, workItemIds) => invoke(() => repositories.execution.retryFailed(id, workItemIds)),
+        retryFailed: (id, workItemIds, commandId) =>
+          invoke(() => repositories.execution.retryFailed(id, workItemIds, commandId)),
+        prepareProviderCompletion: (completion, stagingPath) =>
+          invoke(() => repositories.execution.prepareProviderCompletion(completion, stagingPath)),
         savePlan: (plan) => invoke(() => repositories.execution.savePlan(plan)),
+        stageProviderCompletion: (completion) =>
+          invoke(() => repositories.execution.stageProviderCompletion(completion)),
         startJob: (input) => invoke(() => repositories.execution.startJob(input))
       },
       revisions: {

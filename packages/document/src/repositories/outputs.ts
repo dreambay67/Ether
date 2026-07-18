@@ -219,7 +219,13 @@ export class OutputRepository {
   listByNode(nodeId: string): NodeOutputVersion[] {
     const rows = this.context.database
       .prepare(
-        "SELECT output_version_id FROM node_output_versions WHERE node_id = ? ORDER BY created_at, output_version_id"
+        `SELECT v.output_version_id
+         FROM node_output_versions v
+         LEFT JOIN attempts a ON a.attempt_id = v.attempt_id
+         LEFT JOIN json_each(coalesce(a.output_version_ids_json, '[]')) position
+           ON position.value = v.output_version_id
+         WHERE v.node_id = ?
+         ORDER BY v.created_at, cast(coalesce(position.key, 0) AS INTEGER), v.output_version_id`
       )
       .all(nodeId) as unknown as Array<{ output_version_id: string }>;
     return rows

@@ -8,7 +8,15 @@ export class ApplicationEventBus {
     return () => this.listeners.delete(listener);
   }
 
-  publish(event: ApplicationEvent): void {
-    for (const listener of this.listeners) listener(structuredClone(event));
+  publish(event: ApplicationEvent): boolean {
+    let delivered = true;
+    for (const listener of this.listeners) {
+      try {
+        listener(structuredClone(event));
+      } catch {
+        delivered = false;
+      }
+    }
+    return delivered;
   }
 }

@@ -12,6 +12,7 @@ import type {
   ProviderDiagnostic,
   ProviderDiagnosticContext,
   ProviderGenerationResult,
+  ProviderExecutionContext,
   ProviderProcessRunner
 } from "../types.js";
 import {
@@ -82,7 +83,10 @@ export class CodexCliImageProvider implements GenerationProvider {
     });
   }
 
-  async generate(input: GenerationProviderInput): Promise<ProviderGenerationResult> {
+  async generate(
+    input: GenerationProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult> {
     const codexCliPath = await this.requireAvailableCodexCliPath();
     const job = await createJobPaths(input);
     const requestPath = path.join(job.jobDir, "request.json");
@@ -116,7 +120,7 @@ export class CodexCliImageProvider implements GenerationProvider {
 
     const artifacts = await collectOutputArtifacts(job.outputDir, job.jobId);
 
-    return {
+    const completion = {
       providerId: this.descriptor.id,
       providerName: this.descriptor.name,
       capabilities: [...this.descriptor.capabilities],
@@ -128,9 +132,14 @@ export class CodexCliImageProvider implements GenerationProvider {
         route: this.descriptor.route
       }
     };
+    await context?.complete(completion);
+    return completion;
   }
 
-  async edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult> {
+  async edit(
+    input: ImageEditProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult> {
     const codexCliPath = await this.requireAvailableCodexCliPath();
     const job = await createJobPaths(input);
     const requestPath = path.join(job.jobDir, "request.json");
@@ -164,7 +173,7 @@ export class CodexCliImageProvider implements GenerationProvider {
 
     const artifacts = await collectOutputArtifacts(job.outputDir, job.jobId);
 
-    return {
+    const completion = {
       providerId: this.descriptor.id,
       providerName: this.descriptor.name,
       capabilities: [...this.descriptor.capabilities],
@@ -177,6 +186,8 @@ export class CodexCliImageProvider implements GenerationProvider {
         operation: input.operation
       }
     };
+    await context?.complete(completion);
+    return completion;
   }
 
   private async requireAvailableCodexCliPath() {

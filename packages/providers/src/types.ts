@@ -380,6 +380,7 @@ export type ProviderExecutionContext = {
   providerAttemptId: string;
   attemptOrdinal: number;
   stagingDirectory: string;
+  complete: (result: ProviderGenerationResult) => Promise<void>;
 };
 
 export type ProviderProcessRunner = (

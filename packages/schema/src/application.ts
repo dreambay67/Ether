@@ -315,7 +315,18 @@ export const applicationEventPayloadSchemas = {
     })
     .strict(),
   "plan.stateChanged": z
-    .object({ planId: idSchema, state: z.enum(["previewed", "invalidated", "started"]) })
+    .object({
+      planId: idSchema,
+      state: z.enum([
+        "previewed",
+        "invalidated",
+        "started",
+        "completed",
+        "failed",
+        "cancelled",
+        "needs-attention"
+      ])
+    })
     .strict(),
   "job.stateChanged": z
     .object({

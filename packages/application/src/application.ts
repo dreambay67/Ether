@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import {
   DocumentStore,
   DocumentStoreError,
   ExecutionRepositoryError,
   readBlobRange,
-  type ArtifactLineageSnapshot
+  type ArtifactLineageSnapshot,
+  type DocumentStoreEnvironment
 } from "@ether/document";
 import { compilePlan, DurableScheduler } from "@ether/execution";
 import type { GenerationProvider } from "@ether/providers";
+import { ExecutionJobSchema, ExecutionPlanSchema } from "@ether/schema";
 import type {
   Artifact,
   EtherGraph,
@@ -21,7 +24,6 @@ import type {
   NodeOutputVersion,
   ProviderCapability
 } from "@ether/schema";
-import { ApplicationEventSchema } from "@ether/schema";
 
 import { applyGraphTransaction as applyTransaction } from "./commands/graphCommands.js";
 import { createDocument as createStore } from "./commands/documentCommands.js";
@@ -43,6 +45,7 @@ export class EtherApplication {
   readonly events = new ApplicationEventBus();
   private store: DocumentStore | undefined;
   private scheduler: DurableScheduler | undefined;
+  private eventDrain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly options: {
@@ -50,6 +53,7 @@ export class EtherApplication {
       appVersion: string;
       provider: GenerationProvider;
       dispatchMode?: "automatic" | "manual";
+      documentEnvironment?: Omit<DocumentStoreEnvironment, "leaseRoot" | "recoveryRoot">;
       executionCheckpoint?: (name: string) => void;
     }
   ) {}
@@ -60,7 +64,11 @@ export class EtherApplication {
     initialGraph: EtherGraph;
   }): Promise<DocumentSnapshot> {
     this.assertNoDocument();
-    this.store = await createStore({ ...input, appVersion: this.options.appVersion });
+    this.store = await createStore({
+      ...input,
+      appVersion: this.options.appVersion,
+      environment: this.documentEnvironment()
+    });
     this.attachScheduler();
     return this.queryDocument();
   }
@@ -70,17 +78,35 @@ export class EtherApplication {
     access: "prefer-write" | "read-only" | "require-write";
   }): Promise<DocumentSnapshot> {
     this.assertNoDocument();
-    this.store = await DocumentStore.open(input.path, { access: input.access });
+    this.store = await DocumentStore.open(input.path, {
+      access: input.access,
+      environment: this.documentEnvironment()
+    });
     this.attachScheduler();
     if (this.store.mode.kind === "writable") {
       const jobIds = await this.store.transaction(({ execution }) => execution.recoverProcessLost());
+      await this.drainEvents();
       if (this.options.dispatchMode !== "manual") jobIds.forEach((jobId) => void this.scheduler!.run(jobId));
     }
     return this.queryDocument();
   }
 
-  async saveDocument(_input: { commandId: string }): Promise<void> {
-    await this.requireStore().manualSave("Manual save");
+  async saveDocument(input: { commandId: string }): Promise<void> {
+    await this.requireWritableStore().transaction(({ execution, revisions }) => {
+      const existing = execution.getCommandResult(input.commandId, "document.save");
+      if (existing !== undefined) return;
+      const milestone = revisions.createMilestone("Manual save", "manual");
+      const head = revisions.head();
+      execution.completeCommand(input.commandId, "document.save", { milestone }, [{
+        name: "document.stateChanged",
+        payload: {
+          state: "open",
+          dirty: false,
+          documentRevisionId: head.documentRevisionId
+        }
+      }]);
+    });
+    await this.drainEvents();
   }
 
   async closeDocument(): Promise<void> {
@@ -95,17 +121,9 @@ export class EtherApplication {
     commandId: string;
     transaction: GraphTransaction;
   }): Promise<{ documentRevisionId: string; graphRevisions: Record<string, string> }> {
-    void input.commandId;
     try {
-      const result = await applyTransaction(this.requireStore(), input.transaction);
-      const revisionId = result.graphRevisions[input.transaction.operations[0]!.graphId];
-      if (revisionId !== undefined) {
-        this.publish("graph.revisionChanged", input.commandId, {
-          graphId: input.transaction.operations[0]!.graphId,
-          revisionId,
-          transactionId: input.transaction.id
-        });
-      }
+      const result = await applyTransaction(this.requireStore(), input.commandId, input.transaction);
+      await this.drainEvents();
       return deepFreezeSnapshot(result);
     } catch (error) {
       throw mapError(error);
@@ -118,6 +136,12 @@ export class EtherApplication {
     scope: ExecutionScope;
   }): Promise<ExecutionPlan> {
     const store = this.requireWritableStore();
+    const existing = await store.read(({ execution }) =>
+      execution.getCommandResult(input.commandId, "run.preview")
+    );
+    if (existing !== undefined) {
+      return deepFreezeSnapshot(ExecutionPlanSchema.parse(existing.plan));
+    }
     const snapshot = await store.read(({ graphs, revisions }) => {
       const graph = graphs.get(input.graphId);
       if (graph === undefined) throw new ApplicationServiceError("GRAPH_NOT_FOUND", `Unknown graph ${input.graphId}.`);
@@ -133,9 +157,21 @@ export class EtherApplication {
       capability: capabilityFor(snapshot.graph, this.options.provider),
       createdAt: new Date().toISOString()
     });
-    await store.transaction(({ execution }) => execution.savePlan(plan));
-    this.publish("plan.stateChanged", input.commandId, { planId: plan.id, state: "previewed" });
-    return deepFreezeSnapshot(plan);
+    if (plan.steps.length === 0) {
+      throw new ApplicationServiceError("NO_RUNNABLE_SCOPE", "The selected execution scope has no runnable steps.");
+    }
+    const persisted = await store.transaction(({ execution }) => {
+      const duplicate = execution.getCommandResult(input.commandId, "run.preview");
+      if (duplicate !== undefined) return ExecutionPlanSchema.parse(duplicate.plan);
+      execution.savePlan(plan);
+      execution.completeCommand(input.commandId, "run.preview", { plan }, [{
+        name: "plan.stateChanged",
+        payload: { planId: plan.id, state: "previewed" }
+      }]);
+      return plan;
+    });
+    await this.drainEvents();
+    return deepFreezeSnapshot(persisted);
   }
 
   async grantRunPermit(input: {
@@ -143,16 +179,11 @@ export class EtherApplication {
     planId: string;
     contentHash: string;
   }): Promise<{ id: string; planId: string; contentHash: string }> {
-    void input.commandId;
     try {
       const permit = await this.requireWritableStore().transaction(({ execution }) =>
-        execution.grantRunPermit(input.planId, input.contentHash)
+        execution.grantRunPermit(input.planId, input.contentHash, input.commandId)
       );
-      this.publish("permission.changed", input.commandId, {
-        permitId: permit.id,
-        permission: "run",
-        state: "granted"
-      });
+      await this.drainEvents();
       return deepFreezeSnapshot(permit);
     } catch (error) {
       throw mapError(error);
@@ -169,8 +200,7 @@ export class EtherApplication {
       const job = await this.requireWritableStore().transaction(({ execution }) =>
         execution.startJob(input)
       );
-      this.publish("plan.stateChanged", input.commandId, { planId: input.planId, state: "started" });
-      this.publish("job.stateChanged", input.commandId, { jobId: job.id, state: job.status });
+      await this.drainEvents();
       if (this.options.dispatchMode !== "manual") void this.scheduler!.run(job.id);
       return deepFreezeSnapshot(job);
     } catch (error) {
@@ -180,6 +210,7 @@ export class EtherApplication {
 
   async runPending(jobId: string): Promise<ExecutionJob> {
     await this.requireScheduler().run(jobId);
+    await this.drainEvents();
     return this.queryJob(jobId);
   }
 
@@ -188,8 +219,9 @@ export class EtherApplication {
   }
 
   async cancelRun(input: { commandId: string; jobId: string }): Promise<ExecutionJob> {
-    void input.commandId;
-    return deepFreezeSnapshot(await this.requireScheduler().cancel(input.jobId));
+    const job = await this.requireScheduler().cancel(input.jobId, input.commandId);
+    await this.drainEvents();
+    return deepFreezeSnapshot(job);
   }
 
   async retryRun(input: {
@@ -197,18 +229,29 @@ export class EtherApplication {
     jobId: string;
     workItemIds?: readonly string[];
   }): Promise<ExecutionJob> {
-    void input.commandId;
     const job = await this.requireWritableStore().transaction(({ execution }) =>
-      execution.retryFailed(input.jobId, input.workItemIds)
+      execution.retryFailed(input.jobId, input.workItemIds, input.commandId)
     );
+    await this.drainEvents();
     if (this.options.dispatchMode !== "manual") void this.requireScheduler().run(job.id);
     return deepFreezeSnapshot(job);
   }
 
   async resumeRun(input: { commandId: string; jobId: string }): Promise<ExecutionJob> {
-    void input.commandId;
+    const existing = await this.requireWritableStore().read(({ execution }) =>
+      execution.getCommandResult(input.commandId, "run.resume")
+    );
+    if (existing !== undefined) return deepFreezeSnapshot(ExecutionJobSchema.parse(existing.job));
     await this.requireScheduler().run(input.jobId);
-    return this.queryJob(input.jobId);
+    const job = await this.queryJob(input.jobId);
+    await this.requireWritableStore().transaction(({ execution }) =>
+      execution.completeCommand(input.commandId, "run.resume", { job }, [{
+        name: "job.stateChanged",
+        payload: { jobId: job.id, state: job.status }
+      }])
+    );
+    await this.drainEvents();
+    return job;
   }
 
   async queryDocument(): Promise<DocumentSnapshot> {
@@ -291,36 +334,22 @@ export class EtherApplication {
       provider: this.options.provider,
       store: this.requireStore(),
       checkpoint: this.options.executionCheckpoint,
-      onAccepted: ({ claim, artifactId, outputVersionId }) => {
-        this.publish("attempt.stateChanged", claim.attempt.id, {
-          jobId: claim.job.id,
-          workItemId: claim.workItem.id,
-          attemptId: claim.attempt.id,
-          state: "accepted"
-        });
-        this.publish("workItem.stateChanged", claim.workItem.id, {
-          jobId: claim.job.id,
-          workItemId: claim.workItem.id,
-          state: "accepted"
-        });
-        this.publish("artifact.accepted", claim.attempt.id, { artifactId, outputVersionId });
-        this.publish("job.stateChanged", claim.job.id, { jobId: claim.job.id, state: "completed" });
-      }
+      onEventsAvailable: () => this.drainEvents()
     });
   }
 
-  private publish(name: string, correlationId: string, payload: Record<string, unknown>): void {
-    const store = this.requireStore();
-    const event = ApplicationEventSchema.parse({
-      kind: "event",
-      id: `event-${randomUUID()}`,
-      correlationId,
-      name,
-      documentId: store.documentId,
-      occurredAt: new Date().toISOString(),
-      payload
-    });
-    this.events.publish(event);
+  private drainEvents(): Promise<void> {
+    const drain = async (): Promise<void> => {
+      const store = this.requireStore();
+      if (store.mode.kind !== "writable") return;
+      const events = await store.read(({ execution }) => execution.listPendingEvents());
+      for (const event of events) {
+        if (!this.events.publish(event)) return;
+        await store.transaction(({ execution }) => execution.markEventDelivered(event.id));
+      }
+    };
+    this.eventDrain = this.eventDrain.then(drain, drain);
+    return this.eventDrain;
   }
 
   private requireStore(): DocumentStore {
@@ -341,6 +370,14 @@ export class EtherApplication {
 
   private assertNoDocument(): void {
     if (this.store !== undefined) throw new ApplicationServiceError("DOCUMENT_ALREADY_OPEN", "Close the current document first.");
+  }
+
+  private documentEnvironment(): DocumentStoreEnvironment {
+    return {
+      ...this.options.documentEnvironment,
+      leaseRoot: path.join(this.options.appDataRoot, "leases"),
+      recoveryRoot: path.join(this.options.appDataRoot, "recovery")
+    };
   }
 }
 

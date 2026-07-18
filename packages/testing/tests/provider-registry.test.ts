@@ -1,4 +1,5 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { getEventListeners } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -556,7 +557,8 @@ describe("generation provider registry", () => {
         signal: new AbortController().signal,
         providerAttemptId: "attempt-one",
         attemptOrdinal: 1,
-        stagingDirectory: projectPath
+        stagingDirectory: projectPath,
+        complete: async () => undefined
       })
     ).rejects.toMatchObject({ code: "FAKE_RETRYABLE_FAILURE", retryable: true });
 
@@ -566,10 +568,29 @@ describe("generation provider registry", () => {
       signal: controller.signal,
       providerAttemptId: "attempt-cancelled",
       attemptOrdinal: 2,
-      stagingDirectory: projectPath
+      stagingDirectory: projectPath,
+      complete: async () => undefined
     });
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("removes delayed fake-provider abort listeners after resolve", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new FakeImageProvider({ delayMs: 1 });
+    const controller = new AbortController();
+
+    for (let ordinal = 1; ordinal <= 20; ordinal += 1) {
+      await provider.generate(providerInput(projectPath), {
+        signal: controller.signal,
+        providerAttemptId: `listener-attempt-${ordinal}`,
+        attemptOrdinal: ordinal,
+        stagingDirectory: projectPath,
+        complete: async () => undefined
+      });
+    }
+
+    expect(getEventListeners(controller.signal, "abort")).toEqual([]);
   });
 
   it("builds a Codex CLI image invocation and withholds OpenAI API keys from the child process", async () => {

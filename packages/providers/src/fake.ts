@@ -63,11 +63,13 @@ export class FakeImageProvider implements GenerationProvider {
       width,
       height
     );
-    return this.result(
+    const result = this.result(
       `fake-output-${sanitizeFileNamePart(input.generationNodeId)}-${input.iteration}.png`,
       content,
       { deterministic: true, width, height }
     );
+    await context?.complete(result);
+    return result;
   }
 
   async edit(
@@ -80,7 +82,7 @@ export class FakeImageProvider implements GenerationProvider {
       1024,
       1024
     );
-    return this.result(
+    const result = this.result(
       `fake-edit-${sanitizeFileNamePart(input.editNodeId)}-${input.operation}-${input.iteration}.png`,
       content,
       {
@@ -90,6 +92,8 @@ export class FakeImageProvider implements GenerationProvider {
         localTool: fakeLocalToolForOperation(input.operation)
       }
     );
+    await context?.complete(result);
+    return result;
   }
 
   private async beforeOutput(context?: ProviderExecutionContext): Promise<void> {
@@ -129,13 +133,21 @@ function abortError(): Error {
 
 function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, delayMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = (): void => signal?.removeEventListener("abort", abort);
     const abort = (): void => {
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
+      cleanup();
       reject(abortError());
     };
     if (signal?.aborted === true) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
+    else {
+      signal?.addEventListener("abort", abort, { once: true });
+      timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, delayMs);
+    }
   });
 }
 

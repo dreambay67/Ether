@@ -54,6 +54,7 @@ export {
 } from "./repositories/references.js";
 export {
   assertAppDataOwnedPath,
+  ensureOwnedRecoveryDirectory,
   listRecoveryJournalPaths,
   quarantineRecoveryPath,
   readRecoveryJournal,
