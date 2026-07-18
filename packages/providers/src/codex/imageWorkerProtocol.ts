@@ -49,6 +49,7 @@ export function assertImageWorkerRequest(value: unknown): asserts value is Image
   assertSectionArray(value.sections, "Codex image worker request.sections");
   assertReferenceArray(value.references, "Codex image worker request.references");
   assertEdgeRoleArray(value.edgeRoles, "Codex image worker request.edgeRoles");
+  assertPositiveInteger(value.outputCount, "Codex image worker request.outputCount");
   if (value.output !== undefined) {
     assertObject(value.output, "Codex image worker request.output");
     assertString(value.output.aspectRatio, "Codex image worker request.output.aspectRatio");
@@ -278,6 +279,13 @@ function assertString(value: unknown, label: string): asserts value is string {
 function assertNumber(value: unknown, label: string): asserts value is number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${label} must be a finite number.`);
+  }
+}
+
+function assertPositiveInteger(value: unknown, label: string): asserts value is number {
+  assertNumber(value, label);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer.`);
   }
 }
 

@@ -96,6 +96,9 @@ export class DurableScheduler {
 
   private async dispatch(claim: ClaimedExecution, signal: AbortSignal): Promise<void> {
     if (!verifyPlanHash(claim.plan)) throw new Error("Persisted plan content hash is invalid.");
+    if (claim.plan.documentId !== this.options.store.documentId) {
+      throw new StalePlanDocumentError(claim.plan.documentId, this.options.store.documentId);
+    }
     const step = claim.plan.steps.find((candidate) => candidate.workItemIds.includes(claim.workItem.plannedWorkItemId));
     if (step === undefined) throw new Error("Persisted plan step is missing.");
     if (step.provider.providerId !== this.options.provider.descriptor.id) {
@@ -109,8 +112,6 @@ export class DurableScheduler {
       claim.job.id,
       claim.attempt.id
     );
-    ensureOwnedRecoveryDirectory(stagingDirectory, roots.appDataRoot);
-    const authorizedStagingDirectory = await realpath(stagingDirectory);
     const request = generationInput(claim, step, stagingDirectory);
     const acceptedAt = new Date().toISOString();
     const expectedOutputCount = Number(step.provider.settings.outputCount ?? 1);
@@ -129,99 +130,109 @@ export class DurableScheduler {
       metadata: null,
       outputs: []
     };
-    await this.options.store.transaction(({ execution }) =>
-      execution.prepareProviderCompletion(prepared, stagingDirectory)
-    );
-    const journalPath = writeRecoveryJournal({
-      appDataRoot: roots.appDataRoot,
-      entry: {
-        id: `provider-output-${claim.attempt.id}`,
-        kind: "provider-output",
-        state: "prepared",
-        documentId: claim.plan.documentId,
-        documentPath: this.options.store.path,
-        stagedPath: stagingDirectory,
-        sourceName: "provider-output",
-        mediaType: "application/octet-stream",
-        execution: prepared,
-        createdAt: acceptedAt,
-        updatedAt: acceptedAt
-      }
-    });
-    this.checkpoint("provider-output-intent-created");
+    let journalPath: string | undefined;
     let stagedCompletion: ProviderCompletionRecovery | undefined;
     let stagedOutputs: Awaited<ReturnType<typeof stageArtifacts>> = [];
     try {
-      const result = await this.options.provider.generate(request, {
-        signal,
-        providerAttemptId: claim.providerAttemptId,
-        attemptOrdinal: claim.attempt.ordinal,
-        stagingDirectory,
-        complete: async (providerResult) => {
-          if (stagedCompletion !== undefined) {
-            throw new ProviderCompletionProtocolError("Provider completed the same attempt more than once.");
-          }
-          if (providerResult.providerId !== step.provider.providerId) {
-            throw new ProviderMismatchError(step.provider.providerId, providerResult.providerId);
-          }
-          if (providerResult.artifacts.length !== expectedOutputCount) {
-            throw new ProviderOutputCountError(expectedOutputCount, providerResult.artifacts.length);
-          }
-          stagedOutputs = await stageArtifacts(
-            providerResult,
-            stagingDirectory,
-            authorizedStagingDirectory
-          );
-          stagedCompletion = {
-            ...prepared,
-            response: { artifactCount: providerResult.artifacts.length },
-            metadata: providerResult.metadata ?? {},
-            outputs: stagedOutputs.map((staged, ordinal) => ({
-              ordinal,
-              artifactId: stableId("artifact", claim.providerAttemptId, ordinal),
-              outputVersionId: stableId("output", claim.providerAttemptId, ordinal),
-              payloadId: stableId("payload", claim.providerAttemptId, ordinal),
-              importId: stableId("blob-import", claim.providerAttemptId, ordinal),
-              stagedPath: staged.path,
-              fileName: staged.fileName,
-              mediaType: staged.mediaType,
-              artifactMetadata: {
-                ...staged.metadata,
-                title: staged.fileName,
-                graphId: claim.plan.graphId,
-                nodeId: step.nodeId,
-                jobId: claim.job.id,
-                providerRunId: prepared.providerRunId,
-                ordinal
-              }
-            }))
-          };
-          writeRecoveryJournal({
-            appDataRoot: roots.appDataRoot,
-            entry: {
-              id: `provider-output-${claim.attempt.id}`,
-              kind: "provider-output",
-              state: "staged",
-              documentId: claim.plan.documentId,
-              documentPath: this.options.store.path,
-              stagedPath: stagingDirectory,
-              sourceName: "provider-output",
-              mediaType: "application/octet-stream",
-              execution: stagedCompletion,
-              createdAt: acceptedAt,
-              updatedAt: new Date().toISOString()
-            }
-          });
-          await this.options.store.transaction(({ execution }) =>
-            execution.stageProviderCompletion(stagedCompletion!)
-          );
-          this.checkpoint("provider-output-journal-created");
-          this.checkpoint("provider-output-staged");
+      this.checkpoint("provider-output-before-journal");
+      journalPath = writeRecoveryJournal({
+        appDataRoot: roots.appDataRoot,
+        entry: {
+          id: `provider-output-${claim.attempt.id}`,
+          kind: "provider-output",
+          state: "prepared",
+          documentId: claim.plan.documentId,
+          documentPath: this.options.store.path,
+          stagedPath: stagingDirectory,
+          sourceName: "provider-output",
+          mediaType: "application/octet-stream",
+          execution: prepared,
+          createdAt: acceptedAt,
+          updatedAt: acceptedAt
         }
       });
+      this.checkpoint("provider-output-journal-created");
+      await this.options.store.transaction(({ execution }) =>
+        execution.prepareProviderCompletion(prepared, stagingDirectory)
+      );
+      this.checkpoint("provider-output-intent-created");
+      ensureOwnedRecoveryDirectory(stagingDirectory, roots.appDataRoot);
+      const authorizedStagingDirectory = await realpath(stagingDirectory);
+      this.checkpoint("provider-output-staging-created");
+      let result: ProviderGenerationResult | undefined;
+      try {
+        result = await this.options.provider.generate(request, {
+          signal,
+          providerAttemptId: claim.providerAttemptId,
+          attemptOrdinal: claim.attempt.ordinal,
+          stagingDirectory,
+          complete: async (providerResult) => {
+            if (stagedCompletion !== undefined) {
+              throw new ProviderCompletionProtocolError("Provider completed the same attempt more than once.");
+            }
+            if (providerResult.providerId !== step.provider.providerId) {
+              throw new ProviderMismatchError(step.provider.providerId, providerResult.providerId);
+            }
+            if (providerResult.artifacts.length !== expectedOutputCount) {
+              throw new ProviderOutputCountError(expectedOutputCount, providerResult.artifacts.length);
+            }
+            stagedOutputs = await stageArtifacts(
+              providerResult,
+              stagingDirectory,
+              authorizedStagingDirectory
+            );
+            stagedCompletion = {
+              ...prepared,
+              response: { artifactCount: providerResult.artifacts.length },
+              metadata: providerResult.metadata ?? {},
+              outputs: stagedOutputs.map((staged, ordinal) => ({
+                ordinal,
+                artifactId: stableId("artifact", claim.providerAttemptId, ordinal),
+                outputVersionId: stableId("output", claim.providerAttemptId, ordinal),
+                payloadId: stableId("payload", claim.providerAttemptId, ordinal),
+                importId: stableId("blob-import", claim.providerAttemptId, ordinal),
+                stagedPath: staged.path,
+                fileName: staged.fileName,
+                mediaType: staged.mediaType,
+                artifactMetadata: {
+                  ...staged.metadata,
+                  title: staged.fileName,
+                  graphId: claim.plan.graphId,
+                  nodeId: step.nodeId,
+                  jobId: claim.job.id,
+                  providerRunId: prepared.providerRunId,
+                  ordinal
+                }
+              }))
+            };
+            writeRecoveryJournal({
+              appDataRoot: roots.appDataRoot,
+              entry: {
+                id: `provider-output-${claim.attempt.id}`,
+                kind: "provider-output",
+                state: "staged",
+                documentId: claim.plan.documentId,
+                documentPath: this.options.store.path,
+                stagedPath: stagingDirectory,
+                sourceName: "provider-output",
+                mediaType: "application/octet-stream",
+                execution: stagedCompletion,
+                createdAt: acceptedAt,
+                updatedAt: new Date().toISOString()
+              }
+            });
+            await this.options.store.transaction(({ execution }) =>
+              execution.stageProviderCompletion(stagedCompletion!)
+            );
+            this.checkpoint("provider-output-staged");
+          }
+        });
+      } catch (error) {
+        if (error instanceof ExecutionProcessLostError || stagedCompletion === undefined) throw error;
+      }
       if (stagedCompletion === undefined) {
         throw new ProviderCompletionProtocolError(
-          `Provider ${result.providerId} returned without durably completing its result.`
+          `Provider ${result?.providerId ?? this.options.provider.descriptor.id} returned without durably completing its result.`
         );
       }
       const accepted = await this.options.store.transaction(({ execution }) =>
@@ -249,6 +260,9 @@ export class DurableScheduler {
     } catch (error) {
       if (error instanceof ExecutionProcessLostError) throw error;
       cleanupProviderStaging(stagingDirectory, journalPath, roots.appDataRoot);
+      await this.options.store.transaction(({ execution }) =>
+        execution.discardProviderCompletion(claim.attempt.id)
+      );
       throw error;
     }
     cleanupProviderStaging(stagingDirectory, journalPath, roots.appDataRoot);
@@ -281,6 +295,7 @@ function generationInput(
     sections: [],
     references: [],
     edgeRoles: [],
+    outputCount: Number(settings.outputCount ?? 1),
     output: {
       aspectRatio: String(settings.aspectRatio ?? "1:1"),
       resolution: `${String(resolution?.width ?? 1024)}x${String(resolution?.height ?? 1024)}`,
@@ -352,6 +367,16 @@ class ProviderOutputPathError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "ProviderOutputPathError";
+  }
+}
+
+class StalePlanDocumentError extends Error {
+  readonly code = "STALE_PLAN";
+  readonly retryable = false;
+
+  constructor(expected: string, actual: string) {
+    super(`Persisted plan document ${expected} does not match open document ${actual}.`);
+    this.name = "StalePlanDocumentError";
   }
 }
 
@@ -451,16 +476,22 @@ function samePath(left: string, right: string): boolean {
     : path.resolve(left) === path.resolve(right);
 }
 
-function cleanupProviderStaging(directory: string, journalPath: string, appDataRoot: string): void {
+function cleanupProviderStaging(
+  directory: string,
+  journalPath: string | undefined,
+  appDataRoot: string
+): void {
   try {
     removeOwnedStagingPath(directory, appDataRoot);
   } catch {
     return;
   }
-  try {
-    removeRecoveryJournal(journalPath, appDataRoot);
-  } catch {
-    // A committed output remains accepted; reopen reconciliation owns leftover journal cleanup.
+  if (journalPath !== undefined) {
+    try {
+      removeRecoveryJournal(journalPath, appDataRoot);
+    } catch {
+      // A committed output remains accepted; reopen reconciliation owns leftover journal cleanup.
+    }
   }
 }
 

@@ -23,6 +23,7 @@ function generationInput(): GenerationProviderInput {
     sections: [],
     references: [],
     edgeRoles: [],
+    outputCount: 1,
     requestedAt: "2026-06-28T10:00:00.000Z"
   };
 }
@@ -231,6 +232,35 @@ describe("optional API provider infrastructure", () => {
     });
     expect(result.providerId).toBe("configured-api-generation");
     expect(serialized).not.toContain("explicit-secret");
+  });
+
+  it("rejects an API output count beyond the adapter capability before dispatch", async () => {
+    let calls = 0;
+    const provider = new ApiGenerationProvider({
+      descriptor: {
+        id: "single-output-api-generation",
+        name: "Single Output API Generation",
+        capabilities: ["image.generate"]
+      },
+      enabled: true,
+      credential: "explicit-secret",
+      adapter: {
+        maxOutputsPerCall: 1,
+        async generate() {
+          calls += 1;
+          throw new Error("adapter must not be called");
+        },
+        async edit() {
+          throw new Error("not used");
+        }
+      }
+    });
+
+    await expect(provider.generate({ ...generationInput(), outputCount: 2 })).rejects.toMatchObject({
+      code: "PROVIDER_OUTPUT_COUNT_UNSUPPORTED",
+      retryable: false
+    });
+    expect(calls).toBe(0);
   });
 
   it("reports configured readiness when assistant credentials and adapter are installed", async () => {

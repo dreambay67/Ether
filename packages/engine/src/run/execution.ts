@@ -950,6 +950,7 @@ async function executeGenerationNode(
     sections: assembly.sections,
     references: assembly.references,
     edgeRoles: assembly.edgeRoles,
+    outputCount: 1,
     inputs: collectProviderInputPayloads(state.graph, item.nodeId),
     output,
     requestedAt: startedAt

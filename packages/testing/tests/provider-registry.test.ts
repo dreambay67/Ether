@@ -81,6 +81,7 @@ function providerInput(projectPath: string): GenerationProviderInput {
       }
     ],
     edgeRoles: [{ edgeId: "edge-reference-generation", role: "style" }],
+    outputCount: 1,
     requestedAt: "2026-06-17T13:00:00.000Z"
   };
 }
@@ -573,6 +574,25 @@ describe("generation provider registry", () => {
     });
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("produces the requested number of deterministic PNG artifacts in stable order", async () => {
+    const projectPath = await createTempRoot();
+    const provider = new FakeImageProvider();
+    const input = { ...providerInput(projectPath), outputCount: 2 };
+
+    const first = await provider.generate(input);
+    const second = await provider.generate(input);
+
+    expect(first).toEqual(second);
+    expect(first.artifacts.map((artifact) => artifact.fileName)).toEqual([
+      "fake-output-generation-2-0001.png",
+      "fake-output-generation-2-0002.png"
+    ]);
+    expect(first.artifacts).toHaveLength(2);
+    for (const artifact of first.artifacts) {
+      expect(Buffer.from(artifact.content as Uint8Array).subarray(0, 8)).toEqual(pngSignatureBytes);
+    }
   });
 
   it("removes delayed fake-provider abort listeners after resolve", async () => {

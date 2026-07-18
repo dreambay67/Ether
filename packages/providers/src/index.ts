@@ -41,7 +41,12 @@ export {
   hasBlockedOpenAiEnvKey,
   sanitizeProviderEnv
 } from "./env.js";
-export { ApiProviderUnavailableError, ProviderNotFoundError, ProviderUnavailableError } from "./errors.js";
+export {
+  ApiProviderUnavailableError,
+  ProviderNotFoundError,
+  ProviderOutputCountUnsupportedError,
+  ProviderUnavailableError
+} from "./errors.js";
 export {
   FAKE_PROVIDER_ID,
   FakeImageProvider,

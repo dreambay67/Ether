@@ -59,6 +59,7 @@ export type ApiProviderDiagnostic = ProviderDiagnostic & {
 };
 
 export interface ApiGenerationAdapter {
+  readonly maxOutputsPerCall?: number;
   generate(input: GenerationProviderInput): Promise<ProviderGenerationResult>;
   edit(input: ImageEditProviderInput): Promise<ProviderGenerationResult>;
 }

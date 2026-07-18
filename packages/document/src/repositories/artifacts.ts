@@ -80,7 +80,12 @@ export class ArtifactRepository {
 
   list(): Artifact[] {
     const rows = this.context.database
-      .prepare("SELECT artifact_id FROM artifacts ORDER BY artifact_id")
+      .prepare(
+        `SELECT artifact_id FROM artifacts
+         ORDER BY coalesce(json_extract(metadata_json, '$.jobId'), ''),
+                  coalesce(cast(json_extract(metadata_json, '$.ordinal') AS INTEGER), 0),
+                  artifact_id`
+      )
       .all() as unknown as Array<{ artifact_id: string }>;
     return rows.map(({ artifact_id }) => this.get(artifact_id)).filter((value): value is Artifact => value !== undefined);
   }

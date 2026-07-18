@@ -14,7 +14,9 @@ import {
   readdirSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync
 } from "node:fs";
 import os from "node:os";
@@ -248,8 +250,60 @@ export function quarantineRecoveryPath(filePath: string, appDataRoot?: string): 
 export function removeOwnedStagingPath(filePath: string, appDataRoot?: string): void {
   const roots = resolveRecoveryRoots(appDataRoot);
   ensureOwnedRecoveryDirectory(roots.stagingRoot, roots.appDataRoot);
-  rmSync(assertDestructiveRecoveryPath(filePath, roots.stagingRoot, roots.appDataRoot), {
-    recursive: true,
-    force: true
-  });
+  const resolved = assertAppDataOwnedPath(filePath, roots.stagingRoot);
+  if (!existsSync(resolved)) return;
+  const canonicalAppDataRoot = assertCanonicalAppDataRoot(roots.appDataRoot);
+  const parent = path.dirname(resolved);
+  const relativeParent = path.relative(roots.appDataRoot, parent);
+  let current = roots.appDataRoot;
+  for (const segment of relativeParent.split(path.sep).filter((value) => value.length > 0)) {
+    current = path.join(current, segment);
+    assertStableComponent(current, canonicalAppDataRoot);
+    if (!lstatSync(current).isDirectory()) {
+      throw new Error(`Owned staging parent is not a directory: ${current}`);
+    }
+  }
+  removeOwnedEntry(resolved, canonicalAppDataRoot, false);
+}
+
+function removeOwnedEntry(
+  candidate: string,
+  canonicalAppDataRoot: string,
+  allowReparsePoint: boolean
+): void {
+  if (!existsSync(candidate)) return;
+  const before = lstatSync(candidate);
+  if (before.isSymbolicLink()) {
+    if (!allowReparsePoint) {
+      throw new Error(`Owned staging root is a reparse point: ${candidate}`);
+    }
+    try {
+      unlinkSync(candidate);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EPERM" && code !== "EISDIR") throw error;
+      rmdirSync(candidate);
+    }
+    return;
+  }
+  const canonical = realpathSync.native(candidate);
+  if (!inside(canonical, canonicalAppDataRoot)) {
+    throw new Error(`Owned staging entry resolves outside Ether AppData: ${candidate}`);
+  }
+  const stable = lstatSync(candidate);
+  if (!sameIdentity(before, stable)) {
+    throw new Error(`Owned staging entry changed during cleanup: ${candidate}`);
+  }
+  if (stable.isDirectory()) {
+    for (const entry of readdirSync(candidate)) {
+      removeOwnedEntry(path.join(candidate, entry), canonicalAppDataRoot, true);
+    }
+    const after = lstatSync(candidate);
+    if (!sameIdentity(stable, after)) {
+      throw new Error(`Owned staging directory changed during cleanup: ${candidate}`);
+    }
+    rmdirSync(candidate);
+    return;
+  }
+  unlinkSync(candidate);
 }

@@ -530,6 +530,118 @@ export class ExecutionRepository {
     };
   }
 
+  discardProviderCompletion(attemptId: string): boolean {
+    return this.context.database
+      .prepare(
+        "DELETE FROM provider_completion_intents WHERE attempt_id = ? AND state IN ('prepared', 'staged')"
+      )
+      .run(attemptId).changes === 1;
+  }
+
+  quarantineForeignDocumentPlans(): string[] {
+    const documentId = this.documentId();
+    const jobs = this.context.database
+      .prepare(
+        `SELECT j.job_id, j.plan_id
+         FROM execution_jobs j
+         JOIN execution_plans p ON p.plan_id = j.plan_id
+         WHERE json_extract(p.capsule_json, '$.documentId') <> ?
+           AND j.status IN ('planned', 'queued', 'running')
+         ORDER BY j.created_at, j.job_id`
+      )
+      .all(documentId) as unknown as Array<{ job_id: string; plan_id: string }>;
+    const now = this.context.now();
+    for (const { job_id: jobId, plan_id: planId } of jobs) {
+      const plan = this.requirePlanForJob(jobId);
+      const active = this.context.database
+        .prepare(
+          `SELECT w.work_item_id, a.attempt_id
+           FROM work_items w
+           JOIN attempts a ON a.work_item_id = w.work_item_id
+           WHERE w.job_id = ? AND w.status IN ('queued', 'running')
+             AND a.status IN ('queued', 'running')
+           ORDER BY w.item_index, a.attempt_number`
+        )
+        .all(jobId) as unknown as Array<{ work_item_id: string; attempt_id: string }>;
+      const jobChanged = this.context.database
+        .prepare(
+          `UPDATE execution_jobs
+           SET status = 'needs-attention', started_at = coalesce(started_at, ?), completed_at = ?
+           WHERE job_id = ? AND status IN ('planned', 'queued', 'running')`
+        )
+        .run(now, now, jobId);
+      if (jobChanged.changes !== 1) continue;
+      const failure = JSON.stringify({
+        code: "STALE_PLAN",
+        message: `Plan belongs to document ${plan.documentId}, not ${documentId}.`,
+        retryable: false,
+        details: { documentId }
+      });
+      const attemptsChanged = this.context.database
+        .prepare(
+          `UPDATE attempts
+           SET status = 'failed', error_json = ?, started_at = coalesce(started_at, ?), completed_at = ?
+           WHERE work_item_id IN (SELECT work_item_id FROM work_items WHERE job_id = ?)
+             AND status IN ('queued', 'running')`
+        )
+        .run(failure, now, now, jobId);
+      const workChanged = this.context.database
+        .prepare(
+          `UPDATE work_items SET status = 'failed', updated_at = ?
+           WHERE job_id = ? AND status IN ('queued', 'running')`
+        )
+        .run(now, jobId);
+      if (
+        attemptsChanged.changes !== active.length ||
+        workChanged.changes !== new Set(active.map((row) => row.work_item_id)).size
+      ) {
+        throw new ExecutionRepositoryError(
+          "TRANSITION_CONFLICT",
+          "Foreign-document quarantine did not own every active execution transition."
+        );
+      }
+      this.context.database
+        .prepare(
+          `DELETE FROM provider_completion_intents
+           WHERE attempt_id IN (
+             SELECT a.attempt_id FROM attempts a
+             JOIN work_items w ON w.work_item_id = a.work_item_id
+             WHERE w.job_id = ? AND a.status = 'failed'
+           )`
+        )
+        .run(jobId);
+      const planChanged = this.context.database
+        .prepare(
+          "UPDATE execution_plans SET status = 'invalidated', updated_at = ? WHERE plan_id = ? AND status IN ('previewed', 'started')"
+        )
+        .run(now, planId);
+      for (const { work_item_id: workItemId, attempt_id: attemptId } of active) {
+        this.recordOutbox("attempt.stateChanged", `copy-quarantine:${attemptId}`, {
+          jobId,
+          workItemId,
+          attemptId,
+          state: "failed"
+        }, now);
+        this.recordOutbox("workItem.stateChanged", `copy-quarantine:${attemptId}`, {
+          jobId,
+          workItemId,
+          state: "failed"
+        }, now);
+      }
+      this.recordOutbox("job.stateChanged", `copy-quarantine:${jobId}`, {
+        jobId,
+        state: "needs-attention"
+      }, now);
+      if (planChanged.changes === 1) {
+        this.recordOutbox("plan.stateChanged", `copy-quarantine:${jobId}`, {
+          planId,
+          state: "invalidated"
+        }, now);
+      }
+    }
+    return jobs.map((job) => job.job_id);
+  }
+
   getClaimForAttempt(attemptId: string): ClaimedExecution | undefined {
     const row = this.context.database
       .prepare(

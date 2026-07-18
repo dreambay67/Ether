@@ -6,6 +6,7 @@ import type {
   ProviderExecutionContext,
   ProviderGenerationResult
 } from "../types.js";
+import { ProviderOutputCountUnsupportedError } from "../errors.js";
 import { ApiProviderBase } from "./apiProviderBase.js";
 import type {
   ApiGenerationAdapter,
@@ -41,6 +42,11 @@ export class ApiGenerationProvider extends ApiProviderBase implements Generation
       return this.createUnavailableError(
         `API provider "${this.descriptor.id}" is configured, but no generation API adapter is installed.`
       );
+    }
+
+    const maximum = this.adapter.maxOutputsPerCall ?? 1;
+    if (input.outputCount > maximum) {
+      throw new ProviderOutputCountUnsupportedError(this.descriptor.id, input.outputCount, maximum);
     }
 
     const result = await this.adapter.generate(input);

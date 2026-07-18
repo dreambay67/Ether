@@ -84,7 +84,10 @@ export class EtherApplication {
     });
     this.attachScheduler();
     if (this.store.mode.kind === "writable") {
-      const jobIds = await this.store.transaction(({ execution }) => execution.recoverProcessLost());
+      const jobIds = await this.store.transaction(({ execution }) => {
+        execution.quarantineForeignDocumentPlans();
+        return execution.recoverProcessLost();
+      });
       await this.drainEvents();
       if (this.options.dispatchMode !== "manual") jobIds.forEach((jobId) => void this.scheduler!.run(jobId));
     }

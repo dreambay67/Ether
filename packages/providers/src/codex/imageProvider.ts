@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { ProviderUnavailableError } from "../errors.js";
+import { ProviderOutputCountUnsupportedError, ProviderUnavailableError } from "../errors.js";
 import { inferMimeType } from "../mime.js";
 import { removeInvalidPathCharacters } from "../pathSanitization.js";
 import type {
@@ -87,6 +87,9 @@ export class CodexCliImageProvider implements GenerationProvider {
     input: GenerationProviderInput,
     context?: ProviderExecutionContext
   ): Promise<ProviderGenerationResult> {
+    if (input.outputCount > 1) {
+      throw new ProviderOutputCountUnsupportedError(this.descriptor.id, input.outputCount, 1);
+    }
     const codexCliPath = await this.requireAvailableCodexCliPath();
     const job = await createJobPaths(input);
     const requestPath = path.join(job.jobDir, "request.json");

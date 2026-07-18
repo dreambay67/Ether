@@ -118,6 +118,7 @@ type WriteExecutionRepository = Pick<
   | "cancelJob"
   | "claimNext"
   | "completeCommand"
+  | "discardProviderCompletion"
   | "failAttempt"
   | "getCommandResult"
   | "getJob"
@@ -132,6 +133,7 @@ type WriteExecutionRepository = Pick<
   | "recoverProcessLost"
   | "retryFailed"
   | "prepareProviderCompletion"
+  | "quarantineForeignDocumentPlans"
   | "savePlan"
   | "stageProviderCompletion"
   | "startJob"
@@ -759,6 +761,8 @@ export class DocumentStore {
         claimNext: (id, token) => invoke(() => repositories.execution.claimNext(id, token)),
         completeCommand: (id, name, result, events) =>
           invoke(() => repositories.execution.completeCommand(id, name, result, events)),
+        discardProviderCompletion: (id) =>
+          invoke(() => repositories.execution.discardProviderCompletion(id)),
         failAttempt: (id, code, message, retryable) =>
           invoke(() => repositories.execution.failAttempt(id, code, message, retryable)),
         getCommandResult: (id, name) => invoke(() => repositories.execution.getCommandResult(id, name)),
@@ -777,6 +781,8 @@ export class DocumentStore {
           invoke(() => repositories.execution.retryFailed(id, workItemIds, commandId)),
         prepareProviderCompletion: (completion, stagingPath) =>
           invoke(() => repositories.execution.prepareProviderCompletion(completion, stagingPath)),
+        quarantineForeignDocumentPlans: () =>
+          invoke(() => repositories.execution.quarantineForeignDocumentPlans()),
         savePlan: (plan) => invoke(() => repositories.execution.savePlan(plan)),
         stageProviderCompletion: (completion) =>
           invoke(() => repositories.execution.stageProviderCompletion(completion)),

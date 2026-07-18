@@ -213,6 +213,7 @@ export type GenerationProviderInput = {
   }>;
   references: GenerationReferenceInput[];
   edgeRoles: Array<{ edgeId: string; role: string }>;
+  outputCount: number;
   inputs?: PayloadEnvelope[];
   output?: GenerationOutputSettings;
   requestedAt: string;

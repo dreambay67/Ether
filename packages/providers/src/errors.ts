@@ -33,3 +33,15 @@ export class ApiProviderUnavailableError extends Error {
     this.diagnostic = diagnostic;
   }
 }
+
+export class ProviderOutputCountUnsupportedError extends Error {
+  readonly code = "PROVIDER_OUTPUT_COUNT_UNSUPPORTED";
+  readonly retryable = false;
+
+  constructor(providerId: string, requested: number, maximum: number) {
+    super(
+      `Generation provider "${providerId}" supports at most ${maximum} output${maximum === 1 ? "" : "s"} per call; ${requested} were requested.`
+    );
+    this.name = "ProviderOutputCountUnsupportedError";
+  }
+}

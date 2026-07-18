@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -31,6 +31,16 @@ class CountingFakeProvider extends FakeImageProvider {
   }
 }
 
+class CompleteThenThrowProvider extends CountingFakeProvider {
+  override async generate(
+    input: GenerationProviderInput,
+    context?: ProviderExecutionContext
+  ): Promise<ProviderGenerationResult> {
+    await super.generate(input, context);
+    throw new Error("provider failed after durable completion");
+  }
+}
+
 class ArtifactProbeProvider extends FakeImageProvider {
   constructor(
     private readonly transform: (
@@ -57,6 +67,10 @@ async function temp(prefix: string): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), prefix));
   roots.push(root);
   return root;
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  return access(filePath).then(() => true, () => false);
 }
 
 function blankGraph(): EtherGraph {
@@ -700,9 +714,32 @@ describe("durable application execution", () => {
     await ready.application.closeDocument();
   });
 
-  it("rolls back provider acceptance when artifact count differs from outputCount", async () => {
+  it("sends outputCount to the fake provider and accepts every deterministic PNG", async () => {
     const ready = await createReadyApplication({
       provider: new FakeImageProvider(),
+      outputCount: 2,
+      dispatchMode: "manual"
+    });
+    const started = await ready.application.startRun({
+      commandId: "fake-two-output-start",
+      planId: ready.plan.id,
+      contentHash: ready.plan.contentHash,
+      runPermitId: ready.permit.id
+    });
+
+    expect((await ready.application.runPending(started.id)).status).toBe("completed");
+    const artifacts = await ready.application.searchArtifacts({ text: "" });
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts.map((artifact) => artifact.metadata.ordinal)).toEqual([0, 1]);
+    await ready.application.closeDocument();
+  });
+
+  it("rolls back provider acceptance when artifact count differs from outputCount", async () => {
+    const ready = await createReadyApplication({
+      provider: new ArtifactProbeProvider((result) => ({
+        ...result,
+        artifacts: result.artifacts.slice(0, 1)
+      })),
       outputCount: 2,
       dispatchMode: "manual"
     });
@@ -721,6 +758,56 @@ describe("durable application execution", () => {
       retryable: false
     });
     await ready.application.closeDocument();
+  });
+
+  it("accepts a durable completion when the provider throws after complete", async () => {
+    const provider = new CompleteThenThrowProvider();
+    const ready = await createReadyApplication({ provider, dispatchMode: "manual" });
+    const started = await ready.application.startRun({
+      commandId: "complete-then-throw-start",
+      planId: ready.plan.id,
+      contentHash: ready.plan.contentHash,
+      runPermitId: ready.permit.id
+    });
+
+    expect((await ready.application.runPending(started.id)).status).toBe("completed");
+    expect(provider.calls).toBe(1);
+    expect(await ready.application.searchArtifacts({ text: "" })).toHaveLength(1);
+    expect(listRecoveryJournalPaths(ready.appDataRoot)).toEqual([]);
+    await ready.application.closeDocument();
+  });
+
+  it("does not leak staging or a completion intent when journal publication fails", async () => {
+    const provider = new CountingFakeProvider();
+    const ready = await createReadyApplication({ provider, dispatchMode: "manual" });
+    const recoveryRoot = path.join(ready.appDataRoot, "recovery");
+    await rm(recoveryRoot, { recursive: true, force: true });
+    await writeFile(recoveryRoot, "journal path blocked", "utf8");
+    const started = await ready.application.startRun({
+      commandId: "unwritable-journal-start",
+      planId: ready.plan.id,
+      contentHash: ready.plan.contentHash,
+      runPermitId: ready.permit.id
+    });
+
+    expect((await ready.application.runPending(started.id)).status).toBe("failed");
+    expect(provider.calls).toBe(0);
+    const attempt = (await ready.application.queryAttempts(started.id))[0]!;
+    const stagingDirectory = path.join(
+      ready.appDataRoot,
+      "staging",
+      "provider",
+      ready.plan.documentId,
+      started.id,
+      attempt.id
+    );
+    expect(await pathExists(stagingDirectory)).toBe(false);
+    await ready.application.closeDocument();
+    await rm(recoveryRoot, { force: true });
+
+    const store = await DocumentStore.open(ready.documentPath, { access: "require-write" });
+    expect(await store.transaction(({ execution }) => execution.getProviderCompletion(attempt.id))).toBeUndefined();
+    await store.close();
   });
 
   it("redispatches after recovery only when completion intent has no produced output", async () => {
@@ -836,12 +923,19 @@ describe("durable application execution", () => {
     await reopened.closeDocument();
   });
 
-  it("recovers a staged result after the provider process is hard-killed", async () => {
+  it.each([
+    ["provider-output-before-journal", false, 1],
+    ["provider-output-intent-created", false, 1],
+    ["provider-output-staged", true, 0],
+    ["provider-output-accepted", true, 0]
+  ] as const)(
+  "recovers after the provider process is hard-killed at %s",
+  async (checkpoint, completedOnOpen, expectedProviderCalls) => {
     const documentsRoot = await temp("ether-hard-kill-doc-");
     const appDataRoot = await temp("ether-hard-kill-appdata-");
     const documentPath = path.join(documentsRoot, "Campaign.ether");
     const readyPath = path.join(appDataRoot, "child-ready.json");
-    const markerPath = path.join(appDataRoot, "staged.marker");
+    const markerPath = path.join(appDataRoot, "checkpoint.marker");
     const operations = graphTransaction("placeholder", "placeholder").operations;
     const childSource = `
       import { writeFileSync } from "node:fs";
@@ -853,8 +947,8 @@ describe("durable application execution", () => {
         provider: new FakeImageProvider(),
         dispatchMode: "manual",
         executionCheckpoint: (name) => {
-          if (name === "provider-output-staged") {
-            writeFileSync(process.env.ETHER_CHILD_MARKER, "staged");
+          if (name === process.env.ETHER_CHILD_CHECKPOINT) {
+            writeFileSync(process.env.ETHER_CHILD_MARKER, name);
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);
           }
         }
@@ -901,6 +995,7 @@ describe("durable application execution", () => {
       env: {
         ...process.env,
         ETHER_CHILD_APPDATA: appDataRoot,
+        ETHER_CHILD_CHECKPOINT: checkpoint,
         ETHER_CHILD_DOCUMENT: documentPath,
         ETHER_CHILD_MARKER: markerPath,
         ETHER_CHILD_READY: readyPath
@@ -914,9 +1009,9 @@ describe("durable application execution", () => {
     try {
       await waitFor(async () => {
         if (child.exitCode !== null || child.signalCode !== null) {
-          throw new Error(`Execution child exited before staging: ${childError}`);
+          throw new Error(`Execution child exited before ${checkpoint}: ${childError}`);
         }
-        return (await readFile(markerPath, "utf8").catch(() => "")) === "staged";
+        return (await readFile(markerPath, "utf8").catch(() => "")) === checkpoint;
       }, 10000);
       const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
       child.kill("SIGKILL");
@@ -934,8 +1029,10 @@ describe("durable application execution", () => {
         }
       });
       await reopened.openDocument({ path: documentPath, access: "require-write" });
+      expect((await reopened.queryJob(jobId)).status).toBe(completedOnOpen ? "completed" : "queued");
+      if (!completedOnOpen) await reopened.runPending(jobId);
       expect((await reopened.queryJob(jobId)).status).toBe("completed");
-      expect(provider.calls).toBe(0);
+      expect(provider.calls).toBe(expectedProviderCalls);
       expect(await reopened.searchArtifacts({ text: "" })).toHaveLength(1);
       expect(listRecoveryJournalPaths(appDataRoot)).toEqual([]);
       await reopened.closeDocument();
@@ -1040,6 +1137,37 @@ describe("durable application execution", () => {
         runPermitId: ready.permit.id
       })
     ).rejects.toMatchObject({ code: "STALE_PLAN" });
+    await copy.closeDocument();
+  });
+
+  it("quarantines a queued source-document job when its Save Copy is reopened", async () => {
+    const ready = await createReadyApplication({ dispatchMode: "manual" });
+    const started = await ready.application.startRun({
+      commandId: "queued-copy-start",
+      planId: ready.plan.id,
+      contentHash: ready.plan.contentHash,
+      runPermitId: ready.permit.id
+    });
+    await ready.application.closeDocument();
+    const copyPath = path.join(await temp("ether-queued-save-copy-"), "Campaign Copy.ether");
+    const source = await DocumentStore.open(ready.documentPath, { access: "require-write" });
+    await source.saveCopy(copyPath);
+    await source.close();
+    const provider = new CountingFakeProvider();
+    const copy = new EtherApplication({
+      appDataRoot: ready.appDataRoot,
+      appVersion: "4.0.0-test",
+      provider,
+      dispatchMode: "manual"
+    });
+
+    await copy.openDocument({ path: copyPath, access: "require-write" });
+    expect((await copy.runPending(started.id)).status).toBe("needs-attention");
+    expect(provider.calls).toBe(0);
+    expect((await copy.queryAttempts(started.id))[0]!.failure).toMatchObject({
+      code: "STALE_PLAN",
+      retryable: false
+    });
     await copy.closeDocument();
   });
 
@@ -1158,9 +1286,13 @@ describe("durable application execution", () => {
   it("rejects a provider source path that escapes through a directory link", async () => {
     const outsideRoot = await temp("ether-provider-link-source-");
     const outsidePath = path.join(outsideRoot, "outside.png");
+    let attemptStagingDirectory = "";
+    let ownedLinkPath = "";
     const provider = new ArtifactProbeProvider(async (result, context) => {
       await writeFile(outsidePath, result.artifacts[0]!.content!);
       const linkPath = path.join(context.stagingDirectory, "linked-outside");
+      attemptStagingDirectory = context.stagingDirectory;
+      ownedLinkPath = linkPath;
       await symlink(outsideRoot, linkPath, "junction");
       return {
         ...result,
@@ -1183,6 +1315,10 @@ describe("durable application execution", () => {
     expect((await ready.application.queryAttempts(started.id))[0]?.failure).toMatchObject({
       code: "PROVIDER_OUTPUT_PATH_INVALID"
     });
+    expect(await readFile(outsidePath)).toEqual(expect.any(Buffer));
+    expect(await pathExists(ownedLinkPath)).toBe(false);
+    expect(await pathExists(attemptStagingDirectory)).toBe(false);
+    expect(listRecoveryJournalPaths(ready.appDataRoot)).toEqual([]);
     await ready.application.closeDocument();
   });
 });

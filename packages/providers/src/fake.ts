@@ -58,16 +58,30 @@ export class FakeImageProvider implements GenerationProvider {
     await this.beforeOutput(context);
     const width = input.output?.width ?? 1024;
     const height = input.output?.height ?? 1024;
-    const content = deterministicPng(
-      JSON.stringify({ input, providerAttemptId: context?.providerAttemptId ?? null }),
-      width,
-      height
-    );
-    const result = this.result(
-      `fake-output-${sanitizeFileNamePart(input.generationNodeId)}-${input.iteration}.png`,
-      content,
-      { deterministic: true, width, height }
-    );
+    const outputCount = input.outputCount;
+    const baseName = `fake-output-${sanitizeFileNamePart(input.generationNodeId)}-${input.iteration}`;
+    const artifacts = Array.from({ length: outputCount }, (_, ordinal) => {
+      const metadata = { deterministic: true, width, height, ordinal };
+      return {
+        fileName: outputCount === 1
+          ? `${baseName}.png`
+          : `${baseName}-${String(ordinal + 1).padStart(4, "0")}.png`,
+        mimeType: "image/png",
+        content: deterministicPng(
+          JSON.stringify({ input, ordinal, providerAttemptId: context?.providerAttemptId ?? null }),
+          width,
+          height
+        ),
+        metadata
+      };
+    });
+    const result: ProviderGenerationResult = {
+      providerId: this.descriptor.id,
+      providerName: this.descriptor.name,
+      capabilities: [...this.descriptor.capabilities],
+      artifacts,
+      metadata: { deterministic: true, width, height, outputCount }
+    };
     await context?.complete(result);
     return result;
   }

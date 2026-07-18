@@ -66,6 +66,7 @@ function imageInput(projectPath: string): GenerationProviderInput {
     sections: [],
     references: [],
     edgeRoles: [],
+    outputCount: 1,
     output: {
       aspectRatio: "16:9",
       resolution: "1536-long-edge",
@@ -178,6 +179,25 @@ describe("Codex provider worker contracts", () => {
       mimeType: "image/png"
     });
     await expect(readFile(result.artifacts[0]!.sourcePath!)).resolves.toEqual(validPngBytes);
+  });
+
+  it("rejects unsupported multi-output Codex generation before process dispatch", async () => {
+    const projectPath = await createTempRoot();
+    const calls: ProviderProcessCall[] = [];
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        calls.push(call);
+        throw new Error("runner must not be called");
+      }
+    });
+
+    await expect(provider.generate({ ...imageInput(projectPath), outputCount: 2 })).rejects.toMatchObject({
+      code: "PROVIDER_OUTPUT_COUNT_UNSUPPORTED",
+      retryable: false
+    });
+    expect(calls).toEqual([]);
   });
 
   it("rejects malformed image worker JSON", async () => {
