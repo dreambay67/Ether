@@ -244,6 +244,7 @@ export class CodexAppServerRuntime {
 
   private async restartProcess(restarting: boolean): Promise<CodexRuntimeHealth> {
     await this.retireCurrentProcess();
+    if (this.stopping) return this.health();
     return this.startProcess(restarting);
   }
 

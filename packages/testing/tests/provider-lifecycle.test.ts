@@ -167,6 +167,27 @@ describe("Codex runtime lifecycle", () => {
     await waitFor(() => !processExists(originalPid as number));
   });
 
+  it("does not spawn a replacement when stop races with protocol recovery", async () => {
+    const instance = runtime("oversized-frame", {}, {
+      clientOptions: { maxFrameBytes: 1_024 }
+    });
+    await instance.start();
+    const originalPid = instance.health().pid;
+    expect(originalPid).not.toBeNull();
+    const client = instance.getClient();
+    const thread = await client.startThread({ cwd: process.cwd() });
+    await expect(client.runTurn({
+      threadId: thread.threadId,
+      input: [{ type: "text", text: "trigger protocol failure" }]
+    })).rejects.toThrow(/frame exceeded/i);
+
+    const restart = instance.ensureAvailable();
+    await instance.stop();
+    await expect(restart).rejects.toMatchObject({ code: "CODEX_APP_SERVER_UNAVAILABLE" });
+    await waitFor(() => !processExists(originalPid as number));
+    expect(instance.health()).toMatchObject({ status: "stopped", pid: null, processPhase: "none" });
+  });
+
   it("activates explicit fallback for initialization timeout or initialization death", async () => {
     const timedOut = runtime("no-init");
     await timedOut.start();
