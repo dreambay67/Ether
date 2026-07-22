@@ -39,6 +39,8 @@ export const testSuites = {
     "tests/project-store.test.ts",
     "tests/codex-app-server-client.test.ts",
     "tests/codex-app-server-provider.test.ts",
+    "tests/antigravity-provider.test.ts",
+    "tests/provider-capability-probe.test.ts",
     "tests/provider-lifecycle.test.ts",
     "tests/provider-registry.test.ts",
     "tests/revision-store.test.ts",
@@ -60,7 +62,7 @@ export const testSuites = {
     "tests/codex.conformance.test.ts",
     "tests/conformance/codex-live.conformance.ts"
   ],
-  "conformance:antigravity": ["tests/antigravity.conformance.test.ts"],
+  "conformance:antigravity": ["tests/antigravity.conformance.test.ts", "tests/conformance/antigravity-live.conformance.ts"],
   smoke: ["tests/smoke.spec.ts"],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
   packaged: ["tests/desktop/document-lifecycle.packaged.ts"]

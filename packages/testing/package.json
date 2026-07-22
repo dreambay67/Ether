@@ -17,7 +17,7 @@
     "test:contracts": "cross-env ETHER_TEST_SUITE=contracts vitest run --config vitest.integration.config.ts",
     "pretest:conformance:codex": "pnpm --filter @ether/providers build && pnpm --filter @ether/schema build",
     "test:conformance:codex": "cross-env ETHER_TEST_SUITE=conformance:codex vitest run --config vitest.integration.config.ts",
-    "pretest:conformance:antigravity": "pnpm --filter @ether/schema build",
+    "pretest:conformance:antigravity": "pnpm --filter @ether/providers build && pnpm --filter @ether/schema build",
     "test:conformance:antigravity": "cross-env ETHER_TEST_SUITE=conformance:antigravity vitest run --config vitest.integration.config.ts",
     "test:smoke": "playwright test --config playwright.config.ts",
     "test:desktop": "playwright test --config playwright.desktop.config.ts",

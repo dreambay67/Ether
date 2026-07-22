@@ -65,6 +65,7 @@ export type ProviderOperation =
 
 export type ProviderCapabilitySource =
   | "codex-cli"
+  | "antigravity-cli"
   | "simulation"
   | "api-slot"
   | "adapter-slot"
@@ -99,6 +100,7 @@ export type ProviderMatrixStatus = "ready" | "unavailable" | "experimental";
 export type ProviderRoute =
   | "local-fake"
   | "codex-cli"
+  | "antigravity-cli"
   | "unconfigured-clean-cli-or-mcp"
   | "adapter"
   | "api-generation"

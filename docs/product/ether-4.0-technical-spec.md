@@ -636,7 +636,7 @@ Provider controls bind to this profile. No hardcoded UI list may advertise value
 - Validate Lite output against 1K constraints.
 - Run a conformance probe when installation/version changes.
 - Disable profiles whose probe fails; Nano Banana 2 is the minimum launch gate.
-- Target Antigravity CLI 1.1.3 noninteractive `--print`, `--model`, `--add-dir`, and `--print-timeout` behavior first.
+- The 4.0 baseline evidence targets Antigravity CLI 1.1.4 noninteractive `--print`, `--model`, `--add-dir`, and `--print-timeout` behavior; a changed detected version or executable hash requires new evidence rather than an assumed compatibility claim.
 - Treat Nano Banana image-profile selection as a versioned textual instruction contract until the CLI reports a separate image model identifier.
 - Parse completion from process exit plus validated staged artifacts; printed prose alone never constitutes generation success.
 

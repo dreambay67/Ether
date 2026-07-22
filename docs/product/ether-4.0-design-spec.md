@@ -425,7 +425,7 @@ Antigravity CLI provides these user-facing profiles:
 
 Ether requests the profile explicitly, records the request, probes actual output behavior, and never claims an unverified provider-reported model identity. Nano Banana 2 is the minimum acceptable launch integration. Pro and Lite remain launch targets; unavailable profiles are disabled honestly if conformance cannot be established.
 
-The verified automation surface begins with Antigravity CLI 1.1.3: noninteractive `--print`, explicit `--model`, workspace `--add-dir`, and bounded `--print-timeout`. Image-profile choice is an Ether-owned instruction contract until the CLI reports a distinct image-model identifier. Each CLI version/profile combination must pass a recorded conformance scenario covering exit state, output discovery, dimensions, staging containment, and failure behavior before it is enabled.
+The 4.0 automation baseline was verified with Antigravity CLI 1.1.4 and a recorded executable SHA-256, using noninteractive `--print`, explicit `--model`, workspace `--add-dir`, and bounded `--print-timeout`. Image-profile choice is an Ether-owned instruction contract until the CLI reports a distinct image-model identifier. Every detected CLI version and executable hash requires its own recorded conformance scenario covering exit state, output discovery, dimensions, staging containment, and failure behavior before a profile is enabled.
 
 Nano Banana 2 Lite is constrained to its verified 1K capability. Provider-derived aspect ratios, resolution limits, reference limits, and operation support drive the Inspector controls.
 

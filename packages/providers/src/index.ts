@@ -120,6 +120,33 @@ export {
   type DefaultProviderRegistryOptions,
   type DefaultVisionEvaluationProviderRegistryOptions
 } from "./registry.js";
+export {
+  ANTIGRAVITY_MODEL,
+  ANTIGRAVITY_PROFILE_IDS,
+  AntigravityImageProvider,
+  createAntigravityImageProviders,
+  type AntigravityCliImageProviderOptions,
+  type AntigravityProfile
+} from "./antigravity/imageProvider.js";
+export {
+  discoverAntigravityCli,
+  resolveAntigravityCliPath,
+  type AntigravityCliDiscovery,
+  type AntigravityCliDiscoveryOptions
+} from "./antigravity/discovery.js";
+export {
+  readAntigravityConformance,
+  writeAntigravityConformance,
+  type AntigravityConformanceEvidence,
+  type AntigravityProfileConformance
+} from "./antigravity/capabilityProbe.js";
+export {
+  buildAntigravityPrompt,
+  buildAntigravityProcessCall,
+  extractExplicitProviderIdentity,
+  type AntigravityWorkerRequest
+} from "./antigravity/workerProtocol.js";
+export { runAntigravityProcess, type AntigravityProcessOptions } from "./antigravity/processRunner.js";
 export { UnavailableImageProvider, createNanoBananaProviders } from "./unavailable.js";
 export { PROVIDER_CONNECTION_ROLES, PROVIDER_PAYLOAD_CHANNELS } from "./types.js";
 export type {

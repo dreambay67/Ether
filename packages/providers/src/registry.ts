@@ -11,7 +11,8 @@ import { createDefaultApiGenerationProvider } from "./api/generationApiProvider.
 import { BLOCKED_OPENAI_ENV_KEYS, hasBlockedOpenAiEnvKey } from "./env.js";
 import { ProviderNotFoundError } from "./errors.js";
 import { FAKE_PROVIDER_ID, FakeImageProvider } from "./fake.js";
-import { createNanoBananaProviders, UnavailableImageProvider } from "./unavailable.js";
+import { createAntigravityImageProviders } from "./antigravity/imageProvider.js";
+import { UnavailableImageProvider } from "./unavailable.js";
 import type {
   AssistantProvider,
   GenerationProvider,
@@ -196,7 +197,7 @@ export function createDefaultProviderRegistry(options: DefaultProviderRegistryOp
   const registry = new GenerationProviderRegistry([
     new FakeImageProvider(),
     codexProvider,
-    ...createNanoBananaProviders()
+    ...createAntigravityImageProviders()
   ]);
   if (options.codexBundle) runtimeBundles.set(registry, options.codexBundle);
   return registry;
@@ -319,6 +320,10 @@ function buildProviderCapabilityMatrix(input: {
       displayName: "Nano Banana 2",
       mode: "experimental"
     }),
+    matrixEntry(diagnosticsById.get("google-nano-banana-2-lite"), {
+      displayName: "Nano Banana 2 Lite",
+      mode: "experimental"
+    }),
     ...buildUnavailableAdapterMatrixEntries()
   ];
 
@@ -427,6 +432,10 @@ function cloneCapabilityProfile(profile: ProviderCapabilityProfile): ProviderCap
 function capabilitySourceForRoute(route: ProviderCapabilityProfile["route"]) {
   if (route === "codex-cli") {
     return "codex-cli";
+  }
+
+  if (route === "antigravity-cli") {
+    return "antigravity-cli";
   }
 
   if (route === "local-fake") {

@@ -152,7 +152,8 @@ describe("generation provider registry", () => {
       "ether-fake-local",
       "codex-chatgpt-image-2",
       "google-nano-banana-pro",
-      "google-nano-banana-2"
+      "google-nano-banana-2",
+      "google-nano-banana-2-lite"
     ]);
     expect(providers.find((provider) => provider.id === "ether-fake-local")?.capabilities).toContain(
       "image.generate"
@@ -167,7 +168,7 @@ describe("generation provider registry", () => {
     });
     expect(diagnostics.providers.find((provider) => provider.id === "google-nano-banana-pro")).toMatchObject({
       availability: "unavailable",
-      route: "unconfigured-clean-cli-or-mcp"
+      route: "antigravity-cli"
     });
   });
 
@@ -198,6 +199,7 @@ describe("generation provider registry", () => {
       "api-assistant",
       "google-nano-banana-pro",
       "google-nano-banana-2",
+      "google-nano-banana-2-lite",
       "adapter-audio-to-text",
       "adapter-video-to-text",
       "adapter-image-to-text",
@@ -335,15 +337,26 @@ describe("generation provider registry", () => {
           availability: "unavailable",
           status: "experimental",
           mode: "experimental",
-          unavailableReason: expect.stringMatching(/clean local CLI\/MCP route/i)
+          route: "antigravity-cli",
+          unavailableReason: expect.stringMatching(/conformance|authentication|not found|not live-probed/i)
         }),
         expect.objectContaining({
           id: "google-nano-banana-2",
           displayName: "Nano Banana 2",
+          availability: expect.stringMatching(/^(?:available|unavailable)$/),
+          status: "experimental",
+          mode: "experimental",
+          route: "antigravity-cli"
+        }),
+        expect.objectContaining({
+          id: "google-nano-banana-2-lite",
+          displayName: "Nano Banana 2 Lite",
           availability: "unavailable",
           status: "experimental",
           mode: "experimental",
-          unavailableReason: expect.stringMatching(/clean local CLI\/MCP route/i)
+          route: "antigravity-cli",
+          unavailableReason: expect.stringMatching(/conformance|authentication|not found|not live-probed/i),
+          profiles: [expect.objectContaining({ mediaLimits: expect.objectContaining({ maxWidth: 1024, maxHeight: 1024 }) })]
         }),
         expect.objectContaining({
           id: "adapter-audio-to-text",
