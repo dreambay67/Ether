@@ -99,9 +99,7 @@ export const LiveOutputSettingsSchema = z
         template: z.string().min(1)
       })
       .strict(),
-    // no-clobber/suffix are accepted only while opening pre-freeze documents;
-    // all new command payloads use the canonical rename/skip/error values.
-    collisionPolicy: z.enum(["rename", "skip", "error", "no-clobber", "suffix"]),
+    collisionPolicy: z.enum(["rename", "skip", "error"]),
     transferPolicy: z.enum(["copy", "move"]),
     lastReconciledAt: TimestampSchema.nullable()
   })
@@ -120,8 +118,6 @@ export type LiveOutputSettings = z.infer<typeof LiveOutputSettingsSchema>;
 export function normalizeLiveOutputCollisionPolicy(
   policy: LiveOutputSettings["collisionPolicy"]
 ): "rename" | "skip" | "error" {
-  if (policy === "suffix") return "rename";
-  if (policy === "no-clobber") return "error";
   return policy;
 }
 

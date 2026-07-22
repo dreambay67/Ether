@@ -1383,7 +1383,7 @@ describe("transactional Ether document repositories", () => {
       enabled: true,
       pathGrantId: "grant-1",
       namingPolicy: { template: "{node}-{version}" },
-      collisionPolicy: "suffix",
+      collisionPolicy: "rename",
       transferPolicy: "copy",
       lastReconciledAt: null
     };

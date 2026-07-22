@@ -628,7 +628,7 @@ describe("Ether 4.0 schema", () => {
       enabled: true,
       pathGrantId: "grant-1",
       namingPolicy: { template: "{node}-{version}" },
-      collisionPolicy: "suffix",
+      collisionPolicy: "rename",
       transferPolicy: "copy",
       lastReconciledAt: null
     } as const;
@@ -638,6 +638,9 @@ describe("Ether 4.0 schema", () => {
     ).toBe(false);
     expect(
       LiveOutputSettingsSchema.safeParse({ ...liveOutput, collisionPolicy: "overwrite" }).success
+    ).toBe(false);
+    expect(
+      LiveOutputSettingsSchema.safeParse({ ...liveOutput, collisionPolicy: "suffix" }).success
     ).toBe(false);
   });
 
@@ -992,7 +995,7 @@ describe("Ether 4.0 schema", () => {
       ordering: "manual"
     } as const;
     expect(ReferenceSetConfigSchema.parse(referenceSet)).toEqual(referenceSet);
-    expect(normalizeLiveOutputCollisionPolicy("suffix")).toBe("rename");
+    expect(normalizeLiveOutputCollisionPolicy("rename")).toBe("rename");
 
     expect(
       ApplicationCommandSchema.safeParse({

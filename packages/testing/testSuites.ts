@@ -43,6 +43,11 @@ export const testSuites = {
     "tests/provider-capability-probe.test.ts",
     "tests/provider-lifecycle.test.ts",
     "tests/provider-registry.test.ts",
+    "tests/execution-plan.test.ts",
+    "tests/batch-scheduler.test.ts",
+    "tests/application-contract-4.0.test.ts",
+    "tests/live-output.test.ts",
+    "tests/durable-repositories.test.ts",
     "tests/revision-store.test.ts",
     "tests/vision-evaluation.test.ts",
     "tests/windows-package.test.ts"
