@@ -1,0 +1,83 @@
+/* Task 15 shell: a precise dark command surface around an airy canvas. */
+.ether-shell.task-nine-shell.task-fifteen-shell {
+  grid-template-rows: 68px 42px minmax(0, 1fr) 34px;
+  min-width: 0;
+}
+
+.task-fifteen-shell .workspace-switcher {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--ether-shell-border);
+  background: #090f17;
+}
+
+.workspace-switcher button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #92a1b2;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.workspace-switcher button:hover,
+.workspace-switcher button:focus-visible,
+.workspace-switcher button.is-active {
+  border-color: rgba(55, 230, 234, .45);
+  background: rgba(20, 112, 219, .18);
+  color: #effaff;
+}
+
+.task-fifteen-shell .adaptive-workspace {
+  display: grid;
+  grid-template-rows: 24px auto minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #080d14;
+}
+
+.workspace-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(38, 50, 65, .7);
+  color: var(--ether-shell-muted);
+  font-size: 10px;
+}
+
+.workspace-context span { color: #37e6ea; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.workspace-context p { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+
+.adaptive-workspace-main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.resizable-pane { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--ether-shell-border); background: #0b1119; }
+.resizable-pane.is-collapsed { width: 35px !important; height: 32px !important; min-height: 32px; }
+.resizable-pane-header { display: flex; align-items: center; justify-content: space-between; min-height: 34px; gap: 8px; padding: 6px 8px; border-bottom: 1px solid rgba(38, 50, 65, .8); color: #bcc9d7; font-size: 11px; }
+.resizable-pane-header button { display: grid; width: 22px; min-width: 22px; height: 22px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #aab6c5; }
+.resizable-pane-header button:hover, .resizable-pane-header button:focus-visible { border-color: #37e6ea; color: #effaff; }
+.resizable-pane.is-collapsed .resizable-pane-header strong { display: none; }
+.resizable-pane-content { height: calc(100% - 35px); min-height: 0; overflow: auto; }
+.pane-resizer { position: absolute; z-index: 4; background: transparent; }
+.resizable-pane.is-start .pane-resizer.is-vertical { top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; }
+.resizable-pane.is-end .pane-resizer.is-vertical { top: 0; bottom: 0; left: -3px; width: 7px; cursor: col-resize; }
+.resizable-pane.is-start .pane-resizer.is-horizontal { right: 0; bottom: -3px; left: 0; height: 7px; cursor: row-resize; }
+.resizable-pane.is-end .pane-resizer.is-horizontal { top: -3px; right: 0; left: 0; height: 7px; cursor: row-resize; }
+.pane-resizer:hover, .pane-resizer:focus-visible { background: rgba(55, 230, 234, .45); outline: 0; }
+
+.task-fifteen-shell .resizable-pane-runs { width: 100% !important; height: auto; min-height: 0; border-top: 1px solid var(--ether-shell-border); border-right: 0; }
+.task-fifteen-shell .resizable-pane-runs.is-collapsed { width: 100% !important; height: 32px !important; }
+.task-fifteen-shell .resizable-pane-artifacts { width: 100% !important; height: auto; min-height: 0; border-right: 0; border-bottom: 1px solid var(--ether-shell-border); }
+.task-fifteen-shell .resizable-pane-artifacts.is-collapsed { width: 100% !important; height: 32px !important; }

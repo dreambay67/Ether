@@ -1,0 +1,2 @@
+.task-fifteen-shell .project-header.task-nine-header { grid-template-columns: minmax(180px, 1fr) auto minmax(360px, auto); }
+.task-fifteen-shell .project-header-actions { align-items: center; }

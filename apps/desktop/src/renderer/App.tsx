@@ -17,19 +17,19 @@ import type {
   DocumentDescriptor,
   ReferenceAction
 } from "../shared/ipc/contracts";
-import { ArtifactBrowser } from "./artifacts/ArtifactBrowser";
 import { ProjectHeader } from "./project/ProjectHeader";
 import { StartScreen } from "./project/StartScreen";
-import { useDocumentSession } from "./project/useDocumentSession";
+import { useProjectHealth } from "./project/useProjectHealth";
+import { useProjectSession } from "./project/useProjectSession";
+import { EtherShell } from "./shell/EtherShell";
 
 export function App() {
-  const { state } = useDocumentSession();
-  const document = isDocumentDescriptor(state.snapshot) ? state.snapshot : null;
+  const { state, document } = useProjectSession();
   const [graph, setGraph] = useState<EtherGraph | null>(null);
   const [message, setMessage] = useState("Preparing an untitled document...");
-  const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
+  const health = useProjectHealth(references);
 
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
     const result = await window.ether.graph.snapshot(active.documentId);
@@ -135,7 +135,6 @@ export function App() {
     try {
       setMessage("Running simulation output...");
       await window.ether.artifacts.generateFake(document.documentId);
-      setArtifactsOpen(true);
       setArtifactRevision((value) => value + 1);
       setMessage("Simulation artifact embedded in this document");
     } catch (error) {
@@ -172,9 +171,10 @@ export function App() {
   }
 
   return (
-    <main
-      className="ether-shell task-nine-shell"
-      aria-label="Ether desktop workspace"
+    <EtherShell
+      documentId={document.documentId}
+      references={references}
+      artifactRevision={artifactRevision}
       onDragOver={(event) => {
         if ([...event.dataTransfer.files].some((file) => file.name.toLocaleLowerCase().endsWith(".ether"))) {
           event.preventDefault();
@@ -192,29 +192,30 @@ export function App() {
           });
         }
       }}
-    >
-      <ProjectHeader
-        document={{ ...document, saveState: state.saveState }}
-        artifactsOpen={artifactsOpen}
-        onNew={() => void window.ether.document.new()}
-        onOpen={() => void window.ether.document.open()}
-        onSave={() => void runDocumentCommand((id) => window.ether.document.save(id))}
-        onSaveAs={() => void runDocumentCommand((id) => window.ether.document.saveAs(id))}
-        onSaveCopy={() => void runDocumentCommand((id) => window.ether.document.saveCopy(id))}
-        onCompact={() => void compact(document.documentId)}
-        onMakePortable={() => void makePortable(document.documentId)}
-        onToggleArtifacts={() => setArtifactsOpen((value) => !value)}
-      />
-      <section className="task-nine-workspace">
+      header={(artifactsVisible, toggleArtifacts) => (
+        <ProjectHeader
+          document={{ ...document, saveState: state.saveState }}
+          artifactsOpen={artifactsVisible}
+          onNew={() => void window.ether.document.new()}
+          onOpen={() => void window.ether.document.open()}
+          onSave={() => void runDocumentCommand((id) => window.ether.document.save(id))}
+          onSaveAs={() => void runDocumentCommand((id) => window.ether.document.saveAs(id))}
+          onSaveCopy={() => void runDocumentCommand((id) => window.ether.document.saveCopy(id))}
+          onCompact={() => void compact(document.documentId)}
+          onMakePortable={() => void makePortable(document.documentId)}
+          onToggleArtifacts={toggleArtifacts}
+        />
+      )}
+      tools={(
         <aside className="document-tool-rail" aria-label="Graph tools">
-          <button type="button" onClick={() => addNode("prompt")} disabled={document.mode === "read-only"}>
+          <button type="button" title="Add Prompt node" onClick={() => addNode("prompt")} disabled={document.mode === "read-only"}>
             <Plus size={16} aria-hidden="true" />Prompt
           </button>
-          <button type="button" onClick={() => addNode("generator")} disabled={document.mode === "read-only"}>
+          <button type="button" title="Add Image Generator node" onClick={() => addNode("generator")} disabled={document.mode === "read-only"}>
             <ImagePlus size={16} aria-hidden="true" />Image
           </button>
           {document.simulationEnabled ? (
-            <button type="button" onClick={() => void simulate()} disabled={document.mode === "read-only"}>
+            <button type="button" title="Create diagnostic simulation output" onClick={() => void simulate()} disabled={document.mode === "read-only"}>
               <Sparkles size={16} aria-hidden="true" />Simulation output
             </button>
           ) : null}
@@ -222,27 +223,31 @@ export function App() {
             <RefreshCcw size={16} aria-hidden="true" />Refresh
           </button>
         </aside>
-        <section className="document-canvas" data-testid="document-canvas" aria-label="Document canvas">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodesDraggable={document.mode === "writable"}
-            nodesConnectable={document.mode === "writable"}
-            onNodeDragStop={onNodeDragStop}
-            fitView
-          >
-            <Background color="#263241" gap={24} size={1} />
-            <Controls />
-            <MiniMap pannable zoomable />
-          </ReactFlow>
-        </section>
-        {artifactsOpen ? (
-          <ArtifactBrowser key={`${document.documentId}:${artifactRevision}`} documentId={document.documentId} />
-        ) : null}
-      </section>
-      {references.some((reference) => reference.state === "missing") ? (
+      )}
+      canvas={(
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodesDraggable={document.mode === "writable"}
+          nodesConnectable={document.mode === "writable"}
+          onNodeDragStop={onNodeDragStop}
+          fitView
+        >
+          <Background color="#263241" gap={24} size={1} />
+          <Controls />
+          <MiniMap pannable zoomable />
+        </ReactFlow>
+      )}
+      status={(
+        <footer className={`document-status state-${state.saveState}`} aria-live="polite">
+          <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>
+          <small>{document.mode === "read-only" ? "Read-only" : "Local document"}</small>
+        </footer>
+      )}
+    >
+      {health.missing.length > 0 ? (
         <section className="missing-reference-strip" aria-label="Missing references">
-          {references.filter((reference) => reference.state === "missing").map((reference) => (
+          {health.missing.map((reference) => (
             <div key={reference.id}>
               <Unlink size={15} aria-hidden="true" />
               <strong>{reference.displayName}</strong>
@@ -253,11 +258,7 @@ export function App() {
           ))}
         </section>
       ) : null}
-      <footer className={`document-status state-${state.saveState}`} aria-live="polite">
-        <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>
-        <small>{document.mode === "read-only" ? "Read-only" : "Local document"}</small>
-      </footer>
-    </main>
+    </EtherShell>
   );
 }
 
@@ -269,10 +270,6 @@ const referenceActions = [
   ["embed-available-copy", "Embed Available Copy"],
   ["remove", "Remove"]
 ] as const;
-
-function isDocumentDescriptor(value: unknown): value is DocumentDescriptor {
-  return value !== null && typeof value === "object" && "graphId" in value;
-}
 
 function formatBytes(byteLength: number): string {
   if (byteLength < 1024) return `${byteLength} B`;

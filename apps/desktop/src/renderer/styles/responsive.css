@@ -1,0 +1,12 @@
+@media (max-width: 980px) {
+  .task-fifteen-shell { grid-template-rows: auto auto minmax(0, 1fr) 34px; overflow: auto; }
+  .task-fifteen-shell .project-header.task-nine-header { height: auto; min-height: 68px; grid-template-columns: minmax(0, 1fr) auto; }
+  .task-fifteen-shell .project-header-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .task-fifteen-shell .workspace-switcher { flex-wrap: wrap; }
+  .task-fifteen-shell .adaptive-workspace { min-height: 520px; overflow: visible; }
+  .task-fifteen-shell .adaptive-workspace-main { overflow: auto; }
+  .task-fifteen-shell .canvas-dominant { min-width: 480px; }
+  .task-fifteen-shell .document-tool-rail button { min-width: 0; white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) { .resizable-pane, .workspace-switcher button { transition: none; } }

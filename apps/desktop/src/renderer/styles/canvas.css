@@ -1,0 +1,3 @@
+.task-fifteen-shell .canvas-dominant { flex: 1 1 620px; min-width: 420px; min-height: 0; }
+.task-fifteen-shell .canvas-dominant .react-flow { position: absolute; inset: 0; }
+.task-fifteen-shell .canvas-dominant .react-flow__minimap { right: 16px; bottom: 16px; }

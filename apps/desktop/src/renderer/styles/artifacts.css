@@ -1,0 +1,3 @@
+.task-fifteen-shell .resizable-pane-artifacts { border-right: 0; border-left: 1px solid var(--ether-shell-border); }
+.task-fifteen-shell .resizable-pane-artifacts .artifact-browser { width: 100%; height: 100%; border: 0; background: transparent; }
+.task-fifteen-shell .resizable-pane-artifacts .artifact-browser header { display: none; }

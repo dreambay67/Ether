@@ -1,0 +1,6 @@
+.shell-run-desk { display: flex; align-items: center; gap: 9px; min-height: 66px; padding: 10px 14px; color: #9eacba; font-size: 11px; }
+.shell-run-desk svg { flex: 0 0 auto; color: #37e6ea; }
+.shell-run-desk div { min-width: 0; }
+.shell-run-desk strong { color: #dce5ef; }
+.shell-run-desk p { margin: 3px 0 0; color: #758394; }
+.shell-run-desk span { margin-left: auto; color: #9ce7d0; }
