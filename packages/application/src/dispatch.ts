@@ -429,7 +429,20 @@ export async function executeApplicationQuery(
       const head = await store.read(({ revisions }) => revisions.head());
       return queryResponse(query, { dirty: store.dirty, documentRevisionId: head.documentRevisionId });
     }
-    case "graph.snapshot": return queryResponse(query, { graph: await app.queryGraph(query.payload.graphId) });
+    case "graph.snapshot": {
+      const snapshot = await store.read(({ graphs, revisions }) => ({
+        graph: graphs.get(query.payload.graphId),
+        head: revisions.head()
+      }));
+      if (snapshot.graph === undefined) throw new Error(`Unknown graph ${query.payload.graphId}.`);
+      const graphRevisionId = snapshot.head.graphRevisions[query.payload.graphId];
+      if (graphRevisionId === undefined) throw new Error(`Missing revision for graph ${query.payload.graphId}.`);
+      return queryResponse(query, {
+        graph: snapshot.graph,
+        documentRevisionId: snapshot.head.documentRevisionId,
+        graphRevisionId
+      });
+    }
     case "graph.catalog":
       return queryResponse(query, { graphs: await store.read(({ graphs }) => graphs.list().map((graph) => ({ id: graph.id, title: graph.title, kind: graph.kind }))) });
     case "graph.selectionDetails":

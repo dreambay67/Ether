@@ -893,7 +893,13 @@ const documentSummaryResponseSchema = z
 const documentDirtyStateResponseSchema = z
   .object({ dirty: z.boolean(), documentRevisionId: idSchema.nullable() })
   .strict();
-const graphSnapshotResponseSchema = z.object({ graph: EtherGraphSchema }).strict();
+const graphSnapshotResponseSchema = z
+  .object({
+    graph: EtherGraphSchema,
+    documentRevisionId: idSchema,
+    graphRevisionId: idSchema
+  })
+  .strict();
 const graphCatalogResponseSchema = z
   .object({
     graphs: z.array(

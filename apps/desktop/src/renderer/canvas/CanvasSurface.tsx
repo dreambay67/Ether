@@ -1,0 +1,42 @@
+import { useCallback, useMemo, useRef } from "react";
+import { Background, Controls, MiniMap, ReactFlow, SelectionMode, type Connection, type Node, type OnNodeDrag, type Viewport, type XYPosition } from "@xyflow/react";
+import type { EtherGraph, PayloadChannel } from "@ether/schema";
+import { EtherEdge, type EtherFlowEdgeData } from "./edges/EtherEdge";
+import { EtherNode, type EtherCanvasNodeData, ModuleNode } from "./EtherNode";
+import { useMarqueeSelection } from "./hooks/useMarqueeSelection";
+import { channelsFor } from "./ports/ChannelRail";
+
+function GroupNode({ data }: { data: { title: string; color: string } }) { return <div className="ether-group-frame" style={{ "--group-color": data.color } as React.CSSProperties}><span>{data.title}</span></div>; }
+const nodeTypes = { etherNode: EtherNode, module: ModuleNode, group: GroupNode }; const edgeTypes = { etherEdge: EtherEdge };
+export function CanvasSurface({ graph, readOnly, viewport, onMove, onMoveGroup, onMoveModule, onResize, onDelete, onTitle, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onViewport }: {
+  graph: EtherGraph; readOnly: boolean; viewport?: Viewport; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveGroup(id: string, position: XYPosition): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onTitle(id: string, title: string): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onViewport(viewport: Viewport): void;
+}) {
+  const selection = useMarqueeSelection(onSelected);
+  const marqueeActive = useRef(false);
+  const compatibleChannels = useCallback((edge: EtherGraph["edges"][number], endpoint: "source" | "target") => {
+    const value = endpoint === "source" ? edge.from : edge.to; const oppositeChannel = endpoint === "source" ? edge.to.channel : edge.from.channel;
+    if (value.kind === "module") return [value.channel];
+    const node = graph.nodes.find((item) => item.id === value.nodeId);
+    const available = node === undefined ? [value.channel] : channelsFor(node.definitionId, endpoint === "source" ? "output" : "input");
+    // Same-channel moves are always valid. Keep an existing adapted channel available, but do not
+    // claim a cross-channel adapter exists without an application capability decision.
+    return available.filter((channel) => channel === value.channel || channel === oppositeChannel);
+  }, [graph.nodes]);
+  const activity = useMemo(() => { const result: Record<string, { input: PayloadChannel[]; output: PayloadChannel[] }> = {}; const ensure = (id: string) => result[id] ??= { input: [], output: [] }; for (const edge of graph.edges) { if (edge.from.kind === "node" && !ensure(edge.from.nodeId).output.includes(edge.from.channel)) ensure(edge.from.nodeId).output.push(edge.from.channel); if (edge.to.kind === "node" && !ensure(edge.to.nodeId).input.includes(edge.to.channel)) ensure(edge.to.nodeId).input.push(edge.to.channel); } return result; }, [graph.edges]);
+  const nodes = useMemo<Node[]>(() => [
+    ...graph.groups.map((group) => ({ id: `group:${group.id}`, type: "group", position: group.position, draggable: !readOnly, selectable: false, data: { title: group.title, color: group.color }, style: { width: group.size.width, height: group.size.height, zIndex: 0 } })),
+    ...graph.modules.map((module) => ({ id: `module:${module.id}`, type: "module", position: module.position, draggable: !readOnly, data: { title: module.title, collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id) }, style: { width: module.size.width, height: module.size.height, zIndex: 1 } })),
+    ...graph.nodes.map((node) => ({ id: node.id, type: "etherNode", position: node.position, selected: selection.selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], readOnly, onSelect: selection.selectNode, onDelete, onResize, onTitle } satisfies EtherCanvasNodeData, style: { width: node.size.width, height: node.size.height, zIndex: 1 } }))
+  ], [activity, graph.groups, graph.modules, graph.nodes, onDelete, onModuleEnter, onModuleToggle, onResize, onTitle, readOnly, selection.selectNode, selection.selectedIds]);
+  const edges = useMemo(() => graph.edges.map((edge) => ({ id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, data: { edge, readOnly, compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel } satisfies EtherFlowEdgeData })), [compatibleChannels, graph.edges, onChannel, onDeleteEdge, onRole, readOnly]);
+  const onConnectFlow = useCallback((connection: Connection) => { if (readOnly || !connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return; onConnect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle); }, [onConnect, readOnly]);
+  const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
+    if (readOnly) return;
+    if (node.id.startsWith("group:")) { onMoveGroup(node.id.slice("group:".length), node.position); return; }
+    if (node.id.startsWith("module:")) { onMoveModule(node.id.slice("module:".length), node.position); return; }
+    const original = graph.nodes.find((item) => item.id === node.id); if (!original) return;
+    const selected = selection.selectedIds.includes(node.id) ? selection.selectedIds : [node.id]; const delta = { x: node.position.x - original.position.x, y: node.position.y - original.position.y };
+    onMove(graph.nodes.filter((item) => selected.includes(item.id)).map((item) => ({ nodeId: item.id, position: { x: item.position.x + delta.x, y: item.position.y + delta.y } })));
+  }, [graph.nodes, onMove, onMoveGroup, onMoveModule, readOnly, selection.selectedIds]);
+  return <div className="canvas-surface" data-testid="ether-canvas-surface"><ReactFlow key={graph.id} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultViewport={viewport ?? graph.viewState.viewport} fitView={graph.nodes.length > 0} nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable selectionOnDrag panOnDrag={[2]} selectionMode={SelectionMode.Partial} selectNodesOnDrag={false} onSelectionStart={() => { marqueeActive.current = true; }} onSelectionChange={({ nodes: selected }) => { if (marqueeActive.current) selection.onSelectionChange({ nodes: selected.filter((node) => graph.nodes.some((item) => item.id === node.id)) }); }} onSelectionEnd={() => { marqueeActive.current = false; }} onNodeClick={(event, node) => { if (graph.nodes.some((item) => item.id === node.id)) selection.selectNode(node.id, event.ctrlKey || event.metaKey || event.shiftKey); }} onNodeDragStop={onNodeDragStop} onConnect={onConnectFlow} onMoveEnd={(_event, nextViewport) => onViewport(nextViewport)} onPaneClick={selection.clearSelection} onPaneContextMenu={(event) => event.preventDefault()}><Background color="#304051" gap={24} size={1} /><Controls showInteractive={false} /><MiniMap pannable zoomable nodeColor="#37e6ea" /></ReactFlow></div>;
+}

@@ -1906,7 +1906,11 @@ describe("Ether 4.0 schema", () => {
         requestId: "message-snapshot",
         name: "graph.snapshot",
         documentId: "document-1",
-        payload: { graph: validGraph }
+        payload: {
+          graph: validGraph,
+          documentRevisionId: "document-revision-1",
+          graphRevisionId: "graph-revision-1"
+        }
       },
       {
         kind: "error",

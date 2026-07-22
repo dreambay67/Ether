@@ -1,15 +1,7 @@
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
-  type Node,
-  type OnNodeDrag
-} from "@xyflow/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink } from "lucide-react";
-import type { EtherGraph, EtherNode, GraphTransaction } from "@ether/schema";
+import type { EtherGraph } from "@ether/schema";
 
 import type {
   DesktopReference,
@@ -22,6 +14,7 @@ import { StartScreen } from "./project/StartScreen";
 import { useProjectHealth } from "./project/useProjectHealth";
 import { useProjectSession } from "./project/useProjectSession";
 import { EtherShell } from "./shell/EtherShell";
+import { EtherCanvas, type EtherCanvasHandle } from "./canvas/EtherCanvas";
 
 export function App() {
   const { state, document } = useProjectSession();
@@ -29,6 +22,7 @@ export function App() {
   const [message, setMessage] = useState("Preparing an untitled document...");
   const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
+  const canvasRef = useRef<EtherCanvasHandle>(null);
   const health = useProjectHealth(references);
 
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
@@ -59,67 +53,6 @@ export function App() {
     }
   };
 
-  const apply = async (operations: GraphTransaction["operations"], title: string) => {
-    if (document === null || graph === null || document.mode === "read-only") return;
-    const transaction: GraphTransaction = {
-      id: crypto.randomUUID(),
-      baseDocumentRevisionId: document.documentRevisionId,
-      baseGraphRevisions: { [graph.id]: document.graphRevisionId },
-      title,
-      actor: "user",
-      layoutPolicy: "preserve",
-      operations
-    };
-    try {
-      const result = await window.ether.graph.applyTransaction(document.documentId, transaction);
-      setGraph(result.graph);
-      setMessage("Saving changes...");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The graph change could not be saved.");
-    }
-  };
-
-  const addNode = (kind: "prompt" | "generator") => {
-    if (graph === null || document?.mode === "read-only") return;
-    const ordinal = graph.nodes.length + 1;
-    const node = kind === "prompt" ? promptNode(ordinal) : generatorNode(ordinal);
-    const operation = { type: "addNode", graphId: graph.id, node } as Extract<
-      GraphTransaction["operations"][number],
-      { type: "addNode" }
-    >;
-    void apply([operation], `Add ${node.title}`);
-  };
-
-  const nodes = useMemo<Node[]>(() => (graph?.nodes ?? []).map((node) => ({
-    id: node.id,
-    position: node.position,
-    data: { label: node.title, family: node.config.kind },
-    style: {
-      width: node.size.width,
-      minHeight: node.size.height,
-      borderRadius: 6,
-      border: "1px solid rgba(55, 230, 234, 0.45)",
-      background: "#101722",
-      color: "#f4f7fb"
-    }
-  })), [graph]);
-
-  const edges = useMemo(() => (graph?.edges ?? []).map((edge) => ({
-    id: edge.id,
-    source: edge.from.kind === "node" ? edge.from.nodeId : edge.from.moduleId,
-    target: edge.to.kind === "node" ? edge.to.nodeId : edge.to.moduleId,
-    label: edge.role,
-    style: { stroke: "#37e6ea" }
-  })), [graph]);
-
-  const onNodeDragStop: OnNodeDrag<Node> = (_event, node) => {
-    if (graph === null || document?.mode === "read-only") return;
-    void apply([{
-      type: "moveNodes",
-      graphId: graph.id,
-      positions: [{ nodeId: node.id, position: node.position }]
-    }], "Move node");
-  };
 
   const actOnReference = async (referenceId: string, action: ReferenceAction) => {
     if (document === null) return;
@@ -208,10 +141,10 @@ export function App() {
       )}
       tools={(
         <aside className="document-tool-rail" aria-label="Graph tools">
-          <button type="button" title="Add Prompt node" onClick={() => addNode("prompt")} disabled={document.mode === "read-only"}>
+          <button type="button" title="Add Prompt node" onClick={() => canvasRef.current?.addPrompt()} disabled={document.mode === "read-only"}>
             <Plus size={16} aria-hidden="true" />Prompt
           </button>
-          <button type="button" title="Add Image Generator node" onClick={() => addNode("generator")} disabled={document.mode === "read-only"}>
+          <button type="button" title="Add Image Generator node" onClick={() => canvasRef.current?.addImage()} disabled={document.mode === "read-only"}>
             <ImagePlus size={16} aria-hidden="true" />Image
           </button>
           {document.simulationEnabled ? (
@@ -224,20 +157,7 @@ export function App() {
           </button>
         </aside>
       )}
-      canvas={(
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodesDraggable={document.mode === "writable"}
-          nodesConnectable={document.mode === "writable"}
-          onNodeDragStop={onNodeDragStop}
-          fitView
-        >
-          <Background color="#263241" gap={24} size={1} />
-          <Controls />
-          <MiniMap pannable zoomable />
-        </ReactFlow>
-      )}
+      canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} />}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
           <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>
@@ -261,7 +181,6 @@ export function App() {
     </EtherShell>
   );
 }
-
 const referenceActions = [
   ["locate", "Locate"],
   ["search-folder", "Search Folder"],
@@ -289,35 +208,4 @@ function formatDocumentCommandResult(result: DocumentCommandResult): string {
     : `missing ${result.missingReferences.map((reference) => reference.displayName).join(", ")}`;
   return `Made portable: embedded ${result.embeddedCount} reference${result.embeddedCount === 1 ? "" : "s"} ` +
     `(${formatBytes(result.embeddedBytes)}); ${missing}`;
-}
-
-function promptNode(ordinal: number): EtherNode {
-  return {
-    id: crypto.randomUUID(),
-    definitionId: "prompt.text",
-    title: `Prompt ${ordinal}`,
-    position: { x: 120 + ordinal * 24, y: 120 + ordinal * 18 },
-    size: { width: 240, height: 132 },
-    config: { kind: "prompt.text", body: "Describe the creative direction", assembly: "append" },
-    presentation: { collapsed: false, accent: "default", previewMode: "content" }
-  };
-}
-
-function generatorNode(ordinal: number): EtherNode {
-  return {
-    id: crypto.randomUUID(),
-    definitionId: "generation.image",
-    title: `Image Generator ${ordinal}`,
-    position: { x: 420 + ordinal * 24, y: 180 + ordinal * 18 },
-    size: { width: 250, height: 142 },
-    config: {
-      kind: "generation.image",
-      providerId: "ether-fake-local",
-      profileId: "fake-image-default",
-      aspectRatio: "1:1",
-      resolution: { width: 512, height: 512 },
-      outputCount: 1
-    },
-    presentation: { collapsed: false, accent: "default", previewMode: "summary" }
-  };
 }
