@@ -265,7 +265,11 @@ describe("Codex App Server session and turn providers", () => {
 
     const turnErrorRuntime = runtime("turn-error");
     const turnErrorBundle = createCodexAppServerProviderBundle({ runtime: turnErrorRuntime, execFallback: fallback });
-    await expect(turnErrorBundle.assistant.run(assistantInput(), executionContext())).rejects.toThrow(/ordinary turn error/i);
+    await expect(turnErrorBundle.assistant.run(assistantInput(), executionContext())).rejects.toMatchObject({
+      code: "CODEX_APP_SERVER_INVALID_INPUT",
+      category: "invalid-input",
+      retryable: false
+    });
     expect(assistantFallbackCalls).toBe(1);
     expect(turnErrorRuntime.health().transport).toBe("app-server");
     await turnErrorBundle.close();

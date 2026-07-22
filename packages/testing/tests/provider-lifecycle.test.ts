@@ -25,6 +25,15 @@ async function waitFor(condition: () => boolean, timeoutMs = 2_000) {
   throw new Error("Timed out waiting for runtime state.");
 }
 
+function processExists(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function runtime(
   mode = "normal",
   extraEnv: Record<string, string> = {},
@@ -137,6 +146,25 @@ describe("Codex runtime lifecycle", () => {
     expect(instance.health().generation).toBe(2);
     expect(states).toContain("restarting");
     unsubscribe();
+  });
+
+  it("terminates a protocol-failed process before starting its replacement", async () => {
+    const instance = runtime("oversized-frame", {}, {
+      clientOptions: { maxFrameBytes: 1_024 }
+    });
+    await instance.start();
+    const originalPid = instance.health().pid;
+    expect(originalPid).not.toBeNull();
+    const client = instance.getClient();
+    const thread = await client.startThread({ cwd: process.cwd() });
+    await expect(client.runTurn({
+      threadId: thread.threadId,
+      input: [{ type: "text", text: "trigger protocol failure" }]
+    })).rejects.toThrow(/frame exceeded/i);
+
+    await instance.ensureAvailable();
+    expect(instance.health().pid).not.toBe(originalPid);
+    await waitFor(() => !processExists(originalPid as number));
   });
 
   it("activates explicit fallback for initialization timeout or initialization death", async () => {

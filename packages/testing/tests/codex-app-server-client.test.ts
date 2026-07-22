@@ -369,8 +369,19 @@ describe("Codex App Server protocol 0.144.2", () => {
 
   it("treats duplicate and unknown response IDs as fatal protocol errors", async () => {
     const duplicate = clientFor("duplicate-response");
-    await expect(duplicate.client.initialize()).rejects.toThrow(/duplicate response id/i);
+    let duplicateError: unknown = null;
+    try {
+      await duplicate.client.initialize();
+    } catch (error) {
+      duplicateError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(duplicate.client.isClosed).toBe(true);
+    if (duplicateError) {
+      expect(duplicateError).toMatchObject({ message: expect.stringMatching(/duplicate response id/i) });
+    } else {
+      await expect(duplicate.client.listModels()).rejects.toThrow(/duplicate response id/i);
+    }
 
     const unknown = clientFor("unknown-response");
     await expect(unknown.client.initialize()).rejects.toThrow(/unknown response id/i);

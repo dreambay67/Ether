@@ -185,7 +185,7 @@ export class CodexAppServerRuntime {
     if (this.state.status === "ready" && this.client && !this.client.isClosed) return this.health();
     if (this.startPromise) return this.startPromise;
     this.stopping = false;
-    this.startPromise = this.startProcess(this.state.generation > 0).finally(() => {
+    this.startPromise = this.restartProcess(this.state.generation > 0).finally(() => {
       this.startPromise = null;
     });
     return this.startPromise;
@@ -240,6 +240,23 @@ export class CodexAppServerRuntime {
       pid: null,
       processPhase: "none"
     });
+  }
+
+  private async restartProcess(restarting: boolean): Promise<CodexRuntimeHealth> {
+    await this.retireCurrentProcess();
+    return this.startProcess(restarting);
+  }
+
+  private async retireCurrentProcess(): Promise<void> {
+    const child = this.child;
+    const client = this.client;
+    if (!child && !client) return;
+    if (this.child === child) this.child = null;
+    if (this.client === client) this.client = null;
+    if (client && !client.isClosed) {
+      client.notifyTransportClosed(new Error("Codex App Server runtime replaced a stale transport."));
+    }
+    if (child) await terminateProcessTree(child);
   }
 
   private async startProcess(restarting: boolean): Promise<CodexRuntimeHealth> {
