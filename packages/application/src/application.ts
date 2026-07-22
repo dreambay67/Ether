@@ -19,7 +19,19 @@ import {
 } from "@ether/document";
 import { compilePlan, DurableScheduler } from "@ether/execution";
 import type { GenerationProvider } from "@ether/providers";
-import { ExecutionJobSchema, ExecutionPlanSchema } from "@ether/schema";
+import {
+  ApplicationCommandSchema,
+  ApplicationQuerySchema,
+  ExecutionJobSchema,
+  ExecutionPlanSchema,
+  type ApplicationCommand,
+  type ApplicationCommandResponse,
+  type ApplicationErrorMessage,
+  type ApplicationEvent,
+  type ApplicationQuery,
+  type ApplicationQueryResponse,
+  type EtherApplicationService
+} from "@ether/schema";
 import type {
   Artifact,
   EtherGraph,
@@ -38,6 +50,7 @@ import { createDocument as createStore } from "./commands/documentCommands.js";
 import { ApplicationEventBus } from "./events/eventBus.js";
 import type { DocumentSnapshot } from "./queries/documentQueries.js";
 import { deepFreezeSnapshot } from "./snapshots.js";
+import { executeApplicationCommand, executeApplicationQuery } from "./dispatch.js";
 
 export class ApplicationServiceError extends Error {
   readonly code: string;
@@ -49,7 +62,7 @@ export class ApplicationServiceError extends Error {
   }
 }
 
-export class EtherApplication {
+export class EtherApplication implements EtherApplicationService {
   readonly events = new ApplicationEventBus();
   private store: DocumentStore | undefined;
   private scheduler: DurableScheduler | undefined;
@@ -68,6 +81,58 @@ export class EtherApplication {
       portableImportCheckpoint?: (stage: string, referenceId: string) => void;
     }
   ) {}
+
+  /** Shared, schema-validated boundary used by Electron IPC and MCP. */
+  async execute(command: ApplicationCommand): Promise<ApplicationCommandResponse | ApplicationErrorMessage> {
+    try {
+      const response = await executeApplicationCommand(this, ApplicationCommandSchema.parse(command));
+      if (command.name !== "document.close") await this.drainEvents();
+      return response;
+    } catch (error) {
+      return this.toBoundaryError(command.id, command.correlationId, error);
+    }
+  }
+
+  async query(query: ApplicationQuery): Promise<ApplicationQueryResponse | ApplicationErrorMessage> {
+    try {
+      return await executeApplicationQuery(this, ApplicationQuerySchema.parse(query));
+    } catch (error) {
+      return this.toBoundaryError(query.id, query.correlationId, error);
+    }
+  }
+
+  subscribe(listener: (event: ApplicationEvent) => void): () => void {
+    return this.events.subscribe(listener);
+  }
+
+  /** @internal Command handlers use repositories through this narrow service boundary. */
+  boundaryStore(): DocumentStore {
+    return this.requireStore();
+  }
+
+  /** @internal Provider inspection is intentionally read-only at this layer. */
+  boundaryProvider(): GenerationProvider {
+    return this.options.provider;
+  }
+
+  toBoundaryError(requestId: string, correlationId: string, error: unknown): ApplicationErrorMessage {
+    const mapped = mapError(error);
+    return {
+      kind: "error",
+      id: randomUUID(),
+      correlationId,
+      requestId,
+      error: {
+        code: mapped.code,
+        category: categoryForError(mapped.code),
+        message: mapped.message,
+        retryable: retryableError(mapped.code),
+        ...(mapped.code === "EXTERNAL_CAPABILITY_UNAVAILABLE"
+          ? { userAction: "Configure the requested desktop integration, then retry." }
+          : {})
+      }
+    };
+  }
 
   async createDocument(input: {
     path: string;
@@ -589,7 +654,9 @@ export class EtherApplication {
     this.scheduler = new DurableScheduler({
       appDataRoot: this.options.appDataRoot,
       provider: this.options.provider,
-      store: this.requireStore(),
+      // The scheduler's durable-store protocol is intentionally narrower than
+      // DocumentStore and is being evolved independently in Task 14.
+      store: this.requireStore() as unknown as ConstructorParameters<typeof DurableScheduler>[0]["store"],
       checkpoint: this.options.executionCheckpoint,
       onEventsAvailable: () => this.drainEvents()
     });
@@ -720,5 +787,23 @@ function mapError(error: unknown): ApplicationServiceError {
   if (error instanceof ExecutionRepositoryError || error instanceof DocumentStoreError) {
     return new ApplicationServiceError(error.code, error.message, { cause: error });
   }
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = String((error as { code?: unknown }).code);
+    return new ApplicationServiceError(code, error instanceof Error ? error.message : code, { cause: error as unknown as Error });
+  }
   return new ApplicationServiceError("APPLICATION_COMMAND_FAILED", error instanceof Error ? error.message : String(error), { cause: error });
+}
+
+function categoryForError(code: string): "document" | "graph" | "provider" | "execution" | "reference" | "security" | "validation" {
+  if (code.includes("REFERENCE")) return "reference";
+  if (code.includes("GRAPH") || code.includes("EDGE") || code.includes("NODE")) return "graph";
+  if (code.includes("PROVIDER") || code.includes("CAPABILITY")) return "provider";
+  if (code.includes("PERMIT") || code.includes("GRANT") || code.includes("SCOPE")) return "security";
+  if (code.includes("JOB") || code.includes("PLAN") || code.includes("RUN") || code.includes("OUTPUT")) return "execution";
+  if (code.includes("VALID") || code.includes("CORRUPT")) return "validation";
+  return "document";
+}
+
+function retryableError(code: string): boolean {
+  return code.includes("UNAVAILABLE") || code.includes("BUSY") || code.includes("RETRY") || code.includes("RECOVERY");
 }

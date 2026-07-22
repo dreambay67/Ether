@@ -1,0 +1,478 @@
+import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
+
+import type { DocumentStore } from "@ether/document";
+import { validateFullGraphState } from "@ether/graph-kernel";
+import type { GenerationProvider } from "@ether/providers";
+import {
+  ApplicationCommandResponseSchema,
+  ApplicationQueryResponseSchema,
+  type ApplicationCommand,
+  type ApplicationCommandResponse,
+  type ApplicationQuery,
+  type ApplicationQueryResponse,
+  type NodeOutputVersion,
+  type PayloadEnvelope,
+  type ProviderCapability,
+  type ProviderHealthResult
+} from "@ether/schema";
+
+import type { EtherApplication } from "./application.js";
+
+type CommandResponse = ApplicationCommandResponse;
+type QueryResponse = ApplicationQueryResponse;
+
+class BoundaryUnavailableError extends Error {
+  readonly code = "EXTERNAL_CAPABILITY_UNAVAILABLE";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "BoundaryUnavailableError";
+  }
+}
+
+function commandResponse(command: ApplicationCommand, payload: unknown): CommandResponse {
+  return ApplicationCommandResponseSchema.parse({
+    kind: "response",
+    id: randomUUID(),
+    correlationId: command.correlationId,
+    requestId: command.id,
+    name: command.name,
+    ...("documentId" in command ? { documentId: command.documentId } : {}),
+    payload
+  });
+}
+
+function queryResponse(query: ApplicationQuery, payload: unknown): QueryResponse {
+  return ApplicationQueryResponseSchema.parse({
+    kind: "response",
+    id: randomUUID(),
+    correlationId: query.correlationId,
+    requestId: query.id,
+    name: query.name,
+    ...("documentId" in query ? { documentId: query.documentId } : {}),
+    payload
+  });
+}
+
+function assertDocument(command: ApplicationCommand | ApplicationQuery, store: DocumentStore): void {
+  if ("documentId" in command && command.documentId !== store.documentId) {
+    const error = new Error("The request targets a different Ether document.") as Error & { code: string };
+    error.code = "DOCUMENT_SCOPE_MISMATCH";
+    throw error;
+  }
+}
+
+function acknowledgement() {
+  return { kind: "acknowledgement" as const, accepted: true as const };
+}
+
+function responseFromSaved(value: Record<string, unknown>, key: string): unknown {
+  const result = value[key];
+  if (result === undefined) {
+    const error = new Error("Stored command result is incomplete.") as Error & { code: string };
+    error.code = "COMMAND_RESULT_CORRUPT";
+    throw error;
+  }
+  return result;
+}
+
+async function commandOnce(
+  app: EtherApplication,
+  command: ApplicationCommand,
+  payloadKey: string,
+  run: (repositories: Parameters<DocumentStore["transaction"]>[0] extends (repositories: infer R) => unknown ? R : never) => unknown,
+  events: ReadonlyArray<{ name: string; payload: Record<string, unknown> }> = []
+): Promise<unknown> {
+  const store = app.boundaryStore();
+  assertDocument(command, store);
+  return store.transaction((repositories) => {
+    const existing = repositories.execution.getCommandResult(command.id, command.name);
+    if (existing !== undefined) return responseFromSaved(existing, payloadKey);
+    const result = run(repositories as never);
+    repositories.execution.completeCommand(command.id, command.name, { [payloadKey]: result }, events as never);
+    return result;
+  });
+}
+
+function outputPayload(version: NodeOutputVersion, payload: Record<string, unknown>, relation: "manual-edit" | "restored"): PayloadEnvelope {
+  const id = `payload-${randomUUID()}`;
+  return {
+    id,
+    channel: "data",
+    role: "general",
+    content: { kind: "object", value: payload as never },
+    source: { nodeId: version.nodeId, outputVersionId: `output-${randomUUID()}`, lineageKey: relation },
+    metadata: { manual: true }
+  };
+}
+
+function manualOutput(
+  parent: NodeOutputVersion,
+  payload: PayloadEnvelope,
+  relation: "manual-edit" | "restored"
+): NodeOutputVersion {
+  const now = new Date().toISOString();
+  const id = payload.source.outputVersionId;
+  return {
+    ...parent,
+    id,
+    inputPayloadIds: [...parent.outputPayloadIds],
+    outputPayloadIds: [payload.id],
+    parentOutputVersionId: parent.id,
+    lineage: {
+      parentOutputVersionId: parent.id,
+      rootOutputVersionId: parent.lineage?.rootOutputVersionId ?? parent.id,
+      relation
+    },
+    producer: { kind: "manual", actor: "user" },
+    approval: { state: "unreviewed" },
+    runId: null,
+    stepId: null,
+    workItemId: null,
+    attemptId: null,
+    timing: { startedAt: now, completedAt: now },
+    failure: null,
+    createdAt: now
+  };
+}
+
+async function providerHealth(provider: GenerationProvider): Promise<ProviderHealthResult> {
+  const diagnostic = await provider.diagnose();
+  return {
+    providerId: diagnostic.id,
+    status: diagnostic.availability === "available" ? "available" : "unavailable",
+    message: diagnostic.messages.join(" ") || null,
+    checkedAt: new Date().toISOString()
+  };
+}
+
+async function providerCapabilities(provider: GenerationProvider): Promise<ProviderCapability[]> {
+  const diagnostic = await provider.diagnose();
+  return (diagnostic.profiles ?? []).flatMap((profile) => {
+    if (profile.operation !== "image.generate" && profile.operation !== "image.edit") return [];
+    return [{
+      providerId: profile.providerId,
+      profileId: profile.model ?? profile.providerId,
+      operation: profile.operation === "image.generate" ? "generate-image" : "edit-image",
+      inputChannels: [...profile.inputChannels],
+      outputChannels: [...profile.outputChannels],
+      aspectRatios: [],
+      resolutions: [],
+      maxReferences: profile.mediaLimits?.maxInputs ?? 0,
+      maxOutputsPerCall: 1,
+      supportsCancellation: false,
+      supportsSeed: false,
+      provenance: "runtime-discovered",
+      limitations: profile.messages ?? []
+    } satisfies ProviderCapability];
+  });
+}
+
+export async function executeApplicationCommand(
+  app: EtherApplication,
+  command: ApplicationCommand
+): Promise<CommandResponse> {
+  const store = app.boundaryStore();
+  if ("documentId" in command) assertDocument(command, store);
+
+  switch (command.name) {
+    case "document.save":
+      await app.saveDocument({ commandId: command.id });
+      return commandResponse(command, acknowledgement());
+    case "document.close":
+      await app.closeDocument();
+      return commandResponse(command, acknowledgement());
+    case "document.compact":
+      await app.compactDocument();
+      return commandResponse(command, acknowledgement());
+    case "document.saveAs":
+    case "document.saveCopy":
+    case "document.new":
+    case "document.open":
+    case "document.recover":
+      throw new BoundaryUnavailableError("Document location grants are resolved by the desktop shell and are not attached to this application instance.");
+    case "graph.applyTransaction": {
+      const result = await app.applyGraphTransaction({ commandId: command.id, transaction: command.payload.transaction });
+      return commandResponse(command, {
+        documentRevisionId: result.documentRevisionId,
+        graphRevisions: Object.entries(result.graphRevisions).map(([graphId, revisionId]) => ({ graphId, revisionId }))
+      });
+    }
+    case "run.preview":
+      return commandResponse(command, { plan: await app.previewRun({ commandId: command.id, ...command.payload }) });
+    case "run.start":
+      return commandResponse(command, { job: await app.startRun({ commandId: command.id, ...command.payload }) });
+    case "run.cancel":
+    case "job.cancel":
+      await app.cancelRun({ commandId: command.id, jobId: command.payload.jobId });
+      return commandResponse(command, acknowledgement());
+    case "run.retry":
+    case "job.retry":
+      await app.retryRun({ commandId: command.id, jobId: command.payload.jobId, workItemIds: command.payload.workItemIds });
+      return commandResponse(command, acknowledgement());
+    case "run.resume":
+    case "job.resume":
+      await app.resumeRun({ commandId: command.id, jobId: command.payload.jobId });
+      return commandResponse(command, acknowledgement());
+    case "permission.grantRun": {
+      const permit = await app.grantRunPermit({ commandId: command.id, ...command.payload });
+      return commandResponse(command, { permitId: permit.id, permission: "run", expiresAt: null });
+    }
+    case "output.edit": {
+      const output = await commandOnce(app, command, "output", (repositories) => {
+        const parent = repositories.outputs.getVersion(command.payload.outputVersionId);
+        if (parent === undefined) throw new Error(`Unknown output ${command.payload.outputVersionId}.`);
+        const payload = outputPayload(parent, command.payload.payload, "manual-edit");
+        return repositories.outputs.createManualEdit(manualOutput(parent, payload, "manual-edit"), [payload]);
+      }, [{ name: "output.created", payload: { outputVersionId: command.payload.outputVersionId, parentOutputVersionId: command.payload.outputVersionId } }]);
+      return commandResponse(command, { outputVersion: output });
+    }
+    case "output.restore": {
+      const output = await commandOnce(app, command, "output", (repositories) => {
+        const parent = repositories.outputs.getVersion(command.payload.outputVersionId);
+        if (parent === undefined) throw new Error(`Unknown output ${command.payload.outputVersionId}.`);
+        const payload = outputPayload(parent, { restoredOutputVersionId: parent.id, note: command.payload.note ?? "" }, "restored");
+        return repositories.outputs.restore(manualOutput(parent, payload, "restored"), [payload]);
+      });
+      return commandResponse(command, { outputVersion: output });
+    }
+    case "review.approve":
+    case "review.reject": {
+      const state = command.name === "review.approve" && command.payload.approved ? "approved" : "rejected";
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.outputs.appendReview({
+          outputVersionId: command.payload.outputVersionId,
+          state,
+          actor: "user",
+          ...(command.name === "review.reject" ? { reason: command.payload.reason } : {})
+        });
+        return acknowledgement();
+      }, [{ name: "output.reviewed", payload: { outputVersionId: command.payload.outputVersionId, approval: { state, actor: "user", at: new Date().toISOString() } } }]);
+      return commandResponse(command, acknowledgement());
+    }
+    case "collection.create": {
+      const collection = await commandOnce(app, command, "collection", (repositories) => repositories.collections.create({
+        id: `collection-${randomUUID()}`,
+        title: command.payload.title,
+        description: command.payload.description ?? "",
+        primary: command.payload.primary ?? false
+      }), [{ name: "collection.changed", payload: { collectionId: "created", change: "created" } }]);
+      return commandResponse(command, { collection });
+    }
+    case "collection.update": {
+      const collection = await commandOnce(app, command, "collection", (repositories) => repositories.collections.update(
+        command.payload.collectionId,
+        command.payload
+      ));
+      return commandResponse(command, { collection });
+    }
+    case "collection.delete":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        if (!repositories.collections.remove(command.payload.collectionId)) throw new Error(`Unknown collection ${command.payload.collectionId}.`);
+        return acknowledgement();
+      });
+      return commandResponse(command, acknowledgement());
+    case "collection.addMembers":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.collections.addMembers(command.payload.collectionId, command.payload.members.map((member) => ({
+          ...member,
+          source: { commandId: command.id }
+        })));
+        return acknowledgement();
+      });
+      return commandResponse(command, acknowledgement());
+    case "collection.removeMembers":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.collections.removeMembers(command.payload.collectionId, command.payload.artifactIds);
+        return acknowledgement();
+      });
+      return commandResponse(command, acknowledgement());
+    case "collection.setPrimary": {
+      const collection = await commandOnce(app, command, "collection", (repositories) => repositories.collections.setPrimary(command.payload.collectionId));
+      return commandResponse(command, { collection });
+    }
+    case "review.route":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.collections.addMembers(command.payload.collectionId, [{
+          artifactId: command.payload.artifactId,
+          role: command.payload.role,
+          source: { commandId: command.id }
+        }]);
+        return acknowledgement();
+      });
+      return commandResponse(command, acknowledgement());
+    case "reference.embed":
+      await app.embedAvailableReference(command.payload.referenceId);
+      return commandResponse(command, { referenceId: command.payload.referenceId });
+    case "reference.remove":
+      await app.removeDocumentReference(command.payload.referenceId);
+      return commandResponse(command, acknowledgement());
+    case "reference.relink":
+    case "reference.link":
+    case "reference.assignToSet":
+    case "output.pin":
+    case "graph.undo":
+    case "graph.redo":
+    case "graph.validate":
+    case "graph.layout":
+    case "recipe.preview":
+    case "recipe.instantiate":
+    case "review.rate":
+    case "review.tag":
+    case "review.completeCompare":
+    case "artifact.dragExport":
+    case "artifact.deleteDerivative":
+    case "export.retry":
+    case "export.cancel":
+    case "provider.configure":
+    case "provider.disable":
+    case "recipe.install":
+    case "recipe.remove":
+    case "recovery.dismiss":
+    case "permission.grantEdit":
+    case "permission.grantPath":
+    case "permission.revoke":
+    case "liveOutput.enable":
+    case "liveOutput.disable":
+    case "liveOutput.rebuild":
+    case "liveOutput.reconcile":
+    case "liveOutput.removeMirrorFiles":
+      throw new BoundaryUnavailableError(`${command.name} needs the corresponding desktop, recipe, or Live Output service injection.`);
+    case "artifact.export": {
+      const records = await commandOnce(app, command, "records", (repositories) => command.payload.artifactIds.map((artifactId) => {
+        const artifact = repositories.artifacts.get(artifactId);
+        if (artifact === undefined) throw new Error(`Unknown artifact ${artifactId}.`);
+        return repositories.exports.create({
+          id: `export-${randomUUID()}`,
+          artifactId,
+          pathGrantId: command.payload.pathGrantId,
+          relativePath: `${command.payload.namingTemplate}-${artifactId}`,
+          contentKey: artifact.contentKey,
+          status: "planned",
+          createdAt: new Date().toISOString(),
+          completedAt: null,
+          options: { collisionPolicy: command.payload.collisionPolicy }
+        });
+      }));
+      return commandResponse(command, { records });
+    }
+    case "provider.probe":
+      return commandResponse(command, { health: await providerHealth(app.boundaryProvider()) });
+    case "provider.refresh":
+      return commandResponse(command, { providers: [await providerHealth(app.boundaryProvider())] });
+    case "recovery.inspect":
+      return commandResponse(command, { state: "healthy", reportId: null, message: null });
+  }
+}
+
+export async function executeApplicationQuery(
+  app: EtherApplication,
+  query: ApplicationQuery
+): Promise<QueryResponse> {
+  const store = app.boundaryStore();
+  if ("documentId" in query) assertDocument(query, store);
+
+  switch (query.name) {
+    case "document.summary": {
+      const summary = await store.read(({ settings, graphs, artifacts }) => ({
+        header: settings.getHeader(), graphCount: graphs.list().length, artifactCount: artifacts.list().length
+      }));
+      return queryResponse(query, { ...summary, mode: store.mode.kind });
+    }
+    case "document.dirtyState": {
+      const head = await store.read(({ revisions }) => revisions.head());
+      return queryResponse(query, { dirty: store.dirty, documentRevisionId: head.documentRevisionId });
+    }
+    case "graph.snapshot": return queryResponse(query, { graph: await app.queryGraph(query.payload.graphId) });
+    case "graph.catalog":
+      return queryResponse(query, { graphs: await store.read(({ graphs }) => graphs.list().map((graph) => ({ id: graph.id, title: graph.title, kind: graph.kind }))) });
+    case "graph.selectionDetails":
+      return queryResponse(query, { nodes: await store.read(({ graphs }) => {
+        const graph = graphs.get(query.payload.graphId);
+        if (graph === undefined) throw new Error(`Unknown graph ${query.payload.graphId}.`);
+        return graph.nodes.filter((node) => query.payload.nodeIds.includes(node.id));
+      }), edges: await store.read(({ graphs }) => {
+        const graph = graphs.get(query.payload.graphId);
+        if (graph === undefined) throw new Error(`Unknown graph ${query.payload.graphId}.`);
+        return graph.edges.filter((edge) => query.payload.edgeIds.includes(edge.id));
+      }) });
+    case "graph.validation": {
+      const graphs = await store.read(({ graphs }) => graphs.list());
+      const issues = validateFullGraphState(graphs).map((issue) => ({
+        code: issue.code,
+        message: issue.message,
+        nodeId: issue.entityId ?? null,
+        edgeId: issue.entityId ?? null
+      }));
+      return queryResponse(query, { valid: issues.length === 0, issues });
+    }
+    case "node.outputs": return queryResponse(query, { nodeId: query.payload.nodeId, outputs: await app.queryNodeOutputs(query.payload.nodeId) });
+    case "reference.list":
+      return queryResponse(query, { references: (await app.queryReferences()).filter((reference) => query.payload.state === undefined || reference.state === query.payload.state) });
+    case "reference.detail": {
+      const reference = await store.read(({ references }) => references.get(query.payload.referenceId));
+      if (reference === undefined) throw new Error(`Unknown reference ${query.payload.referenceId}.`);
+      return queryResponse(query, { reference });
+    }
+    case "output.detail": {
+      const output = await store.read(({ outputs }) => outputs.getVersion(query.payload.outputVersionId));
+      if (output === undefined) throw new Error(`Unknown output ${query.payload.outputVersionId}.`);
+      return queryResponse(query, { output });
+    }
+    case "provider.capabilities": return queryResponse(query, { capabilities: await providerCapabilities(app.boundaryProvider()) });
+    case "provider.health": return queryResponse(query, { providers: [await providerHealth(app.boundaryProvider())] });
+    case "plan.summary": return queryResponse(query, { plan: await app.queryPlan(query.payload.planId) });
+    case "job.summary": return queryResponse(query, { job: await app.queryJob(query.payload.jobId) });
+    case "job.list":
+      return queryResponse(query, { jobs: await store.read(({ execution }) => execution.listJobs()
+        .filter((job) => query.payload.status === undefined || job.status === query.payload.status)
+        .slice(0, query.payload.limit ?? 500)) });
+    case "job.timeline":
+      return queryResponse(query, { jobId: query.payload.jobId, entries: await store.read(({ execution }) => execution.listTimeline(query.payload.jobId).map((entry) => ({
+        id: entry.id, occurredAt: entry.occurredAt, state: entry.state, workItemId: entry.workItemId, attemptId: entry.attemptId
+      }))) });
+    case "job.workItems": return queryResponse(query, { jobId: query.payload.jobId, workItems: await app.queryWorkItems(query.payload.jobId) });
+    case "job.attempts": return queryResponse(query, { jobId: query.payload.jobId, attempts: await app.queryAttempts(query.payload.jobId) });
+    case "artifact.search": {
+      const artifacts = await store.read(({ artifacts }) => artifacts.search({ text: query.payload.text }));
+      const filtered = artifacts.filter((artifact) => (query.payload.channels.length === 0 || query.payload.channels.includes(artifact.channel)) &&
+        (query.payload.providerId === null || artifact.metadata.providerId === query.payload.providerId) &&
+        (query.payload.modelId === null || artifact.metadata.modelId === query.payload.modelId));
+      return queryResponse(query, { artifacts: filtered, total: filtered.length });
+    }
+    case "artifact.detail": {
+      const artifact = await store.read(({ artifacts }) => artifacts.get(query.payload.artifactId));
+      if (artifact === undefined) throw new Error(`Unknown artifact ${query.payload.artifactId}.`);
+      return queryResponse(query, { artifact });
+    }
+    case "collection.list": return queryResponse(query, { collections: await store.read(({ collections }) => collections.list()) });
+    case "collection.detail": return queryResponse(query, await store.read(({ collections }) => {
+      const collection = collections.get(query.payload.collectionId);
+      if (collection === undefined) throw new Error(`Unknown collection ${query.payload.collectionId}.`);
+      return { collection, memberships: collections.memberships(collection.id) };
+    }));
+    case "collection.membership": return queryResponse(query, { memberships: await store.read(({ collections }) => collections.memberships(query.payload.collectionId)) });
+    case "artifact.lineage": return queryResponse(query, { lineage: await store.read(({ artifacts }) => artifacts.lineage(query.payload.artifactId).map((entry) => ({
+      id: `${entry.artifactId}:${entry.parentArtifactId}:${entry.relation}`,
+      parentArtifactId: entry.parentArtifactId,
+      childArtifactId: entry.artifactId,
+      relation: entry.relation,
+      role: "general",
+      createdAt: new Date().toISOString()
+    }))) });
+    case "export.records": return queryResponse(query, { records: await store.read(({ exports }) => exports.list(query.payload)) });
+    case "liveOutput.status": return queryResponse(query, { settings: await store.read(({ settings }) => settings.getLiveOutput()) });
+    case "storage.status": {
+      const [file, blobs] = await Promise.all([stat(store.path), store.read(({ blobs }) => blobs.list())]);
+      return queryResponse(query, { documentBytes: file.size, blobBytes: blobs.reduce((total, blob) => total + blob.byteLength, 0), reclaimableBytes: 0 });
+    }
+    case "node.compiledInputPreview":
+    case "liveOutput.entries":
+    case "liveOutput.operations":
+    case "recipe.catalog":
+    case "recipe.setupSchema":
+    case "recovery.status":
+      throw new BoundaryUnavailableError(`${query.name} needs its compiler, recipe, recovery, or Live Output service injection.`);
+  }
+}
