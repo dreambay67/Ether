@@ -1,4 +1,13 @@
-import { ArtifactSchema, EtherGraphSchema, GraphTransactionSchema, ProviderHealthResultSchema } from "@ether/schema";
+import {
+  ApplicationCommandResponseSchema,
+  ApplicationCommandSchema,
+  ApplicationQueryResponseSchema,
+  ApplicationQuerySchema,
+  ArtifactSchema,
+  EtherGraphSchema,
+  GraphTransactionSchema,
+  ProviderHealthResultSchema
+} from "@ether/schema";
 import { z } from "zod";
 
 import { desktopIpcChannels } from "./channels.js";
@@ -160,6 +169,14 @@ export const desktopIpcContracts = {
     request: z.object({ documentId: id, referenceId: id, action: ReferenceActionSchema }).strict(),
     response: resultSchema(z.array(DesktopReferenceSchema))
   },
+  [desktopIpcChannels.application.command]: {
+    request: ApplicationCommandSchema,
+    response: resultSchema(ApplicationCommandResponseSchema)
+  },
+  [desktopIpcChannels.application.query]: {
+    request: ApplicationQuerySchema,
+    response: resultSchema(ApplicationQueryResponseSchema)
+  },
   [desktopIpcChannels.runtime.versions]: {
     request: empty,
     response: resultSchema(z.object({ electron: z.string(), node: z.string() }).strict())
@@ -231,17 +248,57 @@ export function assertDocumentScope(requestedDocumentId: string, activeDocumentI
 }
 
 export function normalizeDesktopError(error: unknown): DesktopError {
-  const candidate = error as { code?: unknown; message?: unknown } | null;
+  const candidate = error as {
+    category?: unknown;
+    causeId?: unknown;
+    code?: unknown;
+    message?: unknown;
+    retryable?: unknown;
+    userAction?: unknown;
+  } | null;
   const code = typeof candidate?.code === "string" ? candidate.code : "UNEXPECTED_ERROR";
-  const category = code.includes("REFERENCE") ? "reference"
+  const inferredCategory = code.includes("REFERENCE") ? "reference"
     : code.includes("GRAPH") || code.includes("REVISION") ? "graph"
       : code.includes("IPC") || code.includes("SCOPE") ? "security"
         : code.includes("INVALID") || code.includes("DESTINATION") ? "validation"
           : "document";
+  const category = isDesktopErrorCategory(candidate?.category)
+    ? candidate.category
+    : inferredCategory;
+  const rawMessage = error instanceof Error ? error.message : "Ether could not complete the request.";
   return DesktopErrorSchema.parse({
     code,
     category,
-    message: error instanceof Error ? error.message : "Ether could not complete the request.",
-    retryable: ["ENOSPC", "EBUSY", "SQLITE_BUSY"].includes(code)
+    message: sanitizeDesktopMessage(rawMessage),
+    retryable: typeof candidate?.retryable === "boolean"
+      ? candidate.retryable
+      : ["ENOSPC", "EBUSY", "SQLITE_BUSY"].includes(code),
+    ...(typeof candidate?.userAction === "string"
+      ? { userAction: sanitizeDesktopMessage(candidate.userAction) }
+      : {}),
+    ...(typeof candidate?.causeId === "string" ? { causeId: candidate.causeId } : {})
   });
+}
+
+const desktopErrorCategories = new Set<DesktopError["category"]>([
+  "document",
+  "graph",
+  "provider",
+  "execution",
+  "reference",
+  "security",
+  "validation"
+]);
+
+function isDesktopErrorCategory(value: unknown): value is DesktopError["category"] {
+  return typeof value === "string" && desktopErrorCategories.has(value as DesktopError["category"]);
+}
+
+function sanitizeDesktopMessage(message: string): string {
+  return message
+    .replace(/file:\/\/[^\s"']+/giu, "the selected file")
+    .replace(/\\\\[^\\\s"']+\\[^\r\n"']+/gu, "the selected file")
+    .replace(/\b[A-Za-z]:[\\/][^\r\n"']+/gu, "the selected file")
+    .replace(/(^|[\s("'=])\/\/[^/\s"']+\/[^\s"']+/gu, "$1the selected file")
+    .replace(/(^|[\s("'=:])\/(?:[^/\s"']+\/)+[^\s"']+/gu, "$1the selected file");
 }

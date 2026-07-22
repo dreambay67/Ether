@@ -24,6 +24,10 @@ export const desktopIpcChannels = {
     list: "ether:references:list",
     act: "ether:references:act"
   },
+  application: {
+    command: "ether:application:command",
+    query: "ether:application:query"
+  },
   runtime: {
     versions: "ether:runtime:versions",
     providerHealth: "ether:runtime:provider-health"

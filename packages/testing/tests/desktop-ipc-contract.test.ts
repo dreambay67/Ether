@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { applicationCommandNames } from "@ether/schema";
 
 import {
   desktopIpcChannels,
@@ -12,8 +13,13 @@ import {
   assertAuthorizedSenderFrame,
   assertTrustedIpcSender,
   desktopIpcContracts,
+  normalizeDesktopError,
   type IpcSenderIdentity
 } from "../../../apps/desktop/src/shared/ipc/contracts";
+import {
+  applicationCommandAvailableToRenderer,
+  applicationCommandMutationPolicy
+} from "../../../apps/desktop/src/main/services/applicationService";
 import { createEtherBridge } from "../../../apps/desktop/src/preload/filePathBridge";
 
 const trustedSender: IpcSenderIdentity = {
@@ -75,6 +81,115 @@ describe("desktop IPC contract", () => {
         }
       }).success
     ).toBe(true);
+  });
+
+  it("keeps generic mutation policy exhaustive and desktop lifecycle-owned", () => {
+    expect(Object.keys(applicationCommandMutationPolicy).sort()).toEqual([...applicationCommandNames].sort());
+    for (const name of applicationCommandNames.filter((candidate) => candidate.startsWith("document."))) {
+      expect(applicationCommandMutationPolicy[name]).toBe(false);
+      expect(applicationCommandAvailableToRenderer(name)).toBe(false);
+    }
+    expect(applicationCommandAvailableToRenderer("graph.undo")).toBe(true);
+    expect(applicationCommandMutationPolicy["run.preview"]).toBe(false);
+    expect(applicationCommandMutationPolicy["graph.applyTransaction"]).toBe(true);
+  });
+
+  it("preserves safe domain metadata while redacting absolute paths from errors", () => {
+    const error = Object.assign(
+      new Error("ENOENT while reading C:\\Users\\person\\Private\\source.png"),
+      {
+        category: "reference",
+        causeId: "cause-1",
+        code: "REFERENCE_SOURCE_MISSING",
+        retryable: true,
+        userAction: "Relink C:\\Users\\person\\Private\\source.png"
+      }
+    );
+    expect(normalizeDesktopError(error)).toEqual({
+      category: "reference",
+      causeId: "cause-1",
+      code: "REFERENCE_SOURCE_MISSING",
+      message: "ENOENT while reading the selected file",
+      retryable: true,
+      userAction: "Relink the selected file"
+    });
+    expect(normalizeDesktopError(new Error("ENOENT while reading /Users/person/Private/source.png")).message)
+      .toBe("ENOENT while reading the selected file");
+    expect(normalizeDesktopError(new Error("ENOENT file://server/share/private.png")).message)
+      .toBe("ENOENT the selected file");
+    expect(normalizeDesktopError(new Error("ENOENT //server/share/private.png")).message)
+      .toBe("ENOENT the selected file");
+  });
+
+  it("validates the generic application command and query boundary end to end", async () => {
+    const command = {
+      kind: "command" as const,
+      id: "command-1",
+      correlationId: "correlation-1",
+      name: "graph.undo" as const,
+      documentId: "document-1",
+      payload: { graphId: "graph-root" }
+    };
+    const query = {
+      kind: "query" as const,
+      id: "query-1",
+      correlationId: "correlation-1",
+      name: "provider.capabilities" as const,
+      payload: {}
+    };
+    const commandResponse = {
+      kind: "response" as const,
+      id: "response-1",
+      correlationId: command.correlationId,
+      requestId: command.id,
+      name: command.name,
+      documentId: command.documentId,
+      payload: {
+        kind: "revision" as const,
+        documentRevisionId: "revision-2",
+        graphRevisions: [{ graphId: "graph-root", revisionId: "graph-revision-2" }]
+      }
+    };
+    const queryResponse = {
+      kind: "response" as const,
+      id: "response-2",
+      correlationId: query.correlationId,
+      requestId: query.id,
+      name: query.name,
+      payload: { capabilities: [] }
+    };
+
+    expect(desktopIpcContracts[desktopIpcChannels.application.command].request.parse(command)).toEqual(command);
+    expect(desktopIpcContracts[desktopIpcChannels.application.query].request.parse(query)).toEqual(query);
+    expect(desktopIpcContracts[desktopIpcChannels.application.command].response.safeParse({
+      ok: true,
+      value: commandResponse
+    }).success).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.application.query].response.safeParse({
+      ok: true,
+      value: queryResponse
+    }).success).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.application.command].request.safeParse({
+      ...command,
+      payload: { graphId: "graph-root", path: "C:\\private\\graph.json" }
+    }).success).toBe(false);
+
+    const invocations: Array<{ channel: string; request: unknown }> = [];
+    const bridge = createEtherBridge({
+      invoke: async (channel, request) => {
+        invocations.push({ channel, request });
+        return { ok: true, value: channel === desktopIpcChannels.application.command ? commandResponse : queryResponse };
+      },
+      subscribe: () => () => undefined,
+      openDroppedDocument: async () => ({ ok: true, value: undefined })
+    });
+
+    await expect(bridge.application.command(command)).resolves.toEqual(commandResponse);
+    await expect(bridge.application.query(query)).resolves.toEqual(queryResponse);
+    expect(invocations).toEqual([
+      { channel: desktopIpcChannels.application.command, request: command },
+      { channel: desktopIpcChannels.application.query, request: query }
+    ]);
   });
 
   it("surfaces read-only provider health without exposing runtime process control", () => {
@@ -207,6 +322,7 @@ describe("desktop IPC contract", () => {
     });
 
     expect(Object.keys(bridge).sort()).toEqual([
+      "application",
       "artifacts",
       "document",
       "graph",

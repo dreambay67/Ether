@@ -14,6 +14,7 @@ import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
 
 import { registerDocumentHandlers } from "./ipc/registerDocumentHandlers.js";
 import { registerGraphHandlers } from "./ipc/registerGraphHandlers.js";
+import { registerApplicationHandlers } from "./ipc/registerApplicationHandlers.js";
 import {
   createEtherAssetProtocolHandler,
   registerEtherAssetScheme
@@ -175,6 +176,12 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     rendererUrl,
     service
   });
+  const disposeApplicationHandlers = registerApplicationHandlers({
+    ipcMain,
+    mainWindow,
+    rendererUrl,
+    service
+  });
 
   protocol.handle(
     "ether-asset",
@@ -241,6 +248,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
 
   await mainWindow.loadURL(rendererUrl);
   mainWindow.on("closed", () => {
+    disposeApplicationHandlers();
     disposeGraphHandlers();
     disposeDocumentHandlers();
     disposeApplicationMenu();

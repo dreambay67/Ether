@@ -24,7 +24,20 @@ import type {
   WritableLocationKind
 } from "@ether/document";
 import type { GenerationProvider } from "@ether/providers";
-import type { EtherGraph, GraphTransaction, LinkedReference } from "@ether/schema";
+import {
+  ApplicationCommandResponseSchema,
+  ApplicationCommandSchema,
+  ApplicationQueryResponseSchema,
+  ApplicationQuerySchema,
+  type ApplicationCommand,
+  type ApplicationCommandResponse,
+  type ApplicationQuery,
+  type ApplicationQueryResponse,
+  type EtherError,
+  type EtherGraph,
+  type GraphTransaction,
+  type LinkedReference
+} from "@ether/schema";
 
 import type {
   DesktopDocumentEvent,
@@ -1007,6 +1020,34 @@ export class DesktopApplicationService {
     return this.enqueueLifecycle(() => this.generateFakeArtifactNow(documentId));
   }
 
+  async executeApplicationCommand(command: ApplicationCommand): Promise<ApplicationCommandResponse> {
+    const parsed = ApplicationCommandSchema.parse(command);
+    if (!applicationCommandAvailableToRenderer(parsed.name)) {
+      throw codedError(
+        "DESKTOP_LIFECYCLE_REQUIRED",
+        "Use Ether's File commands for document lifecycle operations."
+      );
+    }
+    return this.enqueueLifecycle(async () => {
+      if ("documentId" in parsed) this.assertScope(parsed.documentId);
+      const response = await this.requireApplication().execute(parsed);
+      if (response.kind === "error") throw boundaryError(response.error);
+      const validated = ApplicationCommandResponseSchema.parse(response);
+      if ("documentId" in parsed && applicationCommandMutationPolicy[parsed.name]) {
+        this.autosaveCoordinator?.markDirty();
+      }
+      return validated;
+    });
+  }
+
+  async executeApplicationQuery(query: ApplicationQuery): Promise<ApplicationQueryResponse> {
+    const parsed = ApplicationQuerySchema.parse(query);
+    if ("documentId" in parsed) this.assertScope(parsed.documentId);
+    const response = await this.requireApplication().query(parsed);
+    if (response.kind === "error") throw boundaryError(response.error);
+    return redactApplicationQueryResponse(ApplicationQueryResponseSchema.parse(response));
+  }
+
   private async generateFakeArtifactNow(documentId: string) {
     this.assertScope(documentId);
     if (this.options.simulationMode !== true) {
@@ -1568,6 +1609,103 @@ async function closeCandidate(application: EtherApplication): Promise<void> {
   } catch (error) {
     if ((error as { code?: unknown } | null)?.code !== "DOCUMENT_NOT_OPEN") throw error;
   }
+}
+
+export const applicationCommandMutationPolicy: Record<ApplicationCommand["name"], boolean> = {
+  "document.new": false,
+  "document.open": false,
+  "document.save": false,
+  "document.saveAs": false,
+  "document.saveCopy": false,
+  "document.close": false,
+  "document.compact": false,
+  "document.recover": false,
+  "graph.applyTransaction": true,
+  "graph.undo": true,
+  "graph.redo": true,
+  "graph.validate": false,
+  "graph.layout": true,
+  "reference.link": true,
+  "reference.embed": true,
+  "reference.relink": true,
+  "reference.remove": true,
+  "reference.assignToSet": true,
+  "output.edit": true,
+  "output.pin": true,
+  "output.restore": true,
+  "recipe.preview": false,
+  "recipe.instantiate": true,
+  "run.preview": false,
+  "run.start": false,
+  "run.cancel": false,
+  "run.retry": false,
+  "run.resume": false,
+  "review.approve": true,
+  "review.reject": true,
+  "review.rate": true,
+  "review.tag": true,
+  "review.route": true,
+  "review.completeCompare": true,
+  "collection.create": true,
+  "collection.update": true,
+  "collection.delete": true,
+  "collection.addMembers": true,
+  "collection.removeMembers": true,
+  "collection.setPrimary": true,
+  "artifact.export": false,
+  "artifact.dragExport": false,
+  "artifact.deleteDerivative": true,
+  "export.retry": false,
+  "export.cancel": false,
+  "provider.probe": false,
+  "provider.refresh": false,
+  "provider.configure": false,
+  "provider.disable": false,
+  "recipe.install": false,
+  "recipe.remove": false,
+  "job.cancel": false,
+  "job.retry": false,
+  "job.resume": false,
+  "recovery.inspect": false,
+  "recovery.dismiss": false,
+  "permission.grantEdit": false,
+  "permission.grantRun": false,
+  "permission.grantPath": false,
+  "permission.revoke": false,
+  "liveOutput.enable": true,
+  "liveOutput.disable": true,
+  "liveOutput.rebuild": false,
+  "liveOutput.reconcile": false,
+  "liveOutput.removeMirrorFiles": false
+};
+
+export function applicationCommandAvailableToRenderer(name: ApplicationCommand["name"]): boolean {
+  return !name.startsWith("document.");
+}
+
+function boundaryError(error: EtherError): Error {
+  return Object.assign(new Error(error.message), error);
+}
+
+function redactApplicationQueryResponse(response: ApplicationQueryResponse): ApplicationQueryResponse {
+  if (response.name === "reference.list") {
+    return ApplicationQueryResponseSchema.parse({
+      ...response,
+      payload: {
+        references: response.payload.references.map((reference) => ({
+          ...reference,
+          originalPath: null
+        }))
+      }
+    });
+  }
+  if (response.name === "reference.detail") {
+    return ApplicationQueryResponseSchema.parse({
+      ...response,
+      payload: { reference: { ...response.payload.reference, originalPath: null } }
+    });
+  }
+  return response;
 }
 
 export interface WindowsLocationCapabilityPort {
