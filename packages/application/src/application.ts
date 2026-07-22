@@ -1419,7 +1419,11 @@ function extensionForMediaType(mediaType: string): string {
 }
 
 function safeFileName(value: string): string {
-  const safe = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").trim();
+  const safe = [...value]
+    .map((character) => character.charCodeAt(0) < 32 || /[<>:"/\\|?*]/.test(character) ? "-" : character)
+    .join("")
+    .replace(/[. ]+$/g, "")
+    .trim();
   return safe.length === 0 ? "artifact" : safe.slice(0, 180);
 }
 
