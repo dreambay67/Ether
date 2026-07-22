@@ -35,7 +35,8 @@ import {
 import {
   ConnectionRoleSchema,
   EtherNodeSchema,
-  PayloadChannelSchema
+  PayloadChannelSchema,
+  ReferenceSetMemberSchema
 } from "./nodes.js";
 import {
   NodeOutputVersionSchema,
@@ -176,6 +177,7 @@ export const applicationEventNames = [
   "reference.missing",
   "reference.relinked",
   "reference.changed",
+  "reference.setMembershipChanged",
   "recipe.installed",
   "recipe.changed",
   "permission.changed",
@@ -243,7 +245,11 @@ export const applicationCommandPayloadSchemas = {
   "reference.relink": z.object({ referenceId: idSchema, pathGrantId: idSchema }).strict(),
   "reference.remove": referenceIdPayloadSchema,
   "reference.assignToSet": z
-    .object({ nodeId: idSchema, members: z.array(idSchema).min(1), replace: z.boolean().optional() })
+    .object({
+      nodeId: idSchema,
+      members: z.array(ReferenceSetMemberSchema).min(1),
+      replace: z.boolean().optional()
+    })
     .strict(),
   "output.edit": z
     .object({ outputVersionId: idSchema, payload: JsonObjectSchema, note: z.string().optional() })
@@ -482,6 +488,11 @@ export const applicationEventPayloadSchemas = {
   "reference.missing": z.object({ referenceId: idSchema }).strict(),
   "reference.relinked": z.object({ referenceId: idSchema, contentKey: idSchema }).strict(),
   "reference.changed": z.object({ referenceId: idSchema, state: z.enum(["linked", "embedded", "missing", "relinking", "removed"]) }).strict(),
+  "reference.setMembershipChanged": z.object({
+    nodeId: idSchema,
+    members: z.array(ReferenceSetMemberSchema),
+    mode: z.enum(["assign", "replace"])
+  }).strict(),
   "recipe.installed": z.object({ recipeId: idSchema, version: z.string().min(1) }).strict(),
   "recipe.changed": z.object({ recipeId: idSchema, version: z.string().min(1), change: z.enum(["installed", "removed", "instantiated"]) }).strict(),
   "permission.changed": z
@@ -742,6 +753,7 @@ export const ApplicationEventSchema = z.discriminatedUnion("name", [
   eventMessage("reference.missing", applicationEventPayloadSchemas["reference.missing"]),
   eventMessage("reference.relinked", applicationEventPayloadSchemas["reference.relinked"]),
   eventMessage("reference.changed", applicationEventPayloadSchemas["reference.changed"]),
+  eventMessage("reference.setMembershipChanged", applicationEventPayloadSchemas["reference.setMembershipChanged"]),
   globalEventMessage("recipe.installed", applicationEventPayloadSchemas["recipe.installed"]),
   eventMessage("recipe.changed", applicationEventPayloadSchemas["recipe.changed"]),
   eventMessage("permission.changed", applicationEventPayloadSchemas["permission.changed"]),

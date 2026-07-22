@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { JsonValueSchema } from "./document.js";
+import { JsonObjectSchema, JsonValueSchema } from "./document.js";
 
 export const payloadChannels = ["text", "image", "mask", "data", "video", "audio"] as const;
 export const PayloadChannelSchema = z.enum(payloadChannels);
@@ -311,6 +311,7 @@ export const FlowBatchConfigSchema = z
   .object({
     kind: z.literal("flow.batch"),
     dimensions: z.array(BatchDimensionSchema),
+    exclusions: z.array(z.object({ values: JsonObjectSchema }).strict()).optional(),
     parallelism: z.number().int().positive()
   })
   .strict();

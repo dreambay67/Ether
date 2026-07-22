@@ -236,12 +236,15 @@ export class EtherApplication implements EtherApplicationService {
       previewContentKey: preview.contentKey,
       sourcePath: resolution.path
     });
-    await store.transaction(({ references }) => references.assignToReferenceSet(input.nodeId, [{
+    const member = {
       kind: "linked-reference",
       referenceId: reference.id,
       enabled: true,
       roleOverride: input.role
-    }]));
+    } as const;
+    await store.transaction(({ references }) => references.assignToReferenceSet(input.nodeId, [member]));
+    this.publishReferenceChanged(reference.id, "linked");
+    this.publishReferenceSetMembershipChanged(input.nodeId, [member], "assign");
     return reference;
   }
 
@@ -250,17 +253,30 @@ export class EtherApplication implements EtherApplicationService {
     return this.relinkDocumentReference({ referenceId, sourcePath: resolution.path, pathGrantId });
   }
 
-  async assignReferenceSet(nodeId: string, members: readonly string[], replace: boolean): Promise<void> {
-    await this.requireWritableStore().transaction(({ artifacts, references }) => {
-      const parsed = members.map((id) => references.get(id) === undefined
-        ? (() => {
-            if (artifacts.get(id) === undefined) throw new ApplicationServiceError("REFERENCE_MEMBER_NOT_FOUND", `Unknown reference or artifact ${id}.`);
-            return { kind: "embedded-artifact" as const, artifactId: id, enabled: true };
-          })()
-        : { kind: "linked-reference" as const, referenceId: id, enabled: true });
-      if (replace) references.setReferenceSetMembers(nodeId, parsed);
-      else references.assignToReferenceSet(nodeId, parsed);
+  async assignReferenceSet(
+    nodeId: string,
+    members: readonly import("@ether/schema").ReferenceSetMember[],
+    replace: boolean
+  ): Promise<void> {
+    const assigned = await this.requireWritableStore().transaction(({ artifacts, references }) => {
+      const parsed = members.map((member) => {
+        const id = member.kind === "linked-reference" ? member.referenceId : member.artifactId;
+        const exists = member.kind === "linked-reference" ? references.get(id) : artifacts.get(id);
+        if (exists === undefined) {
+          throw new ApplicationServiceError("REFERENCE_MEMBER_NOT_FOUND", `Unknown ${member.kind} ${id}.`);
+        }
+        return member;
+      });
+      return replace ? references.setReferenceSetMembers(nodeId, parsed) : references.assignToReferenceSet(nodeId, parsed);
     });
+    this.publishReferenceSetMembershipChanged(nodeId, assigned, replace ? "replace" : "assign");
+    const references = await this.queryReferences();
+    const stateById = new Map(references.map((reference) => [reference.id, reference.state]));
+    for (const member of assigned) {
+      if (member.kind === "linked-reference") {
+        this.publishReferenceChanged(member.referenceId, stateById.get(member.referenceId) ?? "missing");
+      }
+    }
   }
 
   async liveOutputStatus() {
@@ -625,7 +641,7 @@ export class EtherApplication implements EtherApplicationService {
       if (graph === undefined) throw new ApplicationServiceError("GRAPH_NOT_FOUND", `Unknown graph ${input.graphId}.`);
       return { graph, head: revisions.head() };
     });
-    const capabilities = planningCapabilities(
+    const capabilities = await planningCapabilities(
       snapshot.graph,
       this.options.provider,
       this.options.providerCapabilities
@@ -763,12 +779,14 @@ export class EtherApplication implements EtherApplicationService {
   }
 
   async relinkDocumentReference(input: { referenceId: string; sourcePath: string; pathGrantId: string }) {
-    return relinkReference(
+    const reference = await relinkReference(
       this.requireWritableStore(),
       input.referenceId,
       input.sourcePath,
       input.pathGrantId
     );
+    this.publishReferenceChanged(reference.id, "linked");
+    return reference;
   }
 
   async useEmbeddedReferencePreview(referenceId: string) {
@@ -791,6 +809,7 @@ export class EtherApplication implements EtherApplicationService {
     store.takeReferenceGrantAttention();
     const reference = await resolveReference(store, referenceId);
     if (reference.state !== "linked" || reference.originalPath === null) {
+      this.publishReferenceChanged(reference.id, "missing");
       throw new ApplicationServiceError(
         "REFERENCE_SOURCE_UNAVAILABLE",
         "The linked reference source is not currently available."
@@ -802,6 +821,7 @@ export class EtherApplication implements EtherApplicationService {
       { appDataRoot: this.options.appDataRoot }
     );
     const embedded = await embedReference(store, referenceId, blob.contentKey);
+    this.publishReferenceChanged(embedded.id, "embedded");
     return { grantRevocationPending: store.takeReferenceGrantAttention(), reference: embedded };
   }
 
@@ -825,6 +845,7 @@ export class EtherApplication implements EtherApplicationService {
       throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
     }
     if (reference.pathGrantId !== null) store.revokeReferenceGrantAuthority(reference.pathGrantId);
+    this.publishReferenceChanged(referenceId, "removed");
     return { grantRevocationPending: store.takeReferenceGrantAttention() };
   }
 
@@ -971,7 +992,7 @@ export class EtherApplication implements EtherApplicationService {
         inputs: []
       };
     }
-    const capabilities = planningCapabilities(snapshot.graph, this.options.provider, this.options.providerCapabilities);
+    const capabilities = await planningCapabilities(snapshot.graph, this.options.provider, this.options.providerCapabilities);
     const plan = compilePlan({
       id: `preview-${randomUUID()}`,
       documentId: store.documentId,
@@ -1307,13 +1328,60 @@ export class EtherApplication implements EtherApplicationService {
       payload: { permitId: permit.id, permission: permit.permission, state }
     }));
   }
+
+  private publishReferenceChanged(
+    referenceId: string,
+    state: "linked" | "embedded" | "missing" | "relinking" | "removed"
+  ): void {
+    if (this.store === undefined) return;
+    const id = randomUUID();
+    this.events.publish(ApplicationEventSchema.parse({
+      kind: "event",
+      id,
+      correlationId: id,
+      name: "reference.changed",
+      documentId: this.store.documentId,
+      occurredAt: new Date().toISOString(),
+      payload: { referenceId, state }
+    }));
+  }
+
+  private publishReferenceSetMembershipChanged(
+    nodeId: string,
+    members: readonly import("@ether/schema").ReferenceSetMember[],
+    mode: "assign" | "replace"
+  ): void {
+    if (this.store === undefined) return;
+    const id = randomUUID();
+    this.events.publish(ApplicationEventSchema.parse({
+      kind: "event",
+      id,
+      correlationId: id,
+      name: "reference.setMembershipChanged",
+      documentId: this.store.documentId,
+      occurredAt: new Date().toISOString(),
+      payload: { nodeId, members, mode }
+    }));
+  }
 }
 
-function planningCapabilities(
+async function planningCapabilities(
   graph: EtherGraph,
   provider: GenerationProvider,
   configured: readonly ProviderCapability[] = []
-): { all: ProviderCapability[]; primary: ProviderCapability } {
+): Promise<{ all: ProviderCapability[]; primary: ProviderCapability }> {
+  const runtimeParallelism = new Map<string, number>();
+  try {
+    const diagnostic = await provider.diagnose();
+    for (const profile of diagnostic.profiles ?? []) {
+      const maxParallelism = profile.maxParallelism;
+      if (maxParallelism !== undefined && Number.isSafeInteger(maxParallelism) && maxParallelism > 0) {
+        runtimeParallelism.set(`${profile.providerId}\u0000${profile.profileId}`, maxParallelism);
+      }
+    }
+  } catch {
+    // A provider diagnostic is advisory; planning remains available without a cap.
+  }
   const discovered = graph.nodes.flatMap((node): ProviderCapability[] => {
     if (node.config.kind !== "generation.image" || node.config.providerId !== provider.descriptor.id) return [];
     return [{
@@ -1352,7 +1420,16 @@ function planningCapabilities(
     provenance: "static-constraint",
     limitations: ["Local execution capability; no external provider call."]
   };
-  const all = uniqueCapabilities([...configured, ...discovered, local]);
+  const all = uniqueCapabilities([...configured, ...discovered, local].map((capability) => {
+    const runtimeCap = runtimeParallelism.get(`${capability.providerId}\u0000${capability.profileId}`);
+    if (runtimeCap === undefined) return capability;
+    return {
+      ...capability,
+      maxParallelism: capability.maxParallelism === undefined
+        ? runtimeCap
+        : Math.min(capability.maxParallelism, runtimeCap)
+    };
+  }));
   const needsReasoning = graph.nodes.some((node) =>
     node.config.kind === "prompt.worker" || node.config.kind === "review.evaluate"
   );

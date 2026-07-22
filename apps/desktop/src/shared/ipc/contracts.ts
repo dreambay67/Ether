@@ -1,9 +1,11 @@
 import {
   ApplicationCommandResponseSchema,
   ApplicationCommandSchema,
+  ApplicationEventSchema,
   ApplicationQueryResponseSchema,
   ApplicationQuerySchema,
   ArtifactSchema,
+  ConnectionRoleSchema,
   EtherGraphSchema,
   GraphTransactionSchema,
   ProviderHealthResultSchema
@@ -109,6 +111,11 @@ export const DesktopReferenceSchema = z.object({
   actions: z.array(ReferenceActionSchema)
 }).strict();
 export type DesktopReference = z.infer<typeof DesktopReferenceSchema>;
+export const ReferenceFileSelectionResultSchema = z.discriminatedUnion("cancelled", [
+  z.object({ cancelled: z.literal(true) }).strict(),
+  z.object({ cancelled: z.literal(false), referenceId: id }).strict()
+]);
+export type ReferenceFileSelectionResult = z.infer<typeof ReferenceFileSelectionResultSchema>;
 
 function resultSchema<T extends z.ZodTypeAny>(value: T) {
   return z.discriminatedUnion("ok", [
@@ -169,6 +176,16 @@ export const desktopIpcContracts = {
     request: z.object({ documentId: id, referenceId: id, action: ReferenceActionSchema }).strict(),
     response: resultSchema(z.array(DesktopReferenceSchema))
   },
+  [desktopIpcChannels.references.chooseAndLink]: {
+    request: z.object({
+      documentId: id,
+      graphId: id,
+      nodeId: id,
+      role: ConnectionRoleSchema,
+      storage: z.enum(["link", "embed"])
+    }).strict(),
+    response: resultSchema(ReferenceFileSelectionResultSchema)
+  },
   [desktopIpcChannels.application.command]: {
     request: ApplicationCommandSchema,
     response: resultSchema(ApplicationCommandResponseSchema)
@@ -176,6 +193,10 @@ export const desktopIpcContracts = {
   [desktopIpcChannels.application.query]: {
     request: ApplicationQuerySchema,
     response: resultSchema(ApplicationQueryResponseSchema)
+  },
+  [desktopIpcChannels.application.event]: {
+    request: ApplicationEventSchema,
+    response: resultSchema(z.null())
   },
   [desktopIpcChannels.runtime.versions]: {
     request: empty,

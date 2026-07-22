@@ -6,12 +6,14 @@ import type {
   DesktopReference,
   DocumentDescriptor,
   NormalizedResult,
-  PortableResult
+  PortableResult,
+  ReferenceFileSelectionResult
 } from "../shared/ipc/contracts";
 import type { GraphTransaction } from "@ether/schema";
 import type {
   ApplicationCommand,
   ApplicationCommandResponse,
+  ApplicationEvent,
   ApplicationQuery,
   ApplicationQueryResponse,
   Artifact,
@@ -21,7 +23,10 @@ import type {
 
 type BridgeTransport = {
   invoke(channel: DesktopIpcChannel, request: unknown): Promise<NormalizedResult<unknown>>;
-  subscribe(channel: typeof desktopIpcChannels.document.event, listener: (event: unknown) => void): () => void;
+  subscribe(
+    channel: typeof desktopIpcChannels.document.event | typeof desktopIpcChannels.application.event,
+    listener: (event: unknown) => void
+  ): () => void;
   openDroppedDocument(file: File): Promise<NormalizedResult<unknown>>;
 };
 
@@ -63,13 +68,24 @@ export function createEtherBridge(transport: BridgeTransport) {
     references: {
       list: (documentId: string) => scoped<DesktopReference[]>(desktopIpcChannels.references.list, documentId),
       act: (documentId: string, referenceId: string, action: string) =>
-        unwrap<DesktopReference[]>(transport.invoke(desktopIpcChannels.references.act, { documentId, referenceId, action }))
+        unwrap<DesktopReference[]>(transport.invoke(desktopIpcChannels.references.act, { documentId, referenceId, action })),
+      chooseAndLink: (input: {
+        documentId: string;
+        graphId: string;
+        nodeId: string;
+        role: import("@ether/schema").ConnectionRole;
+        storage: "link" | "embed";
+      }) => unwrap<ReferenceFileSelectionResult>(
+        transport.invoke(desktopIpcChannels.references.chooseAndLink, input)
+      )
     },
     application: {
       command: (command: ApplicationCommand) =>
         unwrap<ApplicationCommandResponse>(transport.invoke(desktopIpcChannels.application.command, command)),
       query: (query: ApplicationQuery) =>
-        unwrap<ApplicationQueryResponse>(transport.invoke(desktopIpcChannels.application.query, query))
+        unwrap<ApplicationQueryResponse>(transport.invoke(desktopIpcChannels.application.query, query)),
+      onEvent: (listener: (event: ApplicationEvent) => void) =>
+        transport.subscribe(desktopIpcChannels.application.event, (event) => listener(event as ApplicationEvent))
     },
     runtime: {
       versions: () => unwrap<{ electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {})),

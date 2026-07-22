@@ -161,7 +161,7 @@ async function providerCapabilities(provider: GenerationProvider): Promise<Provi
     if (profile.operation !== "image.generate" && profile.operation !== "image.edit") return [];
     return [{
       providerId: profile.providerId,
-      profileId: profile.model ?? profile.providerId,
+      profileId: profile.profileId,
       operation: profile.operation === "image.generate" ? "generate-image" : "edit-image",
       inputChannels: [...profile.inputChannels],
       outputChannels: [...profile.outputChannels],
@@ -169,6 +169,7 @@ async function providerCapabilities(provider: GenerationProvider): Promise<Provi
       resolutions: [],
       maxReferences: profile.mediaLimits?.maxInputs ?? 0,
       maxOutputsPerCall: 1,
+      ...(profile.maxParallelism === undefined ? {} : { maxParallelism: profile.maxParallelism }),
       supportsCancellation: false,
       supportsSeed: false,
       provenance: "runtime-discovered",

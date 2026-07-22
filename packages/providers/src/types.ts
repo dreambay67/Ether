@@ -108,6 +108,8 @@ export type ProviderRoute =
 
 export type ProviderCapabilityProfile = {
   providerId: string;
+  /** Stable provider-owned selection identity; never infer it from a display model. */
+  profileId: string;
   providerName?: string;
   route: ProviderRoute;
   operation: ProviderOperation;
@@ -122,6 +124,8 @@ export type ProviderCapabilityProfile = {
   unavailableReason?: string;
   messages?: string[];
   mediaLimits?: ProviderMediaLimits;
+  /** Provider-advertised concurrent request ceiling, when it is known. */
+  maxParallelism?: number;
 };
 
 export type ProviderDescriptor = {

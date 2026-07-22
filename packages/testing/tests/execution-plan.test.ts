@@ -31,6 +31,7 @@ const capability: ProviderCapability = {
   resolutions: [{ id: "64", width: 64, height: 64, label: "64 x 64" }],
   maxReferences: 8,
   maxOutputsPerCall: 4,
+  maxParallelism: 2,
   supportsCancellation: true,
   supportsSeed: false,
   provenance: "conformance-verified",
@@ -100,6 +101,7 @@ function representativeGraph(): EtherGraph {
           { id: "model", name: "Model", values: ["draft", "final"] },
           { id: "lighting", name: "Lighting", values: ["cool", "warm"] }
         ],
+        exclusions: [{ values: { model: "final", lighting: "warm" } }],
         parallelism: 4
       }),
       node("generator", {
@@ -142,7 +144,6 @@ function compile(graph = representativeGraph(), scope: Parameters<typeof compile
     scope,
     capability,
     capabilities: ["codex.vision"],
-    batchExclusions: [{ values: { model: "final", lighting: "warm" } }],
     createdAt: timestamp
   });
 }
@@ -211,6 +212,7 @@ describe("Ether execution planner", () => {
       }).items.map((item) => item.id)
     );
     expect(compile().batchSummary).toEqual({ dimensions: 2, exclusions: 1, workItemCount: 3 });
+    expect(compile().effectiveParallelism).toBe(2);
   });
 
   it("persists adapter subjects, roles, channels, consequences, and stable plan hashes", () => {

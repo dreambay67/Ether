@@ -241,6 +241,84 @@ describe("desktop document lifecycle", () => {
     await service.close();
   });
 
+  it("uses a desktop-only path grant to add an embedded reference and forwards its scoped event", async () => {
+    const root = await tempRoot("ether-desktop-reference-picker-");
+    const referencePath = path.join(root, "selected-reference.png");
+    await writeFile(referencePath, pngBytes(128, 0x51));
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ locateReference: async () => referencePath }),
+      provider: new FakeImageProvider()
+    });
+
+    const document = await service.bootstrap();
+    const events: Array<{ documentId: string; name: string; payload: unknown }> = [];
+    const dispose = service.subscribeApplication((event) => {
+      if ("documentId" in event) events.push({ documentId: event.documentId, name: event.name, payload: event.payload });
+    });
+    try {
+      await service.executeApplicationCommand({
+        kind: "command",
+        id: "add-reference-set",
+        correlationId: "add-reference-set",
+        documentId: document.documentId,
+        name: "graph.applyTransaction",
+        payload: {
+          transaction: {
+            id: "add-reference-set-transaction",
+            baseDocumentRevisionId: document.documentRevisionId,
+            baseGraphRevisions: { [document.graphId]: document.graphRevisionId },
+            title: "Add Reference Set",
+            actor: "user",
+            layoutPolicy: "preserve",
+            operations: [{
+              type: "addNode",
+              graphId: document.graphId,
+              node: {
+                id: "references",
+                definitionId: "reference.set",
+                title: "References",
+                position: { x: 0, y: 0 },
+                size: { width: 240, height: 180 },
+                config: { kind: "reference.set", enabledChannels: ["image"], ordering: "manual" },
+                presentation: { collapsed: false, accent: "default", previewMode: "content" }
+              }
+            }]
+          }
+        }
+      });
+      const result = await service.chooseAndLinkReference({
+        documentId: document.documentId,
+        graphId: document.graphId,
+        nodeId: "references",
+        role: "subject",
+        storage: "embed"
+      });
+      expect(result.cancelled).toBe(false);
+      const references = await service.executeApplicationQuery({
+        kind: "query",
+        id: "reference-list",
+        correlationId: "reference-list",
+        documentId: document.documentId,
+        name: "reference.list",
+        payload: {}
+      });
+      if (references.name !== "reference.list") throw new Error("Expected reference list response.");
+      expect(references.payload.references).toEqual([
+        expect.objectContaining({ originalPath: null, state: "embedded" })
+      ]);
+      expect(events).toContainEqual(expect.objectContaining({
+        documentId: document.documentId,
+        name: "reference.changed",
+        payload: expect.objectContaining({ state: "embedded" })
+      }));
+    } finally {
+      dispose();
+      await service.close();
+    }
+  });
+
   it("saves, saves as, saves a copy, compacts, and reopens one validated Ether file", async () => {
     const root = await tempRoot("ether-desktop-lifecycle-");
     const appDataRoot = path.join(root, "appdata");
@@ -721,19 +799,27 @@ describe("desktop document lifecycle", () => {
 
     expect(generated).toHaveLength(1);
     expect(generated[0]).toMatchObject({ mediaType: "image/png" });
+    const generatedBytes = Buffer.from(await service.readArtifactRange(
+      saved.documentId,
+      generated[0]!.id,
+      0,
+      generated[0]!.byteLength
+    ));
+    expect(generatedBytes).toHaveLength(generated[0]!.byteLength);
     await service.close();
 
     const reopened = new DesktopApplicationService({ ...options, dialogs: dialogs() });
     const snapshot = await reopened.openPath(documentPath);
     const artifacts = await reopened.searchArtifacts(snapshot.documentId, "");
     expect(artifacts.map((artifact) => artifact.id)).toContain(generated[0]!.id);
-    const bytes = await reopened.readArtifactRange(
+    const bytes = Buffer.from(await reopened.readArtifactRange(
       snapshot.documentId,
       generated[0]!.id,
       0,
       generated[0]!.byteLength
-    );
+    ));
     expect(bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(bytes).toEqual(generatedBytes);
     await reopened.close();
   });
 

@@ -28,8 +28,15 @@ export type DocumentStoreLike = {
 
 export function documentStorePersistence(store: DocumentStoreLike): SchedulerPersistence {
   return {
-    documentId: store.documentId,
-    path: store.path,
+    // A Save As publishes the same open store under a new document identity. Keep
+    // scheduler persistence bound to that live identity rather than the identity
+    // captured when the document was first opened.
+    get documentId() {
+      return store.documentId;
+    },
+    get path() {
+      return store.path;
+    },
     claimNext: (jobId, claimToken) => store.transaction(({ execution }) =>
       callMethod<ExecutorClaim | undefined>(execution, "claimNext", [jobId, claimToken])
     ),

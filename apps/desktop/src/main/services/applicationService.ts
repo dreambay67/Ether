@@ -27,10 +27,12 @@ import type { GenerationProvider } from "@ether/providers";
 import {
   ApplicationCommandResponseSchema,
   ApplicationCommandSchema,
+  ApplicationEventSchema,
   ApplicationQueryResponseSchema,
   ApplicationQuerySchema,
   type ApplicationCommand,
   type ApplicationCommandResponse,
+  type ApplicationEvent,
   type ApplicationQuery,
   type ApplicationQueryResponse,
   type EtherError,
@@ -336,6 +338,28 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
       next.set(grantKey(grantId, documentId), { ...grant, operation: "resolve" });
       this.commit(next);
     }
+  }
+
+  /** Resolves an opaque desktop grant without exposing its path to the renderer. */
+  resolveApplicationPathGrant(input: {
+    documentId: string;
+    pathGrantId: string;
+    purpose: "live-output" | "export" | "reference";
+  }): { displayName: string; kind: "file"; path: string } {
+    if (input.purpose !== "reference") {
+      throw codedError("PATH_PERMISSION_REQUIRED", "This desktop service has no grant for that destination.");
+    }
+    const key = grantKey(input.pathGrantId, input.documentId);
+    const grant = this.grants.get(key);
+    if (
+      grant === undefined ||
+      this.pendingRevocations.has(key) ||
+      grant.documentPath !== this.activeDocuments.get(input.documentId) ||
+      (grant.operation !== "link" && grant.operation !== "relink")
+    ) {
+      throw codedError("PATH_PERMISSION_REQUIRED", "The selected reference is no longer authorized for this document.");
+    }
+    return { displayName: path.basename(grant.path), kind: "file", path: grant.path };
   }
 
   prepareRevocation(grantId: string, documentId: string): void {
@@ -721,6 +745,7 @@ export class DesktopApplicationService {
   private untitled = false;
   private revision = 0;
   private readonly listeners = new Set<(event: DesktopDocumentEvent) => void>();
+  private readonly applicationListeners = new Set<(event: ApplicationEvent) => void>();
   private autosaveCoordinator: AutosaveCoordinator | null = null;
   private readonly pathGrants: DesktopPathGrantAuthority;
   private refreshTail: Promise<void> = Promise.resolve();
@@ -1020,6 +1045,11 @@ export class DesktopApplicationService {
     return this.enqueueLifecycle(() => this.generateFakeArtifactNow(documentId));
   }
 
+  subscribeApplication(listener: (event: ApplicationEvent) => void): () => void {
+    this.applicationListeners.add(listener);
+    return () => this.applicationListeners.delete(listener);
+  }
+
   async executeApplicationCommand(command: ApplicationCommand): Promise<ApplicationCommandResponse> {
     const parsed = ApplicationCommandSchema.parse(command);
     if (!applicationCommandAvailableToRenderer(parsed.name)) {
@@ -1046,6 +1076,57 @@ export class DesktopApplicationService {
     const response = await this.requireApplication().query(parsed);
     if (response.kind === "error") throw boundaryError(response.error);
     return redactApplicationQueryResponse(ApplicationQueryResponseSchema.parse(response));
+  }
+
+  async chooseAndLinkReference(input: {
+    documentId: string;
+    graphId: string;
+    nodeId: string;
+    role: import("@ether/schema").ConnectionRole;
+    storage: "link" | "embed";
+  }): Promise<{ cancelled: true } | { cancelled: false; referenceId: string }> {
+    return this.enqueueLifecycle(async () => {
+      this.assertScope(input.documentId);
+      const selected = await this.options.dialogs.locateReference(input.nodeId);
+      if (selected === null) return { cancelled: true };
+      const grantId = this.pathGrants.grant(input.documentId, "link", selected);
+      const application = this.requireApplication();
+      try {
+        await application.grantPathPermit(randomUUID(), grantId, "reference");
+        const linked = await application.execute({
+          kind: "command",
+          id: randomUUID(),
+          correlationId: randomUUID(),
+          documentId: input.documentId,
+          name: "reference.link",
+          payload: {
+            graphId: input.graphId,
+            nodeId: input.nodeId,
+            pathGrantId: grantId,
+            role: input.role
+          }
+        });
+        if (linked.kind === "error") throw boundaryError(linked.error);
+        if (linked.name !== "reference.link") throw codedError("REFERENCE_LINK_FAILED", "Ether returned an unexpected reference response.");
+        this.pathGrants.allowResolve(grantId, input.documentId);
+        if (input.storage === "embed") {
+          const embedded = await application.execute({
+            kind: "command",
+            id: randomUUID(),
+            correlationId: randomUUID(),
+            documentId: input.documentId,
+            name: "reference.embed",
+            payload: { referenceId: linked.payload.referenceId }
+          });
+          if (embedded.kind === "error") throw boundaryError(embedded.error);
+        }
+        this.autosaveCoordinator?.markDirty();
+        return { cancelled: false, referenceId: linked.payload.referenceId };
+      } catch (error) {
+        this.revokePathGrant(grantId, input.documentId);
+        throw error;
+      }
+    });
   }
 
   private async generateFakeArtifactNow(documentId: string) {
@@ -1371,6 +1452,9 @@ export class DesktopApplicationService {
       appDataRoot: this.options.appDataRoot,
       appVersion: this.options.appVersion,
       provider: this.options.provider,
+      pathGrantResolver: {
+        resolve: (input) => this.pathGrants.resolveApplicationPathGrant(input)
+      },
       documentEnvironment: {
         ...this.options.documentEnvironment,
         ...(this.options.locationCapability === undefined
@@ -1379,8 +1463,12 @@ export class DesktopApplicationService {
         referenceGrantAuthority: this.pathGrants
       }
     });
-    application.events.subscribe(() => {
-      if (this.application === application && this.current !== null) void this.refresh("state");
+    application.events.subscribe((rawEvent) => {
+      if (this.application !== application || this.current === null) return;
+      const event = ApplicationEventSchema.parse(rawEvent);
+      if ("documentId" in event && event.documentId !== this.current.documentId) return;
+      for (const listener of this.applicationListeners) listener(event);
+      void this.refresh("state");
     });
     return application;
   }

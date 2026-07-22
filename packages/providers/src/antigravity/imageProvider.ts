@@ -261,6 +261,7 @@ function capabilityProfile(
 ) {
   return {
     providerId: descriptor.id,
+    profileId: descriptor.id,
     providerName: descriptor.name,
     route: descriptor.route,
     operation: "image.generate" as const,
@@ -271,6 +272,7 @@ function capabilityProfile(
     capabilitySource: "antigravity-cli" as const,
     requiresExplicitSelection: true,
     noHiddenFallback: true,
+    maxParallelism: 1,
     model: evidence?.providerIdentity ?? undefined,
     unavailableReason: availability === "unavailable" ? redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.") : undefined,
     messages: availability === "available" ? ["Real conformance passed."] : [redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.")],

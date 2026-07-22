@@ -393,6 +393,7 @@ function buildDiagnosticProfiles(diagnostic: ProviderDiagnostic | ApiProviderDia
     return [
       {
         providerId: diagnostic.id,
+        profileId: `${diagnostic.id}:${capability}`,
         providerName: diagnostic.name,
         route: diagnostic.route,
         operation: capability,
@@ -548,6 +549,7 @@ function unavailableAdapterMatrixEntry(input: {
   const messages = [input.unavailableReason, ...(input.messages ?? [])];
   const profile: ProviderCapabilityProfile = {
     providerId: input.id,
+    profileId: `${input.id}:${input.operation}`,
     providerName: input.displayName,
     route: "adapter",
     operation: input.operation,

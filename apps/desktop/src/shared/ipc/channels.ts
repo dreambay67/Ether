@@ -22,11 +22,13 @@ export const desktopIpcChannels = {
   },
   references: {
     list: "ether:references:list",
-    act: "ether:references:act"
+    act: "ether:references:act",
+    chooseAndLink: "ether:references:choose-and-link"
   },
   application: {
     command: "ether:application:command",
-    query: "ether:application:query"
+    query: "ether:application:query",
+    event: "ether:application:event"
   },
   runtime: {
     versions: "ether:runtime:versions",

@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
-import { FakeImageProvider } from "@ether/providers";
-import type { EtherGraph, GraphTransaction, ProviderCapability } from "@ether/schema";
+import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider } from "@ether/providers";
+import { ApplicationCommandSchema, type EtherGraph, type GraphTransaction, type ProviderCapability } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 const roots: string[] = [];
@@ -93,6 +93,39 @@ afterEach(async () => {
 });
 
 describe("Ether 4.0 application boundary", () => {
+  it("applies a production Codex profile parallelism ceiling without configured capabilities", async () => {
+    const root = await temporaryRoot();
+    const provider = new CodexCliImageProvider({
+      codexCliPath: path.join(root, "codex.exe"),
+      fileExists: async () => true
+    });
+    const app = new EtherApplication({ appDataRoot: root, appVersion: "4.0.0-test", provider });
+    const batchGraph: EtherGraph = {
+      ...graph(),
+      nodes: [
+        {
+          id: "batch", definitionId: "flow.batch", title: "Batch", position: { x: 0, y: 0 }, size: { width: 240, height: 180 },
+          config: { kind: "flow.batch", dimensions: [{ id: "variant", name: "Variant", values: ["a", "b", "c"] }], parallelism: 4 },
+          presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+        },
+        {
+          id: "image", definitionId: "generation.image", title: "Image", position: { x: 320, y: 0 }, size: { width: 240, height: 180 },
+          config: { kind: "generation.image", providerId: CODEX_PROVIDER_ID, profileId: "image-default", aspectRatio: "1:1", resolution: { width: 32, height: 32 }, outputCount: 1 },
+          presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+        }
+      ],
+      edges: [{
+        id: "batch-image", from: { kind: "node", nodeId: "batch", channel: "data" }, to: { kind: "node", nodeId: "image", channel: "data" },
+        role: "general", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true
+      }]
+    };
+    await app.createDocument({ path: path.join(root, "parallelism.ether"), title: "Parallelism", initialGraph: batchGraph });
+    const plan = await app.previewRun({ commandId: "preview-parallelism", graphId: "root", scope: { kind: "node", nodeId: "image" } });
+    expect(plan.effectiveParallelism).toBe(1);
+    expect(plan.requestedParallelism).toBe(4);
+    await app.closeDocument();
+  });
+
   it("dispatches an idempotent durable workflow with output lineage, review, collection routing, events, and job inspection", async () => {
     const root = await temporaryRoot();
     const referencePath = path.join(root, "reference.txt");
@@ -109,8 +142,8 @@ describe("Ether 4.0 application boundary", () => {
           : { kind: "directory", path: liveOutputPath }
       }
     });
-    const eventNames: string[] = [];
-    app.subscribe((event) => eventNames.push(event.name));
+    const events: Array<{ name: string; payload: unknown }> = [];
+    app.subscribe((event) => events.push({ name: event.name, payload: event.payload }));
     await app.createDocument({ path: path.join(root, "Contract.ether"), title: "Contract", initialGraph: graph() });
     const initial = await app.queryDocument();
     await app.applyGraphTransaction({ commandId: "graph", transaction: transaction(initial.documentRevisionId, initial.graphRevisions.root!) });
@@ -121,7 +154,60 @@ describe("Ether 4.0 application boundary", () => {
     await app.execute({ kind: "command", id: "reference-permit", correlationId: "c-reference-permit", documentId: initial.documentId, name: "permission.grantPath", payload: { pathGrantId: "reference-grant", purpose: "reference" } });
     const linked = await app.execute({ kind: "command", id: "link-reference", correlationId: "c-link-reference", documentId: initial.documentId, name: "reference.link", payload: { graphId: "root", nodeId: "references", pathGrantId: "reference-grant", role: "subject" } });
     if (linked.kind !== "response" || linked.name !== "reference.link") throw new Error(`Reference did not link: ${JSON.stringify(linked)}`);
-    await app.execute({ kind: "command", id: "assign-reference", correlationId: "c-assign-reference", documentId: initial.documentId, name: "reference.assignToSet", payload: { nodeId: "references", members: [linked.payload.referenceId], replace: true } });
+    expect(events).toContainEqual({
+      name: "reference.setMembershipChanged",
+      payload: {
+        nodeId: "references",
+        members: [{
+          kind: "linked-reference",
+          referenceId: linked.payload.referenceId,
+          enabled: true,
+          roleOverride: "subject"
+        }],
+        mode: "assign"
+      }
+    });
+    await app.execute({
+      kind: "command",
+      id: "assign-reference",
+      correlationId: "c-assign-reference",
+      documentId: initial.documentId,
+      name: "reference.assignToSet",
+      payload: {
+        nodeId: "references",
+        members: [{
+          kind: "linked-reference",
+          referenceId: linked.payload.referenceId,
+          enabled: false,
+          roleOverride: "style"
+        }],
+        replace: true
+      }
+    });
+    expect(await app.boundaryStore().read(({ references }) => references.referenceSetMembers("references")))
+      .toEqual([{
+        kind: "linked-reference",
+        referenceId: linked.payload.referenceId,
+        enabled: false,
+        roleOverride: "style"
+      }]);
+    expect(events).toContainEqual({
+      name: "reference.setMembershipChanged",
+      payload: {
+        nodeId: "references",
+        members: [{
+          kind: "linked-reference",
+          referenceId: linked.payload.referenceId,
+          enabled: false,
+          roleOverride: "style"
+        }],
+        mode: "replace"
+      }
+    });
+    expect(ApplicationCommandSchema.safeParse({
+      kind: "command", id: "legacy-ids", correlationId: "legacy-ids", documentId: initial.documentId,
+      name: "reference.assignToSet", payload: { nodeId: "references", members: [linked.payload.referenceId] }
+    }).success).toBe(false);
 
     const preview = await app.execute({ kind: "command", id: "preview", correlationId: "c-preview", documentId: initial.documentId, name: "run.preview", payload: { graphId: "root", scope: { kind: "node", nodeId: "image" } } });
     expect(preview.kind).toBe("response");
@@ -135,6 +221,37 @@ describe("Ether 4.0 application boundary", () => {
     const artifacts = await app.query({ kind: "query", id: "artifacts", correlationId: "c-artifacts", documentId: initial.documentId, name: "artifact.search", payload: { text: "", channels: [], collectionIds: [], tags: [], minimumRating: null, providerId: null, modelId: null, runId: null, graphId: null, createdAfter: null, createdBefore: null } });
     if (artifacts.kind !== "response" || artifacts.name !== "artifact.search") throw new Error("Artifacts did not return.");
     const artifact = artifacts.payload.artifacts[0]!;
+
+    await app.execute({
+      kind: "command",
+      id: "assign-embedded-reference",
+      correlationId: "c-assign-embedded-reference",
+      documentId: initial.documentId,
+      name: "reference.assignToSet",
+      payload: {
+        nodeId: "references",
+        members: [{
+          kind: "embedded-artifact",
+          artifactId: artifact.id,
+          enabled: false,
+          roleOverride: "style"
+        }],
+        replace: true
+      }
+    });
+    expect(events).toContainEqual({
+      name: "reference.setMembershipChanged",
+      payload: {
+        nodeId: "references",
+        members: [{
+          kind: "embedded-artifact",
+          artifactId: artifact.id,
+          enabled: false,
+          roleOverride: "style"
+        }],
+        mode: "replace"
+      }
+    });
 
     const current = await app.queryDocument();
     const pinned = await app.execute({ kind: "command", id: "pin", correlationId: "c-pin", documentId: initial.documentId, name: "output.pin", payload: { edgeId: "image-compare", outputVersionId: artifact.source.outputVersionId, baseDocumentRevisionId: current.documentRevisionId } });
@@ -171,7 +288,12 @@ describe("Ether 4.0 application boundary", () => {
     expect(memberships).toMatchObject({ kind: "response", name: "collection.membership", payload: { memberships: [expect.objectContaining({ artifactId: artifact.id })] } });
     const job = await app.query({ kind: "query", id: "job", correlationId: "c-job", documentId: initial.documentId, name: "job.summary", payload: { jobId: started.payload.job.id } });
     expect(job).toMatchObject({ kind: "response", name: "job.summary", payload: { job: { status: "completed" } } });
-    expect(eventNames).toEqual(expect.arrayContaining(["collection.changed", "output.created", "output.reviewed"]));
+    expect(events.map((event) => event.name)).toEqual(expect.arrayContaining([
+      "collection.changed",
+      "output.created",
+      "output.reviewed",
+      "reference.changed"
+    ]));
     await app.closeDocument();
   });
 

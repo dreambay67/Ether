@@ -70,6 +70,7 @@ export const ProviderCapabilitySchema = z
     resolutions: z.array(ResolutionOptionSchema),
     maxReferences: z.number().int().nonnegative(),
     maxOutputsPerCall: z.number().int().positive(),
+    maxParallelism: z.number().int().positive().optional(),
     supportsCancellation: z.boolean(),
     supportsSeed: z.boolean(),
     provenance: z.enum(["runtime-discovered", "conformance-verified", "static-constraint"]),

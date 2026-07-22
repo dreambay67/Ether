@@ -270,9 +270,14 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
     1,
     ...drafts.map((draft) => draft.expansion.requestedParallelism)
   );
+  const activeProviderCaps = steps.flatMap((step) => {
+    const maximum = step.providerBinding?.capabilitySnapshot.maxParallelism;
+    return maximum === undefined ? [] : [maximum];
+  });
   const effectiveParallelism = Math.min(
     requestedParallelism,
-    Math.max(workItems.items.length, 1)
+    Math.max(workItems.items.length, 1),
+    ...activeProviderCaps
   );
   const batchSummary = batchNodes.length === 0
     ? undefined
@@ -644,6 +649,7 @@ function batchContextForNode(
       seenDimensionIds.add(dimension.id);
       dimensions.push(dimension);
     }
+    exclusions.push(...(batchNode.config.exclusions ?? []));
     exclusions.push(...(input.batchExclusionsByNode?.[batchNode.id] ?? []));
   }
   if (dimensions.length === 0 && input.batchDimensions !== undefined) {

@@ -21,6 +21,7 @@ import {
   applicationCommandMutationPolicy
 } from "../../../apps/desktop/src/main/services/applicationService";
 import { createEtherBridge } from "../../../apps/desktop/src/preload/filePathBridge";
+import { registerApplicationHandlers } from "../../../apps/desktop/src/main/ipc/registerApplicationHandlers";
 
 const trustedSender: IpcSenderIdentity = {
   webContentsId: 7,
@@ -190,6 +191,120 @@ describe("desktop IPC contract", () => {
       { channel: desktopIpcChannels.application.command, request: command },
       { channel: desktopIpcChannels.application.query, request: query }
     ]);
+  });
+
+  it("exposes validated application events and a path-free reference picker", async () => {
+    const event = {
+      kind: "event" as const,
+      id: "event-1",
+      correlationId: "correlation-1",
+      documentId: "document-1",
+      name: "job.stateChanged" as const,
+      occurredAt: "2026-07-23T10:00:00.000Z",
+      payload: { jobId: "job-1", state: "running" as const }
+    };
+    expect(desktopIpcContracts[desktopIpcChannels.application.event].request.parse(event)).toEqual(event);
+
+    const pickerRequest = {
+      documentId: "document-1",
+      graphId: "graph-root",
+      nodeId: "references",
+      role: "subject" as const,
+      storage: "link" as const
+    };
+    expect(desktopIpcContracts[desktopIpcChannels.references.chooseAndLink].request.parse(pickerRequest))
+      .toEqual(pickerRequest);
+    expect(desktopIpcContracts[desktopIpcChannels.references.chooseAndLink].request.safeParse({
+      ...pickerRequest,
+      path: "C:\\private\\reference.png"
+    }).success).toBe(false);
+
+    let subscription: ((payload: unknown) => void) | undefined;
+    const invocations: Array<{ channel: string; request: unknown }> = [];
+    const bridge = createEtherBridge({
+      invoke: async (channel, request) => {
+        invocations.push({ channel, request });
+        return { ok: true, value: { cancelled: false, referenceId: "reference-1" } };
+      },
+      subscribe: (channel, listener) => {
+        if (channel === desktopIpcChannels.application.event) subscription = listener;
+        return () => { subscription = undefined; };
+      },
+      openDroppedDocument: async () => ({ ok: true, value: undefined })
+    });
+    const received: unknown[] = [];
+    const dispose = bridge.application.onEvent((payload) => received.push(payload));
+    subscription?.(event);
+    await expect(bridge.references.chooseAndLink(pickerRequest)).resolves.toEqual({
+      cancelled: false,
+      referenceId: "reference-1"
+    });
+    expect(received).toEqual([event]);
+    expect(invocations).toEqual([{ channel: desktopIpcChannels.references.chooseAndLink, request: pickerRequest }]);
+    dispose();
+  });
+
+  it("registers the desktop-owned picker and forwards only validated application events", async () => {
+    const handlers = new Map<string, (event: unknown, input: unknown) => Promise<unknown>>();
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    const mainFrame = { url: trustedSender.senderFrameUrl };
+    let applicationListener: ((event: unknown) => void) | undefined;
+    let receivedPicker: unknown;
+    const dispose = registerApplicationHandlers({
+      ipcMain: {
+        handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => handlers.set(channel, handler),
+        removeHandler: (channel: string) => handlers.delete(channel)
+      } as never,
+      mainWindow: {
+        isDestroyed: () => false,
+        webContents: {
+          id: trustedSender.webContentsId,
+          mainFrame,
+          send: (channel: string, payload: unknown) => sent.push({ channel, payload })
+        }
+      } as never,
+      rendererUrl: trustedSender.senderFrameUrl,
+      service: {
+        executeApplicationCommand: async () => { throw new Error("unused"); },
+        executeApplicationQuery: async () => { throw new Error("unused"); },
+        chooseAndLinkReference: async (request: unknown) => {
+          receivedPicker = request;
+          return { cancelled: false as const, referenceId: "reference-1" };
+        },
+        subscribeApplication: (listener: (event: unknown) => void) => {
+          applicationListener = listener;
+          return () => { applicationListener = undefined; };
+        }
+      } as never
+    });
+    const request = {
+      documentId: "document-1",
+      graphId: "graph-root",
+      nodeId: "references",
+      role: "subject",
+      storage: "embed"
+    };
+    const result = await handlers.get(desktopIpcChannels.references.chooseAndLink)!({
+      sender: { id: trustedSender.webContentsId },
+      senderFrame: mainFrame
+    }, request);
+    expect(result).toEqual({ ok: true, value: { cancelled: false, referenceId: "reference-1" } });
+    expect(receivedPicker).toEqual(request);
+
+    const event = {
+      kind: "event",
+      id: "event-1",
+      correlationId: "correlation-1",
+      documentId: "document-1",
+      name: "reference.changed",
+      occurredAt: "2026-07-23T10:00:00.000Z",
+      payload: { referenceId: "reference-1", state: "linked" }
+    };
+    applicationListener?.(event);
+    expect(sent).toEqual([{ channel: desktopIpcChannels.application.event, payload: event }]);
+    dispose();
+    expect(handlers.has(desktopIpcChannels.references.chooseAndLink)).toBe(false);
+    expect(applicationListener).toBeUndefined();
   });
 
   it("surfaces read-only provider health without exposing runtime process control", () => {

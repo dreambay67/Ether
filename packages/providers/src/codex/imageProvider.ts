@@ -73,7 +73,7 @@ export class CodexCliImageProvider implements GenerationProvider {
   }
 
   async diagnose(context: ProviderDiagnosticContext = {}): Promise<ProviderDiagnostic> {
-    return diagnoseCodexCliProvider({
+    const diagnostic = await diagnoseCodexCliProvider({
       descriptor: this.descriptor,
       codexCliPath: this.codexCliPath,
       fileExists: context.fileExists ?? this.fileExists,
@@ -81,6 +81,10 @@ export class CodexCliImageProvider implements GenerationProvider {
         imageGenerationFeatureStable: true
       }
     });
+    return {
+      ...diagnostic,
+      profiles: codexImageProfiles(this.descriptor, diagnostic.availability)
+    };
   }
 
   async generate(
@@ -206,6 +210,52 @@ export class CodexCliImageProvider implements GenerationProvider {
 
     return this.codexCliPath;
   }
+}
+
+function codexImageProfiles(
+  descriptor: CodexCliImageProvider["descriptor"],
+  availability: "available" | "unavailable"
+) {
+  const status = availability === "available" ? "ready" as const : "unavailable" as const;
+  const message = availability === "available"
+    ? "Codex image workers are serialized to one active request per profile."
+    : "Codex image worker is unavailable.";
+  return [
+    {
+      providerId: descriptor.id,
+      profileId: "image-default",
+      providerName: descriptor.name,
+      route: descriptor.route,
+      operation: "image.generate" as const,
+      inputChannels: ["text", "image", "data"] as const,
+      outputChannels: ["image"] as const,
+      availability,
+      status,
+      capabilitySource: "codex-cli" as const,
+      requiresExplicitSelection: false,
+      noHiddenFallback: true,
+      maxParallelism: 1,
+      model: descriptor.model,
+      messages: [message]
+    },
+    {
+      providerId: descriptor.id,
+      profileId: "image-edit",
+      providerName: descriptor.name,
+      route: descriptor.route,
+      operation: "image.edit" as const,
+      inputChannels: ["text", "image", "mask", "data"] as const,
+      outputChannels: ["image"] as const,
+      availability,
+      status,
+      capabilitySource: "codex-cli" as const,
+      requiresExplicitSelection: false,
+      noHiddenFallback: true,
+      maxParallelism: 1,
+      model: descriptor.model,
+      messages: [message]
+    }
+  ];
 }
 
 function buildCodexExecArgs(
