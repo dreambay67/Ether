@@ -21,18 +21,51 @@ export const ExecutionScopeSchema = z.discriminatedUnion("kind", [
 ]);
 export type ExecutionScope = z.infer<typeof ExecutionScopeSchema>;
 
+export const PlanStepSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("node"), nodeId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("adapter"), adapterId: z.string().min(1) }).strict()
+]);
+export type PlanStepSubject = z.infer<typeof PlanStepSubjectSchema>;
+
+export const ResolvedInputBindingSchema = z
+  .object({
+    name: z.string().min(1),
+    payloadId: z.string().min(1),
+    sourceStepId: z.string().min(1).nullable(),
+    selector: z.enum(["latest-approved", "latest", "all", "pinned"]).optional()
+  })
+  .strict();
+export type ResolvedInputBinding = z.infer<typeof ResolvedInputBindingSchema>;
+
+export const ExecutionPlanStatusSchema = z.enum([
+  "previewed",
+  "started",
+  "completed",
+  "failed",
+  "cancelled",
+  "invalidated",
+  "waiting-review",
+  "needs-attention"
+]);
+export type ExecutionPlanStatus = z.infer<typeof ExecutionPlanStatusSchema>;
+
 export const PlanStepSchema = z
   .object({
     id: z.string().min(1),
+    // nodeId remains the owning graph node for existing persisted plans; subject can
+    // name the node itself or a durable adapter step attached to that node.
     nodeId: z.string().min(1),
+    subject: PlanStepSubjectSchema.optional(),
     executor: NodeExecutorKindSchema,
     dependencyStepIds: z.array(z.string().min(1)),
     inputPayloadIds: z.array(z.string().min(1)),
+    resolvedInputBindings: z.array(ResolvedInputBindingSchema).optional(),
     workItemIds: z.array(z.string().min(1)),
     compiledPrompt: z.string(),
     compiledContext: JsonObjectSchema,
     parameters: JsonObjectSchema,
     selectors: z.array(JsonObjectSchema),
+    executorConfig: JsonObjectSchema.optional(),
     provider: z
       .object({
         providerId: z.string().min(1),
@@ -41,9 +74,31 @@ export const PlanStepSchema = z
         settings: JsonObjectSchema,
         capabilitySnapshot: ProviderCapabilitySchema
       })
+      .strict(),
+    // New plans use this nullable binding for local and human work; provider remains
+    // required for the already-compiled provider plan callers.
+    providerBinding: z
+      .object({
+        providerId: z.string().min(1),
+        profileId: z.string().min(1),
+        modelId: z.string().min(1),
+        settings: JsonObjectSchema,
+        capabilitySnapshot: ProviderCapabilitySchema
+      })
       .strict()
+      .nullable()
+      .optional()
   })
-  .strict();
+  .strict()
+  .superRefine((step, context) => {
+    if (step.subject?.kind === "node" && step.subject.nodeId !== step.nodeId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["subject", "nodeId"],
+        message: "Node plan step subject must match legacy nodeId"
+      });
+    }
+  });
 export type PlanStep = z.infer<typeof PlanStepSchema>;
 
 export const PlannedInputSchema = z
@@ -62,7 +117,8 @@ export const PlannedWorkItemSchema = z
     stepId: z.string().min(1),
     ordinal: z.number().int().nonnegative(),
     inputs: z.array(PlannedInputSchema),
-    parameters: z.array(PlannedParameterSchema)
+    parameters: z.array(PlannedParameterSchema),
+    dependencyWorkItemIds: z.array(z.string().min(1)).optional()
   })
   .strict();
 export type PlannedWorkItem = z.infer<typeof PlannedWorkItemSchema>;
@@ -87,10 +143,21 @@ export const ExecutionPlanSchema = z
     graphId: z.string().min(1),
     graphRevisionId: z.string().min(1),
     scope: ExecutionScopeSchema,
+    status: ExecutionPlanStatusSchema.optional(),
     steps: z.array(PlanStepSchema),
     workItems: z.array(PlannedWorkItemSchema),
     providerCapabilitySnapshots: z.array(ProviderCapabilitySchema),
     estimatedCalls: z.number().int().nonnegative(),
+    batchSummary: z
+      .object({
+        dimensions: z.number().int().nonnegative(),
+        exclusions: z.number().int().nonnegative(),
+        workItemCount: z.number().int().nonnegative()
+      })
+      .strict()
+      .optional(),
+    requestedParallelism: z.number().int().positive().optional(),
+    effectiveParallelism: z.number().int().positive().optional(),
     warnings: z.array(PlanWarningSchema),
     contentHash: z.string().regex(/^sha256:v1:[a-f0-9]{64}$/),
     createdAt: TimestampSchema
@@ -131,6 +198,7 @@ export const JobStatusSchema = z.enum([
   "completed",
   "failed",
   "cancelled",
+  "waiting-review",
   "needs-attention"
 ]);
 export type JobStatus = z.infer<typeof JobStatusSchema>;
@@ -141,6 +209,8 @@ export const ExecutionJobSchema = z
     planId: z.string().min(1),
     planContentHash: z.string().min(1),
     status: JobStatusSchema,
+    requestedParallelism: z.number().int().positive().optional(),
+    effectiveParallelism: z.number().int().positive().optional(),
     createdAt: TimestampSchema,
     startedAt: TimestampSchema.nullable(),
     completedAt: TimestampSchema.nullable(),
@@ -148,7 +218,7 @@ export const ExecutionJobSchema = z
   })
   .strict()
   .superRefine((job, context) => {
-    const requiresStarted = ["running", "completed", "failed", "needs-attention"].includes(
+    const requiresStarted = ["running", "completed", "failed", "waiting-review", "needs-attention"].includes(
       job.status
     );
     const requiresCompleted = ["completed", "failed", "cancelled", "needs-attention"].includes(
@@ -240,6 +310,8 @@ export const WorkItemStatusSchema = z.enum([
   "accepted",
   "failed",
   "cancelled"
+  ,"waiting-review"
+  ,"needs-attention"
 ]);
 export type WorkItemStatus = z.infer<typeof WorkItemStatusSchema>;
 
@@ -278,6 +350,7 @@ export const AttemptStatusSchema = z.enum([
   "accepted",
   "failed",
   "cancelled"
+  ,"needs-attention"
 ]);
 export type AttemptStatus = z.infer<typeof AttemptStatusSchema>;
 

@@ -27,6 +27,7 @@ import {
   PreparedGraphCommitSchema,
   ProviderCapabilitySchema,
   RecipeManifestSchema,
+  ReferenceSetConfigSchema,
   applicationCommandNames,
   applicationCommandPayloadSchemas,
   applicationContractRegistry,
@@ -43,6 +44,7 @@ import {
   parseExecutionPlan,
   parseGraphTransaction,
   parseRecipeManifest,
+  normalizeLiveOutputCollisionPolicy,
   payloadChannels
 } from "@ether/schema";
 import { execFileSync } from "node:child_process";
@@ -977,6 +979,60 @@ describe("Ether 4.0 schema", () => {
         providerCapabilitySnapshots: [{ ...providerCapability, inputChannels: ["file"] }]
       }).success
     ).toBe(false);
+  });
+
+  it("freezes Task 14 typed reference, plan, and application envelopes", () => {
+    const referenceSet = {
+      kind: "reference.set",
+      members: [
+        { kind: "linked-reference", referenceId: "reference-1", enabled: true, roleOverride: "subject" },
+        { kind: "embedded-artifact", artifactId: "artifact-1", enabled: false }
+      ],
+      enabledChannels: ["image"],
+      ordering: "manual"
+    } as const;
+    expect(ReferenceSetConfigSchema.parse(referenceSet)).toEqual(referenceSet);
+    expect(normalizeLiveOutputCollisionPolicy("suffix")).toBe("rename");
+
+    expect(
+      ApplicationCommandSchema.safeParse({
+        kind: "command",
+        id: "command-output-pin",
+        correlationId: "correlation-output-pin",
+        documentId: "document-1",
+        name: "output.pin",
+        payload: {
+          edgeId: "edge-1",
+          outputVersionId: "output-1",
+          baseDocumentRevisionId: "document-revision-1"
+        }
+      }).success
+    ).toBe(true);
+    expect(
+      ApplicationQuerySchema.safeParse({
+        kind: "query",
+        id: "query-live-output",
+        correlationId: "correlation-live-output",
+        documentId: "document-1",
+        name: "liveOutput.entries",
+        payload: {}
+      }).success
+    ).toBe(true);
+    expect(
+      ApplicationEventSchema.safeParse({
+        kind: "event",
+        id: "event-output-pin",
+        correlationId: "correlation-output-pin",
+        documentId: "document-1",
+        occurredAt: "2026-07-17T08:00:00.000Z",
+        name: "output.pinned",
+        payload: {
+          edgeId: "edge-1",
+          outputVersionId: "output-1",
+          documentRevisionId: "document-revision-2"
+        }
+      }).success
+    ).toBe(true);
   });
 
   it("enforces execution lifecycle and immutable output provenance matrices", () => {

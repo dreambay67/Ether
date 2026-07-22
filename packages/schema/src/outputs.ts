@@ -98,6 +98,15 @@ export const OutputApprovalSchema = z.discriminatedUnion("state", [
 ]);
 export type OutputApproval = z.infer<typeof OutputApprovalSchema>;
 
+export const OutputLineageSchema = z
+  .object({
+    parentOutputVersionId: z.string().min(1).nullable(),
+    rootOutputVersionId: z.string().min(1).nullable(),
+    relation: z.enum(["generated", "manual-edit", "restored"])
+  })
+  .strict();
+export type OutputLineage = z.infer<typeof OutputLineageSchema>;
+
 export const OutputTimingSchema = z
   .object({ startedAt: TimestampSchema, completedAt: TimestampSchema.nullable() })
   .strict();
@@ -159,6 +168,11 @@ export const NodeOutputVersionSchema = z
     producer: OutputProducerSchema,
     outputPayloadIds: z.array(z.string().min(1)),
     parentOutputVersionId: z.string().min(1).nullable(),
+    lineage: OutputLineageSchema.optional(),
+    selectedBy: z
+      .object({ edgeId: z.string().min(1), selector: z.enum(["latest-approved", "latest", "all", "pinned"]) })
+      .strict()
+      .optional(),
     approval: OutputApprovalSchema,
     runId: z.string().min(1).nullable(),
     stepId: z.string().min(1).nullable(),

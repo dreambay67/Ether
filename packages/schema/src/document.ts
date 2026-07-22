@@ -99,7 +99,9 @@ export const LiveOutputSettingsSchema = z
         template: z.string().min(1)
       })
       .strict(),
-    collisionPolicy: z.enum(["no-clobber", "suffix"]),
+    // no-clobber/suffix are accepted only while opening pre-freeze documents;
+    // all new command payloads use the canonical rename/skip/error values.
+    collisionPolicy: z.enum(["rename", "skip", "error", "no-clobber", "suffix"]),
     transferPolicy: z.enum(["copy", "move"]),
     lastReconciledAt: TimestampSchema.nullable()
   })
@@ -114,6 +116,42 @@ export const LiveOutputSettingsSchema = z
     }
   });
 export type LiveOutputSettings = z.infer<typeof LiveOutputSettingsSchema>;
+
+export function normalizeLiveOutputCollisionPolicy(
+  policy: LiveOutputSettings["collisionPolicy"]
+): "rename" | "skip" | "error" {
+  if (policy === "suffix") return "rename";
+  if (policy === "no-clobber") return "error";
+  return policy;
+}
+
+export const LiveOutputEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    artifactId: z.string().min(1),
+    collectionId: z.string().min(1).nullable(),
+    relativePath: z.string().min(1),
+    expectedHash: z.string().min(1),
+    state: z.enum(["planned", "staged", "verified", "committed", "failed", "reconciled"]),
+    updatedAt: TimestampSchema
+  })
+  .strict();
+export type LiveOutputEntry = z.infer<typeof LiveOutputEntrySchema>;
+
+export const LiveOutputOperationSchema = z
+  .object({
+    id: z.string().min(1),
+    entryId: z.string().min(1).nullable(),
+    operation: z.enum(["materialize", "remove", "rebuild", "reconcile"]),
+    state: z.enum(["planned", "staged", "verified", "committed", "failed", "reconciled"]),
+    relativePath: z.string().min(1),
+    expectedHash: z.string().min(1),
+    error: JsonObjectSchema.nullable(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema
+  })
+  .strict();
+export type LiveOutputOperation = z.infer<typeof LiveOutputOperationSchema>;
 
 export const WriterLeaseRecordSchema = z
   .object({

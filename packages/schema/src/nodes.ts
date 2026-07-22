@@ -141,15 +141,48 @@ export const PromptWorkerConfigSchema = z
   .strict();
 export type PromptWorkerConfig = z.infer<typeof PromptWorkerConfigSchema>;
 
+export const ReferenceSetMemberSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("linked-reference"),
+      referenceId: z.string().min(1),
+      enabled: z.boolean(),
+      roleOverride: ConnectionRoleSchema.optional()
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("embedded-artifact"),
+      artifactId: z.string().min(1),
+      enabled: z.boolean(),
+      roleOverride: ConnectionRoleSchema.optional()
+    })
+    .strict()
+]);
+export type ReferenceSetMember = z.infer<typeof ReferenceSetMemberSchema>;
+
 export const ReferenceSetConfigSchema = z
   .object({
     kind: z.literal("reference.set"),
-    artifactIds: z.array(z.string().min(1)),
+    // artifactIds is retained so documents written before typed members remain parseable.
+    artifactIds: z.array(z.string().min(1)).optional(),
+    members: z.array(ReferenceSetMemberSchema).optional(),
     enabledChannels: z.array(PayloadChannelSchema),
     ordering: z.enum(["manual", "created", "name"])
   })
   .strict();
 export type ReferenceSetConfig = z.infer<typeof ReferenceSetConfigSchema>;
+
+export function referenceSetMembers(config: ReferenceSetConfig): ReferenceSetMember[] {
+  return [
+    ...(config.members ?? []),
+    ...(config.artifactIds ?? []).map((artifactId) => ({
+      kind: "embedded-artifact" as const,
+      artifactId,
+      enabled: true
+    }))
+  ];
+}
 
 export const ResolutionSchema = z
   .object({ width: z.number().int().positive(), height: z.number().int().positive() })

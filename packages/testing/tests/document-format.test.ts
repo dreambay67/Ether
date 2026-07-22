@@ -275,7 +275,13 @@ describe("Ether 4.0 document format", () => {
         )
       );
       expect(allTables.filter((table) => !ftsShadowTables.has(table))).toEqual(
-        [...ETHER_SCHEMA_TABLES].sort()
+        [
+          ...ETHER_SCHEMA_TABLES,
+          "adapter_intermediates",
+          "approval_history",
+          "review_checkpoints",
+          "work_item_dependencies"
+        ].sort()
       );
     } finally {
       database.close();

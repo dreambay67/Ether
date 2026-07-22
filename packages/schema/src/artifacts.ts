@@ -183,8 +183,15 @@ export const CollectionMembershipSchema = z
     collectionId: z.string().min(1),
     artifactId: z.string().min(1),
     role: ConnectionRoleSchema,
-    sourceNodeId: z.string().min(1),
-    createdAt: TimestampSchema
+    source: z
+      .object({ nodeId: z.string().min(1).optional(), commandId: z.string().min(1).optional() })
+      .strict()
+      .optional(),
+    position: z.number().int().nonnegative().optional(),
+    addedAt: TimestampSchema.optional(),
+    // Kept for current repository records until they begin emitting addedAt/source.
+    sourceNodeId: z.string().min(1).optional(),
+    createdAt: TimestampSchema.optional()
   })
   .strict();
 export type CollectionMembership = z.infer<typeof CollectionMembershipSchema>;
@@ -192,11 +199,13 @@ export type CollectionMembership = z.infer<typeof CollectionMembershipSchema>;
 export const ExportRecordSchema = z
   .object({
     id: z.string().min(1),
-    artifactId: z.string().min(1),
-    pathGrantId: z.string().min(1),
+    artifactId: z.string().min(1).nullable(),
+    collectionId: z.string().min(1).nullable().optional(),
+    pathGrantId: z.string().min(1).nullable(),
     relativePath: z.string().min(1),
     contentKey: ContentKeySchema,
-    status: z.enum(["planned", "written", "verified", "failed"]),
+    status: z.enum(["planned", "staged", "written", "verified", "committed", "skipped", "failed", "cancelled"]),
+    options: JsonObjectSchema.optional(),
     createdAt: TimestampSchema,
     completedAt: TimestampSchema.nullable()
   })

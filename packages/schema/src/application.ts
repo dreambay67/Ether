@@ -4,9 +4,18 @@ import {
   ArtifactLineageSchema,
   ArtifactSchema,
   CollectionMembershipSchema,
-  ExportRecordSchema
+  CollectionSchema,
+  ExportRecordSchema,
+  LinkedReferenceSchema
 } from "./artifacts.js";
-import { DocumentHeaderSchema, JsonObjectSchema, TimestampSchema } from "./document.js";
+import {
+  DocumentHeaderSchema,
+  JsonObjectSchema,
+  LiveOutputEntrySchema,
+  LiveOutputOperationSchema,
+  LiveOutputSettingsSchema,
+  TimestampSchema
+} from "./document.js";
 import {
   AttemptStatusSchema,
   ExecutionAttemptSchema,
@@ -30,6 +39,7 @@ import {
 } from "./nodes.js";
 import {
   NodeOutputVersionSchema,
+  OutputApprovalSchema,
   PayloadEnvelopeSchema,
   ProviderCapabilitySchema
 } from "./outputs.js";
@@ -57,6 +67,10 @@ export const applicationCommandNames = [
   "reference.embed",
   "reference.relink",
   "reference.remove",
+  "reference.assignToSet",
+  "output.edit",
+  "output.pin",
+  "output.restore",
   "recipe.preview",
   "recipe.instantiate",
   "run.preview",
@@ -65,16 +79,36 @@ export const applicationCommandNames = [
   "run.retry",
   "run.resume",
   "review.approve",
+  "review.reject",
   "review.rate",
   "review.tag",
   "review.route",
+  "review.completeCompare",
+  "collection.create",
+  "collection.update",
+  "collection.delete",
+  "collection.addMembers",
+  "collection.removeMembers",
+  "collection.setPrimary",
   "artifact.export",
   "artifact.dragExport",
   "artifact.deleteDerivative",
+  "export.retry",
+  "export.cancel",
   "provider.probe",
   "provider.refresh",
+  "provider.configure",
+  "provider.disable",
+  "recipe.install",
+  "recipe.remove",
+  "job.cancel",
+  "job.retry",
+  "job.resume",
+  "recovery.inspect",
+  "recovery.dismiss",
   "permission.grantEdit",
   "permission.grantRun",
+  "permission.grantPath",
   "permission.revoke",
   "liveOutput.enable",
   "liveOutput.disable",
@@ -94,16 +128,27 @@ export const applicationQueryNames = [
   "graph.validation",
   "node.outputs",
   "node.compiledInputPreview",
+  "reference.list",
+  "reference.detail",
+  "output.detail",
   "provider.capabilities",
   "provider.health",
   "plan.summary",
   "job.summary",
+  "job.list",
   "job.timeline",
   "job.workItems",
   "job.attempts",
   "artifact.search",
+  "artifact.detail",
+  "collection.list",
+  "collection.detail",
   "collection.membership",
   "artifact.lineage",
+  "export.records",
+  "liveOutput.status",
+  "liveOutput.entries",
+  "liveOutput.operations",
   "recipe.catalog",
   "recipe.setupSchema",
   "recovery.status",
@@ -115,6 +160,9 @@ export type ApplicationQueryName = z.infer<typeof ApplicationQueryNameSchema>;
 export const applicationEventNames = [
   "document.stateChanged",
   "graph.revisionChanged",
+  "output.created",
+  "output.pinned",
+  "output.reviewed",
   "domain.selectionChanged",
   "provider.healthChanged",
   "plan.stateChanged",
@@ -122,9 +170,14 @@ export const applicationEventNames = [
   "workItem.stateChanged",
   "attempt.stateChanged",
   "artifact.accepted",
+  "artifact.changed",
+  "export.stateChanged",
+  "collection.changed",
   "reference.missing",
   "reference.relinked",
+  "reference.changed",
   "recipe.installed",
+  "recipe.changed",
   "permission.changed",
   "recovery.attention",
   "liveOutput.progress",
@@ -189,6 +242,18 @@ export const applicationCommandPayloadSchemas = {
   "reference.embed": referenceIdPayloadSchema,
   "reference.relink": z.object({ referenceId: idSchema, pathGrantId: idSchema }).strict(),
   "reference.remove": referenceIdPayloadSchema,
+  "reference.assignToSet": z
+    .object({ nodeId: idSchema, members: z.array(idSchema).min(1), replace: z.boolean().optional() })
+    .strict(),
+  "output.edit": z
+    .object({ outputVersionId: idSchema, payload: JsonObjectSchema, note: z.string().optional() })
+    .strict(),
+  "output.pin": z
+    .object({ edgeId: idSchema, outputVersionId: idSchema, baseDocumentRevisionId: idSchema })
+    .strict(),
+  "output.restore": z
+    .object({ outputVersionId: idSchema, note: z.string().optional() })
+    .strict(),
   "recipe.preview": z
     .object({
       recipeId: idSchema,
@@ -214,11 +279,32 @@ export const applicationCommandPayloadSchemas = {
   "review.approve": z
     .object({ outputVersionId: idSchema, approved: z.boolean() })
     .strict(),
+  "review.reject": z.object({ outputVersionId: idSchema, reason: z.string().optional() }).strict(),
   "review.rate": z.object({ artifactId: idSchema, rating: z.number().int().min(0).max(5) }).strict(),
   "review.tag": z.object({ artifactId: idSchema, tags: z.array(z.string().min(1)) }).strict(),
   "review.route": z
     .object({ artifactId: idSchema, collectionId: idSchema, role: ConnectionRoleSchema })
     .strict(),
+  "review.completeCompare": z
+    .object({ checkpointId: idSchema, selectedOutputVersionIds: z.array(idSchema), note: z.string().optional() })
+    .strict(),
+  "collection.create": z
+    .object({ title: z.string(), description: z.string().optional(), primary: z.boolean().optional() })
+    .strict(),
+  "collection.update": z
+    .object({ collectionId: idSchema, title: z.string().optional(), description: z.string().optional() })
+    .strict(),
+  "collection.delete": z.object({ collectionId: idSchema }).strict(),
+  "collection.addMembers": z
+    .object({
+      collectionId: idSchema,
+      members: z.array(z.object({ artifactId: idSchema, role: ConnectionRoleSchema, position: z.number().int().nonnegative().optional() }).strict()).min(1)
+    })
+    .strict(),
+  "collection.removeMembers": z
+    .object({ collectionId: idSchema, artifactIds: z.array(idSchema).min(1) })
+    .strict(),
+  "collection.setPrimary": z.object({ collectionId: idSchema }).strict(),
   "artifact.export": z
     .object({
       artifactIds: z.array(idSchema).min(1),
@@ -231,12 +317,26 @@ export const applicationCommandPayloadSchemas = {
     .object({ artifactIds: z.array(idSchema).min(1), lifetimeHours: z.number().positive().max(168) })
     .strict(),
   "artifact.deleteDerivative": z.object({ artifactId: idSchema }).strict(),
+  "export.retry": z.object({ exportId: idSchema }).strict(),
+  "export.cancel": z.object({ exportId: idSchema }).strict(),
   "provider.probe": z.object({ providerId: idSchema, profileId: idSchema.optional() }).strict(),
   "provider.refresh": StrictEmptyPayloadSchema,
+  "provider.configure": z
+    .object({ providerId: idSchema, profileId: idSchema, settings: JsonObjectSchema })
+    .strict(),
+  "provider.disable": z.object({ providerId: idSchema, profileId: idSchema.optional() }).strict(),
+  "recipe.install": z.object({ manifest: RecipeManifestSchema }).strict(),
+  "recipe.remove": z.object({ recipeId: idSchema, version: z.string().min(1) }).strict(),
+  "job.cancel": jobIdPayloadSchema,
+  "job.retry": z.object({ jobId: idSchema, workItemIds: z.array(idSchema).min(1) }).strict(),
+  "job.resume": jobIdPayloadSchema,
+  "recovery.inspect": StrictEmptyPayloadSchema,
+  "recovery.dismiss": z.object({ reportId: idSchema }).strict(),
   "permission.grantEdit": z
     .object({ expiresAt: TimestampSchema.optional() })
     .strict(),
   "permission.grantRun": z.object({ planId: idSchema, contentHash: idSchema }).strict(),
+  "permission.grantPath": z.object({ pathGrantId: idSchema, purpose: z.enum(["live-output", "export", "reference"]) }).strict(),
   "permission.revoke": z.object({ permitId: idSchema }).strict(),
   "liveOutput.enable": z
     .object({
@@ -263,10 +363,14 @@ export const applicationQueryPayloadSchemas = {
   "graph.validation": graphIdPayloadSchema,
   "node.outputs": z.object({ nodeId: idSchema }).strict(),
   "node.compiledInputPreview": z.object({ nodeId: idSchema }).strict(),
+  "reference.list": z.object({ state: z.enum(["linked", "embedded", "missing", "relinking"]).optional() }).strict(),
+  "reference.detail": referenceIdPayloadSchema,
+  "output.detail": z.object({ outputVersionId: idSchema }).strict(),
   "provider.capabilities": z.object({ providerId: idSchema.optional() }).strict(),
   "provider.health": z.object({ providerId: idSchema.optional() }).strict(),
   "plan.summary": planIdPayloadSchema,
   "job.summary": jobIdPayloadSchema,
+  "job.list": z.object({ status: JobStatusSchema.optional(), limit: z.number().int().positive().max(500).optional() }).strict(),
   "job.timeline": jobIdPayloadSchema,
   "job.workItems": jobIdPayloadSchema,
   "job.attempts": jobIdPayloadSchema,
@@ -285,8 +389,17 @@ export const applicationQueryPayloadSchemas = {
       createdBefore: TimestampSchema.nullable()
     })
     .strict(),
+  "artifact.detail": z.object({ artifactId: idSchema }).strict(),
+  "collection.list": StrictEmptyPayloadSchema,
+  "collection.detail": z.object({ collectionId: idSchema }).strict(),
   "collection.membership": z.object({ collectionId: idSchema }).strict(),
   "artifact.lineage": z.object({ artifactId: idSchema }).strict(),
+  "export.records": z
+    .object({ artifactId: idSchema.optional(), collectionId: idSchema.optional(), status: z.enum(["planned", "staged", "written", "verified", "committed", "skipped", "failed", "cancelled"]).optional() })
+    .strict(),
+  "liveOutput.status": StrictEmptyPayloadSchema,
+  "liveOutput.entries": z.object({ collectionId: idSchema.optional(), artifactId: idSchema.optional() }).strict(),
+  "liveOutput.operations": z.object({ entryId: idSchema.optional(), limit: z.number().int().positive().max(500).optional() }).strict(),
   "recipe.catalog": StrictEmptyPayloadSchema,
   "recipe.setupSchema": z.object({ recipeId: idSchema, version: z.string().min(1) }).strict(),
   "recovery.status": StrictEmptyPayloadSchema,
@@ -314,6 +427,9 @@ export const applicationEventPayloadSchemas = {
   "graph.revisionChanged": z
     .object({ graphId: idSchema, revisionId: idSchema, transactionId: idSchema.optional() })
     .strict(),
+  "output.created": z.object({ outputVersionId: idSchema, parentOutputVersionId: idSchema.nullable() }).strict(),
+  "output.pinned": z.object({ edgeId: idSchema, outputVersionId: idSchema, documentRevisionId: idSchema }).strict(),
+  "output.reviewed": z.object({ outputVersionId: idSchema, approval: OutputApprovalSchema }).strict(),
   "domain.selectionChanged": z
     .object({ graphId: idSchema, nodeIds: z.array(idSchema), edgeIds: z.array(idSchema) })
     .strict(),
@@ -360,9 +476,14 @@ export const applicationEventPayloadSchemas = {
     })
     .strict(),
   "artifact.accepted": z.object({ artifactId: idSchema, outputVersionId: idSchema }).strict(),
+  "artifact.changed": z.object({ artifactId: idSchema, change: z.enum(["created", "tagged", "rated", "deleted"]) }).strict(),
+  "export.stateChanged": z.object({ exportId: idSchema, status: z.enum(["planned", "staged", "written", "verified", "committed", "skipped", "failed", "cancelled"]) }).strict(),
+  "collection.changed": z.object({ collectionId: idSchema, change: z.enum(["created", "updated", "deleted", "membership", "primary"]) }).strict(),
   "reference.missing": z.object({ referenceId: idSchema }).strict(),
   "reference.relinked": z.object({ referenceId: idSchema, contentKey: idSchema }).strict(),
+  "reference.changed": z.object({ referenceId: idSchema, state: z.enum(["linked", "embedded", "missing", "relinking", "removed"]) }).strict(),
   "recipe.installed": z.object({ recipeId: idSchema, version: z.string().min(1) }).strict(),
+  "recipe.changed": z.object({ recipeId: idSchema, version: z.string().min(1), change: z.enum(["installed", "removed", "instantiated"]) }).strict(),
   "permission.changed": z
     .object({
       permitId: idSchema,
@@ -511,6 +632,10 @@ export const ApplicationCommandSchema = z.discriminatedUnion("name", [
   commandMessage("reference.embed", applicationCommandPayloadSchemas["reference.embed"]),
   commandMessage("reference.relink", applicationCommandPayloadSchemas["reference.relink"]),
   commandMessage("reference.remove", applicationCommandPayloadSchemas["reference.remove"]),
+  commandMessage("reference.assignToSet", applicationCommandPayloadSchemas["reference.assignToSet"]),
+  commandMessage("output.edit", applicationCommandPayloadSchemas["output.edit"]),
+  commandMessage("output.pin", applicationCommandPayloadSchemas["output.pin"]),
+  commandMessage("output.restore", applicationCommandPayloadSchemas["output.restore"]),
   commandMessage("recipe.preview", applicationCommandPayloadSchemas["recipe.preview"]),
   commandMessage("recipe.instantiate", applicationCommandPayloadSchemas["recipe.instantiate"]),
   commandMessage("run.preview", applicationCommandPayloadSchemas["run.preview"]),
@@ -519,16 +644,36 @@ export const ApplicationCommandSchema = z.discriminatedUnion("name", [
   commandMessage("run.retry", applicationCommandPayloadSchemas["run.retry"]),
   commandMessage("run.resume", applicationCommandPayloadSchemas["run.resume"]),
   commandMessage("review.approve", applicationCommandPayloadSchemas["review.approve"]),
+  commandMessage("review.reject", applicationCommandPayloadSchemas["review.reject"]),
   commandMessage("review.rate", applicationCommandPayloadSchemas["review.rate"]),
   commandMessage("review.tag", applicationCommandPayloadSchemas["review.tag"]),
   commandMessage("review.route", applicationCommandPayloadSchemas["review.route"]),
+  commandMessage("review.completeCompare", applicationCommandPayloadSchemas["review.completeCompare"]),
+  commandMessage("collection.create", applicationCommandPayloadSchemas["collection.create"]),
+  commandMessage("collection.update", applicationCommandPayloadSchemas["collection.update"]),
+  commandMessage("collection.delete", applicationCommandPayloadSchemas["collection.delete"]),
+  commandMessage("collection.addMembers", applicationCommandPayloadSchemas["collection.addMembers"]),
+  commandMessage("collection.removeMembers", applicationCommandPayloadSchemas["collection.removeMembers"]),
+  commandMessage("collection.setPrimary", applicationCommandPayloadSchemas["collection.setPrimary"]),
   commandMessage("artifact.export", applicationCommandPayloadSchemas["artifact.export"]),
   commandMessage("artifact.dragExport", applicationCommandPayloadSchemas["artifact.dragExport"]),
   commandMessage("artifact.deleteDerivative", applicationCommandPayloadSchemas["artifact.deleteDerivative"]),
+  commandMessage("export.retry", applicationCommandPayloadSchemas["export.retry"]),
+  commandMessage("export.cancel", applicationCommandPayloadSchemas["export.cancel"]),
   globalCommandMessage("provider.probe", applicationCommandPayloadSchemas["provider.probe"]),
   globalCommandMessage("provider.refresh", applicationCommandPayloadSchemas["provider.refresh"]),
+  commandMessage("provider.configure", applicationCommandPayloadSchemas["provider.configure"]),
+  commandMessage("provider.disable", applicationCommandPayloadSchemas["provider.disable"]),
+  commandMessage("recipe.install", applicationCommandPayloadSchemas["recipe.install"]),
+  commandMessage("recipe.remove", applicationCommandPayloadSchemas["recipe.remove"]),
+  commandMessage("job.cancel", applicationCommandPayloadSchemas["job.cancel"]),
+  commandMessage("job.retry", applicationCommandPayloadSchemas["job.retry"]),
+  commandMessage("job.resume", applicationCommandPayloadSchemas["job.resume"]),
+  commandMessage("recovery.inspect", applicationCommandPayloadSchemas["recovery.inspect"]),
+  commandMessage("recovery.dismiss", applicationCommandPayloadSchemas["recovery.dismiss"]),
   commandMessage("permission.grantEdit", applicationCommandPayloadSchemas["permission.grantEdit"]),
   commandMessage("permission.grantRun", applicationCommandPayloadSchemas["permission.grantRun"]),
+  commandMessage("permission.grantPath", applicationCommandPayloadSchemas["permission.grantPath"]),
   commandMessage("permission.revoke", applicationCommandPayloadSchemas["permission.revoke"]),
   commandMessage("liveOutput.enable", applicationCommandPayloadSchemas["liveOutput.enable"]),
   commandMessage("liveOutput.disable", applicationCommandPayloadSchemas["liveOutput.disable"]),
@@ -550,16 +695,27 @@ export const ApplicationQuerySchema = z.discriminatedUnion("name", [
   queryMessage("graph.validation", applicationQueryPayloadSchemas["graph.validation"]),
   queryMessage("node.outputs", applicationQueryPayloadSchemas["node.outputs"]),
   queryMessage("node.compiledInputPreview", applicationQueryPayloadSchemas["node.compiledInputPreview"]),
+  queryMessage("reference.list", applicationQueryPayloadSchemas["reference.list"]),
+  queryMessage("reference.detail", applicationQueryPayloadSchemas["reference.detail"]),
+  queryMessage("output.detail", applicationQueryPayloadSchemas["output.detail"]),
   globalQueryMessage("provider.capabilities", applicationQueryPayloadSchemas["provider.capabilities"]),
   globalQueryMessage("provider.health", applicationQueryPayloadSchemas["provider.health"]),
   queryMessage("plan.summary", applicationQueryPayloadSchemas["plan.summary"]),
   queryMessage("job.summary", applicationQueryPayloadSchemas["job.summary"]),
+  queryMessage("job.list", applicationQueryPayloadSchemas["job.list"]),
   queryMessage("job.timeline", applicationQueryPayloadSchemas["job.timeline"]),
   queryMessage("job.workItems", applicationQueryPayloadSchemas["job.workItems"]),
   queryMessage("job.attempts", applicationQueryPayloadSchemas["job.attempts"]),
   queryMessage("artifact.search", applicationQueryPayloadSchemas["artifact.search"]),
+  queryMessage("artifact.detail", applicationQueryPayloadSchemas["artifact.detail"]),
+  queryMessage("collection.list", applicationQueryPayloadSchemas["collection.list"]),
+  queryMessage("collection.detail", applicationQueryPayloadSchemas["collection.detail"]),
   queryMessage("collection.membership", applicationQueryPayloadSchemas["collection.membership"]),
   queryMessage("artifact.lineage", applicationQueryPayloadSchemas["artifact.lineage"]),
+  queryMessage("export.records", applicationQueryPayloadSchemas["export.records"]),
+  queryMessage("liveOutput.status", applicationQueryPayloadSchemas["liveOutput.status"]),
+  queryMessage("liveOutput.entries", applicationQueryPayloadSchemas["liveOutput.entries"]),
+  queryMessage("liveOutput.operations", applicationQueryPayloadSchemas["liveOutput.operations"]),
   globalQueryMessage("recipe.catalog", applicationQueryPayloadSchemas["recipe.catalog"]),
   globalQueryMessage("recipe.setupSchema", applicationQueryPayloadSchemas["recipe.setupSchema"]),
   queryMessage("recovery.status", applicationQueryPayloadSchemas["recovery.status"]),
@@ -570,6 +726,9 @@ export type ApplicationQuery = z.infer<typeof ApplicationQuerySchema>;
 export const ApplicationEventSchema = z.discriminatedUnion("name", [
   eventMessage("document.stateChanged", applicationEventPayloadSchemas["document.stateChanged"]),
   eventMessage("graph.revisionChanged", applicationEventPayloadSchemas["graph.revisionChanged"]),
+  eventMessage("output.created", applicationEventPayloadSchemas["output.created"]),
+  eventMessage("output.pinned", applicationEventPayloadSchemas["output.pinned"]),
+  eventMessage("output.reviewed", applicationEventPayloadSchemas["output.reviewed"]),
   eventMessage("domain.selectionChanged", applicationEventPayloadSchemas["domain.selectionChanged"]),
   globalEventMessage("provider.healthChanged", applicationEventPayloadSchemas["provider.healthChanged"]),
   eventMessage("plan.stateChanged", applicationEventPayloadSchemas["plan.stateChanged"]),
@@ -577,9 +736,14 @@ export const ApplicationEventSchema = z.discriminatedUnion("name", [
   eventMessage("workItem.stateChanged", applicationEventPayloadSchemas["workItem.stateChanged"]),
   eventMessage("attempt.stateChanged", applicationEventPayloadSchemas["attempt.stateChanged"]),
   eventMessage("artifact.accepted", applicationEventPayloadSchemas["artifact.accepted"]),
+  eventMessage("artifact.changed", applicationEventPayloadSchemas["artifact.changed"]),
+  eventMessage("export.stateChanged", applicationEventPayloadSchemas["export.stateChanged"]),
+  eventMessage("collection.changed", applicationEventPayloadSchemas["collection.changed"]),
   eventMessage("reference.missing", applicationEventPayloadSchemas["reference.missing"]),
   eventMessage("reference.relinked", applicationEventPayloadSchemas["reference.relinked"]),
+  eventMessage("reference.changed", applicationEventPayloadSchemas["reference.changed"]),
   globalEventMessage("recipe.installed", applicationEventPayloadSchemas["recipe.installed"]),
+  eventMessage("recipe.changed", applicationEventPayloadSchemas["recipe.changed"]),
   eventMessage("permission.changed", applicationEventPayloadSchemas["permission.changed"]),
   eventMessage("recovery.attention", applicationEventPayloadSchemas["recovery.attention"]),
   eventMessage("liveOutput.progress", applicationEventPayloadSchemas["liveOutput.progress"]),
@@ -688,7 +852,7 @@ export type ProviderHealthResult = z.infer<typeof ProviderHealthResultSchema>;
 export const PermitResponsePayloadSchema = z
   .object({
     permitId: idSchema,
-    permission: z.enum(["edit", "run"]),
+    permission: z.enum(["edit", "run", "path"]),
     expiresAt: TimestampSchema.nullable()
   })
   .strict();
@@ -698,6 +862,8 @@ const documentLocationResponseSchema = z
   .object({ documentId: idSchema, pathGrantId: idSchema })
   .strict();
 const referenceResponseSchema = z.object({ referenceId: idSchema }).strict();
+const outputVersionResponseSchema = z.object({ outputVersion: NodeOutputVersionSchema }).strict();
+const collectionResponseSchema = z.object({ collection: CollectionSchema }).strict();
 const recipePreviewResponseSchema: z.ZodType<{ transaction: GraphTransaction; warnings: string[] }> = z
   .object({ transaction: GraphTransactionSchema, warnings: z.array(z.string()) })
   .strict();
@@ -759,6 +925,7 @@ const providerHealthResponseSchema = z
   .strict();
 const planSummaryResponseSchema = z.object({ plan: ExecutionPlanSchema }).strict();
 const jobSummaryResponseSchema = z.object({ job: ExecutionJobSchema }).strict();
+const jobListResponseSchema = z.object({ jobs: z.array(ExecutionJobSchema) }).strict();
 const jobTimelineEntrySchema = z
   .object({
     id: idSchema,
@@ -780,11 +947,25 @@ const jobAttemptsResponseSchema = z
 const artifactSearchResponseSchema = z
   .object({ artifacts: z.array(ArtifactSchema), total: z.number().int().nonnegative() })
   .strict();
+const artifactDetailResponseSchema = z.object({ artifact: ArtifactSchema }).strict();
+const referenceListResponseSchema = z.object({ references: z.array(LinkedReferenceSchema) }).strict();
+const referenceDetailResponseSchema = z.object({ reference: LinkedReferenceSchema }).strict();
+const outputDetailResponseSchema = z.object({ output: NodeOutputVersionSchema }).strict();
+const collectionListResponseSchema = z.object({ collections: z.array(CollectionSchema) }).strict();
+const collectionDetailResponseSchema = z
+  .object({ collection: CollectionSchema, memberships: z.array(CollectionMembershipSchema) })
+  .strict();
 const collectionMembershipResponseSchema = z
   .object({ memberships: z.array(CollectionMembershipSchema) })
   .strict();
 const artifactLineageResponseSchema = z
   .object({ lineage: z.array(ArtifactLineageSchema) })
+  .strict();
+const exportRecordsResponseSchema = z.object({ records: z.array(ExportRecordSchema) }).strict();
+const liveOutputStatusResponseSchema = z.object({ settings: LiveOutputSettingsSchema }).strict();
+const liveOutputEntriesResponseSchema = z.object({ entries: z.array(LiveOutputEntrySchema) }).strict();
+const liveOutputOperationsResponseSchema = z
+  .object({ operations: z.array(LiveOutputOperationSchema) })
   .strict();
 const recipeCatalogResponseSchema = z
   .object({ recipes: z.array(RecipeManifestSchema) })
@@ -829,6 +1010,10 @@ export const applicationResponsePayloadSchemas = {
   "reference.embed": referenceResponseSchema,
   "reference.relink": referenceResponseSchema,
   "reference.remove": AcknowledgementResponsePayloadSchema,
+  "reference.assignToSet": AcknowledgementResponsePayloadSchema,
+  "output.edit": outputVersionResponseSchema,
+  "output.pin": RevisionResponsePayloadSchema,
+  "output.restore": outputVersionResponseSchema,
   "recipe.preview": recipePreviewResponseSchema,
   "recipe.instantiate": RevisionResponsePayloadSchema,
   "run.preview": executionPlanResponseSchema,
@@ -837,16 +1022,36 @@ export const applicationResponsePayloadSchemas = {
   "run.retry": AcknowledgementResponsePayloadSchema,
   "run.resume": AcknowledgementResponsePayloadSchema,
   "review.approve": AcknowledgementResponsePayloadSchema,
+  "review.reject": AcknowledgementResponsePayloadSchema,
   "review.rate": AcknowledgementResponsePayloadSchema,
   "review.tag": AcknowledgementResponsePayloadSchema,
   "review.route": AcknowledgementResponsePayloadSchema,
+  "review.completeCompare": AcknowledgementResponsePayloadSchema,
+  "collection.create": collectionResponseSchema,
+  "collection.update": collectionResponseSchema,
+  "collection.delete": AcknowledgementResponsePayloadSchema,
+  "collection.addMembers": AcknowledgementResponsePayloadSchema,
+  "collection.removeMembers": AcknowledgementResponsePayloadSchema,
+  "collection.setPrimary": collectionResponseSchema,
   "artifact.export": exportResponseSchema,
   "artifact.dragExport": dragExportResponseSchema,
   "artifact.deleteDerivative": AcknowledgementResponsePayloadSchema,
+  "export.retry": exportResponseSchema,
+  "export.cancel": AcknowledgementResponsePayloadSchema,
   "provider.probe": providerProbeResponseSchema,
   "provider.refresh": providerRefreshResponseSchema,
+  "provider.configure": AcknowledgementResponsePayloadSchema,
+  "provider.disable": AcknowledgementResponsePayloadSchema,
+  "recipe.install": AcknowledgementResponsePayloadSchema,
+  "recipe.remove": AcknowledgementResponsePayloadSchema,
+  "job.cancel": AcknowledgementResponsePayloadSchema,
+  "job.retry": AcknowledgementResponsePayloadSchema,
+  "job.resume": AcknowledgementResponsePayloadSchema,
+  "recovery.inspect": recoveryStatusResponseSchema,
+  "recovery.dismiss": AcknowledgementResponsePayloadSchema,
   "permission.grantEdit": PermitResponsePayloadSchema,
   "permission.grantRun": PermitResponsePayloadSchema,
+  "permission.grantPath": PermitResponsePayloadSchema,
   "permission.revoke": AcknowledgementResponsePayloadSchema,
   "liveOutput.enable": liveOutputEnabledResponseSchema,
   "liveOutput.disable": liveOutputDisabledResponseSchema,
@@ -861,16 +1066,27 @@ export const applicationResponsePayloadSchemas = {
   "graph.validation": GraphValidationResultSchema,
   "node.outputs": nodeOutputsResponseSchema,
   "node.compiledInputPreview": compiledInputPreviewResponseSchema,
+  "reference.list": referenceListResponseSchema,
+  "reference.detail": referenceDetailResponseSchema,
+  "output.detail": outputDetailResponseSchema,
   "provider.capabilities": providerCapabilitiesResponseSchema,
   "provider.health": providerHealthResponseSchema,
   "plan.summary": planSummaryResponseSchema,
   "job.summary": jobSummaryResponseSchema,
+  "job.list": jobListResponseSchema,
   "job.timeline": jobTimelineResponseSchema,
   "job.workItems": jobWorkItemsResponseSchema,
   "job.attempts": jobAttemptsResponseSchema,
   "artifact.search": artifactSearchResponseSchema,
+  "artifact.detail": artifactDetailResponseSchema,
+  "collection.list": collectionListResponseSchema,
+  "collection.detail": collectionDetailResponseSchema,
   "collection.membership": collectionMembershipResponseSchema,
   "artifact.lineage": artifactLineageResponseSchema,
+  "export.records": exportRecordsResponseSchema,
+  "liveOutput.status": liveOutputStatusResponseSchema,
+  "liveOutput.entries": liveOutputEntriesResponseSchema,
+  "liveOutput.operations": liveOutputOperationsResponseSchema,
   "recipe.catalog": recipeCatalogResponseSchema,
   "recipe.setupSchema": recipeSetupSchemaResponseSchema,
   "recovery.status": recoveryStatusResponseSchema,
@@ -978,6 +1194,10 @@ export const ApplicationCommandResponseSchema = z.discriminatedUnion("name", [
   responseMessage("reference.embed", applicationResponsePayloadSchemas["reference.embed"]),
   responseMessage("reference.relink", applicationResponsePayloadSchemas["reference.relink"]),
   responseMessage("reference.remove", applicationResponsePayloadSchemas["reference.remove"]),
+  responseMessage("reference.assignToSet", applicationResponsePayloadSchemas["reference.assignToSet"]),
+  responseMessage("output.edit", applicationResponsePayloadSchemas["output.edit"]),
+  responseMessage("output.pin", applicationResponsePayloadSchemas["output.pin"]),
+  responseMessage("output.restore", applicationResponsePayloadSchemas["output.restore"]),
   responseMessage("recipe.preview", applicationResponsePayloadSchemas["recipe.preview"]),
   responseMessage("recipe.instantiate", applicationResponsePayloadSchemas["recipe.instantiate"]),
   responseMessage("run.preview", applicationResponsePayloadSchemas["run.preview"]),
@@ -986,19 +1206,39 @@ export const ApplicationCommandResponseSchema = z.discriminatedUnion("name", [
   responseMessage("run.retry", applicationResponsePayloadSchemas["run.retry"]),
   responseMessage("run.resume", applicationResponsePayloadSchemas["run.resume"]),
   responseMessage("review.approve", applicationResponsePayloadSchemas["review.approve"]),
+  responseMessage("review.reject", applicationResponsePayloadSchemas["review.reject"]),
   responseMessage("review.rate", applicationResponsePayloadSchemas["review.rate"]),
   responseMessage("review.tag", applicationResponsePayloadSchemas["review.tag"]),
   responseMessage("review.route", applicationResponsePayloadSchemas["review.route"]),
+  responseMessage("review.completeCompare", applicationResponsePayloadSchemas["review.completeCompare"]),
+  responseMessage("collection.create", applicationResponsePayloadSchemas["collection.create"]),
+  responseMessage("collection.update", applicationResponsePayloadSchemas["collection.update"]),
+  responseMessage("collection.delete", applicationResponsePayloadSchemas["collection.delete"]),
+  responseMessage("collection.addMembers", applicationResponsePayloadSchemas["collection.addMembers"]),
+  responseMessage("collection.removeMembers", applicationResponsePayloadSchemas["collection.removeMembers"]),
+  responseMessage("collection.setPrimary", applicationResponsePayloadSchemas["collection.setPrimary"]),
   responseMessage("artifact.export", applicationResponsePayloadSchemas["artifact.export"]),
   responseMessage("artifact.dragExport", applicationResponsePayloadSchemas["artifact.dragExport"]),
   responseMessage(
     "artifact.deleteDerivative",
     applicationResponsePayloadSchemas["artifact.deleteDerivative"]
   ),
+  responseMessage("export.retry", applicationResponsePayloadSchemas["export.retry"]),
+  responseMessage("export.cancel", applicationResponsePayloadSchemas["export.cancel"]),
   globalResponseMessage("provider.probe", applicationResponsePayloadSchemas["provider.probe"]),
   globalResponseMessage("provider.refresh", applicationResponsePayloadSchemas["provider.refresh"]),
+  responseMessage("provider.configure", applicationResponsePayloadSchemas["provider.configure"]),
+  responseMessage("provider.disable", applicationResponsePayloadSchemas["provider.disable"]),
+  responseMessage("recipe.install", applicationResponsePayloadSchemas["recipe.install"]),
+  responseMessage("recipe.remove", applicationResponsePayloadSchemas["recipe.remove"]),
+  responseMessage("job.cancel", applicationResponsePayloadSchemas["job.cancel"]),
+  responseMessage("job.retry", applicationResponsePayloadSchemas["job.retry"]),
+  responseMessage("job.resume", applicationResponsePayloadSchemas["job.resume"]),
+  responseMessage("recovery.inspect", applicationResponsePayloadSchemas["recovery.inspect"]),
+  responseMessage("recovery.dismiss", applicationResponsePayloadSchemas["recovery.dismiss"]),
   responseMessage("permission.grantEdit", applicationResponsePayloadSchemas["permission.grantEdit"]),
   responseMessage("permission.grantRun", applicationResponsePayloadSchemas["permission.grantRun"]),
+  responseMessage("permission.grantPath", applicationResponsePayloadSchemas["permission.grantPath"]),
   responseMessage("permission.revoke", applicationResponsePayloadSchemas["permission.revoke"]),
   responseMessage("liveOutput.enable", applicationResponsePayloadSchemas["liveOutput.enable"]),
   responseMessage("liveOutput.disable", applicationResponsePayloadSchemas["liveOutput.disable"]),
@@ -1025,6 +1265,9 @@ export const ApplicationQueryResponseSchema = z.discriminatedUnion("name", [
     "node.compiledInputPreview",
     applicationResponsePayloadSchemas["node.compiledInputPreview"]
   ),
+  responseMessage("reference.list", applicationResponsePayloadSchemas["reference.list"]),
+  responseMessage("reference.detail", applicationResponsePayloadSchemas["reference.detail"]),
+  responseMessage("output.detail", applicationResponsePayloadSchemas["output.detail"]),
   globalResponseMessage(
     "provider.capabilities",
     applicationResponsePayloadSchemas["provider.capabilities"]
@@ -1032,15 +1275,23 @@ export const ApplicationQueryResponseSchema = z.discriminatedUnion("name", [
   globalResponseMessage("provider.health", applicationResponsePayloadSchemas["provider.health"]),
   responseMessage("plan.summary", applicationResponsePayloadSchemas["plan.summary"]),
   responseMessage("job.summary", applicationResponsePayloadSchemas["job.summary"]),
+  responseMessage("job.list", applicationResponsePayloadSchemas["job.list"]),
   responseMessage("job.timeline", applicationResponsePayloadSchemas["job.timeline"]),
   responseMessage("job.workItems", applicationResponsePayloadSchemas["job.workItems"]),
   responseMessage("job.attempts", applicationResponsePayloadSchemas["job.attempts"]),
   responseMessage("artifact.search", applicationResponsePayloadSchemas["artifact.search"]),
+  responseMessage("artifact.detail", applicationResponsePayloadSchemas["artifact.detail"]),
+  responseMessage("collection.list", applicationResponsePayloadSchemas["collection.list"]),
+  responseMessage("collection.detail", applicationResponsePayloadSchemas["collection.detail"]),
   responseMessage(
     "collection.membership",
     applicationResponsePayloadSchemas["collection.membership"]
   ),
   responseMessage("artifact.lineage", applicationResponsePayloadSchemas["artifact.lineage"]),
+  responseMessage("export.records", applicationResponsePayloadSchemas["export.records"]),
+  responseMessage("liveOutput.status", applicationResponsePayloadSchemas["liveOutput.status"]),
+  responseMessage("liveOutput.entries", applicationResponsePayloadSchemas["liveOutput.entries"]),
+  responseMessage("liveOutput.operations", applicationResponsePayloadSchemas["liveOutput.operations"]),
   globalResponseMessage("recipe.catalog", applicationResponsePayloadSchemas["recipe.catalog"]),
   globalResponseMessage("recipe.setupSchema", applicationResponsePayloadSchemas["recipe.setupSchema"]),
   responseMessage("recovery.status", applicationResponsePayloadSchemas["recovery.status"]),
@@ -1071,6 +1322,13 @@ export type ApplicationMessage =
   | ApplicationEvent
   | ApplicationResponse
   | ApplicationErrorMessage;
+
+/** The complete public application boundary used by desktop IPC and MCP handlers. */
+export interface EtherApplicationService {
+  execute(command: ApplicationCommand): Promise<ApplicationCommandResponse | ApplicationErrorMessage>;
+  query(query: ApplicationQuery): Promise<ApplicationQueryResponse | ApplicationErrorMessage>;
+  subscribe(listener: (event: ApplicationEvent) => void): () => void;
+}
 
 export const ApplicationMessageSchema: z.ZodType<ApplicationMessage> = z.union([
   ApplicationCommandSchema,
