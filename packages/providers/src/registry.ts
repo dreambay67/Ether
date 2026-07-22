@@ -12,6 +12,7 @@ import { BLOCKED_OPENAI_ENV_KEYS, hasBlockedOpenAiEnvKey } from "./env.js";
 import { ProviderNotFoundError } from "./errors.js";
 import { FAKE_PROVIDER_ID, FakeImageProvider } from "./fake.js";
 import { createAntigravityImageProviders } from "./antigravity/imageProvider.js";
+import type { AntigravityCliImageProviderOptions } from "./antigravity/imageProvider.js";
 import { UnavailableImageProvider } from "./unavailable.js";
 import type {
   AssistantProvider,
@@ -31,6 +32,7 @@ import type { ApiProviderDiagnostic } from "./api/types.js";
 
 export type DefaultProviderRegistryOptions = Partial<CodexCliImageProviderOptions> & {
   codexBundle?: CodexAppServerProviderBundle;
+  antigravity?: AntigravityCliImageProviderOptions;
 };
 export type DefaultVisionEvaluationProviderRegistryOptions = Partial<CodexCliVisionEvaluationProviderOptions> & {
   codexBundle?: CodexAppServerProviderBundle;
@@ -197,7 +199,7 @@ export function createDefaultProviderRegistry(options: DefaultProviderRegistryOp
   const registry = new GenerationProviderRegistry([
     new FakeImageProvider(),
     codexProvider,
-    ...createAntigravityImageProviders()
+    ...createAntigravityImageProviders(options.antigravity)
   ]);
   if (options.codexBundle) runtimeBundles.set(registry, options.codexBundle);
   return registry;

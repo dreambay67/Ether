@@ -13,6 +13,10 @@ if (args[0] === "models") {
   process.stdout.write("Gemini 3.5 Flash (Medium)\n");
   process.exit(0);
 }
+if (mode === "auth-failure") {
+  process.stderr.write("Code Assist login required: Bearer agy-secret-token-123456789; token=agy-token-987654321; API-Key: agy-api-key-246813579\nhttps://accounts.google.com/o/oauth2/v2/auth?access_token=agy-url-secret-13579\n");
+  process.exit(1);
+}
 if (mode === "slow") {
   setInterval(() => {}, 1_000);
 } else if (mode !== "stale-only") {

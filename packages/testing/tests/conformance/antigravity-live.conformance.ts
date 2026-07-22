@@ -6,17 +6,18 @@ import { describe, expect, it } from "vitest";
 import {
   AntigravityImageProvider,
   discoverAntigravityCli,
+  redactSensitiveText,
   writeAntigravityConformance,
   type GenerationProviderInput,
   type ProviderExecutionContext
 } from "@ether/providers";
 
-const liveEnabled = process.env.ETHER_ANTIGRAVITY_LIVE === "1";
+const liveEnabled = process.env.ETHER_ANTIGRAVITY_LIVE === "1" && process.env.ETHER_ANTIGRAVITY_CREDIT_OVERAGES_NEVER === "1";
 const liveTimeoutMs = 7 * 60 * 1_000;
 
 describe.runIf(liveEnabled)("Antigravity live conformance", () => {
   it("generates and imports one real Nano Banana 2 image through the official CLI", async () => {
-    const cli = await discoverAntigravityCli();
+    const cli = await discoverAntigravityCli({ authProbe: true });
     if (!cli.executablePath || !cli.version || !cli.authenticated) {
       throw new Error(`Antigravity live conformance blocker: ${cli.message ?? "official CLI authentication is unavailable"}.`);
     }
@@ -32,6 +33,8 @@ describe.runIf(liveEnabled)("Antigravity live conformance", () => {
       brainRoot: path.join(process.env.USERPROFILE ?? os.homedir(), ".gemini", "antigravity-cli", "brain"),
       conformanceRoot: evidenceRoot,
       allowConformanceProbe: true,
+      authProbe: true,
+      creditOveragesPolicy: "never-confirmed",
       processTimeoutMs: 5 * 60 * 1_000
     });
     const startedAt = Date.now();
@@ -40,7 +43,7 @@ describe.runIf(liveEnabled)("Antigravity live conformance", () => {
       cli: { version: cli.version, sha256: cliHash },
       createdAt: new Date().toISOString(),
       attempt: {
-        arguments: ["--new-project", "--model", "Gemini 3.5 Flash (Medium)", "--add-dir", "<redacted-path>", "--print-timeout", "300s", "--log-file", "<redacted-path>", "--print", "<redacted-prompt>"],
+        arguments: ["--sandbox", "--new-project", "--model", "Gemini 3.5 Flash (Medium)", "--add-dir", "<redacted-path>", "--print-timeout", "300s", "--log-file", "<redacted-path>", "--print", "<redacted-prompt>"],
         requestedProfileInstruction: "Use the built-in generative image tool exactly once; generate exactly one image using Nano Banana 2.",
         exitState: "failure" as const
       },
@@ -103,5 +106,5 @@ function executionContext(stagingDirectory: string): ProviderExecutionContext {
 function sha256(value: Buffer) { return createHash("sha256").update(value).digest("hex"); }
 function redact(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/[A-Za-z]:\\[^\r\n"']+/g, "<redacted-path>").replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, "<redacted-email>").slice(0, 1_000);
+  return redactSensitiveText(message).slice(0, 1_000);
 }

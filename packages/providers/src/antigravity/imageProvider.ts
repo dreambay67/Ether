@@ -27,6 +27,7 @@ import {
 
 export { ANTIGRAVITY_MODEL, ANTIGRAVITY_PROFILE_IDS } from "./workerProtocol.js";
 export type { AntigravityProfile } from "./workerProtocol.js";
+export type AntigravityCreditOveragesPolicy = "never-confirmed" | "unverified";
 export const ANTIGRAVITY_PROFILE_IDS_BY_PROVIDER = {
   "nano-banana-2": "google-nano-banana-2",
   "nano-banana-pro": "google-nano-banana-pro",
@@ -42,6 +43,8 @@ export type AntigravityCliImageProviderOptions = Omit<AntigravityCliDiscoveryOpt
   sha256File?: (filePath: string) => Promise<string | null>;
   /** Reserved for the live conformance harness; normal provider registration never enables this. */
   allowConformanceProbe?: boolean;
+  /** The official CLI has no per-call overage override; default remains unavailable until this is confirmed. */
+  creditOveragesPolicy?: AntigravityCreditOveragesPolicy;
 };
 
 const defaultConformanceRoot = path.join(process.env.LOCALAPPDATA ?? os.tmpdir(), "Ether", "4.0", "conformance");
@@ -59,6 +62,7 @@ export class AntigravityImageProvider implements GenerationProvider {
   private readonly discoveryOptions: AntigravityCliDiscoveryOptions;
   private readonly sha256File: (filePath: string) => Promise<string | null>;
   private readonly allowConformanceProbe: boolean;
+  private readonly creditOveragesPolicy: AntigravityCreditOveragesPolicy;
 
   constructor(readonly profile: AntigravityProfile, options: AntigravityCliImageProviderOptions = {}) {
     const descriptor = profileDescriptor(profile);
@@ -77,10 +81,12 @@ export class AntigravityImageProvider implements GenerationProvider {
       executablePath: options.executablePath,
       env: this.env,
       fileExists: options.fileExists,
+      authProbe: options.authProbe === true,
       run: options.run ? (call) => options.run!(call, { timeoutMs: 15_000 }) : undefined
     };
     this.sha256File = options.sha256File ?? sha256File;
     this.allowConformanceProbe = options.allowConformanceProbe === true;
+    this.creditOveragesPolicy = options.creditOveragesPolicy ?? "unverified";
   }
 
   async diagnose(context: ProviderDiagnosticContext = {}): Promise<ProviderDiagnostic> {
@@ -90,15 +96,24 @@ export class AntigravityImageProvider implements GenerationProvider {
       cliVersion: discovery.version,
       authenticated: discovery.authenticated,
       visibleModelCount: discovery.visibleModels.length,
-      orchestrator: "Gemini 3.5 Flash (Medium)",
+      authentication: discovery.authentication,
+      creditOveragesPolicy: this.creditOveragesPolicy,
+      orchestratorSelection: "Gemini 3.5 Flash (Medium)",
       requestedProfile: this.profile,
       providerIdentity: null
     };
     if (!discovery.executablePath || !discovery.version) return unavailable(this.descriptor, discovery.message ?? "Antigravity CLI is unavailable.", details);
-    if (!discovery.authenticated) return unavailable(this.descriptor, discovery.message ?? "Antigravity CLI authentication is unavailable.", details);
     const sha256 = await this.sha256File(discovery.executablePath);
     const evidence = await readAntigravityConformance(this.conformanceRoot, { version: discovery.version, sha256 });
     const profileEvidence = evidence?.profiles.find((entry) => entry.requestedProfile === this.profile);
+    const conformanceAuthProof = evidence?.profiles.some((entry) => entry.result === "pass") === true;
+    if (conformanceAuthProof) {
+      details.authentication = "conformance-verified";
+      details.authenticated = false;
+    }
+    if (!discovery.authenticated && !conformanceAuthProof) {
+      return unavailable(this.descriptor, discovery.message ?? "Antigravity CLI authentication is unverified.", details);
+    }
     details.conformance = profileEvidence?.result ?? "missing";
     if (!profileEvidence || profileEvidence.result !== "pass") {
       const reason = profileEvidence?.reason ?? "No matching real Antigravity conformance evidence is present for this CLI version.";
@@ -107,11 +122,14 @@ export class AntigravityImageProvider implements GenerationProvider {
     if (this.profile === "nano-banana-2-lite" && profileEvidence.lite1kVerified !== true) {
       return unavailable(this.descriptor, "Nano Banana 2 Lite is disabled until a real 1K output limit is verified.", details, profileEvidence);
     }
+    if (this.creditOveragesPolicy !== "never-confirmed") {
+      return unavailable(this.descriptor, creditOveragesMessage, details, profileEvidence);
+    }
     return {
       ...this.descriptor,
       capabilities: [...this.descriptor.capabilities],
       availability: "available",
-      messages: ["Authenticated Antigravity CLI and matching real conformance evidence are available."],
+      messages: ["Antigravity is conformance-verified; current keyring state was not inspected."],
       profiles: [capabilityProfile(this.descriptor, "available", profileEvidence)],
       details: {
         ...details,
@@ -125,6 +143,7 @@ export class AntigravityImageProvider implements GenerationProvider {
     if (input.outputCount !== 1) throw new ProviderOutputCountUnsupportedError(this.descriptor.id, input.outputCount, 1);
     if (context?.signal.aborted) throw cancellationError();
     const diagnostic = await this.diagnose();
+    if (this.creditOveragesPolicy !== "never-confirmed") throw new ProviderUnavailableError(diagnostic);
     if (diagnostic.availability !== "available" && !this.allowConformanceProbe) throw new ProviderUnavailableError(diagnostic);
     const discovery = await discoverAntigravityCli(this.discoveryOptions);
     if (!discovery.executablePath) throw new ProviderUnavailableError(diagnostic);
@@ -132,10 +151,13 @@ export class AntigravityImageProvider implements GenerationProvider {
     const parent = context?.stagingDirectory ?? path.join(input.projectPath, ".ether-antigravity-staging");
     const attemptDirectory = path.join(parent, `antigravity-${safeSegment(attemptId)}-${randomUUID()}`);
     const importedDirectory = path.join(attemptDirectory, "imported");
+    const referencesDirectory = path.join(attemptDirectory, "references");
     const logPath = path.join(attemptDirectory, "agy.log");
+    await mkdir(referencesDirectory, { recursive: true });
     await mkdir(importedDirectory, { recursive: true });
-    const before = await snapshotRoots([this.brainRoot, parent]);
-    const prompt = buildAntigravityPrompt(this.profile, input);
+    const stagedReferences = await stageReferences(input.references, referencesDirectory);
+    const before = await snapshotRoots([this.brainRoot, attemptDirectory]);
+    const prompt = buildAntigravityPrompt(this.profile, input, stagedReferences);
     const call = buildAntigravityProcessCall({
       executablePath: discovery.executablePath,
       env: this.env,
@@ -146,7 +168,7 @@ export class AntigravityImageProvider implements GenerationProvider {
         attemptDirectory,
         logPath,
         timeoutMs: input.timeoutMs ?? this.processTimeoutMs,
-        addDirectories: [...new Set([attemptDirectory, ...input.references.flatMap((reference) => reference.assetPath ? [path.dirname(reference.assetPath)] : [])])]
+        addDirectories: [attemptDirectory]
       }
     });
     let result: { stdout: string; stderr: string; exitCode: number };
@@ -159,7 +181,7 @@ export class AntigravityImageProvider implements GenerationProvider {
       throw new Error(`Antigravity CLI exited with ${result.exitCode}: ${redactSensitiveText(`${result.stderr}\n${result.stdout}`).slice(0, 2_000)}`);
     }
     const providerIdentity = extractExplicitProviderIdentity(result.stdout);
-    const candidates = await changedImageCandidates([this.brainRoot, parent], before);
+    const candidates = await changedImageCandidates([this.brainRoot, attemptDirectory], before);
     const validated = await Promise.all(candidates.map(validateImageCandidate));
     const images = validated.filter((candidate): candidate is ValidatedImage => candidate !== null);
     if (images.length !== 1) throw new Error(`Antigravity completed without exactly one newly created valid image artifact (found ${images.length}).`);
@@ -216,7 +238,6 @@ function profileDescriptor(profile: AntigravityProfile) {
     name,
     route: "antigravity-cli" as const,
     capabilities: ["image.generate"] as const,
-    model: name,
     notes: ["Official local Antigravity CLI only; no API, browser, or token fallback.", "Enabled only by matching real CLI conformance evidence."]
   };
 }
@@ -330,3 +351,22 @@ function isImageExtension(filePath: string) { return [".png", ".jpg", ".jpeg"].i
 function safeSegment(value: string) { return value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || "attempt"; }
 function cancellationError() { return Object.assign(new Error("Antigravity image generation was cancelled."), { name: "AbortError", category: "cancellation" }); }
 async function sha256File(filePath: string) { try { return createHash("sha256").update(await readFile(filePath)).digest("hex"); } catch { return null; } }
+
+const creditOveragesMessage = "Confirm the official Antigravity AI Credit Overages setting is Never before connecting or generating. Ether cannot override Google billing.";
+
+async function stageReferences(references: GenerationProviderInput["references"], referencesDirectory: string) {
+  const stagedNames: string[] = [];
+  for (const [index, reference] of references.entries()) {
+    if (!reference.assetPath) continue;
+    const extension = safeExtension(reference.assetPath);
+    const fileName = `reference-${String(index + 1).padStart(3, "0")}-${randomUUID()}${extension}`;
+    await copyFile(reference.assetPath, path.join(referencesDirectory, fileName));
+    stagedNames.push(path.join("references", fileName));
+  }
+  return stagedNames;
+}
+
+function safeExtension(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  return /^\.[a-z0-9]{1,10}$/.test(extension) ? extension : ".bin";
+}

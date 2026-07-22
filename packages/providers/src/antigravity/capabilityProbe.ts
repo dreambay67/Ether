@@ -63,6 +63,13 @@ function isEvidence(value: unknown): value is AntigravityConformanceEvidence {
 function redactEvidence(evidence: AntigravityConformanceEvidence): AntigravityConformanceEvidence {
   return {
     ...evidence,
+    attempt: evidence.attempt
+      ? {
+          ...evidence.attempt,
+          arguments: evidence.attempt.arguments.map(redactSensitiveText),
+          requestedProfileInstruction: redactSensitiveText(evidence.attempt.requestedProfileInstruction)
+        }
+      : undefined,
     profiles: evidence.profiles.map((profile) => ({
       ...profile,
       reason: profile.reason ? redactSensitiveText(profile.reason).slice(0, 1_000) : undefined,

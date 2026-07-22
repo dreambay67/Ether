@@ -9,6 +9,7 @@ export type AntigravityCliDiscovery = {
   version: string | null;
   authenticated: boolean;
   visibleModels: string[];
+  authentication: "unverified" | "probe-verified";
   message: string | null;
 };
 
@@ -16,6 +17,8 @@ export type AntigravityCliDiscoveryOptions = {
   executablePath?: string;
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   fileExists?: (filePath: string) => Promise<boolean> | boolean;
+  /** Explicitly reserved for a user-initiated Connect or live conformance action. */
+  authProbe?: boolean;
   run?: (call: ProviderProcessCall) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 };
 
@@ -43,7 +46,7 @@ export async function discoverAntigravityCli(options: AntigravityCliDiscoveryOpt
   const env = options.env ?? process.env;
   const executablePath = await resolveAntigravityCliPath(options);
   if (!executablePath) {
-    return { executablePath: null, version: null, authenticated: false, visibleModels: [], message: "Antigravity CLI was not found." };
+    return { executablePath: null, version: null, authenticated: false, visibleModels: [], authentication: "unverified", message: "Antigravity CLI was not found." };
   }
   const run = options.run ?? ((call: ProviderProcessCall) => runAntigravityProcess(call, { timeoutMs: 15_000 }));
   const call = (args: string[]): ProviderProcessCall => ({
@@ -56,11 +59,21 @@ export async function discoverAntigravityCli(options: AntigravityCliDiscoveryOpt
     const versionResult = await run(call(["--version"]));
     const version = versionResult.exitCode === 0 ? parseVersion(versionResult.stdout) : null;
     if (!version) {
-      return { executablePath, version: null, authenticated: false, visibleModels: [], message: "Antigravity CLI did not report a semantic version." };
+      return { executablePath, version: null, authenticated: false, visibleModels: [], authentication: "unverified", message: "Antigravity CLI did not report a semantic version." };
+    }
+    if (!options.authProbe) {
+      return {
+        executablePath,
+        version,
+        authenticated: false,
+        visibleModels: [],
+        authentication: "unverified",
+        message: "Antigravity CLI path/version detected; authentication is unverified until an explicit Connect or live conformance action."
+      };
     }
     const models = await run(call(["models"]));
     if (models.exitCode !== 0) {
-      return { executablePath, version, authenticated: false, visibleModels: [], message: "Antigravity CLI model discovery did not confirm authentication." };
+      return { executablePath, version, authenticated: false, visibleModels: [], authentication: "unverified", message: "Antigravity CLI authentication probe did not confirm authentication." };
     }
     const visibleModels = models.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 64);
     return {
@@ -68,7 +81,8 @@ export async function discoverAntigravityCli(options: AntigravityCliDiscoveryOpt
       version,
       authenticated: visibleModels.length > 0,
       visibleModels,
-      message: visibleModels.length > 0 ? null : "Antigravity CLI returned no visible models; sign in through the official CLI."
+      authentication: visibleModels.length > 0 ? "probe-verified" : "unverified",
+      message: visibleModels.length > 0 ? null : "Antigravity CLI authentication probe returned no visible models; use the official CLI Connect action."
     };
   } catch (error) {
     return {
@@ -76,6 +90,7 @@ export async function discoverAntigravityCli(options: AntigravityCliDiscoveryOpt
       version: null,
       authenticated: false,
       visibleModels: [],
+      authentication: "unverified",
       message: redactSensitiveText(error instanceof Error ? error.message : String(error)).slice(0, 500)
     };
   }

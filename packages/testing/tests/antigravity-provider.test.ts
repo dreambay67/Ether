@@ -1,11 +1,14 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AntigravityImageProvider,
+  buildAntigravityProcessCall,
   buildAntigravityPrompt,
+  discoverAntigravityCli,
   extractExplicitProviderIdentity,
+  redactSensitiveText,
   runAntigravityProcess,
   writeAntigravityConformance,
   type GenerationProviderInput,
@@ -24,7 +27,7 @@ async function root() {
   return value;
 }
 
-function input(projectPath: string): GenerationProviderInput {
+function input(projectPath: string, references: GenerationProviderInput["references"] = []): GenerationProviderInput {
   return {
     projectPath,
     runId: "run-1",
@@ -32,24 +35,32 @@ function input(projectPath: string): GenerationProviderInput {
     iteration: 1,
     prompt: "a small glass orb",
     negativePrompt: "text",
-    sections: [], references: [], edgeRoles: [], outputCount: 1,
+    sections: [], references, edgeRoles: [], outputCount: 1,
     requestedAt: "2026-07-22T00:00:00.000Z"
   };
 }
 
-function fakeRunner(env: Record<string, string | undefined>) {
-  return (call: ProviderProcessCall, options: { timeoutMs: number; signal?: AbortSignal }) => runAntigravityProcess({
-    ...call,
-    command: process.execPath,
-    args: [fixture, ...call.args],
-    env: { ...process.env, ...env, ...call.env }
-  }, options);
+function fakeRunner(env: Record<string, string | undefined>, calls: ProviderProcessCall[] = []) {
+  return (call: ProviderProcessCall, options: { timeoutMs: number; signal?: AbortSignal } = { timeoutMs: 15_000 }) => {
+    calls.push(call);
+    return runAntigravityProcess({
+      ...call,
+      command: process.execPath,
+      args: [fixture, ...call.args],
+      env: { ...process.env, ...env, ...call.env }
+    }, options);
+  };
 }
 
-async function readyProvider(profile: "nano-banana-2" | "nano-banana-pro" | "nano-banana-2-lite" = "nano-banana-2", mode = "success") {
+async function readyProvider(
+  profile: "nano-banana-2" | "nano-banana-pro" | "nano-banana-2-lite" = "nano-banana-2",
+  mode = "success",
+  creditOveragesPolicy: "never-confirmed" | "unverified" = "never-confirmed"
+) {
   const projectPath = await root();
   const brainRoot = path.join(projectPath, "brain");
   const conformanceRoot = path.join(projectPath, "conformance");
+  const calls: ProviderProcessCall[] = [];
   const env = { USERPROFILE: projectPath, ANTIGRAVITY_BRAIN_ROOT: brainRoot, FAKE_AGY_MODE: mode, PATH: process.env.PATH };
   await writeAntigravityConformance(conformanceRoot, {
     schemaVersion: 1, cli: { version: "1.1.4", sha256: "fixture-sha" }, createdAt: new Date().toISOString(),
@@ -58,22 +69,24 @@ async function readyProvider(profile: "nano-banana-2" | "nano-banana-pro" | "nan
   return {
     projectPath,
     brainRoot,
+    calls,
     provider: new AntigravityImageProvider(profile, {
       executablePath: "fake-agy",
       env,
       brainRoot,
       conformanceRoot,
       fileExists: async () => true,
-      run: fakeRunner(env),
+      run: fakeRunner(env, calls),
       sha256File: async () => "fixture-sha",
-      processTimeoutMs: 5_000
+      processTimeoutMs: 5_000,
+      creditOveragesPolicy
     })
   };
 }
 
 describe("Antigravity image provider", () => {
   it("uses the official noninteractive command surface and imports only the newly discovered image", async () => {
-    const { projectPath, brainRoot, provider } = await readyProvider();
+    const { projectPath, brainRoot, provider, calls } = await readyProvider();
     await mkdir(brainRoot, { recursive: true });
     await writeFile(path.join(brainRoot, "old.png"), validPng);
     const result = await provider.generate(input(projectPath), {
@@ -84,6 +97,107 @@ describe("Antigravity image provider", () => {
     expect(result.artifacts[0]?.sourcePath).toContain("antigravity-attempt-one");
     expect(result.artifacts[0]?.metadata).toMatchObject({ requestedProfile: "nano-banana-2", dimensions: { width: 1, height: 1 } });
     expect(result.metadata).toMatchObject({ providerIdentity: null, requestedProfile: "nano-banana-2" });
+    const generationCall = calls.find((call) => call.args.includes("--sandbox"));
+    expect(generationCall).toBeDefined();
+    expect(generationCall?.cwd).toContain(path.join("staging", "antigravity-attempt-one-"));
+    expect(generationCall?.args).toContain("--sandbox");
+    expect(generationCall?.args.filter((arg) => arg === "--add-dir")).toHaveLength(1);
+    expect(generationCall?.args[generationCall!.args.indexOf("--add-dir") + 1]).toBe(generationCall?.cwd);
+    expect(generationCall?.env.NO_BROWSER).toBe("true");
+    expect(generationCall?.env.SSH_CONNECTION).toBe("ether-antigravity-headless");
+    expect(generationCall?.stdin).toBeUndefined();
+  });
+
+  it("runs ordinary diagnosis with --version only and leaves authentication unverified", async () => {
+    const projectPath = await root();
+    const calls: ProviderProcessCall[] = [];
+    const env = { USERPROFILE: projectPath, PATH: process.env.PATH };
+    const provider = new AntigravityImageProvider("nano-banana-2", {
+      executablePath: "fake-agy",
+      env,
+      conformanceRoot: path.join(projectPath, "missing-conformance"),
+      fileExists: async () => true,
+      run: fakeRunner(env, calls),
+      sha256File: async () => "fixture-sha"
+    });
+
+    await expect(provider.diagnose()).resolves.toMatchObject({
+      availability: "unavailable",
+      details: { authentication: "unverified", authenticated: false }
+    });
+    expect(calls.map((call) => call.args)).toEqual([["--version"]]);
+  });
+
+  it("only probes models when explicit authentication probing is requested", async () => {
+    const calls: ProviderProcessCall[] = [];
+    const env = { USERPROFILE: await root(), PATH: process.env.PATH };
+    await expect(discoverAntigravityCli({
+      executablePath: "fake-agy",
+      env,
+      fileExists: async () => true,
+      authProbe: true,
+      run: fakeRunner(env, calls)
+    })).resolves.toMatchObject({ authenticated: true, authentication: "probe-verified" });
+    expect(calls.map((call) => call.args)).toEqual([["--version"], ["models"]]);
+  });
+
+  it("stages references and confines the CLI to the attempt directory", async () => {
+    const { projectPath, provider, calls } = await readyProvider();
+    const referenceRoot = await root();
+    const referencePath = path.join(referenceRoot, "customer reference.png");
+    await writeFile(referencePath, validPng);
+    const stagingDirectory = path.join(projectPath, "staging");
+    const result = await provider.generate(input(projectPath, [{
+      nodeId: "reference",
+      role: "style",
+      title: "Customer reference",
+      sourceKind: "Image",
+      assetPath: referencePath
+    }]), {
+      signal: new AbortController().signal,
+      providerAttemptId: "reference-attempt",
+      attemptOrdinal: 1,
+      stagingDirectory,
+      complete: async () => undefined
+    });
+    const generationCall = calls.find((call) => call.args.includes("--sandbox"));
+    expect(generationCall).toBeDefined();
+    const attemptDirectory = generationCall!.cwd;
+    const referenceDirectory = path.join(attemptDirectory, "references");
+    const stagedNames = await readdir(referenceDirectory);
+    expect(stagedNames).toHaveLength(1);
+    expect(stagedNames[0]).toMatch(/^reference-001-[0-9a-f-]+\.png$/);
+    await expect(readFile(path.join(referenceDirectory, stagedNames[0]!))).resolves.toEqual(validPng);
+    expect(generationCall?.args).not.toContain(path.dirname(referencePath));
+    expect(generationCall?.args.join(" ")).not.toContain(referencePath);
+    expect(generationCall?.args.at(-1)).toContain(path.join("references", stagedNames[0]!));
+    expect(result.artifacts[0]?.sourcePath).toContain(path.join(attemptDirectory, "imported"));
+  });
+
+  it("keeps the default credit-overages policy unavailable", async () => {
+    const { provider } = await readyProvider("nano-banana-2", "success", "unverified");
+    const diagnostic = await provider.diagnose();
+    expect(diagnostic).toMatchObject({
+      availability: "unavailable",
+      details: { creditOveragesPolicy: "unverified" },
+      messages: [expect.stringMatching(/Credit Overages.*Never/i)]
+    });
+    expect(diagnostic.messages.join(" ")).toMatch(/cannot override Google billing/i);
+    await expect(provider.generate(input("unused"))).rejects.toThrow(/Credit Overages.*Never/i);
+  });
+
+  it("redacts auth markers and authentication URLs from errors and diagnostics", async () => {
+    const redacted = redactSensitiveText("Bearer agy-secret-token-123456789 token=agy-token-987654321 API-Key: agy-api-key-246813579 https://accounts.google.com/o/oauth2/v2/auth?access_token=agy-url-secret-13579");
+    expect(redacted).toContain("Bearer <redacted>");
+    expect(redacted).toContain("token=<redacted>");
+    expect(redacted).toContain("API-Key=<redacted>");
+    expect(redacted).not.toMatch(/agy-secret-token|agy-token|agy-api-key|agy-url-secret|https?:\/\//);
+
+    const { provider } = await readyProvider("nano-banana-2", "auth-failure");
+    const error = await provider.generate(input("unused")).then(() => null, (failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).not.toMatch(/agy-secret-token|agy-token|agy-api-key|agy-url-secret|https?:\/\//);
   });
 
   it("keeps requested profile and provider identity separate, disables unsupported profiles, and redacts diagnostics", async () => {
@@ -117,8 +231,24 @@ describe("Antigravity image provider", () => {
     const prompt = buildAntigravityPrompt("nano-banana-2", { prompt: "subject", negativePrompt: "text" });
     expect(prompt).toContain("built-in generative image tool exactly once");
     expect(prompt).toContain("exactly one image using Nano Banana 2");
-    expect(prompt).toContain("Do not use terminal, file-write, browser, or any other tools");
+    expect(prompt).toContain("Do not use terminal, file-write, browser, MCP, or any other tools");
     expect(extractExplicitProviderIdentity("Provider model identity: Nano Banana 2\n")).toBe("Nano Banana 2");
     expect(extractExplicitProviderIdentity("Nano Banana 2 in a filename.png")).toBeNull();
+  });
+
+  it("rejects an add-dir outside the attempt directory", () => {
+    expect(() => buildAntigravityProcessCall({
+      executablePath: "agy",
+      env: {},
+      projectPath: "C:\\original-project",
+      request: {
+        profile: "nano-banana-2",
+        prompt: "prompt",
+        attemptDirectory: "C:\\attempt",
+        logPath: "C:\\attempt\\agy.log",
+        timeoutMs: 1_000,
+        addDirectories: ["C:\\attempt", "C:\\original-project"]
+      }
+    })).toThrow(/staged inside the attempt directory/i);
   });
 });

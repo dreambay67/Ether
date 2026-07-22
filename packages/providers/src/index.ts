@@ -125,6 +125,7 @@ export {
   ANTIGRAVITY_PROFILE_IDS,
   AntigravityImageProvider,
   createAntigravityImageProviders,
+  type AntigravityCreditOveragesPolicy,
   type AntigravityCliImageProviderOptions,
   type AntigravityProfile
 } from "./antigravity/imageProvider.js";
@@ -146,7 +147,7 @@ export {
   extractExplicitProviderIdentity,
   type AntigravityWorkerRequest
 } from "./antigravity/workerProtocol.js";
-export { runAntigravityProcess, type AntigravityProcessOptions } from "./antigravity/processRunner.js";
+export { redactSensitiveText, runAntigravityProcess, type AntigravityProcessOptions } from "./antigravity/processRunner.js";
 export { UnavailableImageProvider, createNanoBananaProviders } from "./unavailable.js";
 export { PROVIDER_CONNECTION_ROLES, PROVIDER_PAYLOAD_CHANNELS } from "./types.js";
 export type {

@@ -89,9 +89,15 @@ function redactProcessOutput(stdout: string, stderr: string) {
 
 export function redactSensitiveText(value: string) {
   return value
+    .replace(/https?:\/\/[^\s"'<>]+/gi, (url) =>
+      /(?:accounts\.google|oauth|authorize|authorization|auth(?:entication)?|sign[ -]?in|login|token|callback)/i.test(url)
+        ? "<redacted-auth-url>"
+        : url
+    )
     .replace(/[A-Za-z]:\\(?:[^\r\n"']+)/g, "<redacted-path>")
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, "<redacted-email>")
-    .replace(/\b(?:bearer\s+|token[=:]\s*|api[_-]?key[=:]\s*|auth(?:orization)?[=:]\s*)([A-Za-z0-9._~+/-]{8,})/gi, "$&<redacted>")
+    .replace(/\b(bearer)\s+[^\s,;]+/gi, "$1 <redacted>")
+    .replace(/\b(token|api[ _-]?key|auth(?:orization)?)\s*(?::|=|\s+)\s*[^\s,;]+/gi, "$1=<redacted>")
     .replace(/\b(?:expires?|expiry|expiration)[=:]?\s*[^\s,;]+/gi, "<redacted-expiry>")
     .replace(/\b(?:trace|installation|conversation)[_-]?id[=:]?\s*[A-Za-z0-9_-]+/gi, "<redacted-id>")
     .replace(/\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, "<redacted-host>");

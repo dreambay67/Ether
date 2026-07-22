@@ -172,6 +172,13 @@ describe("generation provider registry", () => {
     });
   });
 
+  it("does not expose requested Nano profiles as verified model identity", () => {
+    const registry = createDefaultProviderRegistry();
+    const descriptors = registry.listDescriptors().filter((provider) => provider.route === "antigravity-cli");
+    expect(descriptors).toHaveLength(3);
+    expect(descriptors.every((provider) => provider.model === undefined)).toBe(true);
+  });
+
   it("reports a provider capability matrix with real, simulation, and experimental slots", async () => {
     const userProfile = await createTempRoot();
     const codexBundle = await createReadyCodexBundle();
@@ -207,6 +214,9 @@ describe("generation provider registry", () => {
       "adapter-data-to-mask",
       "adapter-text-to-audio"
     ]);
+    const antigravityRows = diagnostics.matrix.filter((provider) => provider.route === "antigravity-cli");
+    expect(antigravityRows.every((provider) => provider.model === undefined)).toBe(true);
+    expect(antigravityRows.every((provider) => provider.profiles.every((profile) => profile.model === undefined))).toBe(true);
     expect(diagnostics.matrix).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
