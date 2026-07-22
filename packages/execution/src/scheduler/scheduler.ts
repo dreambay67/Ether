@@ -13,7 +13,7 @@ import type { GenerationProviderInput, ImageEditProviderInput, ProviderGeneratio
 import type { NodeOutputVersion, PayloadEnvelope, ProviderCompletionRecovery } from "@ether/schema";
 
 import { ExecutorRegistry } from "../executors/registry.js";
-import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets } from "../executors/types.js";
+import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets, ExecutionProviderResolver } from "../executors/types.js";
 import { ExecutorFailure } from "../executors/types.js";
 import { verifyPlanHash } from "../plan/hashPlan.js";
 import { isCancellation } from "./cancellation.js";
@@ -26,6 +26,7 @@ export type DurableSchedulerOptions = {
   persistence?: SchedulerPersistence;
   provider?: ExecutionProviderFacets["image"];
   providers?: ExecutionProviderFacets;
+  providerResolver?: ExecutionProviderResolver;
   executors?: ExecutorRegistry;
   onEventsAvailable?: () => Promise<void>;
   checkpoint?: (name: string) => void;
@@ -149,6 +150,9 @@ export class DurableScheduler {
       sourceNodeId: input.source.nodeId,
       sourceEdgeId: input.source.edgeId
     }));
+    const providers = this.options.providerResolver === undefined
+      ? this.providers
+      : await this.options.providerResolver({ binding: step.providerBinding, step });
     const result = await this.executors.execute({
       claim,
       step,
@@ -157,7 +161,7 @@ export class DurableScheduler {
       providerInputs,
       signal,
       stagingDirectory,
-      providers: this.providers
+      providers
     });
     if (result.kind === "provider-generation") {
       await this.executeProviderCompletion(claim, step, result, stagingDirectory, signal);

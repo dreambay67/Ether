@@ -62,6 +62,7 @@ import { ExportRepository } from "./repositories/exports.js";
 import { OutputRepository } from "./repositories/outputs.js";
 import { ExecutionRepository } from "./repositories/execution.js";
 import { ReferenceRepository } from "./repositories/references.js";
+import { LiveOutputRepository } from "./repositories/liveOutput.js";
 import {
   type CommitResult,
   DocumentRepositoryError,
@@ -169,10 +170,10 @@ type WriteExecutionRepository = Pick<
 >;
 
 export interface DocumentRepositories extends ReadDocumentRepositories {
-  artifacts: Pick<ArtifactRepository, "addLineage" | "attach" | "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "search">;
+  artifacts: Pick<ArtifactRepository, "addLineage" | "attach" | "deleteDerivative" | "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "rate" | "search" | "setTags">;
   blobs: Pick<BlobRepository, "get" | "list">;
   collections: Pick<CollectionRepository, "addMembers" | "create" | "get" | "list" | "memberships" | "remove" | "removeMembers" | "setPrimary" | "update">;
-  exports: Pick<ExportRepository, "create" | "get" | "list" | "setStatus">;
+  exports: Pick<ExportRepository, "create" | "get" | "list" | "setRelativePath" | "setStatus">;
   outputs: Pick<OutputRepository, "appendReview" | "createManualEdit" | "currentApproval" | "getPayload" | "getVersion" | "insert" | "listByNode" | "pin" | "pinEdgeSelector" | "restore">;
   execution: WriteExecutionRepository;
   revisions: Pick<
@@ -678,6 +679,19 @@ export class DocumentStore {
     return this.enqueue(() => this.runTransaction(callback));
   }
 
+  runLiveOutput<T>(
+    callback: (repository: LiveOutputRepository) => Promise<T>,
+    mode: "read" | "write" = "write"
+  ): Promise<T> {
+    return this.enqueue(async () => {
+      this.assertOpen();
+      if (mode === "write" && this.currentMode.kind !== "writable") {
+        throw new DocumentStoreError("READ_ONLY", "This Ether document is open read-only.");
+      }
+      return callback(new LiveOutputRepository(createRepositoryContext(this.database)));
+    });
+  }
+
   manualSave(name: string): Promise<{ id: string; members: Record<string, string> }> {
     return this.transaction(({ revisions }) => revisions.createMilestone(name, "manual"));
   }
@@ -1034,12 +1048,15 @@ export class DocumentStore {
     const facade: DocumentRepositories = {
       artifacts: {
         addLineage: (input) => invoke(() => repositories.artifacts.addLineage(input)),
+        deleteDerivative: (id) => invoke(() => repositories.artifacts.deleteDerivative(id)),
         get: (id) => invoke(() => repositories.artifacts.get(id)),
         detail: (id) => invoke(() => repositories.artifacts.detail(id)),
         lineage: (id) => invoke(() => repositories.artifacts.lineage(id)),
         list: () => invoke(() => repositories.artifacts.list()),
         listByOutputVersion: (id) => invoke(() => repositories.artifacts.listByOutputVersion(id)),
+        rate: (id, score, actor) => invoke(() => repositories.artifacts.rate(id, score, actor)),
         search: (input) => invoke(() => repositories.artifacts.search(input)),
+        setTags: (id, tags) => invoke(() => repositories.artifacts.setTags(id, tags)),
         attach: (artifact) => invoke(() => repositories.artifacts.attach(artifact))
       },
       blobs: {
@@ -1061,6 +1078,7 @@ export class DocumentStore {
         create: (input) => invoke(() => repositories.exports.create(input)),
         get: (id) => invoke(() => repositories.exports.get(id)),
         list: (input) => invoke(() => repositories.exports.list(input)),
+        setRelativePath: (id, relativePath) => invoke(() => repositories.exports.setRelativePath(id, relativePath)),
         setStatus: (id, status, completedAt) =>
           invoke(() => repositories.exports.setStatus(id, status, completedAt))
       },

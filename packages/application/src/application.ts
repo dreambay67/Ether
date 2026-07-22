@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -9,18 +9,32 @@ import {
   embedReference,
   embedReferences,
   importBlob,
+  inspectReplacementRecovery,
+  linkReference,
+  materializeLiveOutput,
+  reconcileLiveOutput,
+  removeMirrorFiles,
   readBlobRange,
   relinkReference,
   resolveReference,
   streamBlobRange,
   type ArtifactLineageSnapshot,
   type DocumentStoreEnvironment,
+  type LiveOutputDirectoryGrant,
+  type LiveOutputFileSystem,
   type ReadOnlyReason
 } from "@ether/document";
-import { compilePlan, DurableScheduler } from "@ether/execution";
+import {
+  compilePlan,
+  DurableScheduler,
+  type ExecutionProviderFacets,
+  type ExecutionProviderResolver
+} from "@ether/execution";
+import { previewGraphTransaction } from "@ether/graph-kernel";
 import type { GenerationProvider } from "@ether/providers";
 import {
   ApplicationCommandSchema,
+  ApplicationEventSchema,
   ApplicationQuerySchema,
   ExecutionJobSchema,
   ExecutionPlanSchema,
@@ -40,6 +54,7 @@ import type {
   ExecutionPlan,
   ExecutionScope,
   ExecutionWorkItem,
+  ExportRecord,
   GraphTransaction,
   NodeOutputVersion,
   ProviderCapability
@@ -51,6 +66,13 @@ import { ApplicationEventBus } from "./events/eventBus.js";
 import type { DocumentSnapshot } from "./queries/documentQueries.js";
 import { deepFreezeSnapshot } from "./snapshots.js";
 import { executeApplicationCommand, executeApplicationQuery } from "./dispatch.js";
+import {
+  ApplicationPermitStore,
+  type ApplicationPermit,
+  type PathGrantPurpose,
+  type PathGrantResolver,
+  type ResolvedPathGrant
+} from "./services.js";
 
 export class ApplicationServiceError extends Error {
   readonly code: string;
@@ -68,12 +90,24 @@ export class EtherApplication implements EtherApplicationService {
   private scheduler: DurableScheduler | undefined;
   private inspectedAccess: "prefer-write" | "read-only" | "require-write" | undefined;
   private eventDrain: Promise<void> = Promise.resolve();
+  private readonly permits = new ApplicationPermitStore();
+  private recoveryReport: { dismissed: boolean; message: string | null; reportId: string | null; state: "attention" | "healthy" | "recovering" } = {
+    dismissed: false,
+    message: null,
+    reportId: null,
+    state: "healthy"
+  };
 
   constructor(
     private readonly options: {
       appDataRoot: string;
       appVersion: string;
       provider: GenerationProvider;
+      executionProviders?: ExecutionProviderFacets;
+      providerResolver?: ExecutionProviderResolver;
+      providerCapabilities?: ProviderCapability[];
+      pathGrantResolver?: PathGrantResolver;
+      liveOutputFileSystem?: LiveOutputFileSystem;
       dispatchMode?: "automatic" | "manual";
       documentEnvironment?: Omit<DocumentStoreEnvironment, "leaseRoot" | "recoveryRoot">;
       executionCheckpoint?: (name: string) => void;
@@ -113,6 +147,217 @@ export class EtherApplication implements EtherApplicationService {
   /** @internal Provider inspection is intentionally read-only at this layer. */
   boundaryProvider(): GenerationProvider {
     return this.options.provider;
+  }
+
+  async grantEditPermit(commandId: string, expiresAt: string | null): Promise<ApplicationPermit> {
+    const permit = this.permits.grantEdit(commandId, expiresAt);
+    this.publishPermission(permit, "granted");
+    return permit;
+  }
+
+  async grantPathPermit(
+    commandId: string,
+    pathGrantId: string,
+    purpose: PathGrantPurpose
+  ): Promise<ApplicationPermit> {
+    if (this.options.pathGrantResolver === undefined) {
+      throw new ApplicationServiceError("EXTERNAL_CAPABILITY_UNAVAILABLE", "No desktop path-grant resolver is attached.");
+    }
+    const resolution = await this.options.pathGrantResolver.resolve({
+      documentId: this.requireStore().documentId,
+      pathGrantId,
+      purpose
+    });
+    return this.permits.grantPath(commandId, pathGrantId, purpose, resolution);
+  }
+
+  revokePermit(permitId: string): ApplicationPermit {
+    const permit = this.permits.revoke(permitId);
+    if (permit.permission !== "path") this.publishPermission(permit, "revoked");
+    return permit;
+  }
+
+  requirePathGrant(pathGrantId: string, purpose: PathGrantPurpose): ResolvedPathGrant {
+    return this.permits.requirePath(pathGrantId, purpose);
+  }
+
+  async inspectRecovery(): Promise<Omit<typeof this.recoveryReport, "dismissed">> {
+    const store = this.requireStore();
+    const result = await inspectReplacementRecovery(store.path, path.join(this.options.appDataRoot, "recovery"));
+    const state = result.attention ? "attention" : result.pending ? "recovering" : "healthy";
+    this.recoveryReport = {
+      dismissed: false,
+      message: state === "attention"
+        ? "Ether found recovery data that needs attention."
+        : state === "recovering" ? "Ether found a recoverable interrupted document operation." : null,
+      reportId: state === "healthy" ? null : `recovery-${randomUUID()}`,
+      state
+    };
+    return this.recoveryStatus();
+  }
+
+  recoveryStatus(): Omit<typeof this.recoveryReport, "dismissed"> {
+    return this.recoveryReport.dismissed
+      ? { message: null, reportId: null, state: "healthy" }
+      : { message: this.recoveryReport.message, reportId: this.recoveryReport.reportId, state: this.recoveryReport.state };
+  }
+
+  dismissRecovery(reportId: string): void {
+    if (this.recoveryReport.reportId !== reportId) {
+      throw new ApplicationServiceError("RECOVERY_REPORT_NOT_FOUND", `Unknown recovery report ${reportId}.`);
+    }
+    this.recoveryReport = { ...this.recoveryReport, dismissed: true };
+  }
+
+  async linkDocumentReference(input: {
+    graphId: string;
+    nodeId: string;
+    pathGrantId: string;
+    role: import("@ether/schema").ConnectionRole;
+  }) {
+    const store = this.requireWritableStore();
+    const resolution = this.requirePathGrant(input.pathGrantId, "reference");
+    const graph = await this.queryGraph(input.graphId);
+    const node = graph.nodes.find((candidate) => candidate.id === input.nodeId);
+    if (node?.definitionId !== "reference.set") {
+      throw new ApplicationServiceError("REFERENCE_SET_NOT_FOUND", `Unknown Reference Set node ${input.nodeId}.`);
+    }
+    const mediaType = resolution.mediaType ?? mediaTypeForPath(resolution.path);
+    const preview = await importBlob(
+      store,
+      { mediaType, sourcePath: resolution.path },
+      { appDataRoot: this.options.appDataRoot }
+    );
+    const reference = await linkReference(store, {
+      displayName: resolution.displayName ?? path.basename(resolution.path),
+      id: `reference-${randomUUID()}`,
+      mediaType,
+      pathGrantId: input.pathGrantId,
+      previewContentKey: preview.contentKey,
+      sourcePath: resolution.path
+    });
+    await store.transaction(({ references }) => references.assignToReferenceSet(input.nodeId, [{
+      kind: "linked-reference",
+      referenceId: reference.id,
+      enabled: true,
+      roleOverride: input.role
+    }]));
+    return reference;
+  }
+
+  async relinkDocumentReferenceGrant(referenceId: string, pathGrantId: string) {
+    const resolution = this.requirePathGrant(pathGrantId, "reference");
+    return this.relinkDocumentReference({ referenceId, sourcePath: resolution.path, pathGrantId });
+  }
+
+  async assignReferenceSet(nodeId: string, members: readonly string[], replace: boolean): Promise<void> {
+    await this.requireWritableStore().transaction(({ artifacts, references }) => {
+      const parsed = members.map((id) => references.get(id) === undefined
+        ? (() => {
+            if (artifacts.get(id) === undefined) throw new ApplicationServiceError("REFERENCE_MEMBER_NOT_FOUND", `Unknown reference or artifact ${id}.`);
+            return { kind: "embedded-artifact" as const, artifactId: id, enabled: true };
+          })()
+        : { kind: "linked-reference" as const, referenceId: id, enabled: true });
+      if (replace) references.setReferenceSetMembers(nodeId, parsed);
+      else references.assignToReferenceSet(nodeId, parsed);
+    });
+  }
+
+  async liveOutputStatus() {
+    return this.requireStore().runLiveOutput(async (repository) => repository.getSettings(), "read");
+  }
+
+  async liveOutputEntries(filters: { artifactId?: string; collectionId?: string }) {
+    return this.requireStore().runLiveOutput(async (repository) => repository.listEntries(filters), "read");
+  }
+
+  async liveOutputOperations(options: { entryId?: string; limit?: number }) {
+    return this.requireStore().runLiveOutput(async (repository) => repository.listOperations(options), "read");
+  }
+
+  async enableLiveOutput(input: {
+    collisionPolicy: "error" | "rename" | "skip";
+    namingPolicy: "artifact" | "node" | "template";
+    pathGrantId: string;
+    transferPolicy: "copy" | "move";
+  }): Promise<{ operationId: string }> {
+    const grant = this.liveOutputGrant(input.pathGrantId);
+    const items = await this.liveOutputItems(input.namingPolicy);
+    const result = await this.requireWritableStore().runLiveOutput(async (repository) => {
+      repository.enable(grant, {
+        collisionPolicy: input.collisionPolicy,
+        namingPolicy: { template: liveOutputTemplate(input.namingPolicy) },
+        transferPolicy: input.transferPolicy
+      });
+      return materializeLiveOutput(repository, {
+        fileSystem: this.options.liveOutputFileSystem,
+        grant,
+        grantValidator: () => this.permits.isActivePath(input.pathGrantId, "live-output"),
+        items
+      });
+    });
+    return { operationId: result.items[0]?.operationId ?? `live-output-enable-${randomUUID()}` };
+  }
+
+  async disableLiveOutput(): Promise<void> {
+    await this.requireWritableStore().runLiveOutput(async (repository) => { repository.disable(); });
+  }
+
+  async rebuildLiveOutput(): Promise<string> {
+    const settings = await this.liveOutputStatus();
+    if (!settings.enabled || settings.pathGrantId === null) {
+      throw new ApplicationServiceError("LIVE_OUTPUT_DISABLED", "Enable Live Output before rebuilding it.");
+    }
+    const grant = this.liveOutputGrant(settings.pathGrantId);
+    const entries = await this.liveOutputEntries({});
+    const items = await Promise.all(entries.map(async (entry) => {
+      const artifact = await this.queryArtifactDescriptor(entry.artifactId);
+      return {
+        artifactId: artifact.id,
+        byteLength: artifact.byteLength,
+        collectionId: entry.collectionId,
+        contentKey: artifact.contentKey,
+        expectedHash: artifact.contentKey,
+        relativePath: entry.relativePath,
+        bytes: await this.readArtifactBytes(artifact.id)
+      };
+    }));
+    const result = await this.requireWritableStore().runLiveOutput((repository) => materializeLiveOutput(repository, {
+      fileSystem: this.options.liveOutputFileSystem,
+      grant,
+      grantValidator: () => this.permits.isActivePath(settings.pathGrantId!, "live-output"),
+      items,
+      operationKind: "rebuild"
+    }));
+    return result.items[0]?.operationId ?? `live-output-rebuild-${randomUUID()}`;
+  }
+
+  async reconcileLiveOutputMirror(): Promise<string> {
+    const settings = await this.liveOutputStatus();
+    if (!settings.enabled || settings.pathGrantId === null) {
+      throw new ApplicationServiceError("LIVE_OUTPUT_DISABLED", "Enable Live Output before reconciling it.");
+    }
+    const grant = this.liveOutputGrant(settings.pathGrantId);
+    const result = await this.requireWritableStore().runLiveOutput((repository) => reconcileLiveOutput(repository, {
+      fileSystem: this.options.liveOutputFileSystem,
+      grant,
+      grantValidator: () => this.permits.isActivePath(settings.pathGrantId!, "live-output")
+    }));
+    return result.operationId ?? `live-output-reconcile-${randomUUID()}`;
+  }
+
+  async removeLiveOutputFiles(): Promise<string> {
+    const settings = await this.liveOutputStatus();
+    if (settings.pathGrantId === null) {
+      throw new ApplicationServiceError("LIVE_OUTPUT_GRANT_REQUIRED", "Live Output has no directory grant.");
+    }
+    const grant = this.liveOutputGrant(settings.pathGrantId);
+    const result = await this.requireWritableStore().runLiveOutput((repository) => removeMirrorFiles(repository, {
+      fileSystem: this.options.liveOutputFileSystem,
+      grant,
+      grantValidator: () => this.permits.isActivePath(settings.pathGrantId!, "live-output")
+    }));
+    return result.operationIds[0] ?? `live-output-remove-${randomUUID()}`;
   }
 
   toBoundaryError(requestId: string, correlationId: string, error: unknown): ApplicationErrorMessage {
@@ -259,6 +504,110 @@ export class EtherApplication implements EtherApplicationService {
     }
   }
 
+  async pinOutput(input: {
+    baseDocumentRevisionId: string;
+    commandId: string;
+    edgeId: string;
+    outputVersionId: string;
+  }): Promise<{ documentRevisionId: string; graphRevisions: Record<string, string> }> {
+    const store = this.requireWritableStore();
+    const existing = await store.read(({ execution }) => execution.getCommandResult(input.commandId, "output.pin"));
+    if (existing !== undefined) return existing.revision as { documentRevisionId: string; graphRevisions: Record<string, string> };
+    const snapshot = await store.read(({ graphs, outputs, revisions }) => ({
+      graphs: graphs.list(),
+      head: revisions.head(),
+      output: outputs.getVersion(input.outputVersionId)
+    }));
+    if (snapshot.head.documentRevisionId !== input.baseDocumentRevisionId) {
+      throw new ApplicationServiceError("STALE_REVISION", "Output pinning requires the current document revision.");
+    }
+    if (snapshot.output === undefined) throw new ApplicationServiceError("OUTPUT_NOT_FOUND", `Unknown output ${input.outputVersionId}.`);
+    const graph = snapshot.graphs.find((candidate) => candidate.edges.some((edge) => edge.id === input.edgeId));
+    const edge = graph?.edges.find((candidate) => candidate.id === input.edgeId);
+    if (graph === undefined || edge === undefined) throw new ApplicationServiceError("EDGE_NOT_FOUND", `Unknown edge ${input.edgeId}.`);
+    if (edge.from.kind !== "node" || edge.from.nodeId !== snapshot.output.nodeId) {
+      throw new ApplicationServiceError("OUTPUT_PIN_SOURCE_MISMATCH", "Pinned outputs must belong to the edge source node.");
+    }
+    const transaction: GraphTransaction = {
+      id: `pin-${input.commandId}`,
+      baseDocumentRevisionId: input.baseDocumentRevisionId,
+      baseGraphRevisions: snapshot.head.graphRevisions,
+      title: "Pin output version",
+      actor: "user",
+      layoutPolicy: "preserve",
+      operations: [{
+        type: "updateEdge",
+        graphId: graph.id,
+        edgeId: edge.id,
+        edge: { ...edge, selector: { kind: "pinned", outputVersionId: input.outputVersionId } }
+      }]
+    };
+    const preview = previewGraphTransaction({ graphs: snapshot.graphs, transaction });
+    const result = await store.transaction(({ execution, revisions }) => {
+      const duplicate = execution.getCommandResult(input.commandId, "output.pin");
+      if (duplicate !== undefined) return duplicate.revision as { documentRevisionId: string; graphRevisions: Record<string, string> };
+      const committed = revisions.commit({
+        id: transaction.id,
+        baseDocumentRevisionId: transaction.baseDocumentRevisionId,
+        baseGraphRevisions: transaction.baseGraphRevisions,
+        title: transaction.title,
+        actor: transaction.actor,
+        graphSnapshots: preview.graphs,
+        forwardOperations: preview.forwardOperations,
+        inverseOperations: preview.inverseOperations
+      });
+      const revision = { documentRevisionId: committed.documentRevisionId, graphRevisions: committed.graphRevisions };
+      execution.completeCommand(input.commandId, "output.pin", { revision }, [
+        { name: "graph.revisionChanged", payload: { graphId: graph.id, revisionId: committed.graphRevisions[graph.id]!, transactionId: transaction.id } },
+        { name: "output.pinned", payload: { edgeId: edge.id, outputVersionId: input.outputVersionId, documentRevisionId: committed.documentRevisionId } }
+      ]);
+      return revision;
+    });
+    await this.drainEvents();
+    return result;
+  }
+
+  async applyHistory(commandId: string, name: "graph.redo" | "graph.undo") {
+    const store = this.requireWritableStore();
+    return store.transaction(({ execution, revisions }) => {
+      const existing = execution.getCommandResult(commandId, name);
+      if (existing !== undefined) return existing.revision as { documentRevisionId: string; graphRevisions: Record<string, string> };
+      const committed = name === "graph.undo" ? revisions.undo() : revisions.redo();
+      const revision = { documentRevisionId: committed.documentRevisionId, graphRevisions: committed.graphRevisions };
+      execution.completeCommand(commandId, name, { revision });
+      return revision;
+    });
+  }
+
+  async completeCompare(input: {
+    checkpointId: string;
+    commandId: string;
+    note?: string;
+    selectedOutputVersionIds: string[];
+  }): Promise<void> {
+    const store = this.requireWritableStore();
+    const jobId = await store.transaction(({ execution }) => {
+      const existing = execution.getCommandResult(input.commandId, "review.completeCompare");
+      if (existing !== undefined) return String(existing.jobId);
+      execution.completeCompareCheckpoint({
+        checkpointId: input.checkpointId,
+        selectedOutputVersionIds: input.selectedOutputVersionIds,
+        completion: { note: input.note ?? "" }
+      });
+      const job = execution.listJobs().find((candidate) =>
+        execution.listReviewCheckpoints(candidate.id).some((checkpoint) => checkpoint.id === input.checkpointId)
+      );
+      if (job === undefined) throw new ApplicationServiceError("JOB_NOT_FOUND", "The Compare checkpoint has no durable job.");
+      execution.completeCommand(input.commandId, "review.completeCompare", {
+        acknowledgement: { kind: "acknowledgement", accepted: true },
+        jobId: job.id
+      });
+      return job.id;
+    });
+    await this.drainEvents();
+    this.resumeAfterReview(jobId);
+  }
+
   async previewRun(input: {
     commandId: string;
     graphId: string;
@@ -276,6 +625,11 @@ export class EtherApplication implements EtherApplicationService {
       if (graph === undefined) throw new ApplicationServiceError("GRAPH_NOT_FOUND", `Unknown graph ${input.graphId}.`);
       return { graph, head: revisions.head() };
     });
+    const capabilities = planningCapabilities(
+      snapshot.graph,
+      this.options.provider,
+      this.options.providerCapabilities
+    );
     const plan = compilePlan({
       id: `plan-${randomUUID()}`,
       documentId: store.documentId,
@@ -283,7 +637,8 @@ export class EtherApplication implements EtherApplicationService {
       graph: snapshot.graph,
       graphRevisionId: snapshot.head.graphRevisions[input.graphId]!,
       scope: input.scope,
-      capability: capabilityFor(snapshot.graph, this.options.provider),
+      capability: capabilities.primary,
+      providerCapabilities: capabilities.all,
       createdAt: new Date().toISOString()
     });
     if (plan.steps.length === 0) {
@@ -312,6 +667,7 @@ export class EtherApplication implements EtherApplicationService {
       const permit = await this.requireWritableStore().transaction(({ execution }) =>
         execution.grantRunPermit(input.planId, input.contentHash, input.commandId)
       );
+      this.permits.registerRun(input.commandId, permit.id, input.planId, input.contentHash);
       await this.drainEvents();
       return deepFreezeSnapshot(permit);
     } catch (error) {
@@ -326,6 +682,7 @@ export class EtherApplication implements EtherApplicationService {
     runPermitId: string;
   }): Promise<ExecutionJob> {
     try {
+      this.permits.requireRun(input.runPermitId, input.planId, input.contentHash);
       const job = await this.requireWritableStore().transaction(({ execution }) =>
         execution.startJob(input)
       );
@@ -595,6 +952,51 @@ export class EtherApplication implements EtherApplicationService {
     return deepFreezeSnapshot(graph);
   }
 
+  async compiledInputPreview(nodeId: string) {
+    const store = this.requireStore();
+    const snapshot = await store.read(({ graphs, outputs, revisions }) => {
+      const allGraphs = graphs.list();
+      const graph = allGraphs.find((candidate) => candidate.nodes.some((node) => node.id === nodeId));
+      if (graph === undefined) throw new ApplicationServiceError("NODE_NOT_FOUND", `Unknown node ${nodeId}.`);
+      const versions = graph.nodes.flatMap((node) => outputs.listByNode(node.id));
+      const payloads = versions.flatMap((version) => version.outputPayloadIds.map((id) => outputs.getPayload(id)).filter((value): value is NonNullable<typeof value> => value !== undefined));
+      return { allGraphs, graph, head: revisions.head(), payloads, versions };
+    });
+    const node = snapshot.graph.nodes.find((candidate) => candidate.id === nodeId)!;
+    if (node.config.kind === "prompt.text") {
+      return {
+        nodeId,
+        instruction: node.config.body,
+        contextHash: stableApplicationId("context", JSON.stringify(node.config)),
+        inputs: []
+      };
+    }
+    const capabilities = planningCapabilities(snapshot.graph, this.options.provider, this.options.providerCapabilities);
+    const plan = compilePlan({
+      id: `preview-${randomUUID()}`,
+      documentId: store.documentId,
+      documentRevisionId: snapshot.head.documentRevisionId,
+      graph: snapshot.graph,
+      graphs: snapshot.allGraphs,
+      graphRevisionId: snapshot.head.graphRevisions[snapshot.graph.id]!,
+      scope: { kind: "node", nodeId },
+      capability: capabilities.primary,
+      providerCapabilities: capabilities.all,
+      outputVersions: snapshot.versions,
+      payloads: snapshot.payloads,
+      createdAt: new Date().toISOString()
+    });
+    const step = plan.steps.find((candidate) => candidate.nodeId === nodeId && candidate.subject?.kind !== "adapter");
+    if (step === undefined) throw new ApplicationServiceError("NO_RUNNABLE_SCOPE", "This node has no compiled runnable input.");
+    const inputIds = new Set([...(step.inputPayloadIds ?? []), ...(step.resolvedInputBindings ?? []).map((binding) => binding.payloadId)]);
+    return {
+      nodeId,
+      instruction: step.compiledPrompt,
+      contextHash: plan.contentHash,
+      inputs: snapshot.payloads.filter((payload) => inputIds.has(payload.id))
+    };
+  }
+
   async queryPlan(planId: string): Promise<ExecutionPlan> {
     const plan = await this.requireStore().read(({ execution }) => execution.getPlan(planId));
     if (plan === undefined) throw new ApplicationServiceError("PLAN_NOT_FOUND", `Unknown plan ${planId}.`);
@@ -650,10 +1052,142 @@ export class EtherApplication implements EtherApplicationService {
     return readBlobRange(store, artifact.contentKey, 0, artifact.byteLength);
   }
 
+  async exportArtifacts(input: {
+    artifactIds: readonly string[];
+    collisionPolicy: "error" | "rename" | "skip";
+    commandId: string;
+    namingTemplate: string;
+    pathGrantId: string;
+  }): Promise<ExportRecord[]> {
+    const store = this.requireWritableStore();
+    const duplicate = await store.read(({ execution }) => execution.getCommandResult(input.commandId, "artifact.export"));
+    if (duplicate !== undefined) return duplicate.records as ExportRecord[];
+    const root = this.requirePathGrant(input.pathGrantId, "export").path;
+    await requireDirectory(root);
+    const records = await store.transaction(({ artifacts, exports }) => input.artifactIds.map((artifactId) => {
+      const artifact = artifacts.get(artifactId);
+      if (artifact === undefined) throw new ApplicationServiceError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifactId}.`);
+      const id = stableApplicationId("export", input.commandId, artifactId);
+      return exports.get(id) ?? exports.create({
+        id,
+        artifactId,
+        pathGrantId: input.pathGrantId,
+        relativePath: exportName(input.namingTemplate, artifact),
+        contentKey: artifact.contentKey,
+        status: "planned",
+        createdAt: new Date().toISOString(),
+        completedAt: null,
+        options: { collisionPolicy: input.collisionPolicy, commandId: input.commandId }
+      });
+    }));
+    for (const record of records) await this.materializeExport(record, root);
+    const completed = await store.transaction(({ execution, exports }) => {
+      const current = records.map((record) => exports.get(record.id)!);
+      execution.completeCommand(input.commandId, "artifact.export", { records: current }, current.map((record) => ({
+        name: "export.stateChanged",
+        payload: { exportId: record.id, status: record.status }
+      })));
+      return current;
+    });
+    return completed;
+  }
+
+  async retryExport(commandId: string, exportId: string): Promise<ExportRecord[]> {
+    const store = this.requireWritableStore();
+    const duplicate = await store.read(({ execution }) => execution.getCommandResult(commandId, "export.retry"));
+    if (duplicate !== undefined) return duplicate.records as ExportRecord[];
+    const record = await store.read(({ exports }) => exports.get(exportId));
+    if (record === undefined) throw new ApplicationServiceError("EXPORT_NOT_FOUND", `Unknown export ${exportId}.`);
+    if (record.pathGrantId === null) throw new ApplicationServiceError("PATH_PERMISSION_REQUIRED", "The export has no path grant.");
+    const root = this.requirePathGrant(record.pathGrantId, "export").path;
+    await store.transaction(({ exports }) => { if (record.status !== "committed") exports.setStatus(record.id, "planned", null); });
+    await this.materializeExport({ ...record, status: record.status === "committed" ? "committed" : "planned" }, root);
+    return store.transaction(({ execution, exports }) => {
+      const current = exports.get(record.id)!;
+      execution.completeCommand(commandId, "export.retry", { records: [current] }, [{
+        name: "export.stateChanged", payload: { exportId: current.id, status: current.status }
+      }]);
+      return [current];
+    });
+  }
+
+  async cancelExport(commandId: string, exportId: string): Promise<void> {
+    const store = this.requireWritableStore();
+    await store.transaction(({ execution, exports }) => {
+      if (execution.getCommandResult(commandId, "export.cancel") !== undefined) return;
+      const record = exports.get(exportId);
+      if (record === undefined) throw new ApplicationServiceError("EXPORT_NOT_FOUND", `Unknown export ${exportId}.`);
+      if (!new Set(["committed", "skipped", "cancelled"]).has(record.status)) exports.setStatus(exportId, "cancelled");
+      execution.completeCommand(commandId, "export.cancel", { acknowledgement: { kind: "acknowledgement", accepted: true } }, [{
+        name: "export.stateChanged", payload: { exportId, status: "cancelled" }
+      }]);
+    });
+  }
+
+  async createDragExport(commandId: string, artifactIds: readonly string[], lifetimeHours: number) {
+    const store = this.requireWritableStore();
+    const duplicate = await store.read(({ execution }) => execution.getCommandResult(commandId, "artifact.dragExport"));
+    if (duplicate !== undefined) return duplicate as { expiresAt: string; materializationId: string };
+    const materializationId = stableApplicationId("drag", store.documentId, commandId);
+    const root = path.join(this.options.appDataRoot, "drag-exports", materializationId);
+    await mkdir(root, { recursive: true });
+    for (const artifactId of artifactIds) {
+      const artifact = await this.queryArtifactDescriptor(artifactId);
+      await writeFile(path.join(root, exportName("{artifact}", artifact)), await this.readArtifactBytes(artifact.id), { flag: "w" });
+    }
+    const result = { materializationId, expiresAt: new Date(Date.now() + lifetimeHours * 3_600_000).toISOString() };
+    await store.transaction(({ execution }) => execution.completeCommand(commandId, "artifact.dragExport", result));
+    return result;
+  }
+
+  private async materializeExport(record: ExportRecord, root: string): Promise<void> {
+    if (record.status === "committed" || record.status === "skipped") return;
+    const artifact = await this.queryArtifactDescriptor(record.artifactId!);
+    if (artifact.contentKey !== record.contentKey) {
+      throw new ApplicationServiceError("EXPORT_SOURCE_CHANGED", "The export record no longer matches its immutable artifact source.");
+    }
+    const bytes = await this.readArtifactBytes(artifact.id);
+    let relativePath = record.relativePath;
+    let destination = containedPath(root, relativePath);
+    const policy = String(record.options?.collisionPolicy ?? "error");
+    const occupied = await fileHash(destination);
+    if (occupied !== null && occupied !== artifact.contentKey) {
+      if (policy === "skip") {
+        await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "skipped"); });
+        return;
+      }
+      if (policy === "error") {
+        await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "failed"); });
+        throw new ApplicationServiceError("EXPORT_COLLISION", `Export destination already exists: ${relativePath}`);
+      }
+      ({ relativePath, destination } = await availableExportPath(root, relativePath));
+      await this.requireWritableStore().transaction(({ exports }) => { exports.setRelativePath(record.id, relativePath); });
+    }
+    if (occupied === artifact.contentKey) {
+      await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "committed"); });
+      return;
+    }
+    const temporary = `${destination}.${record.id}.ether-export.tmp`;
+    await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "staged", null); });
+    await writeFile(temporary, bytes, { flag: "w" });
+    await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "written", null); });
+    await rename(temporary, destination);
+    if (await fileHash(destination) !== artifact.contentKey) {
+      await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "failed"); });
+      throw new ApplicationServiceError("EXPORT_VERIFY_FAILED", `Export verification failed: ${relativePath}`);
+    }
+    await this.requireWritableStore().transaction(({ exports }) => {
+      exports.setStatus(record.id, "verified", null);
+      exports.setStatus(record.id, "committed");
+    });
+  }
+
   private attachScheduler(): void {
     this.scheduler = new DurableScheduler({
       appDataRoot: this.options.appDataRoot,
       provider: this.options.provider,
+      providers: this.options.executionProviders,
+      providerResolver: this.options.providerResolver,
       // The scheduler's durable-store protocol is intentionally narrower than
       // DocumentStore and is being evolved independently in Task 14.
       store: this.requireStore() as unknown as ConstructorParameters<typeof DurableScheduler>[0]["store"],
@@ -700,6 +1234,10 @@ export class EtherApplication implements EtherApplicationService {
     const configuredReadOnly = this.options.documentEnvironment?.onReadOnly;
     return {
       ...this.options.documentEnvironment,
+      referenceGrantAuthority: this.options.documentEnvironment?.referenceGrantAuthority ?? {
+        authorizePath: (request) => this.permits.authorizesReference(request.grantId, request.path),
+        validateFingerprint: (request) => this.permits.authorizesReference(request.grantId, request.path)
+      },
       leaseRoot: path.join(this.options.appDataRoot, "leases"),
       recoveryRoot: path.join(this.options.appDataRoot, "recovery"),
       onReadOnly: (reason) => {
@@ -728,41 +1266,212 @@ export class EtherApplication implements EtherApplicationService {
       }
     });
   }
+
+  resumeAfterReview(jobId: string): void {
+    void this.requireScheduler().run(jobId);
+  }
+
+  private liveOutputGrant(pathGrantId: string): LiveOutputDirectoryGrant {
+    const resolution = this.requirePathGrant(pathGrantId, "live-output");
+    return {
+      documentId: this.requireStore().documentId,
+      grantId: pathGrantId,
+      purpose: "live-output",
+      root: resolution.path
+    };
+  }
+
+  private async liveOutputItems(namingPolicy: "artifact" | "node" | "template") {
+    const artifacts = await this.requireStore().read(({ artifacts }) => artifacts.list());
+    return Promise.all(artifacts.map(async (artifact) => ({
+      artifactId: artifact.id,
+      byteLength: artifact.byteLength,
+      collectionId: null,
+      contentKey: artifact.contentKey,
+      expectedHash: artifact.contentKey,
+      relativePath: liveOutputName(artifact, namingPolicy),
+      bytes: await this.readArtifactBytes(artifact.id)
+    })));
+  }
+
+  private publishPermission(permit: ApplicationPermit, state: "granted" | "revoked" | "expired"): void {
+    if (permit.permission === "path" || this.store === undefined) return;
+    const id = randomUUID();
+    this.events.publish(ApplicationEventSchema.parse({
+      kind: "event",
+      id,
+      correlationId: id,
+      name: "permission.changed",
+      documentId: this.store.documentId,
+      occurredAt: new Date().toISOString(),
+      payload: { permitId: permit.id, permission: permit.permission, state }
+    }));
+  }
 }
 
-function capabilityFor(graph: EtherGraph, provider: GenerationProvider): ProviderCapability {
-  const target = graph.nodes.find((node) => node.config.kind === "generation.image");
-  if (target?.config.kind !== "generation.image") {
-    throw new ApplicationServiceError("NO_RUNNABLE_SCOPE", "The graph has no image generator.");
-  }
-  if (target.config.providerId !== provider.descriptor.id) {
-    throw new ApplicationServiceError(
-      "PROVIDER_MISMATCH",
-      `Graph provider ${target.config.providerId} does not match injected provider ${provider.descriptor.id}.`
-    );
-  }
-  return {
-    providerId: provider.descriptor.id,
-    profileId: target.config.profileId,
-    operation: "generate-image",
-    inputChannels: ["text", "image", "data"],
-    outputChannels: ["image"],
-    aspectRatios: [target.config.aspectRatio],
-    resolutions: [
-      {
-        id: `${target.config.resolution.width}x${target.config.resolution.height}`,
-        width: target.config.resolution.width,
-        height: target.config.resolution.height,
-        label: `${target.config.resolution.width} x ${target.config.resolution.height}`
-      }
-    ],
-    maxReferences: 16,
-    maxOutputsPerCall: target.config.outputCount,
+function planningCapabilities(
+  graph: EtherGraph,
+  provider: GenerationProvider,
+  configured: readonly ProviderCapability[] = []
+): { all: ProviderCapability[]; primary: ProviderCapability } {
+  const discovered = graph.nodes.flatMap((node): ProviderCapability[] => {
+    if (node.config.kind !== "generation.image" || node.config.providerId !== provider.descriptor.id) return [];
+    return [{
+      providerId: provider.descriptor.id,
+      profileId: node.config.profileId,
+      operation: "generate-image",
+      inputChannels: ["text", "image", "data"],
+      outputChannels: ["image"],
+      aspectRatios: [node.config.aspectRatio],
+      resolutions: [{
+        id: `${node.config.resolution.width}x${node.config.resolution.height}`,
+        width: node.config.resolution.width,
+        height: node.config.resolution.height,
+        label: `${node.config.resolution.width} x ${node.config.resolution.height}`
+      }],
+      maxReferences: 16,
+      maxOutputsPerCall: node.config.outputCount,
+      supportsCancellation: true,
+      supportsSeed: false,
+      provenance: "static-constraint",
+      limitations: []
+    }];
+  });
+  const local: ProviderCapability = {
+    providerId: "ether-local",
+    profileId: "local-deterministic",
+    operation: "llm",
+    inputChannels: ["text", "image", "mask", "data", "video", "audio"],
+    outputChannels: ["text", "image", "mask", "data", "video", "audio"],
+    aspectRatios: [],
+    resolutions: [],
+    maxReferences: 0,
+    maxOutputsPerCall: 1,
     supportsCancellation: true,
     supportsSeed: false,
     provenance: "static-constraint",
-    limitations: []
+    limitations: ["Local execution capability; no external provider call."]
   };
+  const all = uniqueCapabilities([...configured, ...discovered, local]);
+  const needsReasoning = graph.nodes.some((node) =>
+    node.config.kind === "prompt.worker" || node.config.kind === "review.evaluate"
+  );
+  const reasoning = all.find((capability) => capability.operation === "llm" || capability.operation === "interpret");
+  if (needsReasoning && (reasoning === undefined || reasoning.providerId === "ether-local")) {
+    throw new ApplicationServiceError(
+      "PROVIDER_CAPABILITY_UNAVAILABLE",
+      "This graph requires an injected Worker or evaluation provider capability."
+    );
+  }
+  const primary = needsReasoning
+    ? reasoning!
+    : all.find((capability) => capability.providerId !== "ether-local") ?? local;
+  return { all, primary };
+}
+
+function uniqueCapabilities(input: readonly ProviderCapability[]): ProviderCapability[] {
+  const byIdentity = new Map<string, ProviderCapability>();
+  for (const capability of input) {
+    byIdentity.set(`${capability.providerId}:${capability.profileId}:${capability.operation}`, capability);
+  }
+  return [...byIdentity.values()];
+}
+
+function mediaTypeForPath(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".png": return "image/png";
+    case ".jpg":
+    case ".jpeg": return "image/jpeg";
+    case ".webp": return "image/webp";
+    case ".mp4": return "video/mp4";
+    case ".wav": return "audio/wav";
+    case ".mp3": return "audio/mpeg";
+    default: return "application/octet-stream";
+  }
+}
+
+function liveOutputTemplate(policy: "artifact" | "node" | "template"): string {
+  if (policy === "artifact") return "{artifact}";
+  if (policy === "node") return "{node}-{artifact}";
+  return "{node}-{version}";
+}
+
+function liveOutputName(
+  artifact: Artifact,
+  policy: "artifact" | "node" | "template"
+): string {
+  const extension = extensionForMediaType(artifact.mediaType);
+  const node = typeof artifact.metadata.nodeId === "string" ? artifact.metadata.nodeId : "output";
+  const base = policy === "artifact"
+    ? artifact.id
+    : policy === "node" ? `${node}-${artifact.id}` : `${node}-${artifact.source.outputVersionId}`;
+  return `${safeFileName(base)}${extension}`;
+}
+
+function extensionForMediaType(mediaType: string): string {
+  if (mediaType === "image/png") return ".png";
+  if (mediaType === "image/jpeg") return ".jpg";
+  if (mediaType === "image/webp") return ".webp";
+  if (mediaType === "video/mp4") return ".mp4";
+  if (mediaType === "audio/wav") return ".wav";
+  if (mediaType === "audio/mpeg") return ".mp3";
+  return ".bin";
+}
+
+function safeFileName(value: string): string {
+  const safe = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").trim();
+  return safe.length === 0 ? "artifact" : safe.slice(0, 180);
+}
+
+function exportName(template: string, artifact: Artifact): string {
+  const expanded = template
+    .replaceAll("{artifact}", artifact.id)
+    .replaceAll("{id}", artifact.id)
+    .replaceAll("{version}", artifact.source.outputVersionId);
+  return `${safeFileName(expanded)}${extensionForMediaType(artifact.mediaType)}`;
+}
+
+function stableApplicationId(prefix: string, ...parts: string[]): string {
+  return `${prefix}-${createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32)}`;
+}
+
+async function requireDirectory(directoryPath: string): Promise<void> {
+  const info = await stat(directoryPath);
+  if (!info.isDirectory()) throw new ApplicationServiceError("PATH_GRANT_KIND_MISMATCH", "The path grant does not resolve to a directory.");
+}
+
+function containedPath(root: string, relativePath: string): string {
+  const candidate = path.resolve(root, relativePath);
+  const relative = path.relative(path.resolve(root), candidate);
+  if (relative.length === 0 || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new ApplicationServiceError("PATH_ESCAPE", "The export path escapes its granted directory.");
+  }
+  return candidate;
+}
+
+async function fileHash(filePath: string): Promise<string | null> {
+  try {
+    const info = await stat(filePath);
+    if (!info.isFile()) return "occupied";
+    return createHash("sha256").update(await readFile(filePath)).digest("hex");
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code)
+      : "";
+    if (code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function availableExportPath(root: string, relativePath: string): Promise<{ destination: string; relativePath: string }> {
+  const extension = path.extname(relativePath);
+  const stem = relativePath.slice(0, relativePath.length - extension.length);
+  for (let index = 2; index <= 10_000; index += 1) {
+    const candidate = `${stem}-${index}${extension}`;
+    const destination = containedPath(root, candidate);
+    if (await fileHash(destination) === null) return { destination, relativePath: candidate };
+  }
+  throw new ApplicationServiceError("EXPORT_COLLISION_EXHAUSTED", `No collision-free export name is available for ${relativePath}.`);
 }
 
 function isExpectedReferenceUnavailable(error: unknown): boolean {

@@ -110,6 +110,16 @@ export class ExportRepository {
     return this.get(exportId)!;
   }
 
+  setRelativePath(exportId: string, relativePath: string): ExportRecord {
+    const changed = this.context.database
+      .prepare("UPDATE export_records SET relative_path = ? WHERE export_id = ?")
+      .run(relativePath, exportId);
+    if (changed.changes !== 1) {
+      throw new ExportRepositoryError("EXPORT_NOT_FOUND", `Unknown export ${exportId}.`);
+    }
+    return this.get(exportId)!;
+  }
+
   private requireArtifact(artifactId: string): void {
     if (this.context.database.prepare("SELECT 1 AS found FROM artifacts WHERE artifact_id = ?").get(artifactId) === undefined) {
       throw new ExportRepositoryError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifactId}.`);

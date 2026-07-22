@@ -736,9 +736,9 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
     case "prompt.worker":
       return makeProviderBinding(input, input.capability.providerId, config.model, config);
     case "generation.image":
-      return makeProviderBinding(input, config.providerId, "deterministic-png-v1", config, config.profileId);
+      return makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
     case "edit.image":
-      return makeProviderBinding(input, config.providerId, "deterministic-edit-v1", config, config.profileId);
+      return makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
     case "review.evaluate":
       return makeProviderBinding(input, input.capability.providerId, config.model, config);
     case "edit.mask":

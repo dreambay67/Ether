@@ -147,6 +147,14 @@ describe("Live Output materialization", () => {
       state: "committed",
       relativePath: "collection/first.bin"
     });
+
+    await expect(materializeLiveOutput(fixture.repository, {
+      grant: liveGrant,
+      items: [{
+        ...item(artifact, "collection/tampered.bin"),
+        contentKey: contentKey(Buffer.from("different source"))
+      }]
+    })).rejects.toMatchObject({ code: "SOURCE_VERIFY_FAILED" });
   });
 
   it("renames a collision without overwriting the existing file", async () => {

@@ -440,7 +440,11 @@ async function materializeOne(
   const relativePath = normalizeLiveOutputRelativePath(item.relativePath);
   const expectedHash = item.expectedHash.toLowerCase();
   const bytes = await readSource(item, options.blobReader);
+  const canonical = repository.getArtifactSource(item.artifactId);
   if (
+    canonical === undefined ||
+    canonical.contentKey.toLowerCase() !== expectedHash ||
+    canonical.byteLength !== item.byteLength ||
     bytes.byteLength !== item.byteLength ||
     contentHash(bytes) !== expectedHash ||
     (item.contentKey !== undefined && item.contentKey.toLowerCase() !== expectedHash)

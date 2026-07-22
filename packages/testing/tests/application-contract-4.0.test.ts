@@ -1,10 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
 import { FakeImageProvider } from "@ether/providers";
-import type { EtherGraph, GraphTransaction } from "@ether/schema";
+import type { EtherGraph, GraphTransaction, ProviderCapability } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 const roots: string[] = [];
@@ -24,6 +24,22 @@ function graph(): EtherGraph {
   };
 }
 
+function oneNodeGraph(id: string, definitionId: EtherGraph["nodes"][number]["definitionId"], config: EtherGraph["nodes"][number]["config"]): EtherGraph {
+  return {
+    ...graph(),
+    id: `graph-${id}`,
+    nodes: [{
+      id,
+      definitionId,
+      title: id,
+      position: { x: 0, y: 0 },
+      size: { width: 240, height: 180 },
+      config,
+      presentation: { collapsed: false, accent: "default", previewMode: "content" }
+    }]
+  };
+}
+
 function transaction(documentRevisionId: string, graphRevisionId: string): GraphTransaction {
   return {
     id: "add-generator", baseDocumentRevisionId: documentRevisionId, baseGraphRevisions: { root: graphRevisionId },
@@ -33,6 +49,20 @@ function transaction(documentRevisionId: string, graphRevisionId: string): Graph
           id: "prompt", definitionId: "prompt.text", title: "Prompt", position: { x: 0, y: 0 }, size: { width: 240, height: 180 },
           config: { kind: "prompt.text", body: "A precise studio product photograph.", assembly: "append" },
           presentation: { collapsed: false, accent: "default", previewMode: "content" }
+        }
+      },
+      {
+        type: "addNode", graphId: "root", node: {
+          id: "references", definitionId: "reference.set", title: "References", position: { x: 0, y: 240 }, size: { width: 240, height: 180 },
+          config: { kind: "reference.set", artifactIds: [], enabledChannels: ["image"], ordering: "manual" },
+          presentation: { collapsed: false, accent: "default", previewMode: "content" }
+        }
+      },
+      {
+        type: "addNode", graphId: "root", node: {
+          id: "compare", definitionId: "review.compare", title: "Compare", position: { x: 640, y: 0 }, size: { width: 240, height: 180 },
+          config: { kind: "review.compare", selectionMode: "one", minimumSelections: 1 },
+          presentation: { collapsed: false, accent: "default", previewMode: "summary" }
         }
       },
       {
@@ -47,6 +77,12 @@ function transaction(documentRevisionId: string, graphRevisionId: string): Graph
           id: "prompt-image", from: { kind: "node", nodeId: "prompt", channel: "text" }, to: { kind: "node", nodeId: "image", channel: "text" },
           role: "subject", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true
         }
+      },
+      {
+        type: "addEdge", graphId: "root", edge: {
+          id: "image-compare", from: { kind: "node", nodeId: "image", channel: "image" }, to: { kind: "node", nodeId: "compare", channel: "image" },
+          role: "general", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true
+        }
       }
     ]
   };
@@ -59,14 +95,35 @@ afterEach(async () => {
 describe("Ether 4.0 application boundary", () => {
   it("dispatches an idempotent durable workflow with output lineage, review, collection routing, events, and job inspection", async () => {
     const root = await temporaryRoot();
-    const app = new EtherApplication({ appDataRoot: root, appVersion: "4.0.0-test", provider: new FakeImageProvider() });
+    const referencePath = path.join(root, "reference.txt");
+    const liveOutputPath = path.join(root, "live-output");
+    await writeFile(referencePath, Buffer.from("reference bytes"));
+    await mkdir(liveOutputPath);
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      pathGrantResolver: {
+        resolve: ({ pathGrantId }) => pathGrantId === "reference-grant"
+          ? { kind: "file", path: referencePath, mediaType: "text/plain" }
+          : { kind: "directory", path: liveOutputPath }
+      }
+    });
     const eventNames: string[] = [];
     app.subscribe((event) => eventNames.push(event.name));
     await app.createDocument({ path: path.join(root, "Contract.ether"), title: "Contract", initialGraph: graph() });
     const initial = await app.queryDocument();
     await app.applyGraphTransaction({ commandId: "graph", transaction: transaction(initial.documentRevisionId, initial.graphRevisions.root!) });
 
-    const preview = await app.execute({ kind: "command", id: "preview", correlationId: "c-preview", documentId: initial.documentId, name: "run.preview", payload: { graphId: "root", scope: { kind: "graph" } } });
+    const editPermit = await app.execute({ kind: "command", id: "edit-permit", correlationId: "c-edit-permit", documentId: initial.documentId, name: "permission.grantEdit", payload: {} });
+    if (editPermit.kind === "error") throw new Error(JSON.stringify(editPermit.error));
+    expect(editPermit).toMatchObject({ kind: "response", name: "permission.grantEdit", payload: { permission: "edit" } });
+    await app.execute({ kind: "command", id: "reference-permit", correlationId: "c-reference-permit", documentId: initial.documentId, name: "permission.grantPath", payload: { pathGrantId: "reference-grant", purpose: "reference" } });
+    const linked = await app.execute({ kind: "command", id: "link-reference", correlationId: "c-link-reference", documentId: initial.documentId, name: "reference.link", payload: { graphId: "root", nodeId: "references", pathGrantId: "reference-grant", role: "subject" } });
+    if (linked.kind !== "response" || linked.name !== "reference.link") throw new Error(`Reference did not link: ${JSON.stringify(linked)}`);
+    await app.execute({ kind: "command", id: "assign-reference", correlationId: "c-assign-reference", documentId: initial.documentId, name: "reference.assignToSet", payload: { nodeId: "references", members: [linked.payload.referenceId], replace: true } });
+
+    const preview = await app.execute({ kind: "command", id: "preview", correlationId: "c-preview", documentId: initial.documentId, name: "run.preview", payload: { graphId: "root", scope: { kind: "node", nodeId: "image" } } });
     expect(preview.kind).toBe("response");
     if (preview.kind !== "response" || preview.name !== "run.preview") throw new Error("Preview did not return a plan.");
     const permit = await app.execute({ kind: "command", id: "permit", correlationId: "c-permit", documentId: initial.documentId, name: "permission.grantRun", payload: { planId: preview.payload.plan.id, contentHash: preview.payload.plan.contentHash } });
@@ -78,6 +135,26 @@ describe("Ether 4.0 application boundary", () => {
     const artifacts = await app.query({ kind: "query", id: "artifacts", correlationId: "c-artifacts", documentId: initial.documentId, name: "artifact.search", payload: { text: "", channels: [], collectionIds: [], tags: [], minimumRating: null, providerId: null, modelId: null, runId: null, graphId: null, createdAfter: null, createdBefore: null } });
     if (artifacts.kind !== "response" || artifacts.name !== "artifact.search") throw new Error("Artifacts did not return.");
     const artifact = artifacts.payload.artifacts[0]!;
+
+    const current = await app.queryDocument();
+    const pinned = await app.execute({ kind: "command", id: "pin", correlationId: "c-pin", documentId: initial.documentId, name: "output.pin", payload: { edgeId: "image-compare", outputVersionId: artifact.source.outputVersionId, baseDocumentRevisionId: current.documentRevisionId } });
+    expect(pinned).toMatchObject({ kind: "response", name: "output.pin", payload: { kind: "revision" } });
+    await app.execute({ kind: "command", id: "rate", correlationId: "c-rate", documentId: initial.documentId, name: "review.rate", payload: { artifactId: artifact.id, rating: 5 } });
+    const tagCommand = { kind: "command" as const, id: "tag", correlationId: "c-tag", documentId: initial.documentId, name: "review.tag" as const, payload: { artifactId: artifact.id, tags: ["launch", "select"] } };
+    const firstTag = await app.execute(tagCommand);
+    const duplicateTag = await app.execute(tagCommand);
+    expect(duplicateTag).toMatchObject({ kind: "response", name: "review.tag", payload: firstTag.kind === "response" ? firstTag.payload : {} });
+    const detail = await app.boundaryStore().read(({ artifacts: repository }) => repository.detail(artifact.id));
+    expect(detail).toMatchObject({ tags: ["launch", "select"], ratings: [expect.objectContaining({ score: 5 })] });
+
+    await app.execute({ kind: "command", id: "live-permit", correlationId: "c-live-permit", documentId: initial.documentId, name: "permission.grantPath", payload: { pathGrantId: "live-grant", purpose: "live-output" } });
+    const enabled = await app.execute({ kind: "command", id: "live-enable", correlationId: "c-live-enable", documentId: initial.documentId, name: "liveOutput.enable", payload: { pathGrantId: "live-grant", namingPolicy: "artifact", collisionPolicy: "rename", transferPolicy: "copy" } });
+    expect(enabled).toMatchObject({ kind: "response", name: "liveOutput.enable", payload: { enabled: true } });
+    const entries = await app.query({ kind: "query", id: "live-entries", correlationId: "c-live-entries", documentId: initial.documentId, name: "liveOutput.entries", payload: {} });
+    expect(entries).toMatchObject({ kind: "response", name: "liveOutput.entries", payload: { entries: [expect.objectContaining({ artifactId: artifact.id, state: "committed" })] } });
+    await app.execute({ kind: "command", id: "live-disable", correlationId: "c-live-disable", documentId: initial.documentId, name: "liveOutput.disable", payload: {} });
+    const liveStatus = await app.query({ kind: "query", id: "live-status", correlationId: "c-live-status", documentId: initial.documentId, name: "liveOutput.status", payload: {} });
+    expect(liveStatus).toMatchObject({ kind: "response", name: "liveOutput.status", payload: { settings: { enabled: false } } });
 
     const collection = await app.execute({ kind: "command", id: "collection", correlationId: "c-collection", documentId: initial.documentId, name: "collection.create", payload: { title: "Selects", primary: true } });
     if (collection.kind !== "response" || collection.name !== "collection.create") throw new Error("Collection did not return.");
@@ -96,5 +173,67 @@ describe("Ether 4.0 application boundary", () => {
     expect(job).toMatchObject({ kind: "response", name: "job.summary", payload: { job: { status: "completed" } } });
     expect(eventNames).toEqual(expect.arrayContaining(["collection.changed", "output.created", "output.reviewed"]));
     await app.closeDocument();
+  });
+
+  it("previews and runs Worker, evaluation, and local-only graphs with per-step provider routing", async () => {
+    const root = await temporaryRoot();
+    const routed: Array<{ modelId: string; providerId: string }> = [];
+    const reasoningCapability: ProviderCapability = {
+      providerId: "reasoning-provider", profileId: "reasoning-default", operation: "llm",
+      inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"],
+      aspectRatios: [], resolutions: [], maxReferences: 8, maxOutputsPerCall: 1,
+      supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: []
+    };
+    const facets = {
+      worker: { run: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["assistant" as const], text: "Rewritten launch prompt" }) },
+      evaluation: { evaluate: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["vision-evaluation" as const], items: [], summary: "No inputs to score" }) }
+    };
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      providerCapabilities: [reasoningCapability],
+      providerResolver: ({ binding }) => {
+        if (binding !== null) routed.push({ modelId: binding.modelId, providerId: binding.providerId });
+        return facets;
+      }
+    });
+    const scenarios: Array<{ id: string; graph: EtherGraph }> = [
+      {
+        id: "worker",
+        graph: oneNodeGraph("worker", "prompt.worker", {
+          kind: "prompt.worker", behavior: "rewrite", instruction: "Rewrite precisely.", profile: "balanced", model: "gpt-5",
+          reasoningEffort: "medium", variation: 0.1, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 2000 },
+          memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" }
+        })
+      },
+      {
+        id: "evaluate",
+        graph: oneNodeGraph("evaluate", "review.evaluate", {
+          kind: "review.evaluate", instruction: "Score the available subject.", rubric: [], profile: "balanced", model: "gpt-5", reasoningEffort: "medium"
+        })
+      },
+      {
+        id: "filter",
+        graph: oneNodeGraph("filter", "review.filter", { kind: "review.filter", match: "all", rules: [], routes: [] })
+      }
+    ];
+
+    for (const scenario of scenarios) {
+      await app.createDocument({ path: path.join(root, `${scenario.id}.ether`), title: scenario.id, initialGraph: scenario.graph });
+      const document = await app.queryDocument();
+      const preview = await app.execute({ kind: "command", id: `preview-${scenario.id}`, correlationId: `c-preview-${scenario.id}`, documentId: document.documentId, name: "run.preview", payload: { graphId: scenario.graph.id, scope: { kind: "graph" } } });
+      if (preview.kind !== "response" || preview.name !== "run.preview") throw new Error(`Preview failed for ${scenario.id}: ${JSON.stringify(preview)}`);
+      const permit = await app.execute({ kind: "command", id: `permit-${scenario.id}`, correlationId: `c-permit-${scenario.id}`, documentId: document.documentId, name: "permission.grantRun", payload: { planId: preview.payload.plan.id, contentHash: preview.payload.plan.contentHash } });
+      if (permit.kind !== "response" || permit.name !== "permission.grantRun") throw new Error(`Permit failed for ${scenario.id}.`);
+      const started = await app.execute({ kind: "command", id: `start-${scenario.id}`, correlationId: `c-start-${scenario.id}`, documentId: document.documentId, name: "run.start", payload: { planId: preview.payload.plan.id, contentHash: preview.payload.plan.contentHash, runPermitId: permit.payload.permitId } });
+      if (started.kind !== "response" || started.name !== "run.start") throw new Error(`Run failed for ${scenario.id}: ${JSON.stringify(started)}`);
+      expect((await app.waitForJob(started.payload.job.id)).status).toBe("completed");
+      await app.closeDocument();
+    }
+
+    expect(routed).toEqual(expect.arrayContaining([
+      { providerId: "reasoning-provider", modelId: "gpt-5" }
+    ]));
   });
 });

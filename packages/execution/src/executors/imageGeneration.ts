@@ -8,6 +8,7 @@ export class ImageGenerationExecutor implements StepExecutor {
 
   async execute(context: ExecutorContext): Promise<ExecutorResult> {
     const provider = requireFacet(context.providers.image, "image generation");
+    const binding = context.step.providerBinding ?? context.step.provider;
     const resolution = context.step.parameters.resolution;
     const size = resolution !== null && typeof resolution === "object" && !Array.isArray(resolution)
       ? resolution as { width?: unknown; height?: unknown }
@@ -38,7 +39,7 @@ export class ImageGenerationExecutor implements StepExecutor {
           width,
           height
         },
-        model: provider.descriptor.model,
+        model: binding?.modelId ?? provider.descriptor.model,
         requestedAt: context.claim.attempt.startedAt ?? context.claim.attempt.createdAt
       }
     };
@@ -50,6 +51,7 @@ export class ImageEditExecutor implements StepExecutor {
 
   async execute(context: ExecutorContext): Promise<ExecutorResult> {
     const provider = requireFacet(context.providers.image, "image editing");
+    const binding = context.step.providerBinding ?? context.step.provider;
     const source = context.inputs.find((input) => input.channel === "image");
     const assetPath = source === undefined ? undefined : readStringMetadata(source, "assetPath");
     if (source === undefined || assetPath === undefined) {
@@ -90,7 +92,7 @@ export class ImageEditExecutor implements StepExecutor {
         assetMetadata: mask?.metadata
       },
       inputs: context.providerInputs,
-      model: provider.descriptor.model,
+      model: binding?.modelId ?? provider.descriptor.model,
       requestedAt: context.claim.attempt.startedAt ?? context.claim.attempt.createdAt
     };
     return { kind: "provider-generation", provider, operation: "edit", input, expectedOutputCount: outputCount };

@@ -121,6 +121,11 @@ export type ExecutionProviderFacets = {
   export?: ExportFacet;
 };
 
+export type ExecutionProviderResolver = (input: {
+  binding: PlanStep["providerBinding"];
+  step: PlanStep;
+}) => ExecutionProviderFacets | Promise<ExecutionProviderFacets>;
+
 export type ExecutorContext = {
   claim: ExecutorClaim;
   step: PlanStep;

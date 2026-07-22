@@ -217,6 +217,60 @@ export class ArtifactRepository {
     };
   }
 
+  rate(artifactId: string, score: number, actor = "user"): void {
+    this.require(artifactId);
+    if (!Number.isInteger(score) || score < 0 || score > 5) {
+      throw new BlobRepositoryError("ARTIFACT_RATING_INVALID", "Artifact ratings must be whole numbers from 0 to 5.");
+    }
+    this.context.database
+      .prepare(
+        `INSERT INTO artifact_ratings (
+           rating_id, artifact_id, score, actor, rubric_id, notes, created_at
+         ) VALUES (?, ?, ?, ?, NULL, '', ?)`
+      )
+      .run(this.context.createId("rating"), artifactId, score, actor, this.context.now());
+  }
+
+  setTags(artifactId: string, tags: readonly string[]): void {
+    this.require(artifactId);
+    const normalized = [...new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0))].sort();
+    this.context.database.prepare("DELETE FROM artifact_tags WHERE artifact_id = ?").run(artifactId);
+    const insert = this.context.database.prepare(
+      "INSERT INTO artifact_tags (artifact_id, tag, created_at) VALUES (?, ?, ?)"
+    );
+    const createdAt = this.context.now();
+    for (const tag of normalized) insert.run(artifactId, tag, createdAt);
+  }
+
+  deleteDerivative(artifactId: string): boolean {
+    this.require(artifactId);
+    const lineage = this.context.database
+      .prepare("SELECT 1 AS found FROM artifact_lineage WHERE artifact_id = ? LIMIT 1")
+      .get(artifactId);
+    if (lineage === undefined) {
+      throw new BlobRepositoryError("ARTIFACT_NOT_DERIVATIVE", "Only derivative artifacts with recorded lineage can be deleted.");
+    }
+    const child = this.context.database
+      .prepare("SELECT 1 AS found FROM artifact_lineage WHERE parent_artifact_id = ? LIMIT 1")
+      .get(artifactId);
+    if (child !== undefined) {
+      throw new BlobRepositoryError("ARTIFACT_HAS_DESCENDANTS", "A derivative with descendants cannot be deleted.");
+    }
+    const durableUse = this.context.database
+      .prepare(
+        `SELECT 1 AS found FROM collection_memberships WHERE artifact_id = ?
+         UNION ALL SELECT 1 FROM export_records WHERE artifact_id = ? AND status NOT IN ('cancelled', 'failed', 'skipped')
+         UNION ALL SELECT 1 FROM live_output_entries WHERE artifact_id = ?
+         LIMIT 1`
+      )
+      .get(artifactId, artifactId, artifactId);
+    if (durableUse !== undefined) {
+      throw new BlobRepositoryError("ARTIFACT_IN_USE", "Remove the derivative from collections, exports, and Live Output before deleting it.");
+    }
+    this.context.database.prepare("DELETE FROM artifact_lineage WHERE artifact_id = ?").run(artifactId);
+    return this.context.database.prepare("DELETE FROM artifacts WHERE artifact_id = ?").run(artifactId).changes === 1;
+  }
+
   addLineage(input: ArtifactLineageRecord): void {
     this.require(input.artifactId);
     this.require(input.parentArtifactId);

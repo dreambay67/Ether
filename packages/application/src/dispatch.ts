@@ -67,6 +67,14 @@ function acknowledgement() {
   return { kind: "acknowledgement" as const, accepted: true as const };
 }
 
+function revisionPayload(result: { documentRevisionId: string; graphRevisions: Record<string, string> }) {
+  return {
+    kind: "revision" as const,
+    documentRevisionId: result.documentRevisionId,
+    graphRevisions: Object.entries(result.graphRevisions).map(([graphId, revisionId]) => ({ graphId, revisionId }))
+  };
+}
+
 function responseFromSaved(value: Record<string, unknown>, key: string): unknown {
   const result = value[key];
   if (result === undefined) {
@@ -194,10 +202,17 @@ export async function executeApplicationCommand(
       throw new BoundaryUnavailableError("Document location grants are resolved by the desktop shell and are not attached to this application instance.");
     case "graph.applyTransaction": {
       const result = await app.applyGraphTransaction({ commandId: command.id, transaction: command.payload.transaction });
-      return commandResponse(command, {
-        documentRevisionId: result.documentRevisionId,
-        graphRevisions: Object.entries(result.graphRevisions).map(([graphId, revisionId]) => ({ graphId, revisionId }))
-      });
+      return commandResponse(command, revisionPayload(result));
+    }
+    case "graph.undo":
+    case "graph.redo":
+      return commandResponse(command, revisionPayload(await app.applyHistory(command.id, command.name)));
+    case "graph.validate": {
+      const graphs = await store.read(({ graphs }) => graphs.list());
+      const issues = validateFullGraphState(graphs).map((issue) => ({
+        code: issue.code, message: issue.message, nodeId: issue.entityId ?? null, edgeId: issue.entityId ?? null
+      }));
+      return commandResponse(command, { valid: issues.length === 0, issues });
     }
     case "run.preview":
       return commandResponse(command, { plan: await app.previewRun({ commandId: command.id, ...command.payload }) });
@@ -219,6 +234,17 @@ export async function executeApplicationCommand(
       const permit = await app.grantRunPermit({ commandId: command.id, ...command.payload });
       return commandResponse(command, { permitId: permit.id, permission: "run", expiresAt: null });
     }
+    case "permission.grantEdit": {
+      const permit = await app.grantEditPermit(command.id, command.payload.expiresAt ?? null);
+      return commandResponse(command, { permitId: permit.id, permission: "edit", expiresAt: permit.expiresAt });
+    }
+    case "permission.grantPath": {
+      const permit = await app.grantPathPermit(command.id, command.payload.pathGrantId, command.payload.purpose);
+      return commandResponse(command, { permitId: permit.id, permission: "path", expiresAt: null });
+    }
+    case "permission.revoke":
+      app.revokePermit(command.payload.permitId);
+      return commandResponse(command, acknowledgement());
     case "output.edit": {
       const output = await commandOnce(app, command, "output", (repositories) => {
         const parent = repositories.outputs.getVersion(command.payload.outputVersionId);
@@ -237,6 +263,8 @@ export async function executeApplicationCommand(
       });
       return commandResponse(command, { outputVersion: output });
     }
+    case "output.pin":
+      return commandResponse(command, revisionPayload(await app.pinOutput({ commandId: command.id, ...command.payload })));
     case "review.approve":
     case "review.reject": {
       const state = command.name === "review.approve" && command.payload.approved ? "approved" : "rejected";
@@ -302,67 +330,84 @@ export async function executeApplicationCommand(
         return acknowledgement();
       });
       return commandResponse(command, acknowledgement());
+    case "review.rate":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.artifacts.rate(command.payload.artifactId, command.payload.rating, "user");
+        return acknowledgement();
+      }, [{ name: "artifact.changed", payload: { artifactId: command.payload.artifactId, change: "rated" } }]);
+      return commandResponse(command, acknowledgement());
+    case "review.tag":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.artifacts.setTags(command.payload.artifactId, command.payload.tags);
+        return acknowledgement();
+      }, [{ name: "artifact.changed", payload: { artifactId: command.payload.artifactId, change: "tagged" } }]);
+      return commandResponse(command, acknowledgement());
+    case "review.completeCompare":
+      await app.completeCompare({ commandId: command.id, ...command.payload });
+      return commandResponse(command, acknowledgement());
+    case "reference.link": {
+      const reference = await app.linkDocumentReference(command.payload);
+      return commandResponse(command, { referenceId: reference.id });
+    }
+    case "reference.relink": {
+      const reference = await app.relinkDocumentReferenceGrant(command.payload.referenceId, command.payload.pathGrantId);
+      return commandResponse(command, { referenceId: reference.id });
+    }
+    case "reference.assignToSet":
+      await app.assignReferenceSet(command.payload.nodeId, command.payload.members, command.payload.replace ?? false);
+      return commandResponse(command, acknowledgement());
     case "reference.embed":
       await app.embedAvailableReference(command.payload.referenceId);
       return commandResponse(command, { referenceId: command.payload.referenceId });
     case "reference.remove":
       await app.removeDocumentReference(command.payload.referenceId);
       return commandResponse(command, acknowledgement());
-    case "reference.relink":
-    case "reference.link":
-    case "reference.assignToSet":
-    case "output.pin":
-    case "graph.undo":
-    case "graph.redo":
-    case "graph.validate":
     case "graph.layout":
     case "recipe.preview":
     case "recipe.instantiate":
-    case "review.rate":
-    case "review.tag":
-    case "review.completeCompare":
-    case "artifact.dragExport":
-    case "artifact.deleteDerivative":
-    case "export.retry":
-    case "export.cancel":
     case "provider.configure":
     case "provider.disable":
     case "recipe.install":
     case "recipe.remove":
-    case "recovery.dismiss":
-    case "permission.grantEdit":
-    case "permission.grantPath":
-    case "permission.revoke":
-    case "liveOutput.enable":
-    case "liveOutput.disable":
-    case "liveOutput.rebuild":
-    case "liveOutput.reconcile":
-    case "liveOutput.removeMirrorFiles":
       throw new BoundaryUnavailableError(`${command.name} needs the corresponding desktop, recipe, or Live Output service injection.`);
     case "artifact.export": {
-      const records = await commandOnce(app, command, "records", (repositories) => command.payload.artifactIds.map((artifactId) => {
-        const artifact = repositories.artifacts.get(artifactId);
-        if (artifact === undefined) throw new Error(`Unknown artifact ${artifactId}.`);
-        return repositories.exports.create({
-          id: `export-${randomUUID()}`,
-          artifactId,
-          pathGrantId: command.payload.pathGrantId,
-          relativePath: `${command.payload.namingTemplate}-${artifactId}`,
-          contentKey: artifact.contentKey,
-          status: "planned",
-          createdAt: new Date().toISOString(),
-          completedAt: null,
-          options: { collisionPolicy: command.payload.collisionPolicy }
-        });
-      }));
-      return commandResponse(command, { records });
+      return commandResponse(command, { records: await app.exportArtifacts({ commandId: command.id, ...command.payload }) });
     }
+    case "artifact.dragExport":
+      return commandResponse(command, await app.createDragExport(command.id, command.payload.artifactIds, command.payload.lifetimeHours));
+    case "artifact.deleteDerivative":
+      await commandOnce(app, command, "acknowledgement", (repositories) => {
+        repositories.artifacts.deleteDerivative(command.payload.artifactId);
+        return acknowledgement();
+      }, [{ name: "artifact.changed", payload: { artifactId: command.payload.artifactId, change: "deleted" } }]);
+      return commandResponse(command, acknowledgement());
+    case "export.retry":
+      return commandResponse(command, { records: await app.retryExport(command.id, command.payload.exportId) });
+    case "export.cancel":
+      await app.cancelExport(command.id, command.payload.exportId);
+      return commandResponse(command, acknowledgement());
+    case "recovery.inspect":
+      return commandResponse(command, await app.inspectRecovery());
+    case "recovery.dismiss":
+      app.dismissRecovery(command.payload.reportId);
+      return commandResponse(command, acknowledgement());
+    case "liveOutput.enable": {
+      const result = await app.enableLiveOutput(command.payload);
+      return commandResponse(command, { operationId: result.operationId, enabled: true });
+    }
+    case "liveOutput.disable":
+      await app.disableLiveOutput();
+      return commandResponse(command, { enabled: false });
+    case "liveOutput.rebuild":
+      return commandResponse(command, { operationId: await app.rebuildLiveOutput() });
+    case "liveOutput.reconcile":
+      return commandResponse(command, { operationId: await app.reconcileLiveOutputMirror() });
+    case "liveOutput.removeMirrorFiles":
+      return commandResponse(command, { operationId: await app.removeLiveOutputFiles() });
     case "provider.probe":
       return commandResponse(command, { health: await providerHealth(app.boundaryProvider()) });
     case "provider.refresh":
       return commandResponse(command, { providers: [await providerHealth(app.boundaryProvider())] });
-    case "recovery.inspect":
-      return commandResponse(command, { state: "healthy", reportId: null, message: null });
   }
 }
 
@@ -408,6 +453,7 @@ export async function executeApplicationQuery(
       return queryResponse(query, { valid: issues.length === 0, issues });
     }
     case "node.outputs": return queryResponse(query, { nodeId: query.payload.nodeId, outputs: await app.queryNodeOutputs(query.payload.nodeId) });
+    case "node.compiledInputPreview": return queryResponse(query, await app.compiledInputPreview(query.payload.nodeId));
     case "reference.list":
       return queryResponse(query, { references: (await app.queryReferences()).filter((reference) => query.payload.state === undefined || reference.state === query.payload.state) });
     case "reference.detail": {
@@ -462,17 +508,16 @@ export async function executeApplicationQuery(
       createdAt: new Date().toISOString()
     }))) });
     case "export.records": return queryResponse(query, { records: await store.read(({ exports }) => exports.list(query.payload)) });
-    case "liveOutput.status": return queryResponse(query, { settings: await store.read(({ settings }) => settings.getLiveOutput()) });
+    case "liveOutput.status": return queryResponse(query, { settings: await app.liveOutputStatus() });
+    case "liveOutput.entries": return queryResponse(query, { entries: await app.liveOutputEntries(query.payload) });
+    case "liveOutput.operations": return queryResponse(query, { operations: await app.liveOutputOperations(query.payload) });
+    case "recovery.status": return queryResponse(query, app.recoveryStatus());
     case "storage.status": {
       const [file, blobs] = await Promise.all([stat(store.path), store.read(({ blobs }) => blobs.list())]);
       return queryResponse(query, { documentBytes: file.size, blobBytes: blobs.reduce((total, blob) => total + blob.byteLength, 0), reclaimableBytes: 0 });
     }
-    case "node.compiledInputPreview":
-    case "liveOutput.entries":
-    case "liveOutput.operations":
     case "recipe.catalog":
     case "recipe.setupSchema":
-    case "recovery.status":
       throw new BoundaryUnavailableError(`${query.name} needs its compiler, recipe, recovery, or Live Output service injection.`);
   }
 }

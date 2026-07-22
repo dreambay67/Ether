@@ -114,3 +114,23 @@ export {
 } from "./repositories/artifacts.js";
 export { OutputRepository } from "./repositories/outputs.js";
 export { ReferenceRepository } from "./repositories/references.js";
+export {
+  LiveOutputRepository,
+  type LiveOutputDirectoryGrant
+} from "./repositories/liveOutput.js";
+export {
+  materializeLiveOutput,
+  rebuildLiveOutput,
+  nodeLiveOutputFileSystem,
+  type LiveOutputBlobReader,
+  type LiveOutputFileSystem
+} from "./liveOutput/materialize.js";
+export {
+  reconcileLiveOutput,
+  removeMirrorFiles
+} from "./liveOutput/reconcile.js";
+export {
+  inspectReplacementRecovery,
+  reconcileReplacementRecovery,
+  type ReplacementRecoveryInspection
+} from "./recovery.js";
