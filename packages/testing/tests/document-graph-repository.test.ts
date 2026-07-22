@@ -235,7 +235,7 @@ describe("transactional Ether document repositories", () => {
       }))
     ).resolves.toEqual({
       graphKeys: ["get", "list"],
-      outputKeys: ["getPayload", "getVersion", "listByNode"],
+      outputKeys: ["currentApproval", "getPayload", "getVersion", "listByNode"],
       revisionKeys: [
         "canRedo",
         "canUndo",

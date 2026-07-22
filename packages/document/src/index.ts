@@ -87,7 +87,30 @@ export {
 export {
   ExecutionRepository,
   ExecutionRepositoryError,
+  type AdapterIntermediateCompletion,
   type ArtifactLineageSnapshot,
   type ClaimedExecution,
+  type CompletionAcceptance,
+  type CompletionOutput,
+  type ExecutionJobSummary,
+  type ExecutionRepositorySnapshot,
+  type ExecutionTimelineEvent,
   type ProviderRunSnapshot
 } from "./repositories/execution.js";
+export {
+  CollectionRepository,
+  CollectionRepositoryError,
+  type CollectionInput,
+  type CollectionMemberInput
+} from "./repositories/collections.js";
+export {
+  ExportRepository,
+  ExportRepositoryError
+} from "./repositories/exports.js";
+export {
+  ArtifactRepository,
+  type ArtifactDetail,
+  type ArtifactLineageRecord
+} from "./repositories/artifacts.js";
+export { OutputRepository } from "./repositories/outputs.js";
+export { ReferenceRepository } from "./repositories/references.js";

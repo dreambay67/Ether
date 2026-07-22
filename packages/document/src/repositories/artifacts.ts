@@ -51,6 +51,29 @@ export interface ArtifactRepairMetadata {
   tags: Array<{ artifactId: string; createdAt: string; tag: string }>;
 }
 
+export interface ArtifactLineageRecord {
+  artifactId: string;
+  metadata: Record<string, unknown>;
+  parentArtifactId: string;
+  relation: string;
+  sourceOutputVersionId: string | null;
+}
+
+export interface ArtifactDetail {
+  artifact: Artifact;
+  collections: Array<{ id: string; title: string }>;
+  lineage: ArtifactLineageRecord[];
+  ratings: Array<{
+    actor: string;
+    createdAt: string;
+    id: string;
+    notes: string;
+    rubricId: string | null;
+    score: number;
+  }>;
+  tags: string[];
+}
+
 export class ArtifactRepository {
   constructor(private readonly context: RepositoryTransactionContext) {}
 
@@ -88,6 +111,129 @@ export class ArtifactRepository {
       )
       .all() as unknown as Array<{ artifact_id: string }>;
     return rows.map(({ artifact_id }) => this.get(artifact_id)).filter((value): value is Artifact => value !== undefined);
+  }
+
+  search(input: { channel?: Artifact["channel"]; mediaType?: string; text?: string } = {}): Artifact[] {
+    const clauses: string[] = [];
+    const values: string[] = [];
+    if (input.channel !== undefined) {
+      clauses.push("channel = ?");
+      values.push(input.channel);
+    }
+    if (input.mediaType !== undefined) {
+      clauses.push("media_type = ?");
+      values.push(input.mediaType);
+    }
+    if (input.text !== undefined && input.text.trim().length > 0) {
+      clauses.push("lower(title || ' ' || description || ' ' || metadata_json) LIKE ?");
+      values.push(`%${input.text.trim().toLocaleLowerCase()}%`);
+    }
+    const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+    const rows = this.context.database
+      .prepare(
+        `SELECT artifact_id FROM artifacts ${where}
+         ORDER BY created_at DESC, artifact_id`
+      )
+      .all(...values) as unknown as Array<{ artifact_id: string }>;
+    return rows
+      .map(({ artifact_id }) => this.get(artifact_id))
+      .filter((value): value is Artifact => value !== undefined);
+  }
+
+  listByOutputVersion(outputVersionId: string): Artifact[] {
+    const rows = this.context.database
+      .prepare(
+        `SELECT artifact_id FROM artifacts
+         WHERE source_output_version_id = ? ORDER BY artifact_id`
+      )
+      .all(outputVersionId) as unknown as Array<{ artifact_id: string }>;
+    return rows
+      .map(({ artifact_id }) => this.get(artifact_id))
+      .filter((value): value is Artifact => value !== undefined);
+  }
+
+  lineage(artifactId: string): ArtifactLineageRecord[] {
+    this.require(artifactId);
+    const rows = this.context.database
+      .prepare(
+        `SELECT artifact_id, parent_artifact_id, relation, source_output_version_id, metadata_json
+         FROM artifact_lineage WHERE artifact_id = ? ORDER BY parent_artifact_id, relation`
+      )
+      .all(artifactId) as unknown as Array<{
+        artifact_id: string;
+        metadata_json: string;
+        parent_artifact_id: string;
+        relation: string;
+        source_output_version_id: string | null;
+      }>;
+    return rows.map((row) => ({
+      artifactId: row.artifact_id,
+      parentArtifactId: row.parent_artifact_id,
+      relation: row.relation,
+      sourceOutputVersionId: row.source_output_version_id,
+      metadata: JSON.parse(row.metadata_json) as Record<string, unknown>
+    }));
+  }
+
+  detail(artifactId: string): ArtifactDetail | undefined {
+    const artifact = this.get(artifactId);
+    if (artifact === undefined) return undefined;
+    const collections = this.context.database
+      .prepare(
+        `SELECT c.collection_id, c.title FROM collections c
+         JOIN collection_memberships m ON m.collection_id = c.collection_id
+         WHERE m.artifact_id = ? ORDER BY c.is_primary DESC, c.title, c.collection_id`
+      )
+      .all(artifactId) as unknown as Array<{ collection_id: string; title: string }>;
+    const tags = this.context.database
+      .prepare("SELECT tag FROM artifact_tags WHERE artifact_id = ? ORDER BY tag")
+      .all(artifactId) as unknown as Array<{ tag: string }>;
+    const ratings = this.context.database
+      .prepare(
+        `SELECT rating_id, score, actor, rubric_id, notes, created_at
+         FROM artifact_ratings WHERE artifact_id = ? ORDER BY created_at, rating_id`
+      )
+      .all(artifactId) as unknown as Array<{
+        actor: string;
+        created_at: string;
+        notes: string;
+        rating_id: string;
+        rubric_id: string | null;
+        score: number;
+      }>;
+    return {
+      artifact,
+      collections: collections.map((row) => ({ id: row.collection_id, title: row.title })),
+      lineage: this.lineage(artifactId),
+      tags: tags.map((row) => row.tag),
+      ratings: ratings.map((row) => ({
+        id: row.rating_id,
+        score: row.score,
+        actor: row.actor,
+        rubricId: row.rubric_id,
+        notes: row.notes,
+        createdAt: row.created_at
+      }))
+    };
+  }
+
+  addLineage(input: ArtifactLineageRecord): void {
+    this.require(input.artifactId);
+    this.require(input.parentArtifactId);
+    this.context.database
+      .prepare(
+        `INSERT INTO artifact_lineage (
+           artifact_id, parent_artifact_id, relation, source_output_version_id, metadata_json
+         ) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(artifact_id, parent_artifact_id, relation) DO NOTHING`
+      )
+      .run(
+        input.artifactId,
+        input.parentArtifactId,
+        input.relation,
+        input.sourceOutputVersionId,
+        JSON.stringify(input.metadata)
+      );
   }
 
   attach(input: Artifact): Artifact {
@@ -166,6 +312,14 @@ export class ArtifactRepository {
         "Artifact source output and payload must exist, belong together, and match the channel."
       );
     }
+  }
+
+  private require(artifactId: string): Artifact {
+    const artifact = this.get(artifactId);
+    if (artifact === undefined) {
+      throw new BlobRepositoryError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifactId}.`);
+    }
+    return artifact;
   }
 
   repairMetadata(): ArtifactRepairMetadata {

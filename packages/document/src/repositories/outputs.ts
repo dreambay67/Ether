@@ -1,7 +1,9 @@
 import {
   NodeOutputVersionSchema,
+  OutputApprovalSchema,
   PayloadEnvelopeSchema,
   type NodeOutputVersion,
+  type OutputApproval,
   type PayloadEnvelope
 } from "@ether/schema";
 
@@ -180,6 +182,122 @@ export class OutputRepository {
       );
   }
 
+  createManualEdit(versionInput: NodeOutputVersion, payloadInputs: PayloadEnvelope[]): NodeOutputVersion {
+    const version = NodeOutputVersionSchema.parse(versionInput);
+    if (version.producer.kind !== "manual" || version.parentOutputVersionId === null) {
+      throw new DocumentRepositoryError(
+        "INVALID_MANUAL_OUTPUT",
+        "Manual edits must be manual descendants of an existing output version."
+      );
+    }
+    if (version.lineage?.relation !== undefined && version.lineage.relation !== "manual-edit") {
+      throw new DocumentRepositoryError("INVALID_MANUAL_OUTPUT", "Manual edits must use manual-edit lineage.");
+    }
+    this.insert(version, payloadInputs);
+    return this.getVersion(version.id)!;
+  }
+
+  restore(versionInput: NodeOutputVersion, payloadInputs: PayloadEnvelope[]): NodeOutputVersion {
+    const version = NodeOutputVersionSchema.parse(versionInput);
+    if (version.producer.kind !== "manual" || version.parentOutputVersionId === null) {
+      throw new DocumentRepositoryError(
+        "INVALID_RESTORE_OUTPUT",
+        "Restored outputs must be manual descendants of an existing output version."
+      );
+    }
+    if (version.lineage?.relation !== undefined && version.lineage.relation !== "restored") {
+      throw new DocumentRepositoryError("INVALID_RESTORE_OUTPUT", "Restored outputs must use restored lineage.");
+    }
+    this.insert(version, payloadInputs);
+    return this.getVersion(version.id)!;
+  }
+
+  appendReview(input: {
+    actor: "user" | "codex" | "system";
+    at?: string;
+    outputVersionId: string;
+    reason?: string;
+    state: "approved" | "rejected";
+  }): OutputApproval {
+    this.requireVersion(input.outputVersionId);
+    const approval = OutputApprovalSchema.parse({
+      state: input.state,
+      actor: input.actor,
+      at: input.at ?? this.context.now(),
+      ...(input.state === "rejected" && input.reason !== undefined ? { reason: input.reason } : {})
+    });
+    if (approval.state === "unreviewed") {
+      throw new DocumentRepositoryError("INVALID_REVIEW", "Reviews must approve or reject an output version.");
+    }
+    this.context.database
+      .prepare(
+        `INSERT INTO approval_history (
+           approval_history_id, output_version_id, state, actor, reason, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        this.context.createId("approval-history"),
+        input.outputVersionId,
+        approval.state,
+        approval.actor,
+        approval.state === "rejected" ? (approval.reason ?? null) : null,
+        approval.at
+      );
+    return approval;
+  }
+
+  currentApproval(outputVersionId: string): OutputApproval {
+    const history = this.context.database
+      .prepare(
+        `SELECT state, actor, reason, created_at FROM approval_history
+         WHERE output_version_id = ? ORDER BY created_at DESC, approval_history_id DESC LIMIT 1`
+      )
+      .get(outputVersionId) as
+      | { actor: "user" | "codex" | "system"; created_at: string; reason: string | null; state: "approved" | "rejected" }
+      | undefined;
+    if (history !== undefined) {
+      return OutputApprovalSchema.parse({
+        state: history.state,
+        actor: history.actor,
+        at: history.created_at,
+        ...(history.state === "rejected" && history.reason !== null ? { reason: history.reason } : {})
+      });
+    }
+    const initial = this.context.database
+      .prepare("SELECT approval_json FROM node_output_versions WHERE output_version_id = ?")
+      .get(outputVersionId) as { approval_json: string } | undefined;
+    if (initial === undefined) {
+      throw new DocumentRepositoryError("OUTPUT_NOT_FOUND", `Unknown output version ${outputVersionId}.`);
+    }
+    return OutputApprovalSchema.parse(JSON.parse(initial.approval_json));
+  }
+
+  pinEdgeSelector(edgeId: string, outputVersionId: string): { edgeId: string; outputVersionId: string } {
+    const output = this.requireVersion(outputVersionId);
+    const edge = this.context.database
+      .prepare(
+        `SELECT source_kind, source_node_id FROM edges
+         WHERE edge_id = ? AND deleted_at IS NULL`
+      )
+      .get(edgeId) as { source_kind: string; source_node_id: string | null } | undefined;
+    if (edge === undefined) throw new DocumentRepositoryError("EDGE_NOT_FOUND", `Unknown edge ${edgeId}.`);
+    if (edge.source_kind !== "node" || edge.source_node_id !== output.nodeId) {
+      throw new DocumentRepositoryError(
+        "PIN_SOURCE_MISMATCH",
+        "Pinned output must belong to the source node of the selected edge."
+      );
+    }
+    const changed = this.context.database
+      .prepare("UPDATE edges SET selector_json = ? WHERE edge_id = ? AND deleted_at IS NULL")
+      .run(JSON.stringify({ kind: "pinned", outputVersionId }), edgeId);
+    if (changed.changes !== 1) throw new DocumentRepositoryError("EDGE_NOT_FOUND", `Unknown edge ${edgeId}.`);
+    return { edgeId, outputVersionId };
+  }
+
+  pin(edgeId: string, outputVersionId: string): { edgeId: string; outputVersionId: string } {
+    return this.pinEdgeSelector(edgeId, outputVersionId);
+  }
+
   getVersion(id: string): NodeOutputVersion | undefined {
     const row = this.context.database
       .prepare(
@@ -205,7 +323,7 @@ export class OutputRepository {
       producer: JSON.parse(row.producer_json),
       outputPayloadIds: JSON.parse(row.output_payload_ids_json),
       parentOutputVersionId: row.parent_output_version_id,
-      approval: JSON.parse(row.approval_json),
+      approval: this.currentApproval(row.output_version_id),
       runId: row.run_id,
       stepId: row.step_id,
       workItemId: row.work_item_id,
@@ -251,5 +369,13 @@ export class OutputRepository {
       source: JSON.parse(row.source_json),
       metadata: JSON.parse(row.metadata_json)
     });
+  }
+
+  private requireVersion(outputVersionId: string): NodeOutputVersion {
+    const version = this.getVersion(outputVersionId);
+    if (version === undefined) {
+      throw new DocumentRepositoryError("OUTPUT_NOT_FOUND", `Unknown output version ${outputVersionId}.`);
+    }
+    return version;
   }
 }

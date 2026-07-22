@@ -57,6 +57,8 @@ import { reconcileStaging } from "./recovery/reconcileStaging.js";
 import { createRepositoryContext, GraphRepository } from "./repositories/graphs.js";
 import { ArtifactRepository } from "./repositories/artifacts.js";
 import { BlobRepository } from "./repositories/blobs.js";
+import { CollectionRepository } from "./repositories/collections.js";
+import { ExportRepository } from "./repositories/exports.js";
 import { OutputRepository } from "./repositories/outputs.js";
 import { ExecutionRepository } from "./repositories/execution.js";
 import { ReferenceRepository } from "./repositories/references.js";
@@ -94,19 +96,26 @@ export interface OpenDocumentStoreOptions {
 }
 
 export interface ReadDocumentRepositories {
-  artifacts: Pick<ArtifactRepository, "get" | "list">;
+  artifacts: Pick<ArtifactRepository, "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "search">;
   blobs: Pick<BlobRepository, "get" | "list">;
+  collections: Pick<CollectionRepository, "get" | "list" | "memberships">;
+  exports: Pick<ExportRepository, "get" | "list">;
   graphs: Pick<GraphRepository, "get" | "list">;
-  outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "listByNode">;
+  outputs: Pick<OutputRepository, "currentApproval" | "getPayload" | "getVersion" | "listByNode">;
   execution: Pick<
     ExecutionRepository,
     | "getCommandResult"
     | "getJob"
     | "getLineage"
     | "getPlan"
+    | "getJobSummary"
     | "listAttempts"
+    | "listJobs"
     | "listPendingEvents"
+    | "listReviewCheckpoints"
+    | "listTimeline"
     | "listWorkItems"
+    | "snapshot"
   >;
   revisions: Pick<
     RevisionRepository,
@@ -118,11 +127,12 @@ export interface ReadDocumentRepositories {
     | "listMilestones"
   >;
   settings: Pick<SettingsRepository, "getHeader" | "getLiveOutput">;
-  references: Pick<ReferenceRepository, "get" | "list">;
+  references: Pick<ReferenceRepository, "get" | "list" | "referenceSetMembers">;
 }
 
 type WriteExecutionRepository = Pick<
   ExecutionRepository,
+  | "acceptCompletion"
   | "acceptProviderOutput"
   | "cancelJob"
   | "claimNext"
@@ -133,10 +143,14 @@ type WriteExecutionRepository = Pick<
   | "getJob"
   | "getLineage"
   | "getPlan"
+  | "getJobSummary"
   | "grantRunPermit"
   | "getProviderCompletion"
   | "listAttempts"
+  | "listJobs"
   | "listPendingEvents"
+  | "listReviewCheckpoints"
+  | "listTimeline"
   | "listWorkItems"
   | "markEventDelivered"
   | "recoverProcessLost"
@@ -144,14 +158,22 @@ type WriteExecutionRepository = Pick<
   | "prepareProviderCompletion"
   | "quarantineForeignDocumentPlans"
   | "savePlan"
+  | "snapshot"
   | "stageProviderCompletion"
   | "startJob"
+  | "createCompareCheckpoint"
+  | "createReviewCheckpoint"
+  | "completeCompareCheckpoint"
+  | "completeReviewCheckpoint"
+  | "rejectReviewCheckpoint"
 >;
 
 export interface DocumentRepositories extends ReadDocumentRepositories {
-  artifacts: Pick<ArtifactRepository, "attach" | "get" | "list">;
+  artifacts: Pick<ArtifactRepository, "addLineage" | "attach" | "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "search">;
   blobs: Pick<BlobRepository, "get" | "list">;
-  outputs: Pick<OutputRepository, "getPayload" | "getVersion" | "insert" | "listByNode">;
+  collections: Pick<CollectionRepository, "addMembers" | "create" | "get" | "list" | "memberships" | "remove" | "removeMembers" | "setPrimary" | "update">;
+  exports: Pick<ExportRepository, "create" | "get" | "list" | "setStatus">;
+  outputs: Pick<OutputRepository, "appendReview" | "createManualEdit" | "currentApproval" | "getPayload" | "getVersion" | "insert" | "listByNode" | "pin" | "pinEdgeSelector" | "restore">;
   execution: WriteExecutionRepository;
   revisions: Pick<
     RevisionRepository,
@@ -170,12 +192,14 @@ export interface DocumentRepositories extends ReadDocumentRepositories {
     SettingsRepository,
     "getHeader" | "getLiveOutput" | "setFeatureFlag" | "setLiveOutput" | "setTitle"
   >;
-  references: Pick<ReferenceRepository, "get" | "list" | "remove">;
+  references: Pick<ReferenceRepository, "assignToReferenceSet" | "get" | "list" | "referenceSetMembers" | "remove" | "setReferenceSetMembers">;
 }
 
 interface InternalDocumentRepositories {
   artifacts: ArtifactRepository;
   blobs: BlobRepository;
+  collections: CollectionRepository;
+  exports: ExportRepository;
   graphs: GraphRepository;
   outputs: OutputRepository;
   execution: ExecutionRepository;
@@ -900,6 +924,8 @@ export class DocumentStore {
     return {
       artifacts: new ArtifactRepository(context),
       blobs: new BlobRepository(context),
+      collections: new CollectionRepository(context),
+      exports: new ExportRepository(context),
       graphs,
       outputs: new OutputRepository(context),
       execution: new ExecutionRepository(context),
@@ -927,18 +953,32 @@ export class DocumentStore {
       },
       repositories: {
         artifacts: {
+          detail: (id) => invoke(() => repositories.artifacts.detail(id)),
           get: (id) => invoke(() => repositories.artifacts.get(id)),
-          list: () => invoke(() => repositories.artifacts.list())
+          lineage: (id) => invoke(() => repositories.artifacts.lineage(id)),
+          list: () => invoke(() => repositories.artifacts.list()),
+          listByOutputVersion: (id) => invoke(() => repositories.artifacts.listByOutputVersion(id)),
+          search: (input) => invoke(() => repositories.artifacts.search(input))
         },
         blobs: {
           get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
           list: () => invoke(() => repositories.blobs.list())
+        },
+        collections: {
+          get: (id) => invoke(() => repositories.collections.get(id)),
+          list: () => invoke(() => repositories.collections.list()),
+          memberships: (id) => invoke(() => repositories.collections.memberships(id))
+        },
+        exports: {
+          get: (id) => invoke(() => repositories.exports.get(id)),
+          list: (input) => invoke(() => repositories.exports.list(input))
         },
         graphs: {
           get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
           list: () => invoke(() => repositories.graphs.list())
         },
         outputs: {
+          currentApproval: (id) => invoke(() => repositories.outputs.currentApproval(id)),
           getPayload: (id) => invoke(() => repositories.outputs.getPayload(id)),
           getVersion: (id) => invoke(() => repositories.outputs.getVersion(id)),
           listByNode: (id) => invoke(() => repositories.outputs.listByNode(id))
@@ -948,8 +988,13 @@ export class DocumentStore {
           getJob: (id) => invoke(() => repositories.execution.getJob(id)),
           getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
           getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
+          getJobSummary: (id) => invoke(() => repositories.execution.getJobSummary(id)),
           listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
+          listJobs: () => invoke(() => repositories.execution.listJobs()),
           listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),
+          listReviewCheckpoints: (id) => invoke(() => repositories.execution.listReviewCheckpoints(id)),
+          listTimeline: (id) => invoke(() => repositories.execution.listTimeline(id)),
+          snapshot: (id) => invoke(() => repositories.execution.snapshot(id)),
           listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id))
         },
         revisions: {
@@ -967,7 +1012,8 @@ export class DocumentStore {
         },
         references: {
           get: (id) => invoke(() => repositories.references.get(id)),
-          list: () => invoke(() => repositories.references.list())
+          list: () => invoke(() => repositories.references.list()),
+          referenceSetMembers: (id) => invoke(() => repositories.references.referenceSetMembers(id))
         }
       }
     };
@@ -987,25 +1033,56 @@ export class DocumentStore {
     };
     const facade: DocumentRepositories = {
       artifacts: {
+        addLineage: (input) => invoke(() => repositories.artifacts.addLineage(input)),
         get: (id) => invoke(() => repositories.artifacts.get(id)),
+        detail: (id) => invoke(() => repositories.artifacts.detail(id)),
+        lineage: (id) => invoke(() => repositories.artifacts.lineage(id)),
         list: () => invoke(() => repositories.artifacts.list()),
+        listByOutputVersion: (id) => invoke(() => repositories.artifacts.listByOutputVersion(id)),
+        search: (input) => invoke(() => repositories.artifacts.search(input)),
         attach: (artifact) => invoke(() => repositories.artifacts.attach(artifact))
       },
       blobs: {
         get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
         list: () => invoke(() => repositories.blobs.list())
       },
+      collections: {
+        addMembers: (id, members) => invoke(() => repositories.collections.addMembers(id, members)),
+        create: (input) => invoke(() => repositories.collections.create(input)),
+        get: (id) => invoke(() => repositories.collections.get(id)),
+        list: () => invoke(() => repositories.collections.list()),
+        memberships: (id) => invoke(() => repositories.collections.memberships(id)),
+        remove: (id) => invoke(() => repositories.collections.remove(id)),
+        removeMembers: (id, artifactIds) => invoke(() => repositories.collections.removeMembers(id, artifactIds)),
+        setPrimary: (id) => invoke(() => repositories.collections.setPrimary(id)),
+        update: (id, input) => invoke(() => repositories.collections.update(id, input))
+      },
+      exports: {
+        create: (input) => invoke(() => repositories.exports.create(input)),
+        get: (id) => invoke(() => repositories.exports.get(id)),
+        list: (input) => invoke(() => repositories.exports.list(input)),
+        setStatus: (id, status, completedAt) =>
+          invoke(() => repositories.exports.setStatus(id, status, completedAt))
+      },
       graphs: {
         get: (graphId) => invoke(() => repositories.graphs.get(graphId)),
         list: () => invoke(() => repositories.graphs.list())
       },
       outputs: {
+        appendReview: (input) => invoke(() => repositories.outputs.appendReview(input)),
+        createManualEdit: (version, payloads) => invoke(() => repositories.outputs.createManualEdit(version, payloads)),
+        currentApproval: (id) => invoke(() => repositories.outputs.currentApproval(id)),
         getPayload: (id) => invoke(() => repositories.outputs.getPayload(id)),
         getVersion: (id) => invoke(() => repositories.outputs.getVersion(id)),
         insert: (version, payloads) => invoke(() => repositories.outputs.insert(version, payloads)),
-        listByNode: (id) => invoke(() => repositories.outputs.listByNode(id))
+        listByNode: (id) => invoke(() => repositories.outputs.listByNode(id)),
+        pin: (edgeId, outputVersionId) => invoke(() => repositories.outputs.pin(edgeId, outputVersionId)),
+        pinEdgeSelector: (edgeId, outputVersionId) =>
+          invoke(() => repositories.outputs.pinEdgeSelector(edgeId, outputVersionId)),
+        restore: (version, payloads) => invoke(() => repositories.outputs.restore(version, payloads))
       },
       execution: {
+        acceptCompletion: (input) => invoke(() => repositories.execution.acceptCompletion(input)),
         acceptProviderOutput: (input) => invoke(() => repositories.execution.acceptProviderOutput(input)),
         cancelJob: (id, commandId) => invoke(() => repositories.execution.cancelJob(id, commandId)),
         claimNext: (id, token) => invoke(() => repositories.execution.claimNext(id, token)),
@@ -1019,11 +1096,15 @@ export class DocumentStore {
         getJob: (id) => invoke(() => repositories.execution.getJob(id)),
         getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
         getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
+        getJobSummary: (id) => invoke(() => repositories.execution.getJobSummary(id)),
         getProviderCompletion: (id) => invoke(() => repositories.execution.getProviderCompletion(id)),
         grantRunPermit: (id, hash, commandId) =>
           invoke(() => repositories.execution.grantRunPermit(id, hash, commandId)),
         listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
+        listJobs: () => invoke(() => repositories.execution.listJobs()),
         listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),
+        listReviewCheckpoints: (id) => invoke(() => repositories.execution.listReviewCheckpoints(id)),
+        listTimeline: (id) => invoke(() => repositories.execution.listTimeline(id)),
         listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id)),
         markEventDelivered: (id) => invoke(() => repositories.execution.markEventDelivered(id)),
         recoverProcessLost: () => invoke(() => repositories.execution.recoverProcessLost()),
@@ -1034,9 +1115,15 @@ export class DocumentStore {
         quarantineForeignDocumentPlans: () =>
           invoke(() => repositories.execution.quarantineForeignDocumentPlans()),
         savePlan: (plan) => invoke(() => repositories.execution.savePlan(plan)),
+        snapshot: (id) => invoke(() => repositories.execution.snapshot(id)),
         stageProviderCompletion: (completion) =>
           invoke(() => repositories.execution.stageProviderCompletion(completion)),
-        startJob: (input) => invoke(() => repositories.execution.startJob(input))
+        startJob: (input) => invoke(() => repositories.execution.startJob(input)),
+        createCompareCheckpoint: (input) => invoke(() => repositories.execution.createCompareCheckpoint(input)),
+        createReviewCheckpoint: (input) => invoke(() => repositories.execution.createReviewCheckpoint(input)),
+        completeCompareCheckpoint: (input) => invoke(() => repositories.execution.completeCompareCheckpoint(input)),
+        completeReviewCheckpoint: (input) => invoke(() => repositories.execution.completeReviewCheckpoint(input)),
+        rejectReviewCheckpoint: (id, reason) => invoke(() => repositories.execution.rejectReviewCheckpoint(id, reason))
       },
       revisions: {
         canRedo: () => invoke(() => repositories.revisions.canRedo()),
@@ -1061,9 +1148,13 @@ export class DocumentStore {
         setTitle: (title) => invoke(() => repositories.settings.setTitle(title))
       },
       references: {
+        assignToReferenceSet: (id, members) => invoke(() => repositories.references.assignToReferenceSet(id, members)),
         get: (id) => invoke(() => repositories.references.get(id)),
         list: () => invoke(() => repositories.references.list()),
-        remove: (id) => invoke(() => repositories.references.remove(id))
+        referenceSetMembers: (id) => invoke(() => repositories.references.referenceSetMembers(id)),
+        remove: (id) => invoke(() => repositories.references.remove(id)),
+        setReferenceSetMembers: (id, members) =>
+          invoke(() => repositories.references.setReferenceSetMembers(id, members))
       }
     };
     return {

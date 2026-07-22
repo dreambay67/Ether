@@ -1,8 +1,11 @@
 import {
   LinkedReferenceSchema,
+  ReferenceSetConfigSchema,
+  ReferenceSetMemberSchema,
   type LinkedReference,
   type ReferenceFileIdentity,
-  type ReferenceFingerprint
+  type ReferenceFingerprint,
+  type ReferenceSetMember
 } from "@ether/schema";
 import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
@@ -134,6 +137,81 @@ export class ReferenceRepository {
     return this.context.database
       .prepare("DELETE FROM linked_references WHERE reference_id = ?")
       .run(id).changes === 1;
+  }
+
+  referenceSetMembers(nodeId: string): ReferenceSetMember[] {
+    const row = this.referenceSetRow(nodeId);
+    const config = ReferenceSetConfigSchema.parse(JSON.parse(row.config_json));
+    return config.members ?? (config.artifactIds ?? []).map((artifactId) => ({
+      kind: "embedded-artifact" as const,
+      artifactId,
+      enabled: true
+    }));
+  }
+
+  setReferenceSetMembers(nodeId: string, members: readonly ReferenceSetMember[]): ReferenceSetMember[] {
+    const row = this.referenceSetRow(nodeId);
+    const parsed = members.map((member) => ReferenceSetMemberSchema.parse(member));
+    this.validateReferenceSetMembers(parsed);
+    const unique = new Set<string>();
+    for (const member of parsed) {
+      const identity = member.kind === "linked-reference"
+        ? `linked:${member.referenceId}`
+        : `embedded:${member.artifactId}`;
+      if (unique.has(identity)) {
+        throw new ReferenceError("REFERENCE_SET_DUPLICATE", `Reference Set member ${identity} is repeated.`);
+      }
+      unique.add(identity);
+    }
+    const config = ReferenceSetConfigSchema.parse({
+      ...JSON.parse(row.config_json) as Record<string, unknown>,
+      members: parsed,
+      artifactIds: undefined
+    });
+    this.context.database
+      .prepare("UPDATE nodes SET config_json = ?, updated_at = ? WHERE node_id = ? AND deleted_at IS NULL")
+      .run(JSON.stringify(config), this.context.now(), nodeId);
+    return parsed;
+  }
+
+  assignToReferenceSet(nodeId: string, members: readonly ReferenceSetMember[]): ReferenceSetMember[] {
+    const existing = this.referenceSetMembers(nodeId);
+    const next = new Map<string, ReferenceSetMember>();
+    for (const member of existing) {
+      next.set(member.kind === "linked-reference" ? `linked:${member.referenceId}` : `embedded:${member.artifactId}`, member);
+    }
+    for (const member of members) {
+      const parsed = ReferenceSetMemberSchema.parse(member);
+      next.set(parsed.kind === "linked-reference" ? `linked:${parsed.referenceId}` : `embedded:${parsed.artifactId}`, parsed);
+    }
+    return this.setReferenceSetMembers(nodeId, [...next.values()]);
+  }
+
+  private referenceSetRow(nodeId: string): { config_json: string } {
+    const row = this.context.database
+      .prepare(
+        `SELECT config_json FROM nodes
+         WHERE node_id = ? AND definition_id = 'reference.set' AND deleted_at IS NULL`
+      )
+      .get(nodeId) as { config_json: string } | undefined;
+    if (row === undefined) {
+      throw new ReferenceError("REFERENCE_SET_NOT_FOUND", `Unknown Reference Set node ${nodeId}.`);
+    }
+    return row;
+  }
+
+  private validateReferenceSetMembers(members: readonly ReferenceSetMember[]): void {
+    for (const member of members) {
+      if (member.kind === "linked-reference") {
+        if (this.get(member.referenceId) === undefined) {
+          throw new ReferenceError("REFERENCE_NOT_FOUND", `Unknown reference ${member.referenceId}.`);
+        }
+      } else if (this.context.database
+        .prepare("SELECT 1 AS found FROM artifacts WHERE artifact_id = ?")
+        .get(member.artifactId) === undefined) {
+        throw new ReferenceError("ARTIFACT_NOT_FOUND", `Unknown artifact ${member.artifactId}.`);
+      }
+    }
   }
 
   private parse(row: ReferenceRow): LinkedReference {
