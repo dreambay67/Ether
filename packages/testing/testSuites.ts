@@ -74,7 +74,9 @@ export const testSuites = {
     "tests/desktop/shell-layout.spec.ts",
     "tests/desktop/canvas.spec.ts",
     "tests/desktop/inspectors.spec.ts",
-    "tests/desktop/references-batches-runs.spec.ts"
+    "tests/desktop/references-batches-runs.spec.ts",
+    "tests/desktop/artifacts-review.spec.ts",
+    "tests/desktop/drawing-edit.spec.ts"
   ],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
   packaged: ["tests/desktop/document-lifecycle.packaged.ts"]

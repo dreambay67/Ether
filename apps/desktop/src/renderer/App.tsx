@@ -52,7 +52,9 @@ export function App() {
 
   useEffect(() => {
     if (document === null) return;
-    return window.ether.application.onEvent((event) => {
+    const application = window.ether.application;
+    if (application === undefined) return;
+    return application.onEvent((event) => {
       if (event.name === "reference.setMembershipChanged" && event.documentId === document.documentId) {
         void loadGraph(document);
       }
