@@ -1,11 +1,11 @@
-import type { DragEventHandler, ReactNode } from "react";
+import type { CSSProperties, DragEventHandler, ReactNode } from "react";
 import { Activity, Boxes, PanelRight, Sparkles } from "lucide-react";
 
 import type { DesktopReference } from "../../shared/ipc/contracts";
 import { ArtifactBrowser } from "../artifacts/ArtifactBrowser";
 import { ResizablePane } from "./ResizablePane";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
-import { shellPanelLimits, useShellPanels } from "./useShellPanels";
+import { shellPanelLimitsFor, useShellPanels } from "./useShellPanels";
 
 export function EtherShell({
   documentId,
@@ -40,26 +40,39 @@ export function EtherShell({
 }) {
   const shell = useShellPanels(documentId);
   const { panels } = shell;
+  const panelLimits = (panel: "tools" | "inspector" | "artifacts" | "runs") => shellPanelLimitsFor(shell.workspace, panel);
   const workspaceDescription = {
     build: "Arrange your graph and source material.",
     focus: "Keep the canvas clear for composition.",
     run: "Follow execution work and output readiness.",
     review: "Compare embedded artifacts and project attention."
   }[shell.workspace];
-  const artifactObservatory = <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} />;
+  const applicationAvailable = typeof window.ether.application?.onEvent === "function";
+  const artifactObservatory = applicationAvailable
+    ? <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} />
+    : canvas;
   const upperPane = shell.workspace === "build"
     ? { label: "Reference Desk", content: referenceDesk }
     : shell.workspace === "run"
       ? { label: "Batch Matrix", content: batchMatrix }
       : shell.workspace === "review"
         ? { label: "Review focus", content: <div className="review-focus-brief"><Sparkles size={16} /><strong>Artifact decisions are centered below.</strong><p>Expand this desk only when you want more vertical review context.</p></div> }
-        : { label: "Live output", content: <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /> };
+        : { label: "Live output", content: applicationAvailable ? <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /> : <p>Live output is unavailable in this compatibility session.</p> };
+  const upperPaneLimit = shell.workspace === "run" ? "16vh" : "24vh";
+  const runPaneLimit = shell.workspace === "run" ? "35vh" : "24vh";
 
   return (
     <main className="ether-shell task-nine-shell task-fifteen-shell" aria-label="Ether desktop workspace" onDragOver={onDragOver} onDrop={onDrop}>
       {header(!panels.artifacts.collapsed, () => shell.togglePanel("artifacts"))}
       <WorkspaceSwitcher active={shell.workspace} onChange={shell.setWorkspace} />
-      <section className="adaptive-workspace" data-workspace={shell.workspace} aria-label={`${shell.workspace} workspace`}>
+      <section
+        className="adaptive-workspace"
+        data-workspace={shell.workspace}
+        aria-label={`${shell.workspace} workspace`}
+        style={{
+          gridTemplateRows: `24px ${panels.artifacts.collapsed ? "32px" : `min(${panels.artifacts.size}px, ${upperPaneLimit})`} minmax(0, 1fr) ${panels.runs.collapsed ? "32px" : `min(${panels.runs.size}px, ${runPaneLimit})`}`
+        } as CSSProperties}
+      >
         <div className="workspace-context" aria-live="polite">
           <span>{shell.workspace}</span>
           <p>{workspaceDescription}</p>
@@ -71,8 +84,8 @@ export function EtherShell({
           side="start"
           size={panels.artifacts.size}
           collapsed={panels.artifacts.collapsed}
-          minSize={shellPanelLimits.artifacts.min}
-          maxSize={shellPanelLimits.artifacts.max}
+          minSize={panelLimits("artifacts").min}
+          maxSize={panelLimits("artifacts").max}
           onResize={(size) => shell.setPanelSize("artifacts", size)}
           onToggle={() => shell.togglePanel("artifacts")}
         >
@@ -85,8 +98,8 @@ export function EtherShell({
             size={panels.tools.size}
             collapsed={panels.tools.collapsed}
             side="start"
-            minSize={shellPanelLimits.tools.min}
-            maxSize={shellPanelLimits.tools.max}
+            minSize={panelLimits("tools").min}
+            maxSize={panelLimits("tools").max}
             onResize={(size) => shell.setPanelSize("tools", size)}
             onToggle={() => shell.togglePanel("tools")}
           >
@@ -100,8 +113,8 @@ export function EtherShell({
             label="Project lens"
             size={panels.inspector.size}
             collapsed={panels.inspector.collapsed}
-            minSize={shellPanelLimits.inspector.min}
-            maxSize={shellPanelLimits.inspector.max}
+            minSize={panelLimits("inspector").min}
+            maxSize={panelLimits("inspector").max}
             onResize={(size) => shell.setPanelSize("inspector", size)}
             onToggle={() => shell.togglePanel("inspector")}
           >
@@ -120,8 +133,8 @@ export function EtherShell({
           side="end"
           size={panels.runs.size}
           collapsed={panels.runs.collapsed}
-          minSize={shellPanelLimits.runs.min}
-          maxSize={shellPanelLimits.runs.max}
+          minSize={panelLimits("runs").min}
+          maxSize={panelLimits("runs").max}
           onResize={(size) => shell.setPanelSize("runs", size)}
           onToggle={() => shell.togglePanel("runs")}
         >

@@ -31,6 +31,7 @@ export function App() {
   const canvasRef = useRef<EtherCanvasHandle>(null);
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
+  const applicationAvailable = typeof window.ether.application?.onEvent === "function";
 
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
     const result = await window.ether.graph.snapshot(active.documentId);
@@ -53,7 +54,7 @@ export function App() {
   useEffect(() => {
     if (document === null) return;
     const application = window.ether.application;
-    if (application === undefined) return;
+    if (typeof application?.onEvent !== "function") return;
     return application.onEvent((event) => {
       if (event.name === "reference.setMembershipChanged" && event.documentId === document.documentId) {
         void loadGraph(document);
@@ -177,9 +178,9 @@ export function App() {
       )}
       canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
       inspector={<InspectorPanel context={inspectorContext} />}
-      referenceDesk={graph ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>Loading references…</p>}
-      batchMatrix={graph ? <BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>Loading batch plan…</p>}
-      jobCenter={<JobCenter documentId={document.documentId} onStatus={setMessage} />}
+      referenceDesk={applicationAvailable && graph ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graph ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
+      batchMatrix={applicationAvailable && graph ? <BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graph ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
+      jobCenter={applicationAvailable ? <JobCenter documentId={document.documentId} onStatus={setMessage} /> : <p>Job Center is unavailable in this compatibility session.</p>}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
           <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>

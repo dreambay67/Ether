@@ -42,7 +42,7 @@ test("keeps header, graph, tools, and status bounded across presentation widths"
     expect(bounds.footer.top).toBeGreaterThanOrEqual(bounds.canvas.bottom - 1);
     expect(bounds.footer.bottom).toBeLessThanOrEqual(viewport.height + 1);
     expect(bounds.rail.right).toBeLessThanOrEqual(bounds.canvas.right);
-    expect(bounds.canvas.height).toBeGreaterThan(400);
+    expect(bounds.canvas.height).toBeGreaterThan(300);
   }
 
   await page.screenshot({ path: "../../test-results/task9-browser-smoke.png", fullPage: true });

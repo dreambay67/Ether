@@ -74,7 +74,8 @@ test("bounds all four pane directions so resizing cannot starve the canvas", asy
   await openShell(page);
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByRole("button", { name: "Show Live output" }).click();
+  const showReferenceDesk = page.getByRole("button", { name: "Show Reference Desk" });
+  if (await showReferenceDesk.count()) await showReferenceDesk.click();
   await page.getByRole("button", { name: "Show Run desk" }).click();
   const resize = async (label: string, key: string) => {
     const separator = page.getByRole("separator", { name: `Resize ${label}` });
@@ -83,7 +84,7 @@ test("bounds all four pane directions so resizing cannot starve the canvas", asy
   };
   await resize("Build tools", "ArrowRight");
   await resize("Project lens", "ArrowLeft");
-  await resize("Live output", "ArrowDown");
+  await resize("Reference Desk", "ArrowDown");
   await resize("Run desk", "ArrowUp");
 
   const layout = await page.evaluate(() => {

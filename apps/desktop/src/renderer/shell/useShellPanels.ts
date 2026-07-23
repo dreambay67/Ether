@@ -15,11 +15,19 @@ export const shellPanelLimits: Record<ShellPanelId, { min: number; max: number }
   runs: { min: 104, max: 260 }
 };
 
+export function shellPanelLimitsFor(workspace: WorkspaceId, panel: ShellPanelId) {
+  const limits = shellPanelLimits[panel];
+  if (workspace !== "build") return limits;
+  if (panel === "artifacts") return { ...limits, max: 180 };
+  if (panel === "runs") return { ...limits, max: 148 };
+  return limits;
+}
+
 const initialWorkspacePanels: Record<WorkspaceId, PanelLayout> = {
   build: {
     tools: { size: 184, collapsed: false },
     inspector: { size: 260, collapsed: false },
-    artifacts: { size: 300, collapsed: false },
+    artifacts: { size: 180, collapsed: false },
     runs: { size: 148, collapsed: true }
   },
   focus: {
@@ -53,13 +61,14 @@ export function useShellPanels(documentId: string) {
   const panels = workspacePanels[workspace];
 
   const setPanelSize = useCallback((panel: ShellPanelId, size: number) => {
+    const limits = shellPanelLimitsFor(workspace, panel);
     setWorkspacePanels((current) => ({
       ...current,
       [workspace]: {
         ...current[workspace],
         [panel]: {
           ...current[workspace][panel],
-          size: clamp(size, shellPanelLimits[panel].min, shellPanelLimits[panel].max)
+          size: clamp(size, limits.min, limits.max)
         }
       }
     }));
@@ -91,7 +100,7 @@ function normalizeWorkspacePanels(
     const layout = Object.fromEntries(
       (Object.keys(fallback[workspace]) as ShellPanelId[]).map((panel) => {
         const stored = isRecord(storedLayout[panel]) ? storedLayout[panel] : {};
-        const limits = shellPanelLimits[panel];
+        const limits = shellPanelLimitsFor(workspace, panel);
         const size = typeof stored.size === "number" && Number.isFinite(stored.size)
           ? clamp(stored.size, limits.min, limits.max)
           : fallback[workspace][panel].size;

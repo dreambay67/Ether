@@ -134,7 +134,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
 
   const selectWorker = async () => {
     await page.locator('[data-testid="rf__node-worker"] .ether-node-main p').click();
-    await expect(page.getByRole("button", { name: "Compare" })).toHaveCount(2);
+    await expect(page.getByTestId("node-inspector").getByRole("button", { name: "Compare" })).toHaveCount(2);
   };
   await page.getByRole("button", { name: "Approve" }).first().click();
   await selectWorker();
@@ -143,8 +143,9 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByRole("textbox", { name: "Manual output text output-version-one" }).fill("Manual descendant");
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
   await selectWorker();
-  await page.getByRole("button", { name: "Compare" }).nth(0).click();
-  await page.getByRole("button", { name: "Compare" }).nth(1).click();
+  const outputCompareButtons = page.getByTestId("node-inspector").getByRole("button", { name: "Compare" });
+  await outputCompareButtons.nth(0).click();
+  await outputCompareButtons.nth(1).click();
   await expect(page.getByTestId("output-compare")).toBeVisible();
   await page.getByRole("combobox", { name: "Pin lane output-version-one" }).selectOption("lane-two");
   await page.getByRole("button", { name: "Pin" }).first().click();
