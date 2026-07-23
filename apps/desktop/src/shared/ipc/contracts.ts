@@ -142,7 +142,7 @@ export const desktopIpcContracts = {
   [desktopIpcChannels.document.new]: { request: empty, response: resultSchema(DocumentDescriptorSchema) },
   [desktopIpcChannels.document.open]: { request: empty, response: resultSchema(DocumentDescriptorSchema) },
   [desktopIpcChannels.document.openDropped]: {
-    request: z.object({ path: z.string().min(1) }).strict(),
+    request: z.object({ documentId: id, pathGrantId: id }).strict(),
     response: resultSchema(DocumentDescriptorSchema)
   },
   [desktopIpcChannels.document.save]: { request: documentScope, response: resultSchema(DocumentDescriptorSchema) },
@@ -184,6 +184,14 @@ export const desktopIpcContracts = {
     request: z.object({ documentId: id, purpose: z.enum(["export", "live-output"]) }).strict(),
     response: resultSchema(z.object({ grantId: id, displayName: z.string().min(1) }).strict().nullable())
   },
+  [desktopIpcChannels.permissions.grantDroppedFile]: {
+    request: z.object({
+      documentId: id,
+      purpose: z.enum(["open-document", "reference"]),
+      nativePath: z.string().min(1)
+    }).strict(),
+    response: resultSchema(z.object({ grantId: id, displayName: z.string().min(1) }).strict())
+  },
   [desktopIpcChannels.references.chooseAndLink]: {
     request: z.object({
       documentId: id,
@@ -191,7 +199,7 @@ export const desktopIpcContracts = {
       nodeId: id,
       role: ConnectionRoleSchema,
       storage: z.enum(["link", "embed"]),
-      droppedPath: z.string().min(1).optional()
+      pathGrantId: id.optional()
     }).strict(),
     response: resultSchema(ReferenceFileSelectionResultSchema)
   },

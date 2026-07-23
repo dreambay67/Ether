@@ -29,7 +29,7 @@ async function root() {
 
 function input(projectPath: string, references: GenerationProviderInput["references"] = []): GenerationProviderInput {
   return {
-    projectPath,
+    workspacePath: projectPath,
     runId: "run-1",
     generationNodeId: "image",
     iteration: 1,
@@ -47,7 +47,10 @@ function fakeRunner(env: Record<string, string | undefined>, calls: ProviderProc
       ...call,
       command: process.execPath,
       args: [fixture, ...call.args],
-      env: { ...process.env, ...env, ...call.env }
+      env: Object.fromEntries(
+        Object.entries({ ...process.env, ...env, ...call.env })
+          .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      )
     }, options);
   };
 }
@@ -240,7 +243,7 @@ describe("Antigravity image provider", () => {
     expect(() => buildAntigravityProcessCall({
       executablePath: "agy",
       env: {},
-      projectPath: "C:\\original-project",
+      workspacePath: "C:\\original-project",
       request: {
         profile: "nano-banana-2",
         prompt: "prompt",

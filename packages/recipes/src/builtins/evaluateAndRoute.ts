@@ -13,6 +13,6 @@ export const evaluateAndRouteRecipe = manifest({
   id: "evaluate-and-route", title: "Evaluate and Route", description: "Pair a visible human comparison with transparent evaluation rules and non-destructive collection routes.",
   parameters: [referenceParameter("Artifacts to evaluate")],
   graph: graph(graphRef, "Evaluate and Route", [inputs, compare, evaluate, filter, selects, rework], [edge("inputs-compare", "inputs", "compare", "image"), edge("compare-evaluate", "compare", "evaluate", "image"), edge("evaluate-filter", "evaluate", "filter", "data"), edge("filter-selects", "filter", "selects", "data"), edge("filter-rework", "filter", "rework", "data", "negative")], "inputs"),
-  requirements: [llm], checkpoints: [checkpoint(graphRef, "compare", "Confirm the candidate set")], calls: 1, workItems: 1,
+  requirements: [llm], checkpoints: [checkpoint(graphRef, "compare", "Confirm the candidate set")], calls: 1, workItems: 5,
   scenario: { id: "evaluate-and-route-fake", steps: [{ kind: "success", requirementId: "evaluate", latencyMs: 8, outputs: [{ graphRef, nodeRef: "evaluate", channel: "data", fixtureId: "evaluation-data", mediaType: "application/json" }] }] }
 });

@@ -49,6 +49,7 @@ import {
   ProviderCapabilitySchema
 } from "./outputs.js";
 import {
+  CapabilityRequirementSchema,
   RecipeManifestSchema,
   RecipeParameterSchema,
   RecipeParameterValueSchema
@@ -1053,7 +1054,22 @@ const recipeSetupSchemaResponseSchema = z
   .object({
     recipeId: idSchema,
     version: z.string().min(1),
-    parameters: z.array(RecipeParameterSchema)
+    parameters: z.array(RecipeParameterSchema),
+    capabilities: z.array(z.object({
+      requirementId: idSchema,
+      operation: CapabilityRequirementSchema.shape.operation,
+      inputChannels: CapabilityRequirementSchema.shape.inputChannels,
+      outputChannels: CapabilityRequirementSchema.shape.outputChannels,
+      state: z.enum(["primary", "substitution", "compatible", "missing"]),
+      selectedProviderId: idSchema.nullable(),
+      selectedProfileId: idSchema.nullable(),
+      options: z.array(z.object({
+        providerId: idSchema,
+        profileId: idSchema,
+        priority: z.number().int().nonnegative(),
+        available: z.boolean()
+      }).strict())
+    }).strict())
   })
   .strict();
 const recoveryStatusResponseSchema = z

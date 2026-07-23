@@ -98,7 +98,7 @@ export class CodexCliAssistantProvider implements AssistantProvider {
       createCodexProviderProcessCall({
         command: codexCliPath,
         args,
-        cwd: input.projectPath,
+        cwd: input.workspacePath,
         env: this.env,
         stdin: prompt
       })
@@ -170,7 +170,7 @@ function buildCodexAssistantExecArgs(
   const args = [
     "exec",
     "--cd",
-    input.projectPath,
+    input.workspacePath,
     "--skip-git-repo-check",
     "--sandbox",
     "workspace-write",
@@ -263,7 +263,7 @@ Rules:
 
 async function createAssistantJobPaths(input: AssistantProviderInput) {
   const jobId = `${sanitizePathSegment(input.assistantNodeId)}-${randomUUID()}`;
-  const jobDir = path.join(input.projectPath, "runs", "providers", input.runId, jobId);
+  const jobDir = path.join(input.workspacePath, "runs", "providers", input.runId, jobId);
   const outputDir = path.join(jobDir, "outputs");
 
   await mkdir(outputDir, { recursive: true });

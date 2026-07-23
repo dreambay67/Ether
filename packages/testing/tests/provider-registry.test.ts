@@ -72,7 +72,7 @@ function isProcessRunning(pid: number) {
 
 function providerInput(projectPath: string): GenerationProviderInput {
   return {
-    projectPath,
+    workspacePath: projectPath,
     runId: "run-1",
     generationNodeId: "generation",
     iteration: 2,
@@ -533,7 +533,7 @@ describe("generation provider registry", () => {
     const projectPath = await createTempRoot();
     const provider = new FakeImageProvider();
     const editInput = {
-      projectPath,
+      workspacePath: projectPath,
       runId: "run-edit-1",
       editNodeId: "edit-upscale",
       editSubtype: "Upscale",
@@ -750,7 +750,7 @@ describe("generation provider registry", () => {
     });
 
     const result = await provider.run({
-      projectPath,
+      workspacePath: projectPath,
       runId: "run-assistant",
       assistantNodeId: "assistant",
       assistantSubtype: "Brainstormer",

@@ -11,7 +11,7 @@ describe("preload filesystem boundary", () => {
     });
 
     expect(bridge).not.toHaveProperty("file");
-    expect(Object.keys(bridge.application).sort()).toEqual(["command", "query"]);
+    expect(Object.keys(bridge.application).sort()).toEqual(["command", "onEvent", "query"]);
     expect(JSON.stringify(Object.keys(bridge))).not.toMatch(/path|filesystem|ipc|shell/i);
   });
 });

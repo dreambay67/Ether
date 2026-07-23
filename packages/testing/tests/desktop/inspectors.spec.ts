@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ApplicationCommandSchema, ApplicationQuerySchema } from "@ether/schema";
+import { ApplicationCommandSchema, ApplicationQuerySchema, type EtherGraph } from "@ether/schema";
 
 test("keeps inspector edits conflict-safe while exposing runtime, review, and provider controls", async ({ page }) => {
   test.setTimeout(45_000);
@@ -7,7 +7,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.addInitScript(() => {
     const now = new Date(); const completed = new Date(now.getTime() - 8_000).toISOString();
     let documentRevision = 1; let documentEventListener: ((event: unknown) => void) | undefined;
-    let graph = {
+    let graph: EtherGraph = {
       id: "inspector-graph", title: "Inspector fixture", kind: "root", createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z",
       nodes: [
         { id: "prompt", definitionId: "prompt.text", title: "Direction", position: { x: 80, y: 100 }, size: { width: 250, height: 150 }, config: { kind: "prompt.text", body: "A quiet editorial still life", assembly: "append" }, presentation: { collapsed: false, accent: "default", previewMode: "content" } },
@@ -36,7 +36,22 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
     Object.defineProperty(window, "__inspectorQueries", { value: queries });
     Object.defineProperty(window, "__externalPromptUpdate", { value: () => {
       documentRevision += 1;
-      graph = { ...graph, nodes: graph.nodes.map((node) => node.id === "prompt" ? { ...node, title: `Externally renamed direction ${documentRevision}`, config: { kind: "prompt.text", body: `Externally revised prompt ${documentRevision}`, assembly: "append" } } : node) };
+      graph = {
+        ...graph,
+        nodes: graph.nodes.map((node) =>
+          node.id === "prompt" && node.definitionId === "prompt.text"
+            ? {
+                ...node,
+                title: `Externally renamed direction ${documentRevision}`,
+                config: {
+                  kind: "prompt.text",
+                  body: `Externally revised prompt ${documentRevision}`,
+                  assembly: "append"
+                }
+              }
+            : node
+        )
+      };
       documentEventListener?.({ kind: "snapshot", documentId: "inspector-document", revision: documentRevision, saveState: "saved", snapshot: descriptor() });
     } });
     Object.defineProperty(window, "ether", { value: {
@@ -51,7 +66,21 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
           if (operation?.type === "updateNode" && operation.nodeId && operation.node) graph = { ...graph, nodes: graph.nodes.map((node) => node.id === operation.nodeId ? operation.node! : node) };
           if (command.name === "reference.assignToSet") {
             const payload = command.payload as { nodeId: string; members: Array<{ kind: "linked-reference"; referenceId: string; enabled: boolean }>; replace: boolean };
-            graph = { ...graph, nodes: graph.nodes.map((node) => node.id !== payload.nodeId ? node : { ...node, config: { ...node.config, members: payload.replace ? payload.members : [...((node.config as { members?: typeof payload.members }).members ?? []), ...payload.members] } }) };
+            graph = {
+              ...graph,
+              nodes: graph.nodes.map((node) => {
+                if (node.id !== payload.nodeId || node.definitionId !== "reference.set") return node;
+                return {
+                  ...node,
+                  config: {
+                    ...node.config,
+                    members: payload.replace
+                      ? payload.members
+                      : [...(node.config.members ?? []), ...payload.members]
+                  }
+                };
+              })
+            };
           }
           return command.name === "run.preview" ? { payload: { plan: { id: "plan-preview", estimatedCalls: 1 } } } : { payload: { documentRevisionId: "revision-2", graphRevisions: [{ graphId: "inspector-graph", revisionId: `graph-revision-${commands.length + 1}` }] } };
         },
@@ -184,7 +213,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await expect(page.getByTestId("node-inspector").getByRole("button", { name: "Replace set" })).toBeVisible();
   const geometry = await page.getByTestId("pane-inspector").evaluate((pane) => {
     const root = pane.querySelector<HTMLElement>(".ether-inspector")!;
-    const controls = [...root.querySelectorAll<HTMLElement>("button,input,textarea,select")].filter((element) => {
+    const controls = Array.from(root.querySelectorAll<HTMLElement>("button,input,textarea,select")).filter((element) => {
       const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.height > 0;
     });
     const overlap = controls.some((control, index) => controls.slice(index + 1).some((other) => {

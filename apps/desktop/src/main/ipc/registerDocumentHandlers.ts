@@ -11,9 +11,7 @@ import {
 import type { DesktopApplicationService } from "../services/applicationService.js";
 import type { ProviderService } from "../services/providerService.js";
 
-type Handler = (
-  request: Record<string, never> | { documentId: string } | { path: string }
-) => Promise<unknown> | unknown;
+type Handler = (request: Record<string, unknown>) => Promise<unknown> | unknown;
 
 export function registerDocumentHandlers(options: {
   ipcMain: IpcMain;
@@ -30,8 +28,8 @@ export function registerDocumentHandlers(options: {
     [desktopIpcChannels.document.new, () => service.newDocument()],
     [desktopIpcChannels.document.open, () => openDocument()],
     [desktopIpcChannels.document.openDropped, (request) => {
-      const dropped = request as { path: string };
-      return openPath(dropped.path);
+      const dropped = request as { documentId: string; pathGrantId: string };
+      return openPath(service.consumeDroppedDocumentGrant(dropped.documentId, dropped.pathGrantId));
     }],
     [desktopIpcChannels.document.save, (request) => service.save(scopedId(request))],
     [desktopIpcChannels.document.saveAs, (request) => service.saveAs(scopedId(request))],
@@ -58,6 +56,14 @@ export function registerDocumentHandlers(options: {
     [desktopIpcChannels.permissions.grantFolder, (request) => {
       const grant = request as { documentId: string; purpose: "export" | "live-output" };
       return service.grantFolder(grant.documentId, grant.purpose);
+    }],
+    [desktopIpcChannels.permissions.grantDroppedFile, (request) => {
+      const grant = request as {
+        documentId: string;
+        purpose: "open-document" | "reference";
+        nativePath: string;
+      };
+      return service.grantDroppedFile(grant.documentId, grant.purpose, grant.nativePath);
     }],
     [desktopIpcChannels.references.list, (request) => service.listReferences(scopedId(request))],
     [desktopIpcChannels.references.act, (request) => {

@@ -26,7 +26,13 @@ async function findWorkspaceManifests(): Promise<string[]> {
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
-        manifests.push(path.join(workspaceRoot, entry.name, "package.json"));
+        const manifestPath = path.join(workspaceRoot, entry.name, "package.json");
+        try {
+          await access(path.join(repositoryRoot, manifestPath));
+          manifests.push(manifestPath);
+        } catch {
+          // Empty or retired package directories are not workspace members.
+        }
       }
     }
   }

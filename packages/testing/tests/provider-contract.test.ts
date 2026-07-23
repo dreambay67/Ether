@@ -57,7 +57,7 @@ function isProcessRunning(pid: number) {
 
 function imageInput(projectPath: string): GenerationProviderInput {
   return {
-    projectPath,
+    workspacePath: projectPath,
     runId: "run-1",
     generationNodeId: "generation",
     iteration: 1,
@@ -79,7 +79,7 @@ function imageInput(projectPath: string): GenerationProviderInput {
 
 function assistantInput(projectPath: string): AssistantProviderInput {
   return {
-    projectPath,
+    workspacePath: projectPath,
     runId: "run-assistant",
     assistantNodeId: "assistant",
     assistantSubtype: "Brainstormer",
@@ -95,7 +95,7 @@ function assistantInput(projectPath: string): AssistantProviderInput {
 
 function editInput(projectPath: string): ImageEditProviderInput {
   return {
-    projectPath,
+    workspacePath: projectPath,
     runId: "run-edit",
     editNodeId: "edit",
     editSubtype: "Inpaint",

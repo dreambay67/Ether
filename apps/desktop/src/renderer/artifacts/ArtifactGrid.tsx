@@ -1,7 +1,7 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { File, Grip, Image as ImageIcon } from "lucide-react";
 import type { Artifact } from "@ether/schema";
-import { embeddedArtifactSource } from "./localImageSource";
+import { embeddedArtifactSource } from "./embeddedArtifactSource";
 
 const columns = 5;
 const rowHeight = 188;

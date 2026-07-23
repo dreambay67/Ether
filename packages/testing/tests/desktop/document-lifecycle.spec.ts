@@ -2529,9 +2529,11 @@ describe("document IPC lifecycle", () => {
       const created = await invoke(desktopIpcChannels.document.new, {});
       expect(created).toMatchObject({ ok: true, value: { displayName: "Untitled" } });
       const createdId = (created.value as { documentId: string }).documentId;
-      await expect(invoke(desktopIpcChannels.document.close, { documentId: createdId }))
-        .resolves.toMatchObject({ ok: true, value: null });
-      await expect(invoke(desktopIpcChannels.document.openDropped, { path: originalPath }))
+      const grant = await service.grantDroppedFile(createdId, "open-document", originalPath);
+      await expect(invoke(desktopIpcChannels.document.openDropped, {
+        documentId: createdId,
+        pathGrantId: grant.grantId
+      }))
         .resolves.toMatchObject({ ok: true, value: { documentId: initial.documentId } });
     } finally {
       dispose();

@@ -12,6 +12,6 @@ export const imageEditWithMaskRecipe = manifest({
   id: "image-edit-with-mask", title: "Image Edit with Mask", description: "Bring a supplied image, an explicit local mask, and a precise instruction into one immutable edit output.",
   parameters: [briefParameter("Remove the background distraction while preserving the product edge and existing light"), referenceParameter("Source image", 1)],
   graph: graph(graphRef, "Image Edit with Mask", [source, prompt, mask, edit, compare], [edge("source-mask", "source", "mask", "image"), edge("source-edit", "source", "edit", "image"), edge("mask-edit", "mask", "edit", "mask"), edge("prompt-edit", "prompt", "edit", "text"), edge("edit-compare", "edit", "compare", "image")], "source"),
-  requirements: [editRequirement], checkpoints: [checkpoint(graphRef, "compare", "Approve the edited output")], calls: 1, workItems: 1,
+  requirements: [editRequirement], checkpoints: [checkpoint(graphRef, "compare", "Approve the edited output")], calls: 1, workItems: 3,
   scenario: { id: "image-edit-with-mask-fake", steps: [{ kind: "success", requirementId: "edit", latencyMs: 14, outputs: [{ graphRef, nodeRef: "edit", channel: "image", fixtureId: "masked-edit", mediaType: "image/png" }] }] }
 });

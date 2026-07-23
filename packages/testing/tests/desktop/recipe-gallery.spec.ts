@@ -39,10 +39,22 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
       graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) },
       application: {
         onEvent: () => () => undefined,
-        query: async (query: { name: string }) => query.name === "recipe.catalog"
+        query: async (query: { name: string; payload?: { recipeId?: string } }) => query.name === "recipe.catalog"
           ? { payload: { recipes } }
           : query.name === "recipe.setupSchema"
-            ? { payload: { parameters: [{ id: "brief", title: "Creative brief", description: "The direction for this graph.", type: "string", required: true, defaultValue: "A precise editorial still life", minLength: 3, maxLength: 1200 }] } }
+            ? { payload: {
+                parameters: [{ id: "brief", title: "Creative brief", description: "The direction for this graph.", type: "string", required: true, defaultValue: "A precise editorial still life", minLength: 3, maxLength: 1200 }],
+                capabilities: [{
+                  requirementId: "prompt", operation: "generate-image", inputChannels: ["text"], outputChannels: ["image"],
+                  state: query.payload?.recipeId === "provider-blocked" ? "missing" : "compatible",
+                  selectedProviderId: query.payload?.recipeId === "provider-blocked" ? null : "ether-fake-local",
+                  selectedProfileId: query.payload?.recipeId === "provider-blocked" ? null : "fake-image-default",
+                  options: [
+                    { providerId: "codex", profileId: "image-default", priority: 0, available: false },
+                    { providerId: "antigravity", profileId: "nano-banana-2", priority: 1, available: false }
+                  ]
+                }]
+              } }
             : { payload: { graph, documentRevisionId: "revision-1", graphRevisionId: "graph-revision-1" } },
         command: async (command: { name: string; payload: { recipeId?: string } }) => {
           if (command.name === "recipe.preview") {
@@ -62,10 +74,15 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
   await page.getByRole("button", { name: "Recipes" }).click();
   await expect(page.getByTestId("recipe-gallery")).toBeVisible();
   await page.getByTestId("recipe-card-provider-blocked").click();
-  await page.getByRole("button", { name: "Preview" }).click();
-  await expect(page.getByTestId("recipe-gallery-status")).toContainText("Blocked: No enabled provider");
+  await expect(page.getByTestId("recipe-gallery-status")).toContainText("Blocked: 1 provider requirement");
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Provider missing");
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("No enabled provider");
+  await expect(page.getByRole("button", { name: "Preview" })).toBeDisabled();
 
   await page.getByTestId("recipe-card-prompt-to-image").click();
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Compatible provider");
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("ether-fake-local");
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Fallback · antigravity");
   await page.getByRole("button", { name: "Preview" }).click();
   await expect(page.getByTestId("recipe-gallery-status")).toContainText("Preview ready");
   await page.getByRole("button", { name: "Insert recipe" }).click();

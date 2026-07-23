@@ -3,8 +3,15 @@ import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
+import type { ExecutionProviderFacets } from "@ether/execution";
 import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider } from "@ether/providers";
-import { ApplicationCommandSchema, type EtherGraph, type GraphTransaction, type ProviderCapability } from "@ether/schema";
+import {
+  ApplicationCommandSchema,
+  EtherGraphSchema,
+  type EtherGraph,
+  type GraphTransaction,
+  type ProviderCapability
+} from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 const roots: string[] = [];
@@ -24,8 +31,14 @@ function graph(): EtherGraph {
   };
 }
 
-function oneNodeGraph(id: string, definitionId: EtherGraph["nodes"][number]["definitionId"], config: EtherGraph["nodes"][number]["config"]): EtherGraph {
-  return {
+type GraphNode = EtherGraph["nodes"][number];
+
+function oneNodeGraph<DefinitionId extends GraphNode["definitionId"]>(
+  id: string,
+  definitionId: DefinitionId,
+  config: Extract<GraphNode, { definitionId: DefinitionId }>["config"]
+): EtherGraph {
+  return EtherGraphSchema.parse({
     ...graph(),
     id: `graph-${id}`,
     nodes: [{
@@ -37,7 +50,7 @@ function oneNodeGraph(id: string, definitionId: EtherGraph["nodes"][number]["def
       config,
       presentation: { collapsed: false, accent: "default", previewMode: "content" }
     }]
-  };
+  });
 }
 
 function transaction(documentRevisionId: string, graphRevisionId: string): GraphTransaction {
@@ -318,9 +331,9 @@ describe("Ether 4.0 application boundary", () => {
       aspectRatios: [], resolutions: [], maxReferences: 8, maxOutputsPerCall: 1,
       supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: []
     };
-    const facets = {
-      worker: { run: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["assistant" as const], text: "Rewritten launch prompt" }) },
-      evaluation: { evaluate: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["vision-evaluation" as const], items: [], summary: "No inputs to score" }) }
+    const facets: ExecutionProviderFacets = {
+      worker: { run: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["assistant.text"], text: "Rewritten launch prompt" }) },
+      evaluation: { evaluate: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["evaluation.vision"], items: [], summary: "No inputs to score" }) }
     };
     const app = new EtherApplication({
       appDataRoot: root,
@@ -328,7 +341,7 @@ describe("Ether 4.0 application boundary", () => {
       provider: new FakeImageProvider(),
       providerCapabilities: [reasoningCapability],
       providerResolver: ({ binding }) => {
-        if (binding !== null) routed.push({ modelId: binding.modelId, providerId: binding.providerId });
+        if (binding != null) routed.push({ modelId: binding.modelId, providerId: binding.providerId });
         return facets;
       }
     });

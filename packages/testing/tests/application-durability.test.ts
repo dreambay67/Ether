@@ -1091,7 +1091,7 @@ describe("durable application execution", () => {
         graphId: "graph-root",
         scope: { kind: "graph" }
       })
-    ).rejects.toMatchObject({ code: "PROVIDER_MISMATCH" });
+    ).rejects.toMatchObject({ code: "PROVIDER_CAPABILITY_UNAVAILABLE" });
     await application.closeDocument();
   });
 
@@ -1136,7 +1136,7 @@ describe("durable application execution", () => {
         contentHash: ready.plan.contentHash,
         runPermitId: ready.permit.id
       })
-    ).rejects.toMatchObject({ code: "STALE_PLAN" });
+    ).rejects.toMatchObject({ code: "PERMIT_REVOKED" });
     await copy.closeDocument();
   });
 

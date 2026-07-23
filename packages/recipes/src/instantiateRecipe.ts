@@ -16,6 +16,7 @@ import type {
   InstantiateRecipeInput,
   RecipeBlocker,
   RecipeInstantiation,
+  RecipeProviderSetup,
   RecipeProviderResolution,
   ResolvedRecipeParameter
 } from "./types.js";
@@ -86,6 +87,62 @@ function capabilitySatisfies(requirement: CapabilityRequirement, capability: Pro
     && (!requirement.supportsSeed || capability.supportsSeed);
 }
 
+function providerResolutionFor(
+  manifest: RecipeManifest,
+  requirement: CapabilityRequirement,
+  capabilities: readonly ProviderCapability[]
+): { resolution: RecipeProviderResolution | null; options: RecipeProviderSetup["options"] } {
+  const substitutions = manifest.substitutions
+    .filter((item) => item.requirementId === requirement.id)
+    .sort((left, right) => left.priority - right.priority || left.providerId.localeCompare(right.providerId));
+  const options = substitutions.map((candidate) => ({
+    providerId: candidate.providerId,
+    profileId: candidate.profileId,
+    priority: candidate.priority,
+    available: capabilities.some((capability) =>
+      capability.providerId === candidate.providerId
+      && capability.profileId === candidate.profileId
+      && capabilitySatisfies(requirement, capability))
+  }));
+  const substitution = substitutions.find((candidate) => capabilities.some((capability) =>
+    capability.providerId === candidate.providerId
+    && capability.profileId === candidate.profileId
+    && capabilitySatisfies(requirement, capability)
+  ));
+  const capability = substitution === undefined
+    ? capabilities.find((candidate) => capabilitySatisfies(requirement, candidate))
+    : capabilities.find((candidate) => candidate.providerId === substitution.providerId && candidate.profileId === substitution.profileId && capabilitySatisfies(requirement, candidate));
+  return {
+    options,
+    resolution: capability === undefined ? null : {
+      requirementId: requirement.id,
+      capability,
+      mode: substitution === undefined ? "compatible" : substitution.priority === 0 ? "primary" : "substitution",
+      substitutionProviderId: substitution?.providerId ?? null,
+      substitutionProfileId: substitution?.profileId ?? null
+    }
+  };
+}
+
+export function inspectRecipeProviderSetup(
+  manifest: RecipeManifest,
+  capabilities: readonly ProviderCapability[]
+): readonly RecipeProviderSetup[] {
+  return manifest.capabilityRequirements.map((requirement) => {
+    const { resolution, options } = providerResolutionFor(manifest, requirement, capabilities);
+    return {
+      requirementId: requirement.id,
+      operation: requirement.operation,
+      inputChannels: requirement.inputChannels,
+      outputChannels: requirement.outputChannels,
+      state: resolution?.mode ?? "missing",
+      selectedProviderId: resolution?.capability.providerId ?? null,
+      selectedProfileId: resolution?.capability.profileId ?? null,
+      options
+    };
+  });
+}
+
 function resolveProviders(
   manifest: RecipeManifest,
   capabilities: readonly ProviderCapability[]
@@ -93,33 +150,17 @@ function resolveProviders(
   const resolutions: RecipeProviderResolution[] = [];
   const blockers: RecipeBlocker[] = [];
   for (const requirement of manifest.capabilityRequirements) {
-    const substitutions = manifest.substitutions
-      .filter((item) => item.requirementId === requirement.id)
-      .sort((left, right) => left.priority - right.priority || left.providerId.localeCompare(right.providerId));
-    const substitution = substitutions.find((candidate) => capabilities.some((capability) =>
-      capability.providerId === candidate.providerId
-      && capability.profileId === candidate.profileId
-      && capabilitySatisfies(requirement, capability)
-    ));
-    const capability = substitution === undefined
-      ? capabilities.find((candidate) => capabilitySatisfies(requirement, candidate))
-      : capabilities.find((candidate) => candidate.providerId === substitution.providerId && candidate.profileId === substitution.profileId && capabilitySatisfies(requirement, candidate));
-    if (capability === undefined) {
+    const { resolution, options } = providerResolutionFor(manifest, requirement, capabilities);
+    if (resolution === null) {
       blockers.push({
         code: "CAPABILITY_MISSING",
         message: `No enabled provider can satisfy ${requirement.id} (${requirement.operation}).`,
         requirement,
-        supportedSubstitutions: substitutions.map((item) => ({ providerId: item.providerId, profileId: item.profileId }))
+        supportedSubstitutions: options.map((item) => ({ providerId: item.providerId, profileId: item.profileId }))
       });
       continue;
     }
-    resolutions.push({
-      requirementId: requirement.id,
-      capability,
-      mode: substitution === undefined ? "compatible" : substitution.priority === 0 ? "primary" : "substitution",
-      substitutionProviderId: substitution?.providerId ?? null,
-      substitutionProfileId: substitution?.profileId ?? null
-    });
+    resolutions.push(resolution);
   }
   return { resolutions, blockers };
 }

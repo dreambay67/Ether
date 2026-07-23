@@ -123,7 +123,7 @@ describe("Codex App Server authenticated conformance", () => {
       };
 
       const baseInput = {
-        projectPath: runRoot,
+        workspacePath: runRoot,
         model: defaultModel.id,
         reasoningEffort: selectedReasoningEffort,
         requestedAt: new Date().toISOString()

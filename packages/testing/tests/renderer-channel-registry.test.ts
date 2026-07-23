@@ -8,7 +8,7 @@ import {
 } from "../../../apps/desktop/src/renderer/canvas/ports/channelRegistry";
 
 describe("renderer channel registry", () => {
-  it("keeps the Ether 2.5 channel and role lists exact", () => {
+  it("keeps the Ether 4.0 channel and role lists exact", () => {
     expect(PAYLOAD_CHANNELS).toEqual(["text", "image", "mask", "data", "video", "audio"]);
     expect(CONNECTION_ROLES).toEqual([
       "general",

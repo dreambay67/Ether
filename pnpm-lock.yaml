@@ -139,15 +139,6 @@ importers:
         specifier: workspace:*
         version: link:../schema
 
-  packages/engine:
-    dependencies:
-      '@ether/providers':
-        specifier: workspace:*
-        version: link:../providers
-      zod:
-        specifier: ^3.25.67
-        version: 3.25.76
-
   packages/execution:
     dependencies:
       '@ether/document':
@@ -228,9 +219,6 @@ importers:
       '@ether/document':
         specifier: workspace:*
         version: link:../document
-      '@ether/engine':
-        specifier: workspace:*
-        version: link:../engine
       '@ether/execution':
         specifier: workspace:*
         version: link:../execution

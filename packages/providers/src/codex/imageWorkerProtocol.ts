@@ -40,7 +40,7 @@ export function createImageEditWorkerRequest(
 
 export function assertImageWorkerRequest(value: unknown): asserts value is ImageWorkerRequest {
   assertObject(value, "Codex image worker request");
-  assertString(value.projectPath, "Codex image worker request.projectPath");
+  assertString(value.workspacePath, "Codex image worker request.workspacePath");
   assertString(value.runId, "Codex image worker request.runId");
   assertString(value.generationNodeId, "Codex image worker request.generationNodeId");
   assertNumber(value.iteration, "Codex image worker request.iteration");
@@ -63,7 +63,7 @@ export function assertImageWorkerRequest(value: unknown): asserts value is Image
 
 export function assertImageEditWorkerRequest(value: unknown): asserts value is ImageEditWorkerRequest {
   assertObject(value, "Codex image edit worker request");
-  assertString(value.projectPath, "Codex image edit worker request.projectPath");
+  assertString(value.workspacePath, "Codex image edit worker request.workspacePath");
   assertString(value.runId, "Codex image edit worker request.runId");
   assertString(value.editNodeId, "Codex image edit worker request.editNodeId");
   assertString(value.editSubtype, "Codex image edit worker request.editSubtype");

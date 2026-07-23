@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import type { DocumentStore } from "@ether/document";
 import { validateFullGraphState } from "@ether/graph-kernel";
 import type { GenerationProvider } from "@ether/providers";
-import { BUILTIN_RECIPES, instantiateRecipe, recipeById } from "@ether/recipes";
+import { BUILTIN_RECIPES, inspectRecipeProviderSetup, instantiateRecipe, recipeById } from "@ether/recipes";
 import {
   ApplicationCommandResponseSchema,
   ApplicationQueryResponseSchema,
@@ -629,7 +629,12 @@ export async function executeApplicationQuery(
     case "recipe.catalog": return queryResponse(query, { recipes: BUILTIN_RECIPES });
     case "recipe.setupSchema": {
       const manifest = requireRecipe(query.payload.recipeId, query.payload.version);
-      return queryResponse(query, { recipeId: manifest.id, version: manifest.version, parameters: manifest.parameters });
+      return queryResponse(query, {
+        recipeId: manifest.id,
+        version: manifest.version,
+        parameters: manifest.parameters,
+        capabilities: inspectRecipeProviderSetup(manifest, await recipeCapabilities(app))
+      });
     }
   }
 }

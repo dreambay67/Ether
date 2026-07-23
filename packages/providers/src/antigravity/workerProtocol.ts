@@ -49,7 +49,7 @@ export function buildAntigravityPrompt(
 export function buildAntigravityProcessCall(input: {
   executablePath: string;
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;
-  projectPath: string;
+  workspacePath: string;
   request: AntigravityWorkerRequest;
 }): ProviderProcessCall {
   const attemptDirectory = path.resolve(input.request.attemptDirectory);

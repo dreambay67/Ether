@@ -111,7 +111,7 @@ export class CodexCliImageProvider implements GenerationProvider {
       createCodexProviderProcessCall({
         command: codexCliPath,
         args,
-        cwd: input.projectPath,
+        cwd: input.workspacePath,
         env: this.env,
         stdin: prompt
       })
@@ -164,7 +164,7 @@ export class CodexCliImageProvider implements GenerationProvider {
       createCodexProviderProcessCall({
         command: codexCliPath,
         args,
-        cwd: input.projectPath,
+        cwd: input.workspacePath,
         env: this.env,
         stdin: prompt
       })
@@ -266,7 +266,7 @@ function buildCodexExecArgs(
   const args = [
     "exec",
     "--cd",
-    input.projectPath,
+    input.workspacePath,
     "--skip-git-repo-check",
     "--sandbox",
     "workspace-write",
@@ -297,7 +297,7 @@ function buildCodexEditExecArgs(
   const args = [
     "exec",
     "--cd",
-    input.projectPath,
+    input.workspacePath,
     "--skip-git-repo-check",
     "--sandbox",
     "workspace-write",
@@ -474,7 +474,7 @@ Rules:
 async function createJobPaths(input: GenerationProviderInput | ImageEditProviderInput) {
   const nodeId = "generationNodeId" in input ? input.generationNodeId : input.editNodeId;
   const jobId = `${sanitizePathSegment(nodeId)}-${input.iteration}-${randomUUID()}`;
-  const jobDir = path.join(input.projectPath, "runs", "providers", input.runId, jobId);
+  const jobDir = path.join(input.workspacePath, "runs", "providers", input.runId, jobId);
   const outputDir = path.join(jobDir, "outputs");
 
   await mkdir(outputDir, { recursive: true });

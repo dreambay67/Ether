@@ -8,6 +8,7 @@ import {
   discoverAntigravityCli,
   redactSensitiveText,
   writeAntigravityConformance,
+  type AntigravityConformanceEvidence,
   type GenerationProviderInput,
   type ProviderExecutionContext
 } from "@ether/providers";
@@ -38,24 +39,24 @@ describe.runIf(liveEnabled)("Antigravity live conformance", () => {
       processTimeoutMs: 5 * 60 * 1_000
     });
     const startedAt = Date.now();
-    const evidence = {
-      schemaVersion: 1 as const,
+    const evidence: AntigravityConformanceEvidence = {
+      schemaVersion: 1,
       cli: { version: cli.version, sha256: cliHash },
       createdAt: new Date().toISOString(),
       attempt: {
         arguments: ["--sandbox", "--new-project", "--model", "Gemini 3.5 Flash (Medium)", "--add-dir", "<redacted-path>", "--print-timeout", "300s", "--log-file", "<redacted-path>", "--print", "<redacted-prompt>"],
         requestedProfileInstruction: "Use the built-in generative image tool exactly once; generate exactly one image using Nano Banana 2.",
-        exitState: "failure" as const
+        exitState: "failure"
       },
       profiles: [
-        { requestedProfile: "nano-banana-2" as const, result: "fail" as const, reason: "Conformance did not complete.", providerIdentity: null },
-        { requestedProfile: "nano-banana-pro" as const, result: "disabled" as const, reason: "Not live-probed to avoid repeated paid or quota-consuming generations.", providerIdentity: null },
-        { requestedProfile: "nano-banana-2-lite" as const, result: "disabled" as const, reason: "Not live-probed; verified 1K output evidence is required before enabling Lite.", providerIdentity: null, lite1kVerified: false }
+        { requestedProfile: "nano-banana-2", result: "fail", reason: "Conformance did not complete.", providerIdentity: null },
+        { requestedProfile: "nano-banana-pro", result: "disabled", reason: "Not live-probed to avoid repeated paid or quota-consuming generations.", providerIdentity: null },
+        { requestedProfile: "nano-banana-2-lite", result: "disabled", reason: "Not live-probed; verified 1K output evidence is required before enabling Lite.", providerIdentity: null, lite1kVerified: false }
       ]
     };
     try {
       const input: GenerationProviderInput = {
-        projectPath: runRoot, runId: randomUUID(), generationNodeId: "antigravity-live", iteration: 1,
+        workspacePath: runRoot, runId: randomUUID(), generationNodeId: "antigravity-live", iteration: 1,
         prompt: "Create a single clean square image of a blue ceramic sphere on a neutral background.", negativePrompt: "text, watermark, collage",
         sections: [], references: [], edgeRoles: [], outputCount: 1, requestedAt: new Date().toISOString(),
         output: { aspectRatio: "1:1", resolution: "provider-determined", width: 1024, height: 1024 }
@@ -67,6 +68,7 @@ describe.runIf(liveEnabled)("Antigravity live conformance", () => {
       const image = await readFile(artifact.sourcePath);
       const dimensions = artifact.metadata?.dimensions as { width: number; height: number } | undefined;
       if (!dimensions) throw new Error("Antigravity image did not report validated dimensions.");
+      if (evidence.attempt === undefined) throw new Error("Antigravity evidence is missing its attempt record.");
       evidence.attempt.exitState = "success";
       const providerIdentity = typeof artifact.metadata?.providerIdentity === "string" ? artifact.metadata.providerIdentity : null;
       evidence.profiles[0] = {

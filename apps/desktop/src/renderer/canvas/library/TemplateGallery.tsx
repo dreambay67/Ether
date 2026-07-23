@@ -7,12 +7,33 @@ export type RecipeSetupRequest = {
   parameters: readonly RecipeParameterValue[];
 };
 
+export type RecipeCapabilitySetup = {
+  requirementId: string;
+  operation: RecipeManifest["capabilityRequirements"][number]["operation"];
+  inputChannels: RecipeManifest["capabilityRequirements"][number]["inputChannels"];
+  outputChannels: RecipeManifest["capabilityRequirements"][number]["outputChannels"];
+  state: "primary" | "substitution" | "compatible" | "missing";
+  selectedProviderId: string | null;
+  selectedProfileId: string | null;
+  options: readonly {
+    providerId: string;
+    profileId: string;
+    priority: number;
+    available: boolean;
+  }[];
+};
+
+export type RecipeSetup = {
+  parameters: readonly RecipeParameter[];
+  capabilities: readonly RecipeCapabilitySetup[];
+};
+
 type RecipePreview = { transaction: GraphTransaction; warnings: readonly string[] };
 
 type TemplateGalleryProps = {
   recipes: readonly RecipeManifest[];
   readOnly?: boolean;
-  onLoadSetup(recipeId: string, version: string): Promise<readonly RecipeParameter[]>;
+  onLoadSetup(recipeId: string, version: string): Promise<RecipeSetup>;
   onPreviewRecipe(request: RecipeSetupRequest): Promise<RecipePreview>;
   onInstantiateRecipe(request: RecipeSetupRequest): Promise<void>;
 };
@@ -56,19 +77,34 @@ function errorMessage(error: unknown): string {
   return "The recipe backend did not complete this request.";
 }
 
+function capabilityStateLabel(state: RecipeCapabilitySetup["state"]): string {
+  switch (state) {
+    case "primary": return "Primary ready";
+    case "substitution": return "Substitution ready";
+    case "compatible": return "Compatible provider";
+    case "missing": return "Provider missing";
+  }
+}
+
 export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe }: TemplateGalleryProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [parameters, setParameters] = useState<readonly RecipeParameter[]>([]);
+  const [capabilities, setCapabilities] = useState<readonly RecipeCapabilitySetup[]>([]);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
   const [busy, setBusy] = useState<"setup" | "preview" | "insert" | null>(null);
   const [status, setStatus] = useState("Choose a recipe to inspect its setup.");
   const selected = useMemo(() => recipes.find((recipe) => `${recipe.id}@${recipe.version}` === selectedKey) ?? null, [recipes, selectedKey]);
-  const ready = selected !== null && busy === null && parameters.length > 0 && parameters.every((parameter) => parameterReady(parameter, values[parameter.id]));
+  const ready = selected !== null
+    && busy === null
+    && parameters.length > 0
+    && parameters.every((parameter) => parameterReady(parameter, values[parameter.id]))
+    && capabilities.every((capability) => capability.state !== "missing");
 
   useEffect(() => {
     if (selectedKey !== null && !recipes.some((recipe) => `${recipe.id}@${recipe.version}` === selectedKey)) {
       setSelectedKey(null);
       setParameters([]);
+      setCapabilities([]);
       setValues({});
     }
   }, [recipes, selectedKey]);
@@ -76,16 +112,25 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
   const choose = async (recipe: RecipeManifest) => {
     setSelectedKey(`${recipe.id}@${recipe.version}`);
     setParameters([]);
+    setCapabilities([]);
     setValues({});
     setBusy("setup");
     setStatus(`Loading ${recipe.title} setup…`);
     try {
       const setup = await onLoadSetup(recipe.id, recipe.version);
-      setParameters(setup);
-      setValues(valuesFor(setup));
-      setStatus(`${recipe.title} setup is ready.`);
+      setParameters(setup.parameters);
+      setCapabilities(setup.capabilities);
+      setValues(valuesFor(setup.parameters));
+      const missing = setup.capabilities.filter((capability) => capability.state === "missing").length;
+      const substitutions = setup.capabilities.filter((capability) => capability.state === "substitution").length;
+      setStatus(missing > 0
+        ? `Blocked: ${missing} provider requirement${missing === 1 ? "" : "s"} need configuration.`
+        : substitutions > 0
+          ? `${recipe.title} setup is ready with ${substitutions} declared substitution${substitutions === 1 ? "" : "s"}.`
+          : `${recipe.title} setup is ready.`);
     } catch (error) {
       setParameters([]);
+      setCapabilities([]);
       setValues({});
       setStatus(`Blocked: ${errorMessage(error)}`);
     } finally {
@@ -175,6 +220,40 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
               )}
             </label>
           ))}
+          <section className="recipe-provider-readiness" aria-label="Provider readiness">
+            <header>
+              <span>Provider readiness</span>
+              <small>{capabilities.length === 0 ? "This recipe uses local graph operations only." : `${capabilities.length} typed requirement${capabilities.length === 1 ? "" : "s"}`}</small>
+            </header>
+            {capabilities.map((capability) => (
+              <article
+                key={capability.requirementId}
+                className={`recipe-capability recipe-capability-${capability.state}`}
+                data-testid={`recipe-capability-${capability.requirementId}`}
+              >
+                <div>
+                  <strong>{capability.operation}</strong>
+                  <span>{capabilityStateLabel(capability.state)}</span>
+                </div>
+                <small>{capability.inputChannels.join(" + ")} → {capability.outputChannels.join(" + ")}</small>
+                <p>
+                  {capability.selectedProviderId === null
+                    ? "No enabled provider"
+                    : `${capability.selectedProviderId} · ${capability.selectedProfileId}`}
+                </p>
+                {capability.options.length > 0 ? (
+                  <ul aria-label={`${capability.operation} substitutions`}>
+                    {capability.options.map((option) => (
+                      <li key={`${option.providerId}:${option.profileId}`}>
+                        <span>{option.priority === 0 ? "Primary" : "Fallback"} · {option.providerId} · {option.profileId}</span>
+                        <em>{option.available ? "available" : "unavailable"}</em>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </article>
+            ))}
+          </section>
           <div className="recipe-setup-actions">
             <button type="button" disabled={!ready} onClick={() => void preview()}>Preview</button>
             <button type="submit" disabled={!ready || readOnly}>{busy === "insert" ? "Inserting…" : "Insert recipe"}</button>

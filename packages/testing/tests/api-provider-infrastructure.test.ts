@@ -14,7 +14,7 @@ import {
 
 function generationInput(): GenerationProviderInput {
   return {
-    projectPath: "C:\\Project",
+    workspacePath: "C:\\Project",
     runId: "run-1",
     generationNodeId: "generation",
     iteration: 1,
@@ -30,7 +30,7 @@ function generationInput(): GenerationProviderInput {
 
 function assistantInput(): AssistantProviderInput {
   return {
-    projectPath: "C:\\Project",
+    workspacePath: "C:\\Project",
     runId: "run-1",
     assistantNodeId: "assistant",
     assistantSubtype: "Brainstormer",
@@ -379,7 +379,8 @@ describe("optional API provider infrastructure", () => {
       "ether-fake-local",
       "codex-chatgpt-image-2",
       "google-nano-banana-pro",
-      "google-nano-banana-2"
+      "google-nano-banana-2",
+      "google-nano-banana-2-lite"
     ]);
     expect(descriptors.some((provider) => provider.route === "api-generation")).toBe(false);
     expect(diagnostics.optionalApiProviders?.generation).toMatchObject({

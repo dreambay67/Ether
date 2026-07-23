@@ -28,6 +28,6 @@ export const promptToImageRecipe = manifest({
   requirements: [generate],
   checkpoints: [checkpoint(graphRef, "compare", "Approve a first direction")],
   calls: 1,
-  workItems: 1,
+  workItems: 3,
   scenario: { id: "prompt-to-image-fake", steps: [{ kind: "success", requirementId: "image", latencyMs: 12, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "prompt-image-1", mediaType: "image/png" }] }] }
 });

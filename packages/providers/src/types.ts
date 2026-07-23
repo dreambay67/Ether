@@ -214,7 +214,7 @@ export type GenerationOutputSettings = {
 };
 
 export type GenerationProviderInput = {
-  projectPath: string;
+  workspacePath: string;
   runId: string;
   generationNodeId: string;
   iteration: number;
@@ -270,7 +270,7 @@ export type ImageEditFrameInput = {
 };
 
 export type ImageEditProviderInput = {
-  projectPath: string;
+  workspacePath: string;
   runId: string;
   editNodeId: string;
   editSubtype: string;
@@ -295,7 +295,7 @@ export type ImageEditProviderInput = {
 };
 
 export type AssistantProviderInput = {
-  projectPath: string;
+  workspacePath: string;
   runId: string;
   assistantNodeId: string;
   assistantSubtype: string;
@@ -326,7 +326,7 @@ export type VisionEvaluationImageInput = {
 };
 
 export type VisionEvaluationProviderInput = {
-  projectPath: string;
+  workspacePath: string;
   runId: string;
   evaluationNodeId: string;
   instruction: string;

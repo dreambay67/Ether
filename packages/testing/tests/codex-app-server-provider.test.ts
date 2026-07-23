@@ -49,7 +49,7 @@ function runtime(mode = "normal", extraEnv: Record<string, string> = {}) {
 
 function assistantInput(): AssistantProviderInput {
   return {
-    projectPath: process.cwd(), runId: "run-a", assistantNodeId: "node-a", assistantSubtype: "Worker",
+    workspacePath: process.cwd(), runId: "run-a", assistantNodeId: "node-a", assistantSubtype: "Worker",
     prompt: "hello", instruction: "answer", notes: "", sections: [], references: [], edgeRoles: [],
     requestedAt: new Date(0).toISOString()
   };
@@ -57,7 +57,7 @@ function assistantInput(): AssistantProviderInput {
 
 function evaluationInput(): VisionEvaluationProviderInput {
   return {
-    projectPath: process.cwd(), runId: "run-e", evaluationNodeId: "node-e", instruction: "STRUCTURED",
+    workspacePath: process.cwd(), runId: "run-e", evaluationNodeId: "node-e", instruction: "STRUCTURED",
     criteria: "quality", threshold: 80, images: [], requestedAt: new Date(0).toISOString()
   };
 }
@@ -298,7 +298,7 @@ describe("Codex App Server session and turn providers", () => {
 
 function generationInput(projectPath: string): GenerationProviderInput {
   return {
-    projectPath,
+    workspacePath: projectPath,
     runId: "run-image",
     generationNodeId: "image-node",
     iteration: 1,

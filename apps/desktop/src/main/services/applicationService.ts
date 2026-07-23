@@ -231,7 +231,11 @@ export class OpenDocumentController {
   }
 }
 
-type DesktopGrantOperation = ReferenceGrantPathRequest["operation"] | "export" | "live-output";
+type DesktopGrantOperation =
+  | ReferenceGrantPathRequest["operation"]
+  | "export"
+  | "live-output"
+  | "open-document";
 
 interface GrantBinding {
   documentId: string;
@@ -364,6 +368,24 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
       throw codedError("PATH_PERMISSION_REQUIRED", "The selected reference is no longer authorized for this document.");
     }
     return { displayName: path.basename(grant.path), kind: input.purpose === "reference" ? "file" : "directory", path: grant.path };
+  }
+
+  resolveDroppedFileGrant(input: {
+    documentId: string;
+    pathGrantId: string;
+    operation: "link" | "open-document";
+  }): { displayName: string; path: string } {
+    const key = grantKey(input.pathGrantId, input.documentId);
+    const grant = this.grants.get(key);
+    if (
+      grant === undefined ||
+      this.pendingRevocations.has(key) ||
+      grant.documentPath !== this.activeDocuments.get(input.documentId) ||
+      grant.operation !== input.operation
+    ) {
+      throw codedError("PATH_PERMISSION_REQUIRED", "The dropped file is no longer authorized for this document.");
+    }
+    return { displayName: path.basename(grant.path), path: grant.path };
   }
 
   prepareRevocation(grantId: string, documentId: string): void {
@@ -1068,6 +1090,35 @@ export class DesktopApplicationService {
     }
   }
 
+  async grantDroppedFile(
+    documentId: string,
+    purpose: "open-document" | "reference",
+    nativePath: string
+  ): Promise<{ grantId: string; displayName: string }> {
+    this.assertScope(documentId);
+    const selected = await lstat(nativePath);
+    if (!selected.isFile()) {
+      throw codedError("PATH_GRANT_KIND_MISMATCH", "The dropped item is not a file.");
+    }
+    if (purpose === "open-document" && path.extname(nativePath).toLocaleLowerCase() !== ".ether") {
+      throw codedError("INVALID_DOCUMENT_PATH", "Only Ether documents can be opened from a drop.");
+    }
+    const operation = purpose === "open-document" ? "open-document" : "link";
+    const grantId = this.pathGrants.grant(documentId, operation, nativePath);
+    return { grantId, displayName: path.basename(nativePath) };
+  }
+
+  consumeDroppedDocumentGrant(documentId: string, pathGrantId: string): string {
+    this.assertScope(documentId);
+    const selected = this.pathGrants.resolveDroppedFileGrant({
+      documentId,
+      pathGrantId,
+      operation: "open-document"
+    });
+    this.pathGrants.revoke(pathGrantId, documentId);
+    return selected.path;
+  }
+
   async prepareArtifactDrag(documentId: string, artifactIds: readonly string[]): Promise<string[]> {
     if (this.current?.documentId !== documentId) throw codedError("DOCUMENT_SCOPE_REJECTED", "The active document does not match this request.");
     const result = await this.requireApplication().createDragExport(randomUUID(), artifactIds, 24);
@@ -1242,13 +1293,20 @@ export class DesktopApplicationService {
     nodeId: string;
     role: import("@ether/schema").ConnectionRole;
     storage: "link" | "embed";
-    droppedPath?: string;
+    pathGrantId?: string;
   }): Promise<{ cancelled: true } | { cancelled: false; referenceId: string }> {
     return this.enqueueLifecycle(async () => {
       this.assertScope(input.documentId);
-      const selected = input.droppedPath ?? await this.options.dialogs.locateReference(input.nodeId);
+      const dropped = input.pathGrantId === undefined
+        ? undefined
+        : this.pathGrants.resolveDroppedFileGrant({
+            documentId: input.documentId,
+            pathGrantId: input.pathGrantId,
+            operation: "link"
+          });
+      const selected = dropped?.path ?? await this.options.dialogs.locateReference(input.nodeId);
       if (selected === null) return { cancelled: true };
-      const grantId = this.pathGrants.grant(input.documentId, "link", selected);
+      const grantId = input.pathGrantId ?? this.pathGrants.grant(input.documentId, "link", selected);
       const application = this.requireApplication();
       try {
         await application.grantPathPermit(randomUUID(), grantId, "reference");
@@ -1821,7 +1879,7 @@ function isGrantBinding(value: unknown): value is {
   return typeof binding.documentId === "string" &&
     typeof binding.documentPath === "string" &&
     typeof binding.grantId === "string" &&
-    ["link", "relink", "resolve", "export", "live-output"].includes(String(binding.operation)) &&
+    ["link", "relink", "resolve", "export", "live-output", "open-document"].includes(String(binding.operation)) &&
     typeof binding.path === "string" &&
     (binding.fingerprint === undefined || typeof binding.fingerprint === "string");
 }

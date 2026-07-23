@@ -28,7 +28,6 @@
     "@ether/application": "workspace:*",
     "@ether/brand": "workspace:*",
     "@ether/document": "workspace:*",
-    "@ether/engine": "workspace:*",
     "@ether/execution": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
     "@ether/intelligence": "workspace:*",

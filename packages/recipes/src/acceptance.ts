@@ -14,6 +14,8 @@ export type RecipeAcceptanceScenarioOptions = {
   approveCheckpoints?: boolean | readonly string[];
   /** Lets tests model a broken route without making the manifest structurally invalid. */
   disabledEdgeIds?: readonly string[];
+  /** Selects the deterministic outcome for each review.filter node; matched is the default. */
+  filterOutcomes?: Readonly<Record<string, "matched" | "unmatched">>;
 };
 
 export type RecipeAcceptanceScenarioResult = {
@@ -24,6 +26,7 @@ export type RecipeAcceptanceScenarioResult = {
   collectionIds: readonly string[];
   exportNodeIds: readonly string[];
   completedNodeIds: readonly string[];
+  skippedNodeIds: readonly string[];
   blockedNodeIds: readonly string[];
   failedRequirementIds: readonly string[];
 };
@@ -60,14 +63,18 @@ export function runFakeRecipeAcceptanceScenario(
   }
 
   const providers = new Map(manifest.capabilityRequirements.map((requirement) => [requirement.id, requirement]));
+  const nodes = new Map(manifest.graph.nodes.map((node) => [node.id, node]));
   const steps = new Map<string, typeof manifest.acceptanceScenario.steps>();
   for (const step of manifest.acceptanceScenario.steps) steps.set(step.requirementId, [...(steps.get(step.requirementId) ?? []), step]);
   const checkpoints = new Map(manifest.checkpoints.map((checkpoint) => [checkpoint.nodeRef, checkpoint]));
-  const approvals = options.approveCheckpoints === true
+  const checkpointApproval = options.approveCheckpoints ?? true;
+  const approvals = checkpointApproval === true
     ? new Set(manifest.checkpoints.map((checkpoint) => checkpoint.id))
-    : new Set(options.approveCheckpoints === false ? [] : options.approveCheckpoints ?? []);
+    : new Set(checkpointApproval === false ? [] : checkpointApproval);
 
   const completed = new Set<string>();
+  const skipped = new Set<string>();
+  const routedEdgeIds = new Set<string>();
   const producedChannels = new Map<string, Set<PayloadChannel>>();
   const artifactIndexes = new Map<string, Set<number>>();
   const artifacts: MutableArtifact[] = [];
@@ -81,6 +88,17 @@ export function runFakeRecipeAcceptanceScenario(
     producedChannels.set(nodeId, new Set(channels));
     artifactIndexes.set(nodeId, new Set(indexes));
   };
+  const skipBranch = (nodeId: string) => {
+    if (completed.has(nodeId) || skipped.has(nodeId)) return;
+    skipped.add(nodeId);
+    for (const edge of outgoing.get(nodeId) ?? []) {
+      if (edge.to.kind !== "node") continue;
+      const targetInputs = incoming.get(edge.to.nodeId) ?? [];
+      if (targetInputs.every((input) => input.from.kind === "node" && skipped.has(input.from.nodeId))) {
+        skipBranch(edge.to.nodeId);
+      }
+    }
+  };
 
   for (const node of manifest.graph.nodes) {
     if (!SOURCE_DEFINITIONS.has(node.definitionId) || (incoming.get(node.id)?.length ?? 0) > 0) continue;
@@ -91,12 +109,13 @@ export function runFakeRecipeAcceptanceScenario(
   while (progressed) {
     progressed = false;
     for (const node of manifest.graph.nodes) {
-      if (completed.has(node.id)) continue;
+      if (completed.has(node.id) || skipped.has(node.id)) continue;
       const inputs = incoming.get(node.id) ?? [];
       if (inputs.length === 0) continue;
       const ready = inputs.every((edge) => edge.from.kind === "node"
         && completed.has(edge.from.nodeId)
-        && producedChannels.get(edge.from.nodeId)?.has(edge.from.channel));
+        && producedChannels.get(edge.from.nodeId)?.has(edge.from.channel)
+        && (nodes.get(edge.from.nodeId)?.definitionId !== "review.filter" || routedEdgeIds.has(edge.id)));
       if (!ready) continue;
 
       const upstreamArtifacts = new Set(inputs.flatMap((edge) => edge.from.kind === "node" ? [...(artifactIndexes.get(edge.from.nodeId) ?? [])] : []));
@@ -141,12 +160,20 @@ export function runFakeRecipeAcceptanceScenario(
         exportNodeIds.add(node.id);
         upstreamArtifacts.forEach((index) => artifacts[index]!.exportNodeIds.add(node.id));
       }
+      if (node.definitionId === "review.filter") {
+        const outcome = options.filterOutcomes?.[node.id] ?? "matched";
+        for (const edge of outgoing.get(node.id) ?? []) {
+          const edgeOutcome = edge.role === "negative" ? "unmatched" : "matched";
+          if (edgeOutcome === outcome) routedEdgeIds.add(edge.id);
+          else if (edge.to.kind === "node") skipBranch(edge.to.nodeId);
+        }
+      }
       complete(node.id, (outgoing.get(node.id) ?? []).map((edge) => edge.from.channel), upstreamArtifacts);
       progressed = true;
     }
   }
 
-  const blockedNodeIds = manifest.graph.nodes.map((node) => node.id).filter((id) => !completed.has(id)).sort();
+  const blockedNodeIds = manifest.graph.nodes.map((node) => node.id).filter((id) => !completed.has(id) && !skipped.has(id)).sort();
   const requiredCheckpointIds = manifest.checkpoints.filter((checkpoint) => checkpoint.required).map((checkpoint) => checkpoint.id);
   const passed = blockedNodeIds.length === 0
     && failedRequirementIds.size === 0
@@ -165,6 +192,7 @@ export function runFakeRecipeAcceptanceScenario(
     collectionIds: [...collectionIds].sort(),
     exportNodeIds: [...exportNodeIds].sort(),
     completedNodeIds: [...completed].sort(),
+    skippedNodeIds: [...skipped].sort(),
     blockedNodeIds,
     failedRequirementIds: [...failedRequirementIds].sort()
   };

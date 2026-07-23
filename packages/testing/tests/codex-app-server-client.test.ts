@@ -93,10 +93,11 @@ describe("Codex App Server protocol 0.144.2", () => {
         "..", "..", "..", "providers", "protocol", "codex-0.144.2", "schema",
         selectedPath.replaceAll("/", "-")
       ));
+      const canonicalContent = Buffer.from(content.toString("utf8").replaceAll("\r\n", "\n"));
       const entry = manifest.generatedFiles.find((candidate) => candidate.path === selectedPath);
       expect(entry).toBeDefined();
-      expect(content.byteLength).toBe(entry?.bytes);
-      expect(createHash("sha256").update(content).digest("hex")).toBe(entry?.sha256);
+      expect(canonicalContent.byteLength).toBe(entry?.bytes);
+      expect(createHash("sha256").update(canonicalContent).digest("hex")).toBe(entry?.sha256);
     }
   });
 

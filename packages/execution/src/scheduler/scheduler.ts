@@ -287,7 +287,9 @@ export class DurableScheduler {
           updatedAt: acceptedAt
         }
       });
+      this.checkpoint("provider-output-journal-created");
       await this.persistence.prepareProviderCompletion(prepared, stagingDirectory);
+      this.checkpoint("provider-output-intent-created");
       const authorizedStagingDirectory = await realpath(stagingDirectory);
       const complete = async (providerResult: ProviderGenerationResult): Promise<void> => {
         if (stagedCompletion !== undefined) {
@@ -344,15 +346,27 @@ export class DurableScheduler {
           }
         });
         await this.persistence.stageProviderCompletion(stagedCompletion);
+        this.checkpoint("provider-output-staged");
       };
-      const returned: ProviderGenerationResult = invocation.operation === "generate"
-        ? await invocation.provider.generate(invocation.input as GenerationProviderInput, {
-          signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal, stagingDirectory, complete
-        })
-        : await invocation.provider.edit(invocation.input as ImageEditProviderInput, {
-          signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal, stagingDirectory, complete
-        });
+      let returned: ProviderGenerationResult | undefined;
+      try {
+        returned = invocation.operation === "generate"
+          ? await invocation.provider.generate(invocation.input as GenerationProviderInput, {
+            signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal, stagingDirectory, complete
+          })
+          : await invocation.provider.edit(invocation.input as ImageEditProviderInput, {
+            signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal, stagingDirectory, complete
+          });
+      } catch (error) {
+        if (error instanceof ExecutorFailure && error.code === "PROCESS_LOST") throw error;
+        // Once complete() has durably staged the exact provider result, a later
+        // provider exception cannot revoke that completion.
+        if (stagedCompletion === undefined) throw error;
+      }
       if (stagedCompletion === undefined) {
+        if (returned === undefined) {
+          throw new ExecutorFailure("PROVIDER_COMPLETION_PROTOCOL_INVALID", "Provider returned without a completion result.");
+        }
         await complete(returned);
       }
       const completion = stagedCompletion;
@@ -376,6 +390,9 @@ export class DurableScheduler {
       });
       this.checkpoint("provider-output-accepted");
     } catch (error) {
+      // A checkpoint interruption models abrupt process loss. Preserve the
+      // journal, staging, and durable intent for open-time reconciliation.
+      if (error instanceof ExecutorFailure && error.code === "PROCESS_LOST") throw error;
       cleanupProviderStaging(stagingDirectory, journalPath, roots.appDataRoot);
       await this.persistence.discardProviderCompletion(claim.attempt.id);
       throw error;
@@ -385,6 +402,7 @@ export class DurableScheduler {
 
   private async handleClaimError(claim: ExecutorClaim, error: unknown, signal: AbortSignal): Promise<void> {
     if (this.detaching.has(claim.job.id) || isCancellation(error, signal)) return;
+    if (error instanceof ExecutorFailure && error.code === "PROCESS_LOST") return;
     const code = error instanceof ExecutorFailure ? error.code : errorCode(error);
     const message = error instanceof Error ? error.message : String(error);
     const retryable = error instanceof ExecutorFailure ? error.retryable : errorRetryable(error);
@@ -437,7 +455,17 @@ async function stageArtifacts(
 async function authorizeProviderSource(sourcePath: string, stagingDirectory: string): Promise<string> {
   const candidate = path.resolve(stagingDirectory, sourcePath);
   assertContainedPath(stagingDirectory, candidate);
-  const canonical = await realpath(candidate);
+  let canonical: string;
+  try {
+    canonical = await realpath(candidate);
+  } catch (error) {
+    throw new ExecutorFailure(
+      "PROVIDER_OUTPUT_PATH_INVALID",
+      "Provider artifact source is unavailable or cannot be resolved safely.",
+      false,
+      { cause: error }
+    );
+  }
   assertContainedPath(stagingDirectory, canonical);
   if (!(await stat(canonical)).isFile()) {
     throw new ExecutorFailure("PROVIDER_OUTPUT_PATH_INVALID", "Provider artifact source is not a regular file.");

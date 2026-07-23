@@ -1,7 +1,7 @@
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink, Workflow } from "lucide-react";
-import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, RecipeManifest, RecipeParameter } from "@ether/schema";
+import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, RecipeManifest } from "@ether/schema";
 
 import type {
   DesktopReference,
@@ -20,7 +20,7 @@ import type { InspectorContext } from "./canvas/inspector/types";
 import { ReferenceDesk } from "./references/ReferenceDesk";
 import { BatchMatrix } from "./batches/BatchMatrix";
 import { JobCenter } from "./jobs/JobCenter";
-import { TemplateGallery, type RecipeSetupRequest } from "./canvas/library/TemplateGallery";
+import { TemplateGallery, type RecipeSetup, type RecipeSetupRequest } from "./canvas/library/TemplateGallery";
 
 export function App() {
   const { state, document } = useProjectSession();
@@ -131,11 +131,11 @@ export function App() {
     }
   };
 
-  const loadRecipeSetup = async (recipeId: string, version: string): Promise<readonly RecipeParameter[]> => {
+  const loadRecipeSetup = async (recipeId: string, version: string): Promise<RecipeSetup> => {
     const response = await window.ether.application.query({
       kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "recipe.setupSchema", payload: { recipeId, version }
     } as ApplicationQuery);
-    return (response.payload as { parameters: RecipeParameter[] }).parameters;
+    return response.payload as RecipeSetup;
   };
 
   const previewRecipe = async (request: RecipeSetupRequest): Promise<{ transaction: GraphTransaction; warnings: readonly string[] }> => {
@@ -191,7 +191,7 @@ export function App() {
         );
         if (file !== undefined) {
           event.preventDefault();
-          void window.ether.document.openDropped(file).catch((error) => {
+          void window.ether.document.openDropped(file, document.documentId).catch((error) => {
             setMessage(error instanceof Error ? error.message : "The dropped document could not be opened.");
           });
         }

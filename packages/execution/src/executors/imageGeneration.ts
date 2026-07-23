@@ -22,7 +22,7 @@ export class ImageGenerationExecutor implements StepExecutor {
       operation: "generate",
       expectedOutputCount: outputCount,
       input: {
-        projectPath: context.stagingDirectory,
+        workspacePath: context.stagingDirectory,
         runId: context.claim.job.id,
         generationNodeId: context.step.nodeId,
         iteration: context.claim.attempt.ordinal,
@@ -77,7 +77,7 @@ export class ImageEditExecutor implements StepExecutor {
     }
     const outputCount = numberParameter(context.step.parameters, "outputCount", 1);
     const input: ImageEditProviderInput = {
-      projectPath: context.stagingDirectory,
+      workspacePath: context.stagingDirectory,
       runId: context.claim.job.id,
       editNodeId: context.step.nodeId,
       editSubtype: operation,

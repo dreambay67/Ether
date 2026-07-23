@@ -148,7 +148,7 @@ export class AntigravityImageProvider implements GenerationProvider {
     const discovery = await discoverAntigravityCli(this.discoveryOptions);
     if (!discovery.executablePath) throw new ProviderUnavailableError(diagnostic);
     const attemptId = context?.providerAttemptId ?? randomUUID();
-    const parent = context?.stagingDirectory ?? path.join(input.projectPath, ".ether-antigravity-staging");
+    const parent = context?.stagingDirectory ?? path.join(input.workspacePath, ".ether-antigravity-staging");
     const attemptDirectory = path.join(parent, `antigravity-${safeSegment(attemptId)}-${randomUUID()}`);
     const importedDirectory = path.join(attemptDirectory, "imported");
     const referencesDirectory = path.join(attemptDirectory, "references");
@@ -161,7 +161,7 @@ export class AntigravityImageProvider implements GenerationProvider {
     const call = buildAntigravityProcessCall({
       executablePath: discovery.executablePath,
       env: this.env,
-      projectPath: input.projectPath,
+      workspacePath: input.workspacePath,
       request: {
         profile: this.profile,
         prompt,

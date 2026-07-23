@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { previewGraphTransaction } from "@ether/graph-kernel";
 import type { EtherGraph, ProviderCapability, RecipeManifest } from "@ether/schema";
-import { BUILTIN_RECIPES, instantiateRecipe } from "../../recipes/src/index.js";
+import { BUILTIN_RECIPES, inspectRecipeProviderSetup, instantiateRecipe } from "../../recipes/src/index.js";
 
 function targetGraph(): EtherGraph {
   return {
@@ -69,6 +69,37 @@ describe("recipe instantiation", () => {
     if (result.kind !== "ready") return;
     const generated = result.transaction.operations.find((operation) => operation.type === "addNode" && operation.node.definitionId === "generation.image");
     expect(generated).toMatchObject({ node: { config: { providerId: "antigravity", profileId: "nano-banana-2" } } });
+  });
+
+  it("reports primary, substitution, compatible, and missing setup states from enabled capabilities", () => {
+    const recipe = BUILTIN_RECIPES.find((item) => item.id === "prompt-to-image")!;
+    const primary = inspectRecipeProviderSetup(recipe, capabilitiesFor(recipe));
+    expect(primary).toMatchObject([{
+      state: "primary",
+      selectedProviderId: "codex",
+      options: [
+        expect.objectContaining({ providerId: "codex", available: true }),
+        expect.objectContaining({ providerId: "antigravity", available: false })
+      ]
+    }]);
+
+    const substitution = inspectRecipeProviderSetup(recipe, capabilitiesFor(recipe, 1));
+    expect(substitution).toMatchObject([{ state: "substitution", selectedProviderId: "antigravity" }]);
+
+    const compatibleCapability = {
+      ...capabilitiesFor(recipe)[0]!,
+      providerId: "ether-fake-local",
+      profileId: "fake-image-default"
+    };
+    expect(inspectRecipeProviderSetup(recipe, [compatibleCapability])).toMatchObject([{
+      state: "compatible",
+      selectedProviderId: "ether-fake-local",
+      options: [
+        expect.objectContaining({ providerId: "codex", available: false }),
+        expect.objectContaining({ providerId: "antigravity", available: false })
+      ]
+    }]);
+    expect(inspectRecipeProviderSetup(recipe, [])).toMatchObject([{ state: "missing", selectedProviderId: null }]);
   });
 
   it("binds providers to their requirement nodes, including two nodes with the same operation", () => {

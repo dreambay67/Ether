@@ -21,6 +21,10 @@ describe("recipe fake-provider acceptance", () => {
       expect(result.checkpointsReached).toEqual(declaredCheckpointIds);
       const collectionIds = recipe.graph.nodes
         .filter((node) => node.definitionId === "output.collection")
+        .filter((node) => !recipe.graph.edges.some((edge) =>
+          edge.role === "negative"
+          && edge.to.kind === "node"
+          && edge.to.nodeId === node.id))
         .map((node) => String(node.config.collectionId))
         .sort();
       expect(result.collectionIds).toEqual(collectionIds);
@@ -30,6 +34,19 @@ describe("recipe fake-provider acceptance", () => {
         .sort();
       expect(result.exportNodeIds).toEqual(exportNodeIds);
     }
+  });
+
+  it("takes exactly one declared filter route for matched and unmatched outcomes", () => {
+    const recipe = BUILTIN_RECIPES.find((item) => item.id === "evaluate-and-route")!;
+    const matched = runFakeRecipeAcceptanceScenario(recipe);
+    expect(matched.passed).toBe(true);
+    expect(matched.collectionIds).toEqual(["selects"]);
+    expect(matched.skippedNodeIds).toEqual(["rework"]);
+
+    const unmatched = runFakeRecipeAcceptanceScenario(recipe, { filterOutcomes: { filter: "unmatched" } });
+    expect(unmatched.passed).toBe(true);
+    expect(unmatched.collectionIds).toEqual(["needs-rework"]);
+    expect(unmatched.skippedNodeIds).toEqual(["selects"]);
   });
 
   it("cannot cross an unapproved review gate or a broken route", () => {

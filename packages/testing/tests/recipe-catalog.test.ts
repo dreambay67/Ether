@@ -38,6 +38,10 @@ describe("Ether 4.0 executable recipe catalog", () => {
         expect([recipe.graph, ...recipe.moduleGraphs].some((graph) => graph.nodes.some((node) => node.id === requirement.id)), `${recipe.id}:${requirement.id}`).toBe(true);
         expect(recipe.substitutions.some((item) => item.requirementId === requirement.id && item.priority === 0)).toBe(true);
         expect(recipe.substitutions.some((item) => item.requirementId === requirement.id && item.priority === 1)).toBe(true);
+        const declaredOutputs = recipe.acceptanceScenario.steps
+          .filter((step) => step.kind === "success" && step.requirementId === requirement.id)
+          .flatMap((step) => step.kind === "success" ? step.outputs : []);
+        expect(declaredOutputs.length, `${recipe.id}:${requirement.id}`).toBeGreaterThanOrEqual(requirement.minimumOutputs);
       }
     }
   });

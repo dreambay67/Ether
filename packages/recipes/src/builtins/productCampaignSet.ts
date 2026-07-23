@@ -13,7 +13,7 @@ export const productCampaignSetRecipe = manifest({
   id: "product-campaign-set", title: "Product Campaign Set", description: "Build a coherent, reviewable campaign set across hero, detail, social, and editorial formats.",
   parameters: [briefParameter("A launch campaign for a sculptural refillable fragrance bottle, cool stone and reflected water"), referenceParameter("Product reference images")],
   graph: graph(graphRef, "Product Campaign Set", [references, prompt, batch, image, compare, collection], [edge("product-image", "product", "image", "image", "product"), edge("prompt-image", "prompt", "image", "text"), edge("formats-image", "formats", "image", "data"), edge("image-compare", "image", "compare", "image"), edge("compare-collection", "compare", "collection", "image")], "product"),
-  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve the campaign set")], calls: 4, workItems: 4,
+  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve the campaign set")], calls: 4, workItems: 12,
   scenario: { id: "product-campaign-set-fake", steps: [
     { kind: "success", requirementId: "image", latencyMs: 5, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "campaign-hero", mediaType: "image/png" }] },
     { kind: "success", requirementId: "image", latencyMs: 5, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "campaign-detail", mediaType: "image/png" }] },

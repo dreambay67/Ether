@@ -14,7 +14,7 @@ describe("desktop Vite packaging config", () => {
     });
   });
 
-  it("builds the renderer against the CommonJS engine package", async () => {
+  it("builds the renderer against the Ether 4.0 workspace packages", async () => {
     const outputDirectory = await mkdtemp(path.join(os.tmpdir(), "ether-desktop-vite-"));
 
     try {

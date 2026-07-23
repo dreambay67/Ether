@@ -23,7 +23,6 @@ export const CONNECTION_ROLES = [
 export type ConnectionRole = (typeof CONNECTION_ROLES)[number];
 
 export const DEFAULT_CONNECTION_ROLE: ConnectionRole = "general";
-export const EDGE_GRAPH_VERSION = "2.5" as const;
 
 const CHANNEL_LABELS: Record<PayloadChannel, string> = {
   text: "Text",

@@ -174,9 +174,9 @@ class AppServerGenerationProvider implements GenerationProvider {
     const imageCapability = this.route.requireImageCapability();
     validateRequestedAspect(input.output?.aspectRatio, imageCapability);
     const result = await this.route.runner.run({
-      documentId: documentIdFromInput(input.projectPath),
+      documentId: documentIdFromInput(input.workspacePath),
       memoryScopeKey: null,
-      cwd: input.projectPath,
+      cwd: input.workspacePath,
       prompt: generationPrompt(input),
       images: collectGenerationImages(input),
       model: input.model,
@@ -201,9 +201,9 @@ class AppServerGenerationProvider implements GenerationProvider {
       ...(input.mask?.assetPath ? [{ kind: "local-image" as const, value: input.mask.assetPath }] : [])
     ];
     const result = await this.route.runner.run({
-      documentId: documentIdFromInput(input.projectPath),
+      documentId: documentIdFromInput(input.workspacePath),
       memoryScopeKey: null,
-      cwd: input.projectPath,
+      cwd: input.workspacePath,
       prompt: editPrompt(input),
       images,
       model: input.model,
@@ -240,9 +240,9 @@ class AppServerAssistantProvider implements AssistantProvider {
     const fallback = await this.route.select("assistant");
     if (fallback) return withFallbackMetadata(await fallback.run(input, context), this.route.runtime.health());
     const result = await this.route.runner.run({
-      documentId: documentIdFromInput(input.projectPath),
+      documentId: documentIdFromInput(input.workspacePath),
       memoryScopeKey: memoryScopeFromMetadata(input.inputs),
-      cwd: input.projectPath,
+      cwd: input.workspacePath,
       prompt: assistantPrompt(input),
       images: collectEnvelopeImages(input.inputs),
       model: input.model,
@@ -284,9 +284,9 @@ class AppServerEvaluationProvider implements VisionEvaluationProvider {
     const fallback = await this.route.select("evaluation");
     if (fallback) return withFallbackMetadata(await fallback.evaluate(input, context), this.route.runtime.health());
     const result = await this.route.runner.run({
-      documentId: documentIdFromInput(input.projectPath),
+      documentId: documentIdFromInput(input.workspacePath),
       memoryScopeKey: memoryScopeFromMetadata(input.inputs),
-      cwd: input.projectPath,
+      cwd: input.workspacePath,
       prompt: evaluationPrompt(input),
       images: input.images.map((image) => ({ kind: "local-image", value: image.assetPath })),
       outputSchema: evaluationOutputSchema,
@@ -412,7 +412,7 @@ async function generationResult(
     const requestedOutput = "output" in input ? input.output : undefined;
     if (requestedOutput) validateActualAspect(requestedOutput.aspectRatio, actualDimensions, imageCapability);
     const stagingDirectory = context?.stagingDirectory
-      ?? path.join(input.projectPath, ".ether", "staging", "codex", randomUUID());
+      ?? path.join(input.workspacePath, ".ether", "staging", "codex", randomUUID());
     await mkdir(stagingDirectory, { recursive: true });
     const originalBaseName = path.basename(image.savedPath, path.extname(image.savedPath))
       .replace(/[^a-zA-Z0-9._-]+/g, "-")
@@ -646,6 +646,6 @@ function memoryScopeFromMetadata(inputs: AssistantProviderInput["inputs"] | Visi
   return null;
 }
 
-function documentIdFromInput(projectPath: string) {
-  return `project:${path.resolve(projectPath).toLocaleLowerCase()}`;
+function documentIdFromInput(workspacePath: string) {
+  return `project:${path.resolve(workspacePath).toLocaleLowerCase()}`;
 }

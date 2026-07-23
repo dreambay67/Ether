@@ -12,7 +12,7 @@
   box-sizing: border-box;
 }
 
-/* Keep the active 4.0 shell isolated from the retained 2.5 presentation rules above. */
+/* Keep the active 4.0 shell isolated from the retired presentation rules above. */
 main.ether-shell.task-nine-shell {
   display: grid;
   grid-template-rows: 68px minmax(0, 1fr) 34px;
@@ -2435,6 +2435,107 @@ button.ether-edge-channel-dot[aria-expanded="true"] {
   grid-row: 1 / span 2;
   min-height: 18px;
   align-self: center;
+}
+
+.recipe-provider-readiness {
+  display: grid;
+  gap: 7px;
+  padding-top: 9px;
+  border-top: 1px solid #283648;
+}
+
+.recipe-provider-readiness > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recipe-provider-readiness > header > span {
+  color: #dce5ef;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.recipe-provider-readiness > header > small {
+  color: var(--ether-text-muted);
+  font-size: 9px;
+}
+
+.recipe-capability {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #334154;
+  border-left: 2px solid #37e6ea;
+  border-radius: 5px;
+  background: #09111b;
+}
+
+.recipe-capability-missing {
+  border-left-color: #fb7185;
+  background: rgb(251 113 133 / 5%);
+}
+
+.recipe-capability-substitution {
+  border-left-color: #f4c868;
+}
+
+.recipe-capability > div,
+.recipe-capability li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recipe-capability > div > strong {
+  color: #edf5fb;
+  font-size: 10px;
+}
+
+.recipe-capability > div > span {
+  color: #7debf0;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.recipe-capability-missing > div > span {
+  color: #fb9baa;
+}
+
+.recipe-capability > small,
+.recipe-capability > p,
+.recipe-capability li {
+  margin: 0;
+  color: var(--ether-text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.recipe-capability > p {
+  color: #cdd8e4;
+}
+
+.recipe-capability ul {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid #243143;
+  list-style: none;
+}
+
+.recipe-capability li em {
+  color: #8494a7;
+  font-size: 8px;
+  font-style: normal;
+}
+
+.recipe-capability li em:first-letter {
+  text-transform: uppercase;
 }
 
 .recipe-setup-actions {

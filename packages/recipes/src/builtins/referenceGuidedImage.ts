@@ -15,6 +15,6 @@ export const referenceGuidedImageRecipe = manifest({
   graph: graph(graphRef, "Reference-Guided Image", [references, prompt, image, compare], [
     edge("references-image", "references", "image", "image", "style"), edge("prompt-image", "prompt", "image", "text"), edge("image-compare", "image", "compare", "image")
   ], "references"),
-  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve reference fidelity")], calls: 1, workItems: 1,
+  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve reference fidelity")], calls: 1, workItems: 2,
   scenario: { id: "reference-guided-image-fake", steps: [{ kind: "success", requirementId: "image", latencyMs: 12, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "guided-image-1", mediaType: "image/png" }] }] }
 });

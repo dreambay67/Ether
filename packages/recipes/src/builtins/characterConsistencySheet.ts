@@ -13,7 +13,7 @@ export const characterConsistencySheetRecipe = manifest({
   id: "character-consistency-sheet", title: "Character Consistency Sheet", description: "Turn approved character references into a clear multi-view sheet with a human consistency check.",
   parameters: [briefParameter("A thoughtful ceramicist in a navy work apron, warm studio light, consistent facial features"), referenceParameter("Character reference images")],
   graph: graph(graphRef, "Character Consistency Sheet", [references, prompt, batch, image, compare, collect], [edge("character-image", "character", "image", "image", "face"), edge("prompt-image", "prompt", "image", "text"), edge("views-image", "views", "image", "data"), edge("image-compare", "image", "compare", "image"), edge("compare-collection", "compare", "collection", "image")], "character"),
-  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve the consistent views")], calls: 4, workItems: 4,
+  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve the consistent views")], calls: 4, workItems: 12,
   scenario: { id: "character-consistency-sheet-fake", steps: [
     { kind: "success", requirementId: "image", latencyMs: 5, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "character-front", mediaType: "image/png" }] },
     { kind: "success", requirementId: "image", latencyMs: 5, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "character-three-quarter", mediaType: "image/png" }] },

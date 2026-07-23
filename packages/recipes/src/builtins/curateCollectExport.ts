@@ -13,6 +13,6 @@ export const curateCollectExportRecipe = manifest({
   id: "curate-collect-export", title: "Curate, Collect, and Export", description: "Curate delivery candidates, route them into a durable collection, and prepare an explicit export without hidden files.",
   parameters: [referenceParameter("Candidate artifacts")],
   graph: graph(graphRef, "Curate, Collect, and Export", [inputs, compare, evaluate, filter, collection, exportNode], [edge("inputs-compare", "inputs", "compare", "image"), edge("compare-evaluate", "compare", "evaluate", "image"), edge("evaluate-filter", "evaluate", "filter", "data"), edge("filter-collection", "filter", "collection", "data"), edge("collection-export", "collection", "export", "image")], "inputs"),
-  requirements: [llm], checkpoints: [checkpoint(graphRef, "compare", "Approve delivery candidates")], calls: 1, workItems: 1,
+  requirements: [llm], checkpoints: [checkpoint(graphRef, "compare", "Approve delivery candidates")], calls: 1, workItems: 5,
   scenario: { id: "curate-collect-export-fake", steps: [{ kind: "success", requirementId: "evaluate", latencyMs: 8, outputs: [{ graphRef, nodeRef: "evaluate", channel: "data", fixtureId: "delivery-evaluation", mediaType: "application/json" }] }] }
 });

@@ -27,7 +27,8 @@ export const desktopIpcChannels = {
     chooseAndLink: "ether:references:choose-and-link"
   },
   permissions: {
-    grantFolder: "ether:permissions:grant-folder"
+    grantFolder: "ether:permissions:grant-folder",
+    grantDroppedFile: "ether:permissions:grant-dropped-file"
   },
   application: {
     command: "ether:application:command",

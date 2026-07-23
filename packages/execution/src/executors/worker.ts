@@ -10,7 +10,7 @@ export class WorkerExecutor implements StepExecutor {
     if (context.step.executor === "codex-evaluation") return this.evaluate(context);
     const worker = requireFacet(context.providers.worker, "Codex worker");
     const result = await worker.run({
-      projectPath: context.stagingDirectory,
+      workspacePath: context.stagingDirectory,
       runId: context.claim.job.id,
       assistantNodeId: context.step.nodeId,
       assistantSubtype: String(context.step.parameters.behavior ?? "custom"),
@@ -54,7 +54,7 @@ export class WorkerExecutor implements StepExecutor {
         };
       });
     const result = await evaluation.evaluate({
-      projectPath: context.stagingDirectory,
+      workspacePath: context.stagingDirectory,
       runId: context.claim.job.id,
       evaluationNodeId: context.step.nodeId,
       instruction: context.step.compiledPrompt,

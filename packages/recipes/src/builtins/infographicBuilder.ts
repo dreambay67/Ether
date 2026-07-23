@@ -12,7 +12,7 @@ export const infographicBuilderRecipe = manifest({
   id: "infographic-builder", title: "Infographic Builder", description: "Separate factual hierarchy from rendering so an infographic is readable before it is visually polished.",
   parameters: [briefParameter("Explain the circular materials lifecycle of a refillable bottle in five clear steps")],
   graph: graph(graphRef, "Infographic Builder", [prompt, worker, image, compare], [edge("prompt-structure", "prompt", "structure", "text"), edge("structure-image", "structure", "image", "text"), edge("image-compare", "image", "compare", "image")]),
-  requirements: [llm, generate], checkpoints: [checkpoint(graphRef, "compare", "Approve legibility and hierarchy")], calls: 2, workItems: 1,
+  requirements: [llm, generate], checkpoints: [checkpoint(graphRef, "compare", "Approve legibility and hierarchy")], calls: 2, workItems: 3,
   scenario: { id: "infographic-builder-fake", steps: [
     { kind: "success", requirementId: "structure", latencyMs: 4, outputs: [{ graphRef, nodeRef: "structure", channel: "text", fixtureId: "info-outline", mediaType: "text/plain" }] },
     { kind: "success", requirementId: "image", latencyMs: 12, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "info-render", mediaType: "image/png" }] }

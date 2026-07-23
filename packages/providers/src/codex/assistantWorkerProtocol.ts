@@ -50,7 +50,7 @@ export function createEvaluationWorkerRequest(
 
 export function assertAssistantWorkerRequest(value: unknown): asserts value is AssistantWorkerRequest {
   assertObject(value, "Codex assistant worker request");
-  assertString(value.projectPath, "Codex assistant worker request.projectPath");
+  assertString(value.workspacePath, "Codex assistant worker request.workspacePath");
   assertString(value.runId, "Codex assistant worker request.runId");
   assertString(value.assistantNodeId, "Codex assistant worker request.assistantNodeId");
   assertString(value.assistantSubtype, "Codex assistant worker request.assistantSubtype");
@@ -66,7 +66,7 @@ export function assertAssistantWorkerRequest(value: unknown): asserts value is A
 
 export function assertEvaluationWorkerRequest(value: unknown): asserts value is EvaluationWorkerRequest {
   assertObject(value, "Codex evaluation worker request");
-  assertString(value.projectPath, "Codex evaluation worker request.projectPath");
+  assertString(value.workspacePath, "Codex evaluation worker request.workspacePath");
   assertString(value.runId, "Codex evaluation worker request.runId");
   assertString(value.evaluationNodeId, "Codex evaluation worker request.evaluationNodeId");
   assertString(value.instruction, "Codex evaluation worker request.instruction");

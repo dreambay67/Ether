@@ -220,8 +220,12 @@ describe("desktop IPC contract", () => {
     }).success).toBe(false);
     expect(desktopIpcContracts[desktopIpcChannels.references.chooseAndLink].request.parse({
       ...pickerRequest,
+      pathGrantId: "grant-reference-1"
+    })).toMatchObject({ pathGrantId: "grant-reference-1" });
+    expect(desktopIpcContracts[desktopIpcChannels.references.chooseAndLink].request.safeParse({
+      ...pickerRequest,
       droppedPath: "C:\\private\\dropped-reference.png"
-    })).toMatchObject({ droppedPath: "C:\\private\\dropped-reference.png" });
+    }).success).toBe(false);
 
     let subscription: ((payload: unknown) => void) | undefined;
     const invocations: Array<{ channel: string; request: unknown }> = [];

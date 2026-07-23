@@ -27,7 +27,7 @@ type BridgeTransport = {
     channel: typeof desktopIpcChannels.document.event | typeof desktopIpcChannels.application.event,
     listener: (event: unknown) => void
   ): () => void;
-  openDroppedDocument(file: File): Promise<NormalizedResult<unknown>>;
+  openDroppedDocument(file: File, documentId: string): Promise<NormalizedResult<unknown>>;
   importDroppedReference?: (
     file: File,
     input: { documentId: string; graphId: string; nodeId: string; role: import("@ether/schema").ConnectionRole; storage: "link" | "embed" }
@@ -48,7 +48,8 @@ export function createEtherBridge(transport: BridgeTransport) {
       bootstrap: () => unwrap<DocumentDescriptor>(transport.invoke(desktopIpcChannels.document.bootstrap, {})),
       new: () => unwrap<DocumentDescriptor>(transport.invoke(desktopIpcChannels.document.new, {})),
       open: () => unwrap<DocumentDescriptor>(transport.invoke(desktopIpcChannels.document.open, {})),
-      openDropped: (file: File) => unwrap<DocumentDescriptor>(transport.openDroppedDocument(file)),
+      openDropped: (file: File, documentId: string) =>
+        unwrap<DocumentDescriptor>(transport.openDroppedDocument(file, documentId)),
       save: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.save, documentId),
       saveAs: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.saveAs, documentId),
       saveCopy: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.saveCopy, documentId),

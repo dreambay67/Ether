@@ -31,6 +31,24 @@ export type RecipeProviderResolution = {
   substitutionProfileId: string | null;
 };
 
+export type RecipeProviderOption = {
+  providerId: string;
+  profileId: string;
+  priority: number;
+  available: boolean;
+};
+
+export type RecipeProviderSetup = {
+  requirementId: string;
+  operation: CapabilityRequirement["operation"];
+  inputChannels: CapabilityRequirement["inputChannels"];
+  outputChannels: CapabilityRequirement["outputChannels"];
+  state: "primary" | "substitution" | "compatible" | "missing";
+  selectedProviderId: string | null;
+  selectedProfileId: string | null;
+  options: readonly RecipeProviderOption[];
+};
+
 export type RecipeBlocker = {
   code: "RECIPE_MANIFEST_INVALID" | "TARGET_GRAPH_MISSING" | "PARAMETER_INVALID" | "PARAMETER_REQUIRED" | "CAPABILITY_MISSING" | "TRANSACTION_INVALID";
   message: string;

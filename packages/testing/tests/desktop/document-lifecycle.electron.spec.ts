@@ -470,7 +470,8 @@ async function openDroppedFile(page: Page, filePath: string) {
     const input = document.querySelector<HTMLInputElement>("#drop-fixture");
     const file = input?.files?.[0];
     if (file === undefined) throw new Error("Drop fixture has no file.");
-    await window.ether.document.openDropped(file);
+    const active = await window.ether.document.bootstrap();
+    await window.ether.document.openDropped(file, active.documentId);
   });
 }
 

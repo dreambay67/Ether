@@ -100,7 +100,7 @@ export class CodexCliVisionEvaluationProvider implements VisionEvaluationProvide
       createCodexProviderProcessCall({
         command: codexCliPath,
         args,
-        cwd: input.projectPath,
+        cwd: input.workspacePath,
         env: this.env,
         stdin: prompt
       })
@@ -169,7 +169,7 @@ function buildCodexEvaluationExecArgs(
   const args = [
     "exec",
     "--cd",
-    input.projectPath,
+    input.workspacePath,
     "--skip-git-repo-check",
     "--sandbox",
     "workspace-write",
@@ -268,7 +268,7 @@ Rules:
 
 async function createEvaluationJobPaths(input: VisionEvaluationProviderInput) {
   const jobId = `${sanitizePathSegment(input.evaluationNodeId)}-${randomUUID()}`;
-  const jobDir = path.join(input.projectPath, "runs", "providers", input.runId, jobId);
+  const jobDir = path.join(input.workspacePath, "runs", "providers", input.runId, jobId);
   const outputDir = path.join(jobDir, "outputs");
 
   await mkdir(outputDir, { recursive: true });

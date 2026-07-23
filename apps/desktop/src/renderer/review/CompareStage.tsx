@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Scale } from "lucide-react";
 import type { ApplicationCommand, Artifact } from "@ether/schema";
 
-import { embeddedArtifactSource } from "../artifacts/localImageSource";
+import { embeddedArtifactSource } from "../artifacts/embeddedArtifactSource";
 
 const EMPTY_SELECTION: readonly string[] = [];
 

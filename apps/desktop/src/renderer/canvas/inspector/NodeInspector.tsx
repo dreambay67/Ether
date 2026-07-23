@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
-import { embeddedArtifactSource } from "../../artifacts/localImageSource";
+import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
 import { StrokeCanvas, buildDrawingSvg } from "../drawing/StrokeCanvas";
 import { EditWorkspace, type ImageEditCapability, type ImageEditCommit, type ImageEditSource } from "../edit/EditWorkspace";
 import { documentCommand, documentQuery, globalQuery } from "./applicationRequests";
