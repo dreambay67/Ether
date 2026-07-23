@@ -498,7 +498,10 @@ export async function executeApplicationQuery(
     case "job.attempts": return queryResponse(query, { jobId: query.payload.jobId, attempts: await app.queryAttempts(query.payload.jobId) });
     case "review.checkpoints": return queryResponse(query, await store.read(({ execution }) => execution.searchReviewCheckpoints(query.payload)));
     case "artifact.search": {
-      return queryResponse(query, await store.read(({ artifacts }) => artifacts.searchPage(query.payload)));
+      return queryResponse(query, await store.read(({ artifacts }) => artifacts.searchPage({
+        ...query.payload,
+        outputVersionIds: query.payload.outputVersionIds ?? []
+      })));
     }
     case "artifact.detail": {
       const detail = await store.read(({ artifacts }) => artifacts.detail(query.payload.artifactId));

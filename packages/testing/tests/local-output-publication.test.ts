@@ -1,9 +1,10 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication, transcodeArtifactForExport } from "@ether/application";
 import { importBlob } from "@ether/document";
+import { compilePlan, documentStorePersistence, ExecutorRegistry } from "@ether/execution";
 import { FakeImageProvider } from "@ether/providers";
 import { ApplicationCommandSchema, type EtherGraph, type GraphTransaction, type NodeOutputVersion, type PayloadEnvelope, type ProviderCapability } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
@@ -37,6 +38,10 @@ function graph(): EtherGraph {
       },
       presentation: { collapsed: false, accent: "default", previewMode: "summary" }
     }, {
+      id: "connected-mask", definitionId: "edit.mask", title: "Connected Mask", position: { x: 0, y: 110 }, size: { width: 220, height: 160 },
+      config: { kind: "edit.mask", mode: "local", feather: 0 },
+      presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+    }, {
       id: "drawing", definitionId: "canvas.drawing", title: "Drawing", position: { x: 0, y: 220 }, size: { width: 220, height: 160 },
       config: { kind: "canvas.drawing", width: 2, height: 2, background: "#ffffff", strokes: [] },
       presentation: { collapsed: false, accent: "default", previewMode: "content" }
@@ -44,6 +49,9 @@ function graph(): EtherGraph {
     edges: [{
       id: "source-edit", from: { kind: "node", nodeId: "source", channel: "image" }, to: { kind: "node", nodeId: "edit", channel: "image" },
       role: "subject", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true
+    }, {
+      id: "mask-edit", from: { kind: "node", nodeId: "connected-mask", channel: "mask" }, to: { kind: "node", nodeId: "edit", channel: "mask" },
+      role: "general", order: 1, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true
     }],
     groups: [], modules: [],
     viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
@@ -79,6 +87,10 @@ describe("typed local output publication", () => {
     const sourcePath = path.join(root, "source.png");
     await writeFile(sourcePath, sourcePng);
     const blob = await importBlob(app.boundaryStore(), { sourcePath, mediaType: "image/png" }, { appDataRoot: root });
+    const connectedMaskBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="white"/></svg>');
+    const connectedMaskPath = path.join(root, "connected-mask.svg");
+    await writeFile(connectedMaskPath, connectedMaskBytes);
+    const connectedMaskBlob = await importBlob(app.boundaryStore(), { sourcePath: connectedMaskPath, mediaType: "image/svg+xml" }, { appDataRoot: root });
     const head = await app.boundaryStore().read(({ revisions }) => revisions.head());
     const sourceVersion: NodeOutputVersion = {
       id: "source-output", nodeId: "source", graphId: "root", graphRevisionId: head.graphRevisions.root!, inputPayloadIds: [], selectedOutputVersionIds: [],
@@ -90,10 +102,32 @@ describe("typed local output publication", () => {
       id: "source-payload", channel: "image", role: "subject", content: { kind: "artifact", artifactId: "source-artifact" },
       source: { nodeId: "source", outputVersionId: "source-output", lineageKey: "source" }, metadata: { width: 2, height: 2 }
     };
+    const connectedMaskVersion: NodeOutputVersion = {
+      ...sourceVersion,
+      id: "connected-mask-output", nodeId: "connected-mask", outputPayloadIds: ["connected-mask-payload"], compiledContextHash: "connected-mask"
+    };
+    const connectedMaskPayload: PayloadEnvelope = {
+      id: "connected-mask-payload", channel: "mask", role: "general", content: { kind: "artifact", artifactId: "connected-mask-artifact" },
+      source: { nodeId: "connected-mask", outputVersionId: "connected-mask-output", lineageKey: "connected-mask" }, metadata: { width: 2, height: 2 }
+    };
     await app.boundaryStore().transaction(({ artifacts, outputs }) => {
       outputs.insert(sourceVersion, [sourcePayload]);
       artifacts.attach({ id: "source-artifact", contentKey: blob.contentKey, channel: "image", mediaType: "image/png", byteLength: sourcePng.byteLength, source: { outputVersionId: "source-output", payloadId: "source-payload" }, createdAt: at, metadata: { width: 2, height: 2 } });
+      outputs.insert(connectedMaskVersion, [connectedMaskPayload]);
+      artifacts.attach({ id: "connected-mask-artifact", contentKey: connectedMaskBlob.contentKey, channel: "mask", mediaType: "image/svg+xml", byteLength: connectedMaskBytes.byteLength, source: { outputVersionId: "connected-mask-output", payloadId: "connected-mask-payload" }, createdAt: at, metadata: { width: 2, height: 2 } });
     });
+    const connectedMaskDocument = await app.queryDocument();
+    const connectedMaskPlan = compilePlan({
+      id: "connected-mask-plan", documentId: app.boundaryStore().documentId,
+      documentRevisionId: connectedMaskDocument.documentRevisionId,
+      graph: await app.queryGraph("root"), graphRevisionId: connectedMaskDocument.graphRevisions.root!,
+      scope: { kind: "node", nodeId: "edit" }, capability: editCapability,
+      providerCapabilities: [editCapability], outputVersions: [sourceVersion, connectedMaskVersion],
+      payloads: [sourcePayload, connectedMaskPayload], createdAt: at
+    });
+    const connectedMaskStep = connectedMaskPlan.steps.find((step) => step.nodeId === "edit")!;
+    expect(connectedMaskStep.inputPayloadIds).toEqual(["source-payload", "connected-mask-payload"]);
+    expect(connectedMaskStep.compiledContext).not.toHaveProperty("workspaceInputPolicy");
 
     const drawingSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><path d="M0 0 L2 2" stroke="#123456"/></svg>');
     const drawingResponse = await app.execute({
@@ -128,9 +162,94 @@ describe("typed local output publication", () => {
     expect(persisted.detail).toMatchObject({ artifact: { metadata: { geometry, editCapabilityMode: "guidance-only", maskSemantics: "guidance-only-not-pixel-exact" } }, lineage: [expect.objectContaining({ parentArtifactId: "source-artifact", childArtifactId: first.payload.artifact.id, relation: "edited-from" })] });
     expect(events.filter((event) => event === `artifact.changed:${first.payload.artifact.id}`)).toHaveLength(1);
     expect(events.filter((event) => event === `output.created:${first.payload.outputVersion.id}`)).toHaveLength(1);
+    const exactSourceArtifacts = await app.query({
+      kind: "query", id: "exact-source-artifacts", correlationId: "exact-source-artifacts",
+      documentId: app.boundaryStore().documentId, name: "artifact.search",
+      payload: {
+        text: "", channels: ["image"], collectionIds: [], tags: [], minimumRating: null,
+        providerId: null, modelId: null, runId: null, graphId: null,
+        createdAfter: null, createdBefore: null, outputVersionIds: ["source-output"]
+      }
+    });
+    expect(exactSourceArtifacts).toMatchObject({
+      kind: "response", name: "artifact.search",
+      payload: { artifacts: [{ id: "source-artifact", source: { outputVersionId: "source-output" } }], total: 1 }
+    });
+    const beforeWorkspaceSave = await app.queryDocument();
+    const editNode = (await app.queryGraph("root")).nodes.find((node) => node.id === "edit")!;
+    if (editNode.config.kind !== "edit.image" || editNode.config.workspace === undefined) throw new Error("Edit workspace is missing.");
+    await app.applyGraphTransaction({ commandId: "save-mask-selection", transaction: {
+      id: "save-mask-selection", baseDocumentRevisionId: beforeWorkspaceSave.documentRevisionId,
+      baseGraphRevisions: { root: beforeWorkspaceSave.graphRevisions.root! }, title: "Save mask selection", actor: "user", layoutPolicy: "preserve",
+      operations: [{ type: "updateNode", graphId: "root", nodeId: "edit", node: {
+        ...editNode,
+        definitionId: "edit.image",
+        config: { ...editNode.config, workspace: { ...editNode.config.workspace, maskArtifactId: first.payload.artifact.id } }
+      } as EtherGraph["nodes"][number] }]
+    } });
     await app.closeDocument();
     await app.openDocument({ path: documentPath, access: "require-write" });
     expect(await app.readArtifactBytes(first.payload.artifact.id)).toEqual(maskBytes);
+    const reopenedEdit = (await app.queryGraph("root")).nodes.find((node) => node.id === "edit")!;
+    expect(reopenedEdit.config).toMatchObject({ workspace: { sourceArtifactId: "source-artifact", maskArtifactId: first.payload.artifact.id } });
+    const editPlan = await app.previewRun({ commandId: "reopened-edit-plan", graphId: "root", scope: { kind: "node", nodeId: "edit" } });
+    const editStep = editPlan.steps.find((step) => step.nodeId === "edit")!;
+    expect(editStep.resolvedInputBindings?.map((binding) => [binding.name, binding.payloadId])).toEqual([
+      ["workspace.sourceImage", "source-payload"],
+      ["workspace.mask", first.payload.artifact.source.payloadId]
+    ]);
+    expect(editStep.parameters).toMatchObject({ workspace: { capability: { mode: "guidance-only" } } });
+    expect(editStep.provider.settings).toMatchObject({ workspace: { capability: { mode: "guidance-only" } } });
+    expect(editStep.compiledContext).toMatchObject({ workspaceInputPolicy: "workspace-mask-overrides-connected" });
+    const plannedWorkItem = editPlan.workItems.find((item) => editStep.workItemIds.includes(item.id))!;
+    const executionStaging = path.join(root, "execution-staging");
+    const boundPayloads = await documentStorePersistence(app.boundaryStore()).resolvePayloads(editStep.inputPayloadIds, executionStaging);
+    expect(boundPayloads.map((payload) => [payload.channel, payload.metadata.assetPath])).toEqual([
+      ["image", expect.stringContaining("resolved-inputs")],
+      ["mask", expect.stringContaining("resolved-inputs")]
+    ]);
+    const materializedByChannel = new Map(boundPayloads.map((payload) => [payload.channel, payload.metadata.assetPath as string]));
+    expect(await readFile(materializedByChannel.get("image")!)).toEqual(sourcePng);
+    expect(await readFile(materializedByChannel.get("mask")!)).toEqual(maskBytes);
+    const executorResult = await new ExecutorRegistry().execute({
+      claim: {
+        plan: editPlan,
+        job: { id: "job-edit", status: "running" },
+        workItem: { id: "work-edit", plannedWorkItemId: plannedWorkItem.id, status: "running" },
+        attempt: { id: "attempt-edit", ordinal: 1, status: "running", startedAt: at, createdAt: at },
+        providerAttemptId: "provider-attempt-edit"
+      },
+      step: editStep,
+      plannedWorkItem,
+      inputs: boundPayloads,
+      providerInputs: [],
+      signal: new AbortController().signal,
+      stagingDirectory: root,
+      providers: { image: new FakeImageProvider() }
+    });
+    if (executorResult.kind !== "provider-generation" || executorResult.operation !== "edit") throw new Error("Edit executor did not produce a provider edit request.");
+    expect(executorResult.input).toMatchObject({
+      sourceImage: { assetId: "source-artifact" },
+      mask: { assetId: first.payload.artifact.id, assetMetadata: { maskSemantics: "guidance-only-not-pixel-exact" } },
+      notes: expect.stringMatching(/guidance-only.*pixel-exact/i)
+    });
+
+    const beforeUnsupported = await app.queryDocument();
+    const editBeforeUnsupported = (await app.queryGraph("root")).nodes.find((node) => node.id === "edit")!;
+    await app.applyGraphTransaction({ commandId: "mark-edit-unsupported", transaction: {
+      id: "mark-edit-unsupported", baseDocumentRevisionId: beforeUnsupported.documentRevisionId,
+      baseGraphRevisions: { root: beforeUnsupported.graphRevisions.root! }, title: "Mark edit unsupported", actor: "user", layoutPolicy: "preserve",
+      operations: [{ type: "updateNode", graphId: "root", nodeId: "edit", node: {
+        ...editBeforeUnsupported,
+        definitionId: "edit.image",
+        config: editBeforeUnsupported.config.kind === "edit.image" ? {
+          ...editBeforeUnsupported.config,
+          workspace: { ...editBeforeUnsupported.config.workspace!, capability: { ...editBeforeUnsupported.config.workspace!.capability, mode: "unsupported", detail: "No edit route." } }
+        } : editBeforeUnsupported.config
+      } as EtherGraph["nodes"][number] }]
+    } });
+    await expect(app.previewRun({ commandId: "unsupported-plan", graphId: "root", scope: { kind: "node", nodeId: "edit" } }))
+      .rejects.toMatchObject({ code: "EDIT_CAPABILITY_UNSUPPORTED" });
     await app.closeDocument();
   });
 
@@ -141,26 +260,6 @@ describe("typed local output publication", () => {
     expect(ApplicationCommandSchema.safeParse({ kind: "command", id: "oversize", correlationId: "oversize", documentId: app.boundaryStore().documentId, name: "editWorkspace.commit", payload: { graphId: "root", nodeId: "edit", kind: "mask", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: 16 * 1024 * 1024 + 1, content: { encoding: "base64", data: "AAAA" }, geometry: { width: 2, height: 2, strokes: [] } } }).success).toBe(false);
     await expect(app.commitEditWorkspace({ commandId: "bad-base64", graphId: "root", nodeId: "edit", kind: "mask", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: 2, content: { encoding: "base64", data: "%%%=" }, geometry: { width: 2, height: 2, strokes: [] } })).rejects.toMatchObject({ code: "LOCAL_OUTPUT_BASE64_INVALID" });
     await expect(app.commitEditWorkspace({ commandId: "unsupported", graphId: "root", nodeId: "edit", kind: "mask", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: 4, content: { encoding: "utf8", data: "<svg" }, geometry: { width: 2, height: 2, strokes: [] }, editState: { sourceArtifactId: "source-artifact", recipeId: "freeform", frame: { mode: "source", x: 0, y: 0, width: 2, height: 2 }, maskGeometry: { width: 2, height: 2, strokes: [] }, capability: { providerId: "edit-provider", profileId: "edit-profile", mode: "unsupported", detail: "No edit route." } } })).rejects.toMatchObject({ code: "EDIT_CAPABILITY_UNSUPPORTED" });
-    const plan = await app.previewRun({ commandId: "guidance-plan", graphId: "root", scope: { kind: "node", nodeId: "edit" } });
-    const step = plan.steps.find((candidate) => candidate.nodeId === "edit")!;
-    expect(step.parameters).toMatchObject({ workspace: { capability: { mode: "guidance-only" } } });
-    expect(step.provider.settings).toMatchObject({ workspace: { capability: { mode: "guidance-only" } } });
-    const current = await app.queryDocument();
-    const edit = (await app.queryGraph("root")).nodes.find((node) => node.id === "edit")!;
-    await app.applyGraphTransaction({ commandId: "mark-edit-unsupported", transaction: {
-      id: "mark-edit-unsupported", baseDocumentRevisionId: current.documentRevisionId, baseGraphRevisions: { root: current.graphRevisions.root! },
-      title: "Mark edit unsupported", actor: "user", layoutPolicy: "preserve",
-      operations: [{ type: "updateNode", graphId: "root", nodeId: "edit", node: {
-        ...edit,
-        definitionId: "edit.image",
-        config: edit.config.kind === "edit.image" ? {
-          ...edit.config,
-          workspace: { ...edit.config.workspace!, capability: { ...edit.config.workspace!.capability, mode: "unsupported", detail: "No edit route." } }
-        } : edit.config
-      } as EtherGraph["nodes"][number] }]
-    } });
-    await expect(app.previewRun({ commandId: "unsupported-plan", graphId: "root", scope: { kind: "node", nodeId: "edit" } }))
-      .rejects.toMatchObject({ code: "EDIT_CAPABILITY_UNSUPPORTED" });
     await app.closeDocument();
   });
 });

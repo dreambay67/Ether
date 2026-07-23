@@ -138,7 +138,7 @@ export class DurableScheduler {
       ...step.inputPayloadIds,
       ...(step.resolvedInputBindings ?? []).map((binding) => binding.payloadId)
     ];
-    const inputs = await this.persistence.resolvePayloads(unique(inputIds));
+    const inputs = await this.persistence.resolvePayloads(unique(inputIds), stagingDirectory);
     const providerInputs = inputs.map((input) => ({
       id: input.id,
       channel: input.channel,

@@ -75,6 +75,8 @@ export type PlanCompilationErrorCode =
   | "PROVIDER_CAPABILITY_UNAVAILABLE"
   | "EDIT_CAPABILITY_UNSUPPORTED"
   | "EDIT_MASK_UNSUPPORTED"
+  | "EDIT_WORKSPACE_ARTIFACT_NOT_FOUND"
+  | "EDIT_SOURCE_NOT_ON_IMAGE_LANE"
   | "INVALID_PLAN";
 
 export class PlanCompilationError extends Error {
@@ -387,8 +389,8 @@ function resolveEdges(
         { edgeId: edge.id, adapterId: decision.adapter.adapterId }
       );
     }
-    const sourcePayloadIds = resolveSourcePayloadIds(input, edge, source.id);
     const sourceStepId = nodeStepIds.get(source.id) ?? null;
+    const sourcePayloadIds = resolveSourcePayloadIds(input, edge, source.id, sourceStepId !== null);
     const sourceDependencyStepIds = dependencyStepIdsForNode(
       source.id,
       topology,
@@ -514,7 +516,9 @@ function makeNodeStep(input: {
       : edge.sourceDependencyStepIds
   );
   const dependencyStepIds = unique(incomingDependencyIds);
-  const bindings = input.incoming.flatMap((edge) => edge.targetBindings);
+  const edgeBindings = input.incoming.flatMap((edge) => edge.targetBindings);
+  const bindings = bindEditWorkspaceInputs(input.input, input.target, input.incoming, edgeBindings);
+  const workspaceInputPolicy = editWorkspaceInputPolicy(input.input, input.target, input.incoming);
   const providerBinding = nodeProviderBinding(input.input, input.target);
   const provider = providerBinding ?? compatibilityProvider(input.input.capability, input.target.config);
   const resolverInputs = input.incoming
@@ -558,7 +562,8 @@ function makeNodeStep(input: {
       resolverInputs,
       sourceEdgeIds: input.incoming.map((edge) => edge.edge.id),
       promptSections: compilePromptSections(input.target, input.incoming),
-      selectedDependencies: dependencyStepIds
+      selectedDependencies: dependencyStepIds,
+      ...(workspaceInputPolicy === undefined ? {} : { workspaceInputPolicy })
     }),
     parameters,
     selectors: input.incoming.map((edge) => edge.edge.selector as unknown as JsonObject),
@@ -566,6 +571,92 @@ function makeNodeStep(input: {
     provider,
     providerBinding
   };
+}
+
+function bindEditWorkspaceInputs(
+  input: CompilePlanInput,
+  target: PlannerNode,
+  incoming: readonly EdgeResolution[],
+  bindings: NonNullable<PlanStep["resolvedInputBindings"]>
+): NonNullable<PlanStep["resolvedInputBindings"]> {
+  if (target.config.kind !== "edit.image" || target.config.workspace === undefined) return bindings;
+  const payloads = input.payloads ?? [];
+  const byId = new Map(payloads.map((payload) => [payload.id, payload]));
+  const artifactPayload = (artifactId: string, channel: "image" | "mask") => payloads.find((payload) =>
+    payload.channel === channel && payload.content.kind === "artifact" && payload.content.artifactId === artifactId
+  );
+  const source = artifactPayload(target.config.workspace.sourceArtifactId, "image");
+  if (source === undefined) {
+    throw new PlanCompilationError(
+      "EDIT_WORKSPACE_ARTIFACT_NOT_FOUND",
+      `Workspace source artifact ${target.config.workspace.sourceArtifactId} has no persisted Image payload.`,
+      { nodeId: target.id, artifactId: target.config.workspace.sourceArtifactId }
+    );
+  }
+  const connectedImageIds = new Set(incoming.flatMap((edge) =>
+    edge.edge.to.kind === "node" && edge.edge.to.channel === "image" ? edge.targetPayloadIds : []
+  ));
+  if (!connectedImageIds.has(source.id)) {
+    throw new PlanCompilationError(
+      "EDIT_SOURCE_NOT_ON_IMAGE_LANE",
+      "The workspace-selected source is not the artifact resolved by an incoming Image lane selector.",
+      { nodeId: target.id, artifactId: target.config.workspace.sourceArtifactId, payloadId: source.id }
+    );
+  }
+  const sourceBinding = bindings.find((binding) => binding.payloadId === source.id);
+  const result: NonNullable<PlanStep["resolvedInputBindings"]> = [{
+    name: "workspace.sourceImage",
+    payloadId: source.id,
+    sourceStepId: sourceBinding?.sourceStepId ?? null,
+    selector: sourceBinding?.selector ?? "pinned"
+  }];
+  const maskArtifactId = target.config.workspace.maskArtifactId;
+  if (maskArtifactId !== undefined) {
+    const mask = artifactPayload(maskArtifactId, "mask");
+    if (mask === undefined) {
+      throw new PlanCompilationError(
+        "EDIT_WORKSPACE_ARTIFACT_NOT_FOUND",
+        `Workspace mask artifact ${maskArtifactId} has no persisted Mask payload.`,
+        { nodeId: target.id, artifactId: maskArtifactId }
+      );
+    }
+    const maskBinding = bindings.find((binding) => binding.payloadId === mask.id);
+    result.push({
+      name: "workspace.mask",
+      payloadId: mask.id,
+      sourceStepId: maskBinding?.sourceStepId ?? null,
+      selector: maskBinding?.selector ?? "pinned"
+    });
+  }
+  for (const binding of bindings) {
+    if (result.some((candidate) => candidate.payloadId === binding.payloadId)) continue;
+    const payload = byId.get(binding.payloadId);
+    if (payload?.channel === "image") continue;
+    if (maskArtifactId !== undefined && payload?.channel === "mask") continue;
+    result.push(binding);
+  }
+  return result;
+}
+
+function editWorkspaceInputPolicy(
+  input: CompilePlanInput,
+  target: PlannerNode,
+  incoming: readonly EdgeResolution[]
+): "workspace-mask-overrides-connected" | undefined {
+  if (target.config.kind !== "edit.image") return undefined;
+  const maskArtifactId = target.config.workspace?.maskArtifactId;
+  if (maskArtifactId === undefined) return undefined;
+  const savedMask = input.payloads?.find((payload) =>
+    payload.channel === "mask" &&
+    payload.content.kind === "artifact" &&
+    payload.content.artifactId === maskArtifactId
+  );
+  if (savedMask === undefined) return undefined;
+  return incoming.some((edge) =>
+    edge.edge.to.kind === "node" &&
+    edge.edge.to.channel === "mask" &&
+    edge.targetPayloadIds.some((payloadId) => payloadId !== savedMask.id)
+  ) ? "workspace-mask-overrides-connected" : undefined;
 }
 
 function materializeWorkItems(drafts: readonly StepDraft[]): {
@@ -824,9 +915,11 @@ function compatibilityProvider(capability: ProviderCapability, settings: unknown
 function resolveSourcePayloadIds(
   input: CompilePlanInput,
   edge: EtherEdge,
-  sourceNodeId: string
+  sourceNodeId: string,
+  sourceWillRun: boolean
 ): string[] {
-  const hasOutputContext = input.outputVersions !== undefined || input.payloads !== undefined;
+  if (sourceWillRun) return [logicalPayloadId(edge)];
+  const hasOutputContext = input.outputVersions?.some((version) => version.nodeId === sourceNodeId) ?? false;
   if (hasOutputContext) {
     const result = resolveOutputSelector({
       selector: edge.selector,

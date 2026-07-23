@@ -1,5 +1,12 @@
-import type { ClaimedExecution } from "@ether/document";
-import type { ExecutionJob, PayloadEnvelope } from "@ether/schema";
+import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { mkdir, realpath } from "node:fs/promises";
+import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+import { streamBlobRange, type ClaimedExecution, type DocumentStore } from "@ether/document";
+import type { Artifact, ExecutionJob, PayloadEnvelope } from "@ether/schema";
 
 import { ExecutorFailure, type ExecutorClaim } from "../executors/types.js";
 
@@ -15,14 +22,14 @@ export type SchedulerPersistence = {
   prepareProviderCompletion(completion: unknown, stagingPath: string): Promise<unknown>;
   stageProviderCompletion(completion: unknown): Promise<unknown>;
   discardProviderCompletion(attemptId: string): Promise<boolean>;
-  resolvePayloads(payloadIds: readonly string[]): Promise<PayloadEnvelope[]>;
+  resolvePayloads(payloadIds: readonly string[], stagingDirectory?: string): Promise<PayloadEnvelope[]>;
   waitForReview(input: { claim: ExecutorClaim; selectionMode: "one" | "many"; minimumSelections: number }): Promise<void>;
 };
 
 export type DocumentStoreLike = {
   documentId: string;
   path: string;
-  read<T>(operation: (repositories: { execution: unknown; outputs: unknown }) => T): Promise<T>;
+  read<T>(operation: (repositories: { artifacts: unknown; execution: unknown; outputs: unknown }) => T): Promise<T>;
   transaction<T>(operation: (repositories: { execution: unknown; outputs: unknown }) => T): Promise<T>;
 };
 
@@ -53,10 +60,37 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
     stageProviderCompletion: (completion) => store.transaction(({ execution }) => callMethod(execution, "stageProviderCompletion", [completion])),
     discardProviderCompletion: (attemptId) =>
       store.transaction(({ execution }) => callMethod<boolean>(execution, "discardProviderCompletion", [attemptId])),
-    resolvePayloads: (payloadIds) => store.read(({ outputs }) =>
-      payloadIds.map((id) => callMethod<PayloadEnvelope | undefined>(outputs, "getPayload", [id]))
-        .filter((value): value is PayloadEnvelope => value !== undefined)
-    ),
+    resolvePayloads: async (payloadIds, stagingDirectory) => {
+      const resolved = await store.read(({ artifacts, outputs }) => payloadIds.map((id) => {
+        const payload = callMethod<PayloadEnvelope | undefined>(outputs, "getPayload", [id]);
+        if (payload?.content.kind !== "artifact") return payload === undefined ? undefined : { payload };
+        const artifact = callMethod<Artifact | undefined>(artifacts, "get", [payload.content.artifactId]);
+        return artifact === undefined ? { payload } : { payload, artifact };
+      }).filter((value): value is { payload: PayloadEnvelope; artifact?: Artifact } => value !== undefined));
+      if (stagingDirectory === undefined) return resolved.map(({ payload }) => payload);
+      if (!resolved.some(({ artifact }) => artifact !== undefined)) return resolved.map(({ payload }) => payload);
+      const assetRoot = path.join(stagingDirectory, "resolved-inputs");
+      await mkdir(assetRoot, { recursive: true });
+      const canonicalStaging = await realpath(stagingDirectory);
+      const canonicalAssetRoot = await realpath(assetRoot);
+      const assetRootRelative = path.relative(canonicalStaging, canonicalAssetRoot);
+      if (assetRootRelative === ".." || assetRootRelative.startsWith(`..${path.sep}`) || path.isAbsolute(assetRootRelative)) {
+        throw new ExecutorFailure(
+          "INPUT_ASSET_PATH_INVALID",
+          "Resolved input assets must remain inside the scheduler-owned attempt staging directory."
+        );
+      }
+      return Promise.all(resolved.map(async ({ payload, artifact }) => {
+        if (artifact === undefined) return payload;
+        const fileName = `${createHash("sha256").update(payload.id).digest("hex")}${extensionForMediaType(artifact.mediaType)}`;
+        const assetPath = path.join(canonicalAssetRoot, fileName);
+        await pipeline(
+          Readable.from(streamBlobRange(store as DocumentStore, artifact.contentKey, 0, artifact.byteLength)),
+          createWriteStream(assetPath, { flags: "w" })
+        );
+        return { ...payload, metadata: { ...payload.metadata, assetPath, resolvedArtifactId: artifact.id } };
+      }));
+    },
     waitForReview: async (input) => {
       await store.transaction(({ execution }) => {
         const create = optionalExecutionMethod(execution, "createReviewCheckpoint")
@@ -71,6 +105,16 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
       });
     }
   };
+}
+
+function extensionForMediaType(mediaType: string): string {
+  if (mediaType === "image/png") return ".png";
+  if (mediaType === "image/jpeg") return ".jpg";
+  if (mediaType === "image/webp") return ".webp";
+  if (mediaType === "image/svg+xml") return ".svg";
+  if (mediaType === "video/mp4") return ".mp4";
+  if (mediaType === "audio/wav") return ".wav";
+  return ".bin";
 }
 
 export function isSchedulerPersistence(value: unknown): value is SchedulerPersistence {

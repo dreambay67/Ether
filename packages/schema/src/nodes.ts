@@ -238,6 +238,7 @@ export type ImageEditCapabilityState = z.infer<typeof ImageEditCapabilityStateSc
 
 export const EditWorkspaceStateSchema = z.object({
   sourceArtifactId: z.string().min(1),
+  maskArtifactId: z.string().min(1).optional(),
   recipeId: z.enum(["freeform", "product-cleanup", "object-removal", "outpaint-scene"]),
   frame: EditFrameSchema,
   maskGeometry: EditMaskGeometrySchema,

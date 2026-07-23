@@ -433,6 +433,7 @@ export const applicationQueryPayloadSchemas = {
       graphId: idSchema.nullable(),
       createdAfter: TimestampSchema.nullable(),
       createdBefore: TimestampSchema.nullable(),
+      outputVersionIds: z.array(idSchema).max(500).optional(),
       cursor: z.string().min(1).nullable().optional(),
       limit: z.number().int().positive().max(500).optional()
     })

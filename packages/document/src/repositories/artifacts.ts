@@ -79,6 +79,7 @@ export interface ArtifactSearchInput {
   graphId: string | null;
   createdAfter: string | null;
   createdBefore: string | null;
+  outputVersionIds?: string[];
   cursor?: string | null;
   limit?: number;
 }
@@ -190,6 +191,11 @@ export class ArtifactRepository {
     }
     if (input.runId !== null) { clauses.push("v.run_id = ?"); values.push(input.runId); }
     if (input.graphId !== null) { clauses.push("v.graph_id = ?"); values.push(input.graphId); }
+    const outputVersionIds = input.outputVersionIds ?? [];
+    if (outputVersionIds.length > 0) {
+      clauses.push(`a.source_output_version_id IN (${outputVersionIds.map(() => "?").join(", ")})`);
+      values.push(...outputVersionIds);
+    }
     if (input.createdAfter !== null) { clauses.push("a.created_at >= ?"); values.push(input.createdAfter); }
     if (input.createdBefore !== null) { clauses.push("a.created_at <= ?"); values.push(input.createdBefore); }
     const baseWhere = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;

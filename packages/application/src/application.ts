@@ -639,10 +639,15 @@ export class EtherApplication implements EtherApplicationService {
     if (existing !== undefined) {
       return deepFreezeSnapshot(ExecutionPlanSchema.parse(existing.plan));
     }
-    const snapshot = await store.read(({ graphs, revisions }) => {
+    const snapshot = await store.read(({ graphs, outputs, revisions }) => {
       const graph = graphs.get(input.graphId);
       if (graph === undefined) throw new ApplicationServiceError("GRAPH_NOT_FOUND", `Unknown graph ${input.graphId}.`);
-      return { graph, head: revisions.head() };
+      const versions = graph.nodes.flatMap((node) => outputs.listByNode(node.id));
+      const payloads = versions.flatMap((version) => version.outputPayloadIds.flatMap((payloadId) => {
+        const payload = outputs.getPayload(payloadId);
+        return payload === undefined ? [] : [payload];
+      }));
+      return { graph, head: revisions.head(), versions, payloads };
     });
     const capabilities = await planningCapabilities(
       snapshot.graph,
@@ -658,6 +663,8 @@ export class EtherApplication implements EtherApplicationService {
       scope: input.scope,
       capability: capabilities.primary,
       providerCapabilities: capabilities.all,
+      outputVersions: snapshot.versions,
+      payloads: snapshot.payloads,
       createdAt: new Date().toISOString()
     });
     if (plan.steps.length === 0) {
