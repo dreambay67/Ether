@@ -41,9 +41,16 @@ const roles = ["general", "negative", "subject", "product", "face", "clothing", 
 const publicTools = ETHER_MCP_TOOLS.map((tool) => tool.name);
 const timestamp = "2026-07-23T12:00:00.000Z";
 const viewState = { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null };
-const fixtures: Fixture[] = [];
 
-type Fixture = Awaited<ReturnType<typeof createFixture>>;
+type Fixture = {
+  client: Client;
+  server: ReturnType<typeof createEtherMcpServer>;
+  executed: string[];
+  acceptEditPermit(id: string): void;
+  close(): Promise<void>;
+};
+
+const fixtures: Fixture[] = [];
 
 afterEach(async () => {
   await Promise.all(fixtures.splice(0).map((fixture) => fixture.close()));
@@ -166,7 +173,7 @@ describe("Ether 4.0 Codex plugin", () => {
     expect(inspectedGraph.nodes.some((node) => node.id === collectionNodeId && node.definitionId === "output.collection")).toBe(true);
     expect(inspectedGraph.edges.some((edge) => edge.id === reviewCollectionEdgeId)).toBe(true);
 
-    const applyRevision = record(record(constructionApplied.result).revision);
+    const applyRevision = record(constructionApplied.result);
     const repairDocumentRevisionId = requiredString(inspected.documentRevisionId);
     const repairGraphRevisionId = requiredString(inspected.graphRevisionId);
     expect(applyRevision.documentRevisionId).toBe(repairDocumentRevisionId);
@@ -225,7 +232,7 @@ function contractViolations(content: string): string[] {
   return violations;
 }
 
-async function createFixture() {
+async function createFixture(): Promise<Fixture> {
   const executed: string[] = [];
   const nonce = randomUUID().slice(0, 8);
   const documentId = `portable-document-${nonce}`;
@@ -262,7 +269,7 @@ async function createFixture() {
       rootGraph = resolvePreview(transaction).graphs.find((graph) => graph.id === graphId)!;
       documentRevisionId = nextRevision(documentRevisionId);
       graphRevisionId = nextRevision(graphRevisionId);
-      return { revision: { documentRevisionId, graphRevisions: { [graphId]: graphRevisionId } } };
+      return { documentRevisionId, graphRevisions: { [graphId]: graphRevisionId } };
     },
     cancelRun: async () => {
       executed.push("run.cancel");
@@ -312,7 +319,7 @@ async function createFixture() {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "plugin-4.0-test", version: "4.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  const fixture = {
+  const fixture: Fixture = {
     client,
     server,
     executed,

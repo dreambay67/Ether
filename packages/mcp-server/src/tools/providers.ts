@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { applicationQuery } from "../applicationAdapter.js";
+import { mcpToolOutputSchemas } from "../outputSchemas.js";
 import { NonEmptyIdSchema } from "../schemas.js";
 import type { EtherToolDefinition } from "../toolTypes.js";
 import { readOnlyAnnotations } from "../toolTypes.js";
@@ -10,6 +11,7 @@ export const providerTools: EtherToolDefinition[] = [
     name: "ether.provider.inspect",
     description: "Inspect provider health and declared capabilities without configuring or invoking a provider.",
     inputSchema: z.object({ providerId: NonEmptyIdSchema.optional() }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.provider.inspect"],
     annotations: readOnlyAnnotations,
     async run({ application }, input) {
       const payload = input.providerId === undefined ? {} : { providerId: input.providerId };

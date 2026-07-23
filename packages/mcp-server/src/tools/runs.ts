@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
 import { ExecutionScopeSchema } from "@ether/schema";
 
 import { activeDocumentId, applicationCommand, applicationQuery } from "../applicationAdapter.js";
+import { mcpToolOutputSchemas } from "../outputSchemas.js";
 import { EtherMcpError, NonEmptyIdSchema } from "../schemas.js";
 import type { EtherToolDefinition, ToolContext } from "../toolTypes.js";
 import { executionAnnotations, planningAnnotations, readOnlyAnnotations } from "../toolTypes.js";
@@ -18,6 +19,7 @@ export const runTools: EtherToolDefinition[] = [
       status: z.enum(["planned", "queued", "running", "completed", "failed", "cancelled", "waiting-review", "needs-attention"]).optional(),
       limit: z.number().int().positive().max(500).default(100)
     }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.list"],
     annotations: readOnlyAnnotations,
     async run({ application }, input) {
       return applicationQuery(application, "job.list", input);
@@ -27,6 +29,7 @@ export const runTools: EtherToolDefinition[] = [
     name: "ether.run.inspect",
     description: "Inspect a durable job, timeline, work items, attempts, and immutable plan.",
     inputSchema: z.object({ jobId: NonEmptyIdSchema }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.inspect"],
     annotations: readOnlyAnnotations,
     async run({ application }, input) {
       const jobId = String(input.jobId);
@@ -46,6 +49,7 @@ export const runTools: EtherToolDefinition[] = [
     name: "ether.run.plan.inspect",
     description: "Inspect one persisted immutable run plan and its content hash.",
     inputSchema: z.object({ planId: NonEmptyIdSchema }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.plan.inspect"],
     annotations: readOnlyAnnotations,
     async run({ application }, input) {
       return applicationQuery(application, "plan.summary", input);
@@ -55,6 +59,7 @@ export const runTools: EtherToolDefinition[] = [
     name: "ether.run.plan.preview",
     description: "Compile and persist an immutable run-plan preview without launching providers.",
     inputSchema: z.object({ graphId: NonEmptyIdSchema, scope: ExecutionScopeSchema }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.plan.preview"],
     annotations: planningAnnotations,
     async run({ application }, input) {
       return applicationCommand(application, "run.preview", input);
@@ -68,6 +73,7 @@ export const runTools: EtherToolDefinition[] = [
       contentHash: NonEmptyIdSchema,
       runPermitId: NonEmptyIdSchema
     }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.start"],
     annotations: executionAnnotations,
     async run(context, input) {
       const planId = String(input.planId);
@@ -82,13 +88,14 @@ export const runTools: EtherToolDefinition[] = [
     name: "ether.run.cancel",
     description: "Explicitly cancel a durable job under a Run Permit bound to that job's immutable plan.",
     inputSchema: z.object({ jobId: NonEmptyIdSchema, runPermitId: NonEmptyIdSchema }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.cancel"],
     annotations: executionAnnotations,
     async run(context, input) {
       const jobId = String(input.jobId);
       const documentId = await activeDocumentId(context.application);
       const authorization = await jobAuthorization(context, jobId);
       return context.application.cancelRun({
-        commandId: `mcp-cancel-${jobId}`,
+        commandId: `mcp-cancel-${randomUUID()}`,
         documentId,
         jobId,
         runPermitId: String(input.runPermitId),
@@ -104,13 +111,14 @@ export const runTools: EtherToolDefinition[] = [
       workItemIds: z.array(NonEmptyIdSchema).min(1),
       runPermitId: NonEmptyIdSchema
     }).strict(),
+    outputSchema: mcpToolOutputSchemas["ether.run.retry"],
     annotations: executionAnnotations,
     async run(context, input) {
       const jobId = String(input.jobId);
       const documentId = await activeDocumentId(context.application);
       const authorization = await jobAuthorization(context, jobId);
       return context.application.retryRun({
-        commandId: `mcp-retry-${jobId}-${selectionHash(input.workItemIds as string[])}`,
+        commandId: `mcp-retry-${randomUUID()}`,
         documentId,
         jobId,
         runPermitId: String(input.runPermitId),
@@ -128,10 +136,6 @@ async function jobAuthorization(context: ToolContext, jobId: string): Promise<{ 
     planId: requiredString(job.planId, "job.planId"),
     contentHash: requiredString(job.planContentHash, "job.planContentHash")
   };
-}
-
-function selectionHash(workItemIds: readonly string[]): string {
-  return createHash("sha256").update([...workItemIds].sort().join("\0")).digest("hex").slice(0, 24);
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

@@ -2,8 +2,14 @@ import { execFileSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { describe, expect, it } from "vitest";
-import { packageWindowsApp, requiredPackageInputs } from "../../../scripts/package-windows.mjs";
+import {
+  packageApplicationRuntime,
+  packageWindowsApp,
+  requiredPackageInputs
+} from "../../../scripts/package-windows.mjs";
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const workspacePackages = ["application", "document", "execution", "graph-kernel", "mcp-server", "providers", "recipes", "schema"];
@@ -30,6 +36,17 @@ async function createFakePackageRoot() {
       `export const packagedName = ${JSON.stringify(packageDirectory)};\n`
     );
   }
+  await createFile(
+    path.join(root, "packages/mcp-server/dist/index.js"),
+    [
+      'import { sdkMarker } from "@modelcontextprotocol/sdk/server/mcp.js";',
+      'export const packagedName = "mcp-server";',
+      'if (process.argv.includes("--stdio-probe")) {',
+      '  process.stdin.setEncoding("utf8");',
+      '  process.stdin.once("data", (input) => process.stdout.write(`${sdkMarker}:${input.trim()}\\n`));',
+      '}'
+    ].join("\n")
+  );
   await createFile(path.join(root, "packages/document/dist/schema/40000.sql"), "-- packaged schema");
   await createFile(
     path.join(root, "packages/providers/protocol/codex-0.144.2/manifest.json"),
@@ -41,6 +58,30 @@ async function createFakePackageRoot() {
   const zodLink = path.join(root, "packages/schema/node_modules/zod");
   await mkdir(path.dirname(zodLink), { recursive: true });
   await symlink(zodStore, zodLink, process.platform === "win32" ? "junction" : "dir");
+
+  const sdkStore = path.join(root, "store/modelcontextprotocol-sdk");
+  await createFile(path.join(sdkStore, "package.json"), JSON.stringify({
+    name: "@modelcontextprotocol/sdk",
+    version: "1.29.0",
+    type: "module",
+    exports: { "./server/mcp.js": "./dist/server/mcp.js" },
+    dependencies: { "mcp-sdk-leaf": "1.0.0" }
+  }));
+  await createFile(
+    path.join(sdkStore, "dist/server/mcp.js"),
+    'import { marker } from "mcp-sdk-leaf"; export const sdkMarker = `official-sdk:${marker}`;\n'
+  );
+  await createFile(
+    path.join(sdkStore, "node_modules/mcp-sdk-leaf/package.json"),
+    JSON.stringify({ name: "mcp-sdk-leaf", version: "1.0.0", type: "module", exports: "./index.js" })
+  );
+  await createFile(
+    path.join(sdkStore, "node_modules/mcp-sdk-leaf/index.js"),
+    'export const marker = "transitive";\n'
+  );
+  const sdkLink = path.join(root, "packages/mcp-server/node_modules/@modelcontextprotocol/sdk");
+  await mkdir(path.dirname(sdkLink), { recursive: true });
+  await symlink(sdkStore, sdkLink, process.platform === "win32" ? "junction" : "dir");
   return root;
 }
 
@@ -75,7 +116,8 @@ describe("Windows desktop package", () => {
         "packages\\recipes\\dist\\index.js",
         "packages\\schema\\dist\\index.js",
         "packages\\providers\\protocol\\codex-0.144.2\\manifest.json",
-        "packages\\schema\\node_modules\\zod\\package.json"
+        "packages\\schema\\node_modules\\zod\\package.json",
+        "packages\\mcp-server\\node_modules\\@modelcontextprotocol\\sdk\\package.json"
       ]);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -109,13 +151,46 @@ describe("Windows desktop package", () => {
         )
       ).resolves.toContain('"version":"0.144.2"');
       expect((await lstat(path.join(appRoot, "node_modules/zod"))).isSymbolicLink()).toBe(false);
+      expect((await lstat(path.join(appRoot, "node_modules/@modelcontextprotocol/sdk"))).isSymbolicLink()).toBe(false);
+      expect((await lstat(
+        path.join(appRoot, "node_modules/mcp-sdk-leaf")
+      )).isSymbolicLink()).toBe(false);
       expect(execFileSync(process.execPath, [
         "--input-type=module",
         "--eval",
         "import('@ether/application').then((value) => console.log(value.packagedName))"
       ], { cwd: appRoot, encoding: "utf8" }).trim()).toBe("application");
+      expect(execFileSync(process.execPath, [
+        path.join(appRoot, "node_modules/@ether/mcp-server/dist/index.js"),
+        "--stdio-probe"
+      ], { cwd: appRoot, encoding: "utf8", input: "ping\n" }).trim()).toBe(
+        "official-sdk:transitive:ping"
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("launches the actual packaged MCP server over stdio with the official SDK closure", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-mcp-package-runtime-"));
+    const appRoot = path.join(root, "app");
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(appRoot, "node_modules/@ether/mcp-server/dist/index.js")],
+      cwd: appRoot,
+      env: getDefaultEnvironment(),
+      stderr: "pipe"
+    });
+    const client = new Client({ name: "ether-packaged-runtime-test", version: "4.0.0" });
+    try {
+      await packageApplicationRuntime(repoRoot, appRoot);
+      await client.connect(transport);
+      await expect(client.listTools()).resolves.toMatchObject({
+        tools: expect.arrayContaining([expect.objectContaining({ name: "ether.document.inspect" })])
+      });
+    } finally {
+      await client.close().catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

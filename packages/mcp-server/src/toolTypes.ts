@@ -12,7 +12,7 @@ export type EtherToolDefinition = {
   name: string;
   description: string;
   inputSchema: z.ZodTypeAny;
-  outputSchema?: z.ZodTypeAny;
+  outputSchema: z.ZodTypeAny;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;

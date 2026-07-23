@@ -42,7 +42,9 @@ type Fixture = {
   client: Client;
   server: EtherMcpServer;
   applied: GraphTransaction[];
+  controlCommandIds: { cancel: string[]; retry: string[] };
   close(): Promise<void>;
+  corruptNextCancel(): void;
   grantEdit(id?: string): string;
   grantRun(id?: string): string;
   holdApply(): ApplyGate;
@@ -72,7 +74,19 @@ describe("Ether 4.0 official MCP SDK integration", () => {
       "ether.run.list", "ether.run.inspect", "ether.run.plan.inspect", "ether.run.plan.preview", "ether.run.start", "ether.run.cancel", "ether.run.retry"
     ]);
     expect(names).not.toEqual(expect.arrayContaining(["ether.document.open", "ether.permission.grant", "ether.graph.replace"]));
-    expect(tools.tools.every((tool) => tool.outputSchema?.type === "object")).toBe(true);
+    expect(tools.tools.every((tool) => {
+      const schema = tool.outputSchema as {
+        type?: unknown;
+        properties?: Record<string, unknown>;
+        anyOf?: Array<{ type?: unknown; properties?: Record<string, unknown> }>;
+      } | undefined;
+      const variants = schema?.anyOf ?? (schema === undefined ? [] : [schema]);
+      return variants.some((variant) => (
+        variant.type === "object" &&
+        variant.properties !== undefined &&
+        Object.keys(variant.properties).some((property) => property !== "error")
+      ));
+    })).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "ether.run.plan.preview")?.annotations).toMatchObject({ readOnlyHint: false });
 
     const malformed = await callResult(fixture.client, "ether.graph.transaction.preview", {});
@@ -147,8 +161,27 @@ describe("Ether 4.0 official MCP SDK integration", () => {
       planId: "plan-1", contentHash: planHash, runPermitId
     });
     expect(reuse).toMatchObject({ isError: true, structuredContent: { error: { code: "RUN_PERMIT_INVALID" } } });
-    await expect(call(fixture.client, "ether.run.cancel", { jobId: "job-1", runPermitId })).resolves.toMatchObject({ accepted: true });
-    await expect(call(fixture.client, "ether.run.retry", { jobId: "job-1", workItemIds: ["work-1"], runPermitId })).resolves.toMatchObject({ accepted: true });
+    await expect(call(fixture.client, "ether.run.cancel", { jobId: "job-1", runPermitId })).resolves.toMatchObject({
+      job: { id: "job-1", status: "cancelled" }
+    });
+    await expect(call(fixture.client, "ether.run.retry", { jobId: "job-1", workItemIds: ["work-1"], runPermitId })).resolves.toMatchObject({
+      job: { id: "job-1", status: "queued" }
+    });
+    await expect(call(fixture.client, "ether.run.cancel", { jobId: "job-1", runPermitId })).resolves.toMatchObject({
+      job: { id: "job-1", status: "cancelled" }
+    });
+    await expect(call(fixture.client, "ether.run.retry", { jobId: "job-1", workItemIds: ["work-1"], runPermitId })).resolves.toMatchObject({
+      job: { id: "job-1", status: "queued" }
+    });
+    expect(new Set(fixture.controlCommandIds.cancel).size).toBe(2);
+    expect(new Set(fixture.controlCommandIds.retry).size).toBe(2);
+
+    fixture.corruptNextCancel();
+    const invalidOutput = await callResult(fixture.client, "ether.run.cancel", { jobId: "job-1", runPermitId });
+    expect(invalidOutput).toMatchObject({
+      isError: true,
+      structuredContent: { error: { code: "INVALID_MCP_OUTPUT", category: "validation" } }
+    });
     await expect(call(fixture.client, "ether.permission.inspect")).resolves.toMatchObject({
       permits: expect.arrayContaining([expect.objectContaining({ id: runPermitId, state: "start-consumed" })])
     });
@@ -241,6 +274,8 @@ async function createFixture(): Promise<Fixture> {
   let applyGate: { entered(): void; wait: Promise<void> } | null = null;
   const permits = new Map<string, PermitInspection>();
   const applied: GraphTransaction[] = [];
+  const controlCommandIds = { cancel: [] as string[], retry: [] as string[] };
+  let corruptNextCancel = false;
   const rootGraph = graph("graph-root");
   const application: EtherMcpApplicationAdapter = {
     activeDocument: async () => ({ documentId }),
@@ -278,7 +313,7 @@ async function createFixture(): Promise<Fixture> {
       }
       applied.push(input.transaction);
       documentRevisionId = "doc-revision-2";
-      return { revision: { documentRevisionId, graphRevisions: { "graph-root": "graph-revision-2" } } };
+      return { documentRevisionId, graphRevisions: { "graph-root": "graph-revision-2" } };
     },
     instantiateRecipe: async (input) => {
       requirePermit(permits, input.editPermitId, "edit");
@@ -299,11 +334,17 @@ async function createFixture(): Promise<Fixture> {
     },
     cancelRun: async (input) => {
       requireRunControl(permits, input.runPermitId, input.planId, input.contentHash);
-      return { accepted: true };
+      controlCommandIds.cancel.push(input.commandId);
+      if (corruptNextCancel) {
+        corruptNextCancel = false;
+        return { accepted: true };
+      }
+      return { job: executionJob("cancelled") };
     },
     retryRun: async (input) => {
       requireRunControl(permits, input.runPermitId, input.planId, input.contentHash);
-      return { accepted: true };
+      controlCommandIds.retry.push(input.commandId);
+      return { job: executionJob("queued") };
     }
   };
   const server = createEtherMcpServer({ application });
@@ -314,6 +355,8 @@ async function createFixture(): Promise<Fixture> {
     client,
     server,
     applied,
+    controlCommandIds,
+    corruptNextCancel() { corruptNextCancel = true; },
     grantEdit(id = "edit-approved") {
       permits.set(id, { id, permission: "edit", expiresAt: null, state: "active" });
       return id;
@@ -371,10 +414,13 @@ function executionPlan(): Record<string, unknown> {
   };
 }
 
-function executionJob(): Record<string, unknown> {
+function executionJob(status = "failed"): Record<string, unknown> {
+  const queued = status === "queued";
   return {
-    id: "job-1", planId: "plan-1", planContentHash: planHash, status: "failed",
-    createdAt: timestamp, startedAt: timestamp, completedAt: timestamp, cancellationRequestedAt: null
+    id: "job-1", planId: "plan-1", planContentHash: planHash, status,
+    createdAt: timestamp, startedAt: queued ? null : timestamp,
+    completedAt: queued ? null : timestamp,
+    cancellationRequestedAt: status === "cancelled" ? timestamp : null
   };
 }
 

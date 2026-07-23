@@ -7,7 +7,7 @@ import {
   createUnavailableApplicationAdapter,
   type EtherMcpApplicationAdapter
 } from "./applicationAdapter.js";
-import { errorResult, EtherMcpError, successResult } from "./schemas.js";
+import { errorResult, EtherMcpError, EtherMcpErrorOutputSchema, successResult } from "./schemas.js";
 import type { EtherToolDefinition, ToolContext } from "./toolTypes.js";
 import { EditTransactionStore } from "./transactions/editTransaction.js";
 import { artifactTools } from "./tools/artifacts.js";
@@ -84,16 +84,45 @@ function registerTool(mcp: McpServer, context: ToolContext, definition: EtherToo
     {
       description: definition.description,
       inputSchema: definition.inputSchema,
-      outputSchema: definition.outputSchema ?? z.object({}).passthrough(),
+      outputSchema: advertisedOutputSchema(definition.outputSchema),
       annotations: definition.annotations
     },
     async (input) => {
       try {
         const parsed = definition.inputSchema.parse(input) as Record<string, unknown>;
-        return successResult(await definition.run(context, parsed));
+        const value = await definition.run(context, parsed);
+        const output = definition.outputSchema.safeParse(value);
+        if (!output.success) {
+          throw new EtherMcpError(
+            "INVALID_MCP_OUTPUT",
+            "validation",
+            `The ${definition.name} application response does not match its declared output contract.`,
+            {
+              details: {
+                issues: output.error.issues.map((issue) => ({
+                  path: issue.path.join("."),
+                  message: issue.message
+                }))
+              }
+            }
+          );
+        }
+        return successResult(output.data as Record<string, unknown>);
       } catch (error) {
         return errorResult(error);
       }
     }
   );
+}
+
+function advertisedOutputSchema(schema: z.ZodTypeAny): z.AnyZodObject {
+  if (!(schema instanceof z.ZodObject)) {
+    throw new TypeError("MCP tool output schemas must be top-level object schemas.");
+  }
+  // The official client validates structured errors against the advertised output
+  // schema as well. Runtime success output remains strictly validated against the
+  // tool's original schema above; this envelope adds the shared error alternative.
+  return schema.partial().extend({
+    error: EtherMcpErrorOutputSchema.shape.error.optional()
+  }).strict();
 }

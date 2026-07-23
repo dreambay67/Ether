@@ -1,9 +1,10 @@
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { EtherError } from "@ether/schema";
+import { EtherErrorSchema, type EtherError } from "@ether/schema";
 
 export const NonEmptyIdSchema = z.string().min(1);
 export const EmptyInputSchema = z.object({}).strict();
+export const EtherMcpErrorOutputSchema = z.object({ error: EtherErrorSchema }).strict();
 
 export const ArtifactSearchInputSchema = z.object({
   text: z.string().default(""),

@@ -1,4 +1,5 @@
-import { cp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,6 +9,10 @@ const runtimeDependencies = [
   {
     packageName: "zod",
     sourceRelativePath: "packages/schema/node_modules/zod"
+  },
+  {
+    packageName: "@modelcontextprotocol/sdk",
+    sourceRelativePath: "packages/mcp-server/node_modules/@modelcontextprotocol/sdk"
   }
 ];
 const workspacePackages = [
@@ -74,17 +79,25 @@ export async function packageWindowsApp(options = {}) {
     "utf8"
   );
 
-  for (const [packageName, sourceRelativePath] of workspacePackages) {
-    await copyWorkspacePackage(rootDir, appRoot, packageName, sourceRelativePath);
-  }
-  for (const dependency of runtimeDependencies) {
-    await copyRuntimeDependency(rootDir, appRoot, dependency);
-  }
+  await packageApplicationRuntime(rootDir, appRoot);
 
   return {
     outputDir,
     executablePath: path.join(outputDir, "Ether.exe")
   };
+}
+
+export async function packageApplicationRuntime(rootDir, appRoot) {
+  for (const [packageName, sourceRelativePath] of workspacePackages) {
+    await copyWorkspacePackage(rootDir, appRoot, packageName, sourceRelativePath);
+  }
+  const runtimeCopyState = {
+    copiedTargets: new Set(),
+    rootPackages: new Map()
+  };
+  for (const dependency of runtimeDependencies) {
+    await copyRuntimeDependency(rootDir, appRoot, dependency, runtimeCopyState);
+  }
 }
 
 async function assertPackageInputs(rootDir) {
@@ -115,12 +128,81 @@ async function copyWorkspacePackage(rootDir, appRoot, packageName, sourceRelativ
   }
 }
 
-async function copyRuntimeDependency(rootDir, appRoot, dependency) {
-  await cp(
-    path.join(rootDir, dependency.sourceRelativePath),
-    path.join(appRoot, "node_modules", dependency.packageName),
-    { recursive: true, dereference: true }
+async function copyRuntimeDependency(rootDir, appRoot, dependency, state) {
+  const canonicalSource = await realpath(path.join(rootDir, dependency.sourceRelativePath));
+  state.rootPackages.set(dependency.packageName, canonicalSource);
+  await copyRuntimePackage(
+    canonicalSource,
+    path.join(appRoot, "node_modules", ...dependency.packageName.split("/")),
+    appRoot,
+    state,
+    new Set()
   );
+}
+
+async function copyRuntimePackage(sourceRoot, targetRoot, appRoot, state, ancestors) {
+  const canonicalSource = await realpath(sourceRoot);
+  if (ancestors.has(canonicalSource) || state.copiedTargets.has(targetRoot)) return;
+  const nextAncestors = new Set(ancestors).add(canonicalSource);
+  const manifest = JSON.parse(await readFile(path.join(canonicalSource, "package.json"), "utf8"));
+  state.copiedTargets.add(targetRoot);
+
+  await cp(canonicalSource, targetRoot, {
+    recursive: true,
+    dereference: true,
+    filter: (candidate) => path.basename(candidate) !== "node_modules"
+  });
+
+  const requiredDependencies = Object.keys(manifest.dependencies ?? {});
+  const optionalDependencies = Object.keys(manifest.optionalDependencies ?? {});
+  for (const dependencyName of [...new Set([...requiredDependencies, ...optionalDependencies])]) {
+    let dependencyRoot;
+    try {
+      dependencyRoot = await resolveInstalledPackageRoot(canonicalSource, dependencyName);
+    } catch (error) {
+      if (optionalDependencies.includes(dependencyName) && !requiredDependencies.includes(dependencyName)) continue;
+      throw error;
+    }
+    const canonicalDependency = await realpath(dependencyRoot);
+    const rootDependency = state.rootPackages.get(dependencyName);
+    let dependencyTarget;
+    if (rootDependency === undefined) {
+      state.rootPackages.set(dependencyName, canonicalDependency);
+      dependencyTarget = path.join(appRoot, "node_modules", ...dependencyName.split("/"));
+    } else if (rootDependency === canonicalDependency) {
+      dependencyTarget = path.join(appRoot, "node_modules", ...dependencyName.split("/"));
+    } else {
+      dependencyTarget = path.join(targetRoot, "node_modules", ...dependencyName.split("/"));
+    }
+    await copyRuntimePackage(
+      canonicalDependency,
+      dependencyTarget,
+      appRoot,
+      state,
+      nextAncestors
+    );
+  }
+}
+
+async function resolveInstalledPackageRoot(packageRoot, dependencyName) {
+  const requireFromPackage = createRequire(path.join(packageRoot, "package.json"));
+  try {
+    return path.dirname(await realpath(requireFromPackage.resolve(`${dependencyName}/package.json`)));
+  } catch {
+    const entryPath = await realpath(requireFromPackage.resolve(dependencyName));
+    let candidate = path.dirname(entryPath);
+    const filesystemRoot = path.parse(candidate).root;
+    while (candidate !== filesystemRoot) {
+      try {
+        const manifest = JSON.parse(await readFile(path.join(candidate, "package.json"), "utf8"));
+        if (manifest.name === dependencyName) return candidate;
+      } catch {
+        // Continue toward the package root.
+      }
+      candidate = path.dirname(candidate);
+    }
+    throw new Error(`Could not resolve installed runtime dependency ${dependencyName} from ${packageRoot}.`);
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
