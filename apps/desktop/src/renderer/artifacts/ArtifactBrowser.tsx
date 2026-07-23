@@ -1,66 +1,101 @@
-import { useCallback, useEffect, useState } from "react";
-import { Image, RefreshCcw, Search } from "lucide-react";
-import type { Artifact } from "@ether/schema";
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
+import { Columns3, Download, Film, GitFork, Grid3X3, ListFilter, RefreshCcw, Search, Sparkles } from "lucide-react";
+import type { ArtifactDetail, Collection, EtherNode, PayloadChannel, ReviewEvaluateConfig, ReviewFilterConfig } from "@ether/schema";
 
-import { embeddedArtifactSource } from "./localImageSource";
+import { CompareStage } from "../review/CompareStage";
+import { EvaluationPanel } from "../review/EvaluationPanel";
+import { FilterRules } from "../review/FilterRules";
+import { ExportDialog } from "../export/ExportDialog";
+import { LiveOutputPanel } from "../export/LiveOutputPanel";
+import { ArtifactDetailPanel } from "./ArtifactDetailPanel";
+import { ArtifactFilmstrip } from "./ArtifactFilmstrip";
+import { ArtifactGrid } from "./ArtifactGrid";
+import { CollectionView } from "./CollectionView";
+import { LineageView } from "./LineageView";
+import { startArtifactDrag } from "./artifactDragPayload";
+import { emptyArtifactFilters, useArtifacts, type ArtifactFilters } from "./useArtifacts";
+import "../styles/review-workspace.css";
+
+type View = "grid" | "filmstrip" | "lineage" | "collections" | "compare" | "evaluate" | "filter" | "live";
+const channels: PayloadChannel[] = ["text", "image", "mask", "data", "video", "audio"];
 
 export function ArtifactBrowser({ documentId }: { documentId: string }) {
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [search, setSearch] = useState("");
-  const [message, setMessage] = useState("Artifacts are embedded in this document");
+  const [draft, setDraft] = useState<ArtifactFilters>(emptyArtifactFilters);
+  const [filters, setFilters] = useState<ArtifactFilters>(emptyArtifactFilters);
+  const { artifacts, total, nextCursor, loading, loadingMore, error, refresh, loadMore } = useArtifacts(documentId, filters);
+  const [view, setView] = useState<View>("grid");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [message, setMessage] = useState("Review is local and document-backed.");
+  const [checkpoint, setCheckpoint] = useState<{ id: string; selectedOutputVersionIds: string[] } | null>(null);
+  const [reviewNodes, setReviewNodes] = useState<Array<{ graphId: string; node: EtherNode }>>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [evaluationDetails, setEvaluationDetails] = useState<ArtifactDetail[]>([]);
+  const selectedIds = useMemo(() => [...selected], [selected]);
+  const selectedArtifact = artifacts.find((artifact) => artifact.id === (detailId ?? selectedIds[0])) ?? null;
+  const evaluationEntry = reviewNodes.find((entry) => entry.node.definitionId === "review.evaluate");
+  const evaluationNode = evaluationEntry?.node as EtherNode<ReviewEvaluateConfig> | undefined;
+  const filterEntry = reviewNodes.find((entry) => entry.node.definitionId === "review.filter");
+  const filterNode = filterEntry?.node as EtherNode<ReviewFilterConfig> | undefined;
+  const fallbackFilter: ReviewFilterConfig = { kind: "review.filter", match: "all", rules: [], routes: [] };
 
-  const refresh = useCallback(async () => {
+  const loadReviewContext = useCallback(async () => {
     try {
-      setArtifacts(await window.ether.artifacts.search(documentId, search));
-      setMessage("Saved inside this document");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Artifacts need attention");
-    }
-  }, [documentId, search]);
-
+      const [checkpoints, catalog, collectionList] = await Promise.all([
+        window.ether.application.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId, name: "review.checkpoints", payload: { state: "waiting-review", limit: 20 } }),
+        window.ether.application.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId, name: "graph.catalog", payload: {} }),
+        window.ether.application.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId, name: "collection.list", payload: {} })
+      ]);
+      if (checkpoints.name === "review.checkpoints") setCheckpoint(checkpoints.payload.checkpoints[0] ?? null);
+      if (collectionList.name === "collection.list") setCollections(collectionList.payload.collections);
+      if (catalog.name === "graph.catalog") {
+        const snapshots = await Promise.all(catalog.payload.graphs.map((graph) => window.ether.application.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId, name: "graph.snapshot", payload: { graphId: graph.id } })));
+        setReviewNodes(snapshots.flatMap((response) => response.name === "graph.snapshot" ? response.payload.graph.nodes.filter((node) => node.definitionId.startsWith("review.")).map((node) => ({ graphId: response.payload.graph.id, node })) : []));
+      }
+    } catch { setReviewNodes([]); }
+  }, [documentId]);
+  useEffect(() => { void loadReviewContext(); }, [loadReviewContext]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (view !== "evaluate") return;
+    let cancelled = false;
+    const ids = selectedIds.length ? selectedIds : artifacts.slice(0, 4).map((artifact) => artifact.id);
+    void Promise.all(ids.map((artifactId) => window.ether.application.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId, name: "artifact.detail", payload: { artifactId } })))
+      .then((responses) => { if (!cancelled) setEvaluationDetails(responses.flatMap((response) => response.name === "artifact.detail" ? [response.payload] : [])); })
+      .catch(() => { if (!cancelled) setEvaluationDetails([]); });
+    return () => { cancelled = true; };
+  }, [artifacts, documentId, selectedIds, view]);
 
-  return (
-    <aside className="artifact-browser task-nine-artifacts" aria-label="Embedded artifacts">
-      <header>
-        <div>
-          <Image size={16} aria-hidden="true" />
-          <strong>Artifacts</strong>
-        </div>
-        <button type="button" title="Refresh artifacts" aria-label="Refresh artifacts" onClick={() => void refresh()}>
-          <RefreshCcw size={15} aria-hidden="true" />
-        </button>
-      </header>
-      <label className="artifact-search-field">
-        <Search size={14} aria-hidden="true" />
-        <input
-          value={search}
-          placeholder="Search artifacts"
-          aria-label="Search artifacts"
-          onChange={(event) => setSearch(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") void refresh();
-          }}
-        />
-      </label>
-      <p className="artifact-browser-status">{message}</p>
-      <div className="embedded-artifact-grid">
-        {artifacts.map((artifact) => (
-          <figure key={artifact.id} data-testid="embedded-artifact">
-            {artifact.mediaType.startsWith("image/") ? (
-              <img
-                src={embeddedArtifactSource(documentId, artifact.id)}
-                alt={typeof artifact.metadata.title === "string" ? artifact.metadata.title : "Generated artifact"}
-              />
-            ) : (
-              <div className="artifact-media-fallback">{artifact.mediaType}</div>
-            )}
-            <figcaption>{typeof artifact.metadata.title === "string" ? artifact.metadata.title : artifact.id}</figcaption>
-          </figure>
-        ))}
-      </div>
-    </aside>
-  );
+  const toggle = (id: string) => setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const drag = (event: DragEvent<HTMLElement>, artifact: (typeof artifacts)[number]) => {
+    event.dataTransfer.effectAllowed = "copy";
+    const ids = selected.has(artifact.id) ? selectedIds : [artifact.id];
+    void startArtifactDrag(documentId, ids).catch((cause) => setMessage(cause instanceof Error ? cause.message : "Native drag needs attention."));
+  };
+  const apply = () => setFilters({ ...draft, tags: draft.tags.filter(Boolean) });
+  const patchDraft = <K extends keyof ArtifactFilters>(key: K, value: ArtifactFilters[K]) => setDraft((current) => ({ ...current, [key]: value }));
+
+  return <section className="artifact-observatory" aria-label="Artifact Observatory" data-testid="artifact-observatory">
+    <header className="observatory-title"><div><span className="eyebrow">Decision workspace</span><h1><Sparkles size={19} />Artifact Observatory</h1></div><div><strong>{total.toLocaleString()}</strong><span>document artifacts</span></div></header>
+    <form className="observatory-search" onSubmit={(event) => { event.preventDefault(); apply(); }}><label><Search size={15} /><input aria-label="Search artifacts" value={draft.text} onChange={(event) => patchDraft("text", event.target.value)} placeholder="Search title, metadata, provenance — empty shows all" /></label><button type="submit">Search</button><button type="button" aria-pressed={advanced} onClick={() => setAdvanced((value) => !value)}><ListFilter size={15} />Filters</button><button type="button" aria-label="Refresh artifacts" onClick={() => void refresh()}><RefreshCcw size={15} /></button></form>
+    {advanced ? <section className="observatory-filters" aria-label="Artifact filters"><fieldset><legend>Channels</legend>{channels.map((channel) => <label key={channel}><input type="checkbox" checked={draft.channels.includes(channel)} onChange={() => patchDraft("channels", draft.channels.includes(channel) ? draft.channels.filter((item) => item !== channel) : [...draft.channels, channel])} />{channel}</label>)}</fieldset><fieldset><legend>Collections</legend>{collections.length ? collections.map((collection) => <label key={collection.id}><input type="checkbox" checked={draft.collectionIds.includes(collection.id)} onChange={() => patchDraft("collectionIds", draft.collectionIds.includes(collection.id) ? draft.collectionIds.filter((id) => id !== collection.id) : [...draft.collectionIds, collection.id])} />{collection.title}</label>) : <span>No collections yet</span>}</fieldset><div className="review-form-grid"><label>Tags<input value={draft.tags.join(", ")} onChange={(event) => patchDraft("tags", event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean))} /></label><label>Minimum rating<select value={draft.minimumRating ?? ""} onChange={(event) => patchDraft("minimumRating", event.target.value ? Number(event.target.value) : null)}><option value="">Any</option>{[1,2,3,4,5].map((rating) => <option key={rating}>{rating}</option>)}</select></label><label>Provider<input value={draft.providerId ?? ""} onChange={(event) => patchDraft("providerId", event.target.value || null)} /></label><label>Model<input value={draft.modelId ?? ""} onChange={(event) => patchDraft("modelId", event.target.value || null)} /></label><label>Run ID<input value={draft.runId ?? ""} onChange={(event) => patchDraft("runId", event.target.value || null)} /></label><label>Graph ID<input value={draft.graphId ?? ""} onChange={(event) => patchDraft("graphId", event.target.value || null)} /></label><label>Created after<input type="datetime-local" value={draft.createdAfter?.slice(0,16) ?? ""} onChange={(event) => patchDraft("createdAfter", event.target.value ? new Date(event.target.value).toISOString() : null)} /></label><label>Created before<input type="datetime-local" value={draft.createdBefore?.slice(0,16) ?? ""} onChange={(event) => patchDraft("createdBefore", event.target.value ? new Date(event.target.value).toISOString() : null)} /></label></div><footer><button type="button" onClick={() => { setDraft(emptyArtifactFilters); setFilters(emptyArtifactFilters); }}>Clear all</button><button type="button" onClick={apply}>Apply filters</button></footer></section> : null}
+    <nav className="observatory-modes" aria-label="Observatory views">{([
+      ["grid", Grid3X3, "Grid"], ["filmstrip", Film, "Filmstrip"], ["lineage", GitFork, "Lineage"], ["collections", Columns3, "Collections"], ["compare", Columns3, "Compare"], ["evaluate", Sparkles, "Evaluate"], ["filter", ListFilter, "Filter"], ["live", RefreshCcw, "Live Output"]
+    ] as const).map(([id, Icon, label]) => <button type="button" key={id} aria-current={view === id ? "page" : undefined} onClick={() => setView(id)}><Icon size={14} />{label}</button>)}</nav>
+    <div className="observatory-actionbar"><p role="status">{error ?? (loading ? "Loading embedded artifacts…" : `${artifacts.length.toLocaleString()} loaded · ${selected.size} selected · ${message}`)}</p><div><button type="button" disabled={!selected.size} onClick={() => setSelected(new Set())}>Clear selection</button><button type="button" disabled={!artifacts.length} onClick={() => setSelected(new Set(artifacts.map((artifact) => artifact.id)))}>Select loaded</button><button type="button" disabled={!selected.size && !artifacts.length} onClick={() => setExportOpen(true)}><Download size={14} />Export</button></div></div>
+    <main className="observatory-stage">
+      {view === "grid" ? <ArtifactGrid documentId={documentId} artifacts={artifacts} selectedIds={selected} onToggle={toggle} onOpen={(artifact) => setDetailId(artifact.id)} onDragStart={drag} onNearEnd={() => void loadMore()} /> : null}
+      {view === "filmstrip" ? <ArtifactFilmstrip documentId={documentId} artifacts={artifacts} selectedIds={selected} onToggle={toggle} onOpen={(artifact) => setDetailId(artifact.id)} onDragStart={drag} onNearEnd={() => void loadMore()} /> : null}
+      {view === "lineage" ? <LineageView documentId={documentId} artifact={selectedArtifact} onStatus={setMessage} /> : null}
+      {view === "collections" ? <CollectionView documentId={documentId} selectedArtifactIds={selectedIds} onStatus={setMessage} /> : null}
+      {view === "compare" ? checkpoint ? <CompareStage documentId={documentId} checkpointId={checkpoint.id} artifacts={artifacts} selectionMode="many" initialSelectedOutputVersionIds={checkpoint.selectedOutputVersionIds} onStatus={setMessage} onCompleted={loadReviewContext} /> : <div className="review-empty"><h2>No waiting Compare checkpoint</h2><p>Run a graph with a Compare node to create a durable human checkpoint.</p></div> : null}
+      {view === "evaluate" ? evaluationNode && evaluationEntry ? <EvaluationPanel documentId={documentId} graphId={evaluationEntry.graphId} node={evaluationNode} artifactDetails={evaluationDetails} onStatus={setMessage} /> : <div className="review-empty"><h2>No Evaluate node in this document</h2><p>Add an Evaluate node to reveal its Codex instruction, rubric, and run provenance here.</p></div> : null}
+      {view === "filter" ? <FilterRules config={filterNode?.config ?? fallbackFilter} artifacts={artifacts.slice(0, 50)} /> : null}
+      {view === "live" ? <LiveOutputPanel documentId={documentId} onStatus={setMessage} /> : null}
+      {loadingMore ? <p className="loading-more">Loading the next page…</p> : nextCursor && (view === "grid" || view === "filmstrip") ? <button type="button" className="load-more" onClick={() => void loadMore()}>Load more</button> : null}
+      {detailId ? <ArtifactDetailPanel documentId={documentId} artifactId={detailId} onClose={() => setDetailId(null)} onChanged={refresh} onStatus={setMessage} /> : null}
+    </main>
+    <ExportDialog documentId={documentId} selectedIds={selectedIds} loadedIds={artifacts.map((artifact) => artifact.id)} total={total} open={exportOpen} onClose={() => setExportOpen(false)} onStatus={setMessage} />
+  </section>;
 }

@@ -46,12 +46,13 @@ export function EtherShell({
     run: "Follow execution work and output readiness.",
     review: "Compare embedded artifacts and project attention."
   }[shell.workspace];
+  const artifactObservatory = <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} />;
   const upperPane = shell.workspace === "build"
     ? { label: "Reference Desk", content: referenceDesk }
     : shell.workspace === "run"
       ? { label: "Batch Matrix", content: batchMatrix }
       : shell.workspace === "review"
-        ? { label: "Artifact Observatory", content: <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /> }
+        ? { label: "Review focus", content: <div className="review-focus-brief"><Sparkles size={16} /><strong>Artifact decisions are centered below.</strong><p>Expand this desk only when you want more vertical review context.</p></div> }
         : { label: "Live output", content: <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /> };
 
   return (
@@ -92,7 +93,7 @@ export function EtherShell({
             {tools}
           </ResizablePane>
           <section className="document-canvas canvas-dominant" data-testid="document-canvas" aria-label="Document canvas">
-            {canvas}
+            {shell.workspace === "review" ? artifactObservatory : canvas}
           </section>
           <ResizablePane
             id="inspector"

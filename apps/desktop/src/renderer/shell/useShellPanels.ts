@@ -37,7 +37,7 @@ const initialWorkspacePanels: Record<WorkspaceId, PanelLayout> = {
   review: {
     tools: { size: 184, collapsed: true },
     inspector: { size: 300, collapsed: false },
-    artifacts: { size: 260, collapsed: false },
+    artifacts: { size: 180, collapsed: true },
     runs: { size: 148, collapsed: true }
   }
 };
