@@ -494,17 +494,14 @@ export async function executeApplicationQuery(
       }))) });
     case "job.workItems": return queryResponse(query, { jobId: query.payload.jobId, workItems: await app.queryWorkItems(query.payload.jobId) });
     case "job.attempts": return queryResponse(query, { jobId: query.payload.jobId, attempts: await app.queryAttempts(query.payload.jobId) });
+    case "review.checkpoints": return queryResponse(query, await store.read(({ execution }) => execution.searchReviewCheckpoints(query.payload)));
     case "artifact.search": {
-      const artifacts = await store.read(({ artifacts }) => artifacts.search({ text: query.payload.text }));
-      const filtered = artifacts.filter((artifact) => (query.payload.channels.length === 0 || query.payload.channels.includes(artifact.channel)) &&
-        (query.payload.providerId === null || artifact.metadata.providerId === query.payload.providerId) &&
-        (query.payload.modelId === null || artifact.metadata.modelId === query.payload.modelId));
-      return queryResponse(query, { artifacts: filtered, total: filtered.length });
+      return queryResponse(query, await store.read(({ artifacts }) => artifacts.searchPage(query.payload)));
     }
     case "artifact.detail": {
-      const artifact = await store.read(({ artifacts }) => artifacts.get(query.payload.artifactId));
-      if (artifact === undefined) throw new Error(`Unknown artifact ${query.payload.artifactId}.`);
-      return queryResponse(query, { artifact });
+      const detail = await store.read(({ artifacts }) => artifacts.detail(query.payload.artifactId));
+      if (detail === undefined) throw new Error(`Unknown artifact ${query.payload.artifactId}.`);
+      return queryResponse(query, detail);
     }
     case "collection.list": return queryResponse(query, { collections: await store.read(({ collections }) => collections.list()) });
     case "collection.detail": return queryResponse(query, await store.read(({ collections }) => {
@@ -513,14 +510,7 @@ export async function executeApplicationQuery(
       return { collection, memberships: collections.memberships(collection.id) };
     }));
     case "collection.membership": return queryResponse(query, { memberships: await store.read(({ collections }) => collections.memberships(query.payload.collectionId)) });
-    case "artifact.lineage": return queryResponse(query, { lineage: await store.read(({ artifacts }) => artifacts.lineage(query.payload.artifactId).map((entry) => ({
-      id: `${entry.artifactId}:${entry.parentArtifactId}:${entry.relation}`,
-      parentArtifactId: entry.parentArtifactId,
-      childArtifactId: entry.artifactId,
-      relation: entry.relation,
-      role: "general",
-      createdAt: new Date().toISOString()
-    }))) });
+    case "artifact.lineage": return queryResponse(query, { lineage: await store.read(({ artifacts }) => artifacts.detail(query.payload.artifactId)?.lineage ?? []) });
     case "export.records": return queryResponse(query, { records: await store.read(({ exports }) => exports.list(query.payload)) });
     case "liveOutput.status": return queryResponse(query, { settings: await app.liveOutputStatus() });
     case "liveOutput.entries": return queryResponse(query, { entries: await app.liveOutputEntries(query.payload) });

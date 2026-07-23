@@ -124,6 +124,7 @@ export type CompletionAcceptance = {
 };
 
 export type ReviewCheckpoint = {
+  createdAt: string;
   completedAt: string | null;
   completion: Record<string, unknown> | null;
   id: string;
@@ -792,6 +793,7 @@ export class ExecutionRepository {
       for (const artifact of output.artifacts ?? []) {
         if (!seenArtifacts.has(artifact.id)) {
           artifacts.attach(artifact);
+          this.recordArtifactLineage(artifacts, artifact, version);
           seenArtifacts.add(artifact.id);
           acceptedArtifacts.push(artifact);
         }
@@ -951,7 +953,7 @@ export class ExecutionRepository {
         nodeId: step.nodeId,
         graphId: input.claim.plan.graphId,
         graphRevisionId: input.claim.plan.graphRevisionId,
-        inputPayloadIds: [],
+        inputPayloadIds: step.inputPayloadIds.filter((payloadId) => outputs.getPayload(payloadId) !== undefined),
         selectedOutputVersionIds: [],
         compiledContextHash: input.claim.plan.contentHash,
         producer: {
@@ -996,6 +998,7 @@ export class ExecutionRepository {
         metadata: output.artifactMetadata
       });
       artifactsRepository.attach(artifact);
+      this.recordArtifactLineage(artifactsRepository, artifact, outputVersion);
       acceptedArtifacts.push(artifact);
       acceptedOutputVersions.push(outputVersion);
     }
@@ -1226,6 +1229,37 @@ export class ExecutionRepository {
       )
       .all(jobId) as unknown as Array<{ checkpoint_id: string }>;
     return rows.map((row) => this.requireReviewCheckpoint(row.checkpoint_id));
+  }
+
+  searchReviewCheckpoints(input: {
+    planId?: string;
+    state?: ReviewCheckpoint["state"];
+    cursor?: string | null;
+    limit?: number;
+  }): { checkpoints: ReviewCheckpoint[]; nextCursor: string | null } {
+    const clauses: string[] = [];
+    const values: Array<string | number | null> = [];
+    if (input.planId !== undefined) { clauses.push("plan_id = ?"); values.push(input.planId); }
+    if (input.state !== undefined) { clauses.push("state = ?"); values.push(input.state); }
+    if (input.cursor) {
+      const [createdAt, checkpointId] = decodeReviewCursor(input.cursor);
+      clauses.push("(created_at < ? OR (created_at = ? AND checkpoint_id > ?))");
+      values.push(createdAt, createdAt, checkpointId);
+    }
+    const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+    const limit = Math.max(1, Math.min(200, input.limit ?? 50));
+    const rows = this.context.database.prepare(
+      `SELECT checkpoint_id, created_at FROM review_checkpoints ${where}
+       ORDER BY created_at DESC, checkpoint_id ASC LIMIT ?`
+    ).all(...values, limit + 1) as unknown as Array<{ checkpoint_id: string; created_at: string }>;
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      checkpoints: page.map((row) => this.requireReviewCheckpoint(row.checkpoint_id)),
+      nextCursor: rows.length > limit && last
+        ? Buffer.from(JSON.stringify([last.created_at, last.checkpoint_id]), "utf8").toString("base64url")
+        : null
+    };
   }
 
   failAttempt(attemptId: string, code: string, message: string, retryable: boolean): boolean {
@@ -1921,12 +1955,13 @@ export class ExecutionRepository {
     const row = this.context.database
       .prepare(
         `SELECT checkpoint_id, plan_id, step_id, work_item_id, state,
-                selected_output_version_ids_json, completion_json, completed_at
+                selected_output_version_ids_json, completion_json, created_at, completed_at
          FROM review_checkpoints WHERE checkpoint_id = ?`
       )
       .get(checkpointId) as
       | {
           checkpoint_id: string;
+          created_at: string;
           completed_at: string | null;
           completion_json: string | null;
           plan_id: string;
@@ -1947,6 +1982,7 @@ export class ExecutionRepository {
       state: row.state,
       selectedOutputVersionIds: JSON.parse(row.selected_output_version_ids_json) as string[],
       completion: row.completion_json === null ? null : JSON.parse(row.completion_json) as Record<string, unknown>,
+      createdAt: row.created_at,
       completedAt: row.completed_at
     };
   }
@@ -2006,6 +2042,38 @@ export class ExecutionRepository {
       startedAt: String(row.started_at),
       completedAt: row.completed_at === null ? null : String(row.completed_at)
     };
+  }
+
+  private recordArtifactLineage(repository: ArtifactRepository, artifact: Artifact, version: NodeOutputVersion): void {
+    const inputs = this.context.database.prepare(
+      `SELECT a.artifact_id, p.role FROM node_output_payloads p
+       JOIN artifacts a ON a.artifact_id = p.artifact_id
+       WHERE p.payload_id IN (${version.inputPayloadIds.map(() => "?").join(",") || "NULL"})`
+    ).all(...version.inputPayloadIds) as unknown as Array<{ artifact_id: string; role: string }>;
+    for (const input of inputs) {
+      if (input.artifact_id !== artifact.id) repository.addLineage({
+        artifactId: artifact.id, parentArtifactId: input.artifact_id, relation: "derived-from",
+        sourceOutputVersionId: version.id, metadata: { role: input.role }
+      });
+    }
+    for (const selectedVersionId of version.selectedOutputVersionIds) {
+      for (const selected of repository.listByOutputVersion(selectedVersionId)) {
+        if (selected.id !== artifact.id) repository.addLineage({
+          artifactId: artifact.id, parentArtifactId: selected.id, relation: "selected-from",
+          sourceOutputVersionId: version.id, metadata: { role: "general" }
+        });
+      }
+    }
+  }
+}
+
+function decodeReviewCursor(cursor: string): [string, string] {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (!Array.isArray(value) || value.length !== 2 || typeof value[0] !== "string" || typeof value[1] !== "string") throw new Error();
+    return [value[0], value[1]];
+  } catch {
+    throw new ExecutionRepositoryError("CHECKPOINT_CURSOR_INVALID", "Review checkpoint cursor is invalid or expired.");
   }
 }
 

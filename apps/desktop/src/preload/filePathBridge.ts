@@ -67,7 +67,9 @@ export function createEtherBridge(transport: BridgeTransport) {
       search: (documentId: string, text = "") =>
         unwrap<Artifact[]>(transport.invoke(desktopIpcChannels.artifacts.search, { documentId, text })),
       generateFake: (documentId: string) =>
-        scoped<Artifact[]>(desktopIpcChannels.artifacts.generateFake, documentId)
+        scoped<Artifact[]>(desktopIpcChannels.artifacts.generateFake, documentId),
+      startDrag: (documentId: string, artifactIds: string[]) =>
+        unwrap<null>(transport.invoke(desktopIpcChannels.artifacts.startDrag, { documentId, artifactIds }))
     },
     references: {
       list: (documentId: string) => scoped<DesktopReference[]>(desktopIpcChannels.references.list, documentId),
@@ -94,6 +96,13 @@ export function createEtherBridge(transport: BridgeTransport) {
         }
         return unwrap<ReferenceFileSelectionResult>(transport.importDroppedReference(file, input));
       }
+    },
+    permissions: {
+      grantFolder: (documentId: string, purpose: "export" | "live-output") =>
+        unwrap<{ grantId: string; displayName: string } | null>(transport.invoke(
+          desktopIpcChannels.permissions.grantFolder,
+          { documentId, purpose }
+        ))
     },
     application: {
       command: (command: ApplicationCommand) =>

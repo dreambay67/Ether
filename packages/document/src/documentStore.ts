@@ -97,7 +97,7 @@ export interface OpenDocumentStoreOptions {
 }
 
 export interface ReadDocumentRepositories {
-  artifacts: Pick<ArtifactRepository, "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "search">;
+  artifacts: Pick<ArtifactRepository, "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "search" | "searchPage">;
   blobs: Pick<BlobRepository, "get" | "list">;
   collections: Pick<CollectionRepository, "get" | "list" | "memberships">;
   exports: Pick<ExportRepository, "get" | "list">;
@@ -114,6 +114,7 @@ export interface ReadDocumentRepositories {
     | "listJobs"
     | "listPendingEvents"
     | "listReviewCheckpoints"
+    | "searchReviewCheckpoints"
     | "listTimeline"
     | "listWorkItems"
     | "snapshot"
@@ -151,6 +152,7 @@ type WriteExecutionRepository = Pick<
   | "listJobs"
   | "listPendingEvents"
   | "listReviewCheckpoints"
+  | "searchReviewCheckpoints"
   | "listTimeline"
   | "listWorkItems"
   | "markEventDelivered"
@@ -170,7 +172,7 @@ type WriteExecutionRepository = Pick<
 >;
 
 export interface DocumentRepositories extends ReadDocumentRepositories {
-  artifacts: Pick<ArtifactRepository, "addLineage" | "attach" | "deleteDerivative" | "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "rate" | "search" | "setTags">;
+  artifacts: Pick<ArtifactRepository, "addLineage" | "attach" | "deleteDerivative" | "detail" | "get" | "lineage" | "list" | "listByOutputVersion" | "rate" | "search" | "searchPage" | "setTags">;
   blobs: Pick<BlobRepository, "get" | "list">;
   collections: Pick<CollectionRepository, "addMembers" | "create" | "get" | "list" | "memberships" | "remove" | "removeMembers" | "setPrimary" | "update">;
   exports: Pick<ExportRepository, "create" | "get" | "list" | "setRelativePath" | "setStatus">;
@@ -972,7 +974,8 @@ export class DocumentStore {
           lineage: (id) => invoke(() => repositories.artifacts.lineage(id)),
           list: () => invoke(() => repositories.artifacts.list()),
           listByOutputVersion: (id) => invoke(() => repositories.artifacts.listByOutputVersion(id)),
-          search: (input) => invoke(() => repositories.artifacts.search(input))
+          search: (input) => invoke(() => repositories.artifacts.search(input)),
+          searchPage: (input) => invoke(() => repositories.artifacts.searchPage(input))
         },
         blobs: {
           get: (contentKey) => invoke(() => repositories.blobs.get(contentKey)),
@@ -1007,6 +1010,7 @@ export class DocumentStore {
           listJobs: () => invoke(() => repositories.execution.listJobs()),
           listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),
           listReviewCheckpoints: (id) => invoke(() => repositories.execution.listReviewCheckpoints(id)),
+          searchReviewCheckpoints: (input) => invoke(() => repositories.execution.searchReviewCheckpoints(input)),
           listTimeline: (id) => invoke(() => repositories.execution.listTimeline(id)),
           snapshot: (id) => invoke(() => repositories.execution.snapshot(id)),
           listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id))
@@ -1056,6 +1060,7 @@ export class DocumentStore {
         listByOutputVersion: (id) => invoke(() => repositories.artifacts.listByOutputVersion(id)),
         rate: (id, score, actor) => invoke(() => repositories.artifacts.rate(id, score, actor)),
         search: (input) => invoke(() => repositories.artifacts.search(input)),
+        searchPage: (input) => invoke(() => repositories.artifacts.searchPage(input)),
         setTags: (id, tags) => invoke(() => repositories.artifacts.setTags(id, tags)),
         attach: (artifact) => invoke(() => repositories.artifacts.attach(artifact))
       },
@@ -1122,6 +1127,7 @@ export class DocumentStore {
         listJobs: () => invoke(() => repositories.execution.listJobs()),
         listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),
         listReviewCheckpoints: (id) => invoke(() => repositories.execution.listReviewCheckpoints(id)),
+        searchReviewCheckpoints: (input) => invoke(() => repositories.execution.searchReviewCheckpoints(input)),
         listTimeline: (id) => invoke(() => repositories.execution.listTimeline(id)),
         listWorkItems: (id) => invoke(() => repositories.execution.listWorkItems(id)),
         markEventDelivered: (id) => invoke(() => repositories.execution.markEventDelivered(id)),

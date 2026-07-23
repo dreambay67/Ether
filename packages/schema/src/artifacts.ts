@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { JsonObjectSchema, TimestampSchema } from "./document.js";
 import { ConnectionRoleSchema, PayloadChannelSchema } from "./nodes.js";
+import { NodeOutputVersionSchema, PayloadEnvelopeSchema } from "./outputs.js";
 
 export const ContentKeySchema = z.string().regex(/^[a-fA-F0-9]{64}$/);
 export type ContentKey = z.infer<typeof ContentKeySchema>;
@@ -24,6 +25,23 @@ export const ArtifactSchema = z
   })
   .strict();
 export type Artifact = z.infer<typeof ArtifactSchema>;
+
+export const ArtifactSearchCursorSchema = z.string().min(1);
+export type ArtifactSearchCursor = z.infer<typeof ArtifactSearchCursorSchema>;
+
+export const ArtifactEvaluationProvenanceSchema = z
+  .object({
+    schemaId: z.string().min(1),
+    instruction: z.string(),
+    rubric: z.array(z.unknown()),
+    providerId: z.string().min(1),
+    modelId: z.string().min(1),
+    reasoningEffort: z.string().min(1).nullable(),
+    summary: z.string(),
+    items: z.array(z.unknown())
+  })
+  .strict();
+export type ArtifactEvaluationProvenance = z.infer<typeof ArtifactEvaluationProvenanceSchema>;
 
 export const ReferenceFileIdentitySchema = z
   .object({
@@ -150,6 +168,27 @@ export const ArtifactLineageSchema = z
   })
   .strict();
 export type ArtifactLineage = z.infer<typeof ArtifactLineageSchema>;
+
+export const ArtifactDetailSchema = z
+  .object({
+    artifact: ArtifactSchema,
+    outputVersion: NodeOutputVersionSchema,
+    sourcePayload: PayloadEnvelopeSchema,
+    collections: z.array(z.object({ id: z.string().min(1), title: z.string() }).strict()),
+    lineage: z.array(ArtifactLineageSchema),
+    tags: z.array(z.string().min(1)),
+    ratings: z.array(z.object({
+      id: z.string().min(1),
+      score: z.number().int().min(0).max(5),
+      actor: z.string().min(1),
+      rubricId: z.string().min(1).nullable(),
+      notes: z.string(),
+      createdAt: TimestampSchema
+    }).strict()),
+    evaluation: ArtifactEvaluationProvenanceSchema.nullable()
+  })
+  .strict();
+export type ArtifactDetail = z.infer<typeof ArtifactDetailSchema>;
 
 export const ArtifactTagSchema = z
   .object({ artifactId: z.string().min(1), tag: z.string().min(1), createdAt: TimestampSchema })

@@ -1,7 +1,15 @@
-import { ArtifactSchema, type Artifact } from "@ether/schema";
+import {
+  ArtifactDetailSchema,
+  ArtifactSchema,
+  type Artifact,
+  type ArtifactDetail,
+  type ArtifactLineage,
+  type PayloadChannel
+} from "@ether/schema";
 
 import type { RepositoryTransactionContext } from "./graphs.js";
 import { BlobRepositoryError } from "./blobs.js";
+import { OutputRepository } from "./outputs.js";
 
 interface ArtifactRow {
   artifact_id: string;
@@ -59,19 +67,26 @@ export interface ArtifactLineageRecord {
   sourceOutputVersionId: string | null;
 }
 
-export interface ArtifactDetail {
-  artifact: Artifact;
-  collections: Array<{ id: string; title: string }>;
-  lineage: ArtifactLineageRecord[];
-  ratings: Array<{
-    actor: string;
-    createdAt: string;
-    id: string;
-    notes: string;
-    rubricId: string | null;
-    score: number;
-  }>;
+export interface ArtifactSearchInput {
+  text: string;
+  channels: PayloadChannel[];
+  collectionIds: string[];
   tags: string[];
+  minimumRating: number | null;
+  providerId: string | null;
+  modelId: string | null;
+  runId: string | null;
+  graphId: string | null;
+  createdAfter: string | null;
+  createdBefore: string | null;
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface ArtifactSearchPage {
+  artifacts: Artifact[];
+  total: number;
+  nextCursor: string | null;
 }
 
 export class ArtifactRepository {
@@ -140,6 +155,73 @@ export class ArtifactRepository {
       .filter((value): value is Artifact => value !== undefined);
   }
 
+  searchPage(input: ArtifactSearchInput): ArtifactSearchPage {
+    const clauses: string[] = [];
+    const values: Array<string | number | null> = [];
+    const phrase = ftsPhrase(input.text);
+    if (phrase !== null) {
+      clauses.push(`(a.artifact_id IN (SELECT artifact_id FROM artifact_fts WHERE artifact_fts MATCH ?)
+        OR a.artifact_id IN (SELECT artifact_id FROM tag_fts WHERE tag_fts MATCH ?))`);
+      values.push(phrase, phrase);
+    }
+    if (input.channels.length > 0) {
+      clauses.push(`a.channel IN (${input.channels.map(() => "?").join(", ")})`);
+      values.push(...input.channels);
+    }
+    for (const collectionId of input.collectionIds) {
+      clauses.push("EXISTS (SELECT 1 FROM collection_memberships cm WHERE cm.artifact_id = a.artifact_id AND cm.collection_id = ?)");
+      values.push(collectionId);
+    }
+    for (const tag of input.tags) {
+      clauses.push("EXISTS (SELECT 1 FROM artifact_tags t WHERE t.artifact_id = a.artifact_id AND t.tag = ?)");
+      values.push(tag);
+    }
+    if (input.minimumRating !== null) {
+      clauses.push("EXISTS (SELECT 1 FROM artifact_ratings r WHERE r.artifact_id = a.artifact_id AND r.score >= ?)");
+      values.push(input.minimumRating);
+    }
+    if (input.providerId !== null) {
+      clauses.push("json_extract(v.producer_json, '$.providerId') = ?");
+      values.push(input.providerId);
+    }
+    if (input.modelId !== null) {
+      clauses.push("json_extract(v.producer_json, '$.modelId') = ?");
+      values.push(input.modelId);
+    }
+    if (input.runId !== null) { clauses.push("v.run_id = ?"); values.push(input.runId); }
+    if (input.graphId !== null) { clauses.push("v.graph_id = ?"); values.push(input.graphId); }
+    if (input.createdAfter !== null) { clauses.push("a.created_at >= ?"); values.push(input.createdAfter); }
+    if (input.createdBefore !== null) { clauses.push("a.created_at <= ?"); values.push(input.createdBefore); }
+    const baseWhere = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+    const total = (this.context.database.prepare(
+      `SELECT count(*) AS count FROM artifacts a
+       JOIN node_output_versions v ON v.output_version_id = a.source_output_version_id ${baseWhere}`
+    ).get(...values) as { count: number }).count;
+    const pageClauses = [...clauses];
+    const pageValues = [...values];
+    if (input.cursor) {
+      const cursor = decodeArtifactCursor(input.cursor);
+      pageClauses.push("(a.created_at < ? OR (a.created_at = ? AND a.artifact_id > ?))");
+      pageValues.push(cursor.createdAt, cursor.createdAt, cursor.artifactId);
+    }
+    const limit = Math.max(1, Math.min(500, input.limit ?? 100));
+    const pageWhere = pageClauses.length === 0 ? "" : `WHERE ${pageClauses.join(" AND ")}`;
+    const rows = this.context.database.prepare(
+      `SELECT a.artifact_id, a.created_at FROM artifacts a
+       JOIN node_output_versions v ON v.output_version_id = a.source_output_version_id
+       ${pageWhere} ORDER BY a.created_at DESC, a.artifact_id ASC LIMIT ?`
+    ).all(...pageValues, limit + 1) as unknown as Array<{ artifact_id: string; created_at: string }>;
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+    const artifacts = pageRows.map((row) => this.get(row.artifact_id)).filter((value): value is Artifact => value !== undefined);
+    const last = pageRows.at(-1);
+    return {
+      artifacts,
+      total,
+      nextCursor: hasMore && last ? encodeArtifactCursor(last.created_at, last.artifact_id) : null
+    };
+  }
+
   listByOutputVersion(outputVersionId: string): Artifact[] {
     const rows = this.context.database
       .prepare(
@@ -157,9 +239,10 @@ export class ArtifactRepository {
     const rows = this.context.database
       .prepare(
         `SELECT artifact_id, parent_artifact_id, relation, source_output_version_id, metadata_json
-         FROM artifact_lineage WHERE artifact_id = ? ORDER BY parent_artifact_id, relation`
+         FROM artifact_lineage WHERE artifact_id = ? OR parent_artifact_id = ?
+         ORDER BY parent_artifact_id, artifact_id, relation`
       )
-      .all(artifactId) as unknown as Array<{
+      .all(artifactId, artifactId) as unknown as Array<{
         artifact_id: string;
         metadata_json: string;
         parent_artifact_id: string;
@@ -201,10 +284,26 @@ export class ArtifactRepository {
         rubric_id: string | null;
         score: number;
       }>;
-    return {
+    const outputVersion = new OutputRepository(this.context).getVersion(artifact.source.outputVersionId);
+    const sourcePayload = new OutputRepository(this.context).getPayload(artifact.source.payloadId);
+    if (outputVersion === undefined || sourcePayload === undefined) {
+      throw new BlobRepositoryError("ARTIFACT_PROVENANCE_MISMATCH", "Artifact output provenance is incomplete.");
+    }
+    const lineage: ArtifactLineage[] = this.lineage(artifactId).map((entry) => ({
+      id: typeof entry.metadata.id === "string" ? entry.metadata.id : `${entry.parentArtifactId}:${entry.artifactId}:${entry.relation}`,
+      parentArtifactId: entry.parentArtifactId,
+      childArtifactId: entry.artifactId,
+      relation: lineageRelation(entry.relation),
+      role: lineageRole(entry.metadata.role, sourcePayload.role),
+      createdAt: typeof entry.metadata.createdAt === "string" ? entry.metadata.createdAt : artifact.createdAt
+    }));
+    const evaluation = evaluationProvenance(sourcePayload);
+    return ArtifactDetailSchema.parse({
       artifact,
+      outputVersion,
+      sourcePayload,
       collections: collections.map((row) => ({ id: row.collection_id, title: row.title })),
-      lineage: this.lineage(artifactId),
+      lineage,
       tags: tags.map((row) => row.tag),
       ratings: ratings.map((row) => ({
         id: row.rating_id,
@@ -213,8 +312,9 @@ export class ArtifactRepository {
         rubricId: row.rubric_id,
         notes: row.notes,
         createdAt: row.created_at
-      }))
-    };
+      })),
+      evaluation
+    });
   }
 
   rate(artifactId: string, score: number, actor = "user"): void {
@@ -286,7 +386,11 @@ export class ArtifactRepository {
         input.parentArtifactId,
         input.relation,
         input.sourceOutputVersionId,
-        JSON.stringify(input.metadata)
+        JSON.stringify({
+          ...input.metadata,
+          id: typeof input.metadata.id === "string" ? input.metadata.id : this.context.createId("lineage"),
+          createdAt: typeof input.metadata.createdAt === "string" ? input.metadata.createdAt : this.context.now()
+        })
       );
   }
 
@@ -530,4 +634,51 @@ export class ArtifactRepository {
       membership.run(row.collectionId, row.artifactId, row.position, row.addedAt);
     }
   }
+}
+
+function ftsPhrase(text: string): string | null {
+  const tokens = text.trim().split(/\s+/).filter(Boolean).map((token) => `"${token.replaceAll('"', '""')}"`);
+  return tokens.length === 0 ? null : tokens.join(" AND ");
+}
+
+function encodeArtifactCursor(createdAt: string, artifactId: string): string {
+  return Buffer.from(JSON.stringify([createdAt, artifactId]), "utf8").toString("base64url");
+}
+
+function decodeArtifactCursor(cursor: string): { createdAt: string; artifactId: string } {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 2 || typeof parsed[0] !== "string" || typeof parsed[1] !== "string") throw new Error();
+    return { createdAt: parsed[0], artifactId: parsed[1] };
+  } catch {
+    throw new BlobRepositoryError("ARTIFACT_CURSOR_INVALID", "Artifact search cursor is invalid or expired.");
+  }
+}
+
+function lineageRelation(value: string): ArtifactLineage["relation"] {
+  return value === "generated-from" || value === "edited-from" || value === "selected-from" ? value : "derived-from";
+}
+
+function lineageRole(value: unknown, fallback: ArtifactLineage["role"]): ArtifactLineage["role"] {
+  return typeof value === "string" && [
+    "general", "negative", "subject", "product", "face", "clothing", "pose", "setting",
+    "composition", "style", "lighting", "colourPalette", "typography", "motion", "timing"
+  ].includes(value) ? value as ArtifactLineage["role"] : fallback;
+}
+
+function evaluationProvenance(payload: import("@ether/schema").PayloadEnvelope) {
+  if (payload.content.kind !== "object" || payload.content.schemaId !== "ether.evaluation.v1" || payload.content.value === null || typeof payload.content.value !== "object" || Array.isArray(payload.content.value)) return null;
+  const value = payload.content.value as Record<string, unknown>;
+  const metadata = payload.metadata;
+  if (typeof metadata.evaluationProviderId !== "string" || typeof metadata.evaluationModelId !== "string") return null;
+  return {
+    schemaId: payload.content.schemaId,
+    instruction: typeof metadata.evaluationInstruction === "string" ? metadata.evaluationInstruction : "",
+    rubric: Array.isArray(metadata.evaluationRubric) ? metadata.evaluationRubric : [],
+    providerId: metadata.evaluationProviderId,
+    modelId: metadata.evaluationModelId,
+    reasoningEffort: typeof metadata.evaluationReasoningEffort === "string" ? metadata.evaluationReasoningEffort : null,
+    summary: typeof value.summary === "string" ? value.summary : "",
+    items: Array.isArray(value.items) ? value.items : []
+  };
 }

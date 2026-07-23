@@ -18,12 +18,16 @@ export const desktopIpcChannels = {
   },
   artifacts: {
     search: "ether:artifacts:search",
-    generateFake: "ether:artifacts:generate-fake"
+    generateFake: "ether:artifacts:generate-fake",
+    startDrag: "ether:artifacts:start-drag"
   },
   references: {
     list: "ether:references:list",
     act: "ether:references:act",
     chooseAndLink: "ether:references:choose-and-link"
+  },
+  permissions: {
+    grantFolder: "ether:permissions:grant-folder"
   },
   application: {
     command: "ether:application:command",

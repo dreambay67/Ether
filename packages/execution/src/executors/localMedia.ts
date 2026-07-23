@@ -1,4 +1,5 @@
 import type { ExecutorContext, ExecutorResult, StepExecutor } from "./types.js";
+import { jsonValue } from "./input.js";
 
 export class LocalMediaExecutor implements StepExecutor {
   readonly kinds = ["mask", "transform", "deterministic", "batch", "join", "deterministic-filter"] as const;
@@ -30,7 +31,19 @@ export class LocalMediaExecutor implements StepExecutor {
 
 function filter(context: ExecutorContext): ExecutorResult {
   const rules = Array.isArray(context.step.parameters.rules) ? context.step.parameters.rules : [];
-  const matched = context.inputs.filter((input) => rules.every((rule) => matchesRule(input.metadata, rule)));
+  const mode = context.step.parameters.match === "any" ? "any" : "all";
+  const routes = Array.isArray(context.step.parameters.routes) ? context.step.parameters.routes : [];
+  const items = context.inputs.map((input) => {
+    const explanations = rules.map((rule, index) => explainRule(input.metadata, rule, index));
+    const matched = mode === "any" ? explanations.some((rule) => rule.matched) : explanations.every((rule) => rule.matched);
+    const routeIds = routes.flatMap((route, index) => {
+      if (route === null || typeof route !== "object" || Array.isArray(route)) return [];
+      const value = route as { id?: unknown; outcome?: unknown };
+      const outcome = value.outcome === "unmatched" ? "unmatched" : "matched";
+      return matched === (outcome === "matched") ? [typeof value.id === "string" ? value.id : `route-${index + 1}`] : [];
+    });
+    return { input, matched, routeIds, explanations };
+  });
   return {
     kind: "complete",
     outputs: [{
@@ -38,33 +51,66 @@ function filter(context: ExecutorContext): ExecutorResult {
       role: "general",
       content: {
         kind: "object",
-        value: {
-          matchedPayloadIds: matched.map((input) => input.id),
-          unmatchedPayloadIds: context.inputs.filter((input) => !matched.includes(input)).map((input) => input.id)
-        },
+        value: jsonValue({
+          match: mode,
+          matchedPayloadIds: items.filter((item) => item.matched).map((item) => item.input.id),
+          unmatchedPayloadIds: items.filter((item) => !item.matched).map((item) => item.input.id),
+          items: items.map((item) => ({ payloadId: item.input.id, matched: item.matched, routeIds: item.routeIds, rules: item.explanations }))
+        }),
         schemaId: "ether.filter-result.v1"
       },
-      metadata: { ruleCount: rules.length }
-    }]
+      metadata: { ruleCount: rules.length, match: mode }
+    }, ...items.map((item) => ({
+      channel: item.input.channel,
+      role: item.input.role,
+      content: item.input.content,
+      metadata: {
+        ...item.input.metadata,
+        filterMatched: item.matched,
+        filterRouteIds: item.routeIds,
+        filterExplanations: item.explanations
+      }
+    }))]
   };
 }
 
-function matchesRule(metadata: Record<string, unknown>, rule: unknown): boolean {
-  if (rule === null || typeof rule !== "object" || Array.isArray(rule)) return false;
+function explainRule(metadata: Record<string, unknown>, rule: unknown, index: number) {
+  if (rule === null || typeof rule !== "object" || Array.isArray(rule)) {
+    return { ruleId: `rule-${index + 1}`, field: "", operator: "invalid", matched: false, explanation: "Rule is not an object." };
+  }
   const value = rule as { field?: unknown; operator?: unknown; value?: unknown };
-  if (typeof value.field !== "string" || typeof value.operator !== "string") return false;
+  const ruleId = typeof (rule as { id?: unknown }).id === "string" ? String((rule as { id?: unknown }).id) : `rule-${index + 1}`;
+  if (typeof value.field !== "string" || typeof value.operator !== "string") {
+    return { ruleId, field: "", operator: "invalid", matched: false, explanation: "Rule needs a field and operator." };
+  }
   const actual = metadata[value.field];
-  switch (value.operator) {
+  const matched = matchesValue(actual, value.operator, value.value);
+  return {
+    ruleId,
+    field: value.field,
+    operator: value.operator,
+    matched,
+    explanation: `${value.field} ${value.operator} ${displayValue(value.value)}; actual ${displayValue(actual)}: ${matched ? "matched" : "did not match"}.`
+  };
+}
+
+function matchesValue(actual: unknown, operator: string, expected: unknown): boolean {
+  switch (operator) {
     case "exists": return actual !== undefined;
-    case "eq": return JSON.stringify(actual) === JSON.stringify(value.value);
-    case "neq": return JSON.stringify(actual) !== JSON.stringify(value.value);
-    case "contains": return typeof actual === "string" && String(actual).includes(String(value.value ?? ""));
-    case "gt": return typeof actual === "number" && typeof value.value === "number" && actual > value.value;
-    case "gte": return typeof actual === "number" && typeof value.value === "number" && actual >= value.value;
-    case "lt": return typeof actual === "number" && typeof value.value === "number" && actual < value.value;
-    case "lte": return typeof actual === "number" && typeof value.value === "number" && actual <= value.value;
+    case "eq": return JSON.stringify(actual) === JSON.stringify(expected);
+    case "neq": return JSON.stringify(actual) !== JSON.stringify(expected);
+    case "contains": return typeof actual === "string" && actual.includes(String(expected ?? ""));
+    case "gt": return typeof actual === "number" && typeof expected === "number" && actual > expected;
+    case "gte": return typeof actual === "number" && typeof expected === "number" && actual >= expected;
+    case "lt": return typeof actual === "number" && typeof expected === "number" && actual < expected;
+    case "lte": return typeof actual === "number" && typeof expected === "number" && actual <= expected;
     default: return false;
   }
+}
+
+function displayValue(value: unknown): string {
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? "missing" : encoded;
 }
 
 function stringOperation(value: unknown): "resize" | "crop" | "rotate" | "upscale" {

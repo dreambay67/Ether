@@ -10,7 +10,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "prebuild": "pnpm --filter @ether/execution build",
     "build": "tsc -p tsconfig.json",
@@ -23,6 +25,7 @@
     "@ether/execution": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
     "@ether/providers": "workspace:*",
-    "@ether/schema": "workspace:*"
+    "@ether/schema": "workspace:*",
+    "sharp": "^0.35.3"
   }
 }

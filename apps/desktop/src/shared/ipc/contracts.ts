@@ -176,6 +176,14 @@ export const desktopIpcContracts = {
     request: z.object({ documentId: id, referenceId: id, action: ReferenceActionSchema }).strict(),
     response: resultSchema(z.array(DesktopReferenceSchema))
   },
+  [desktopIpcChannels.artifacts.startDrag]: {
+    request: z.object({ documentId: id, artifactIds: z.array(id).min(1) }).strict(),
+    response: resultSchema(z.null())
+  },
+  [desktopIpcChannels.permissions.grantFolder]: {
+    request: z.object({ documentId: id, purpose: z.enum(["export", "live-output"]) }).strict(),
+    response: resultSchema(z.object({ grantId: id, displayName: z.string().min(1) }).strict().nullable())
+  },
   [desktopIpcChannels.references.chooseAndLink]: {
     request: z.object({
       documentId: id,

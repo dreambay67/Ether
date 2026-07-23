@@ -220,7 +220,19 @@ describe("Ether 4.0 application boundary", () => {
 
     const artifacts = await app.query({ kind: "query", id: "artifacts", correlationId: "c-artifacts", documentId: initial.documentId, name: "artifact.search", payload: { text: "", channels: [], collectionIds: [], tags: [], minimumRating: null, providerId: null, modelId: null, runId: null, graphId: null, createdAfter: null, createdBefore: null } });
     if (artifacts.kind !== "response" || artifacts.name !== "artifact.search") throw new Error("Artifacts did not return.");
+    expect(artifacts.payload).toMatchObject({ total: expect.any(Number), nextCursor: null });
     const artifact = artifacts.payload.artifacts[0]!;
+    const boundaryDetail = await app.query({
+      kind: "query", id: "artifact-detail", correlationId: "c-artifact-detail", documentId: initial.documentId,
+      name: "artifact.detail", payload: { artifactId: artifact.id }
+    });
+    if (boundaryDetail.kind !== "response" || boundaryDetail.name !== "artifact.detail") throw new Error("Artifact detail did not return.");
+    expect(boundaryDetail.payload).toMatchObject({
+      artifact: { id: artifact.id },
+      outputVersion: { id: artifact.source.outputVersionId },
+      sourcePayload: { id: artifact.source.payloadId },
+      collections: [], tags: [], ratings: [], lineage: []
+    });
 
     await app.execute({
       kind: "command",

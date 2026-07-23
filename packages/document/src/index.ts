@@ -109,7 +109,8 @@ export {
 } from "./repositories/exports.js";
 export {
   ArtifactRepository,
-  type ArtifactDetail,
+  type ArtifactSearchInput,
+  type ArtifactSearchPage,
   type ArtifactLineageRecord
 } from "./repositories/artifacts.js";
 export { OutputRepository } from "./repositories/outputs.js";

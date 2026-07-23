@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 
 import {
   DocumentStore,
@@ -1079,26 +1080,42 @@ export class EtherApplication implements EtherApplicationService {
     commandId: string;
     namingTemplate: string;
     pathGrantId: string;
+    format?: "original" | "png" | "jpeg" | "webp";
+    hierarchy?: "flat" | "collection";
+    includeMetadataSidecar?: boolean;
+    includeLineageReport?: boolean;
   }): Promise<ExportRecord[]> {
     const store = this.requireWritableStore();
     const duplicate = await store.read(({ execution }) => execution.getCommandResult(input.commandId, "artifact.export"));
     if (duplicate !== undefined) return duplicate.records as ExportRecord[];
     const root = this.requirePathGrant(input.pathGrantId, "export").path;
     await requireDirectory(root);
-    const records = await store.transaction(({ artifacts, exports }) => input.artifactIds.map((artifactId) => {
+    const exportDetails = await Promise.all(input.artifactIds.map((artifactId) => store.read(({ artifacts }) => artifacts.detail(artifactId))));
+    const records = await store.transaction(({ artifacts, exports }) => input.artifactIds.map((artifactId, index) => {
       const artifact = artifacts.get(artifactId);
       if (artifact === undefined) throw new ApplicationServiceError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifactId}.`);
       const id = stableApplicationId("export", input.commandId, artifactId);
+      const collectionFolder = input.hierarchy === "collection"
+        ? exportDetails[index]?.collections[0]?.title
+        : undefined;
+      const relativePath = exportName(input.namingTemplate, artifact, input.format ?? "original");
       return exports.get(id) ?? exports.create({
         id,
         artifactId,
         pathGrantId: input.pathGrantId,
-        relativePath: exportName(input.namingTemplate, artifact),
+        relativePath: collectionFolder === undefined ? relativePath : path.join(safeFileName(collectionFolder), relativePath),
         contentKey: artifact.contentKey,
         status: "planned",
         createdAt: new Date().toISOString(),
         completedAt: null,
-        options: { collisionPolicy: input.collisionPolicy, commandId: input.commandId }
+        options: {
+          collisionPolicy: input.collisionPolicy,
+          commandId: input.commandId,
+          format: input.format ?? "original",
+          hierarchy: input.hierarchy ?? "flat",
+          includeMetadataSidecar: input.includeMetadataSidecar ?? false,
+          includeLineageReport: input.includeLineageReport ?? false
+        }
       });
     }));
     for (const record of records) await this.materializeExport(record, root);
@@ -1148,15 +1165,18 @@ export class EtherApplication implements EtherApplicationService {
   async createDragExport(commandId: string, artifactIds: readonly string[], lifetimeHours: number) {
     const store = this.requireWritableStore();
     const duplicate = await store.read(({ execution }) => execution.getCommandResult(commandId, "artifact.dragExport"));
-    if (duplicate !== undefined) return duplicate as { expiresAt: string; materializationId: string };
+    if (duplicate !== undefined) return duplicate as { expiresAt: string; materializationId: string; paths: string[] };
     const materializationId = stableApplicationId("drag", store.documentId, commandId);
     const root = path.join(this.options.appDataRoot, "drag-exports", materializationId);
     await mkdir(root, { recursive: true });
+    const paths: string[] = [];
     for (const artifactId of artifactIds) {
       const artifact = await this.queryArtifactDescriptor(artifactId);
-      await writeFile(path.join(root, exportName("{artifact}", artifact)), await this.readArtifactBytes(artifact.id), { flag: "w" });
+      const outputPath = path.join(root, exportName("{artifact}", artifact));
+      await writeFile(outputPath, await this.readArtifactBytes(artifact.id), { flag: "w" });
+      paths.push(outputPath);
     }
-    const result = { materializationId, expiresAt: new Date(Date.now() + lifetimeHours * 3_600_000).toISOString() };
+    const result = { materializationId, expiresAt: new Date(Date.now() + lifetimeHours * 3_600_000).toISOString(), paths };
     await store.transaction(({ execution }) => execution.completeCommand(commandId, "artifact.dragExport", result));
     return result;
   }
@@ -1167,12 +1187,15 @@ export class EtherApplication implements EtherApplicationService {
     if (artifact.contentKey !== record.contentKey) {
       throw new ApplicationServiceError("EXPORT_SOURCE_CHANGED", "The export record no longer matches its immutable artifact source.");
     }
-    const bytes = await this.readArtifactBytes(artifact.id);
+    const sourceBytes = await this.readArtifactBytes(artifact.id);
+    const format = exportFormat(record.options?.format);
+    const bytes = await transcodeArtifactForExport(sourceBytes, artifact.mediaType, format);
+    const exportedContentKey = createHash("sha256").update(bytes).digest("hex");
     let relativePath = record.relativePath;
     let destination = containedPath(root, relativePath);
     const policy = String(record.options?.collisionPolicy ?? "error");
     const occupied = await fileHash(destination);
-    if (occupied !== null && occupied !== artifact.contentKey) {
+    if (occupied !== null && occupied !== exportedContentKey) {
       if (policy === "skip") {
         await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "skipped"); });
         return;
@@ -1184,16 +1207,17 @@ export class EtherApplication implements EtherApplicationService {
       ({ relativePath, destination } = await availableExportPath(root, relativePath));
       await this.requireWritableStore().transaction(({ exports }) => { exports.setRelativePath(record.id, relativePath); });
     }
-    if (occupied === artifact.contentKey) {
+    if (occupied === exportedContentKey) {
       await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "committed"); });
       return;
     }
     const temporary = `${destination}.${record.id}.ether-export.tmp`;
+    await mkdir(path.dirname(destination), { recursive: true });
     await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "staged", null); });
     await writeFile(temporary, bytes, { flag: "w" });
     await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "written", null); });
     await rename(temporary, destination);
-    if (await fileHash(destination) !== artifact.contentKey) {
+    if (await fileHash(destination) !== exportedContentKey) {
       await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "failed"); });
       throw new ApplicationServiceError("EXPORT_VERIFY_FAILED", `Export verification failed: ${relativePath}`);
     }
@@ -1201,6 +1225,17 @@ export class EtherApplication implements EtherApplicationService {
       exports.setStatus(record.id, "verified", null);
       exports.setStatus(record.id, "committed");
     });
+    if (record.options?.includeMetadataSidecar === true || record.options?.includeLineageReport === true) {
+      const detail = await this.requireStore().read(({ artifacts }) => artifacts.detail(artifact.id));
+      if (detail !== undefined) {
+        if (record.options.includeMetadataSidecar === true) {
+          await writeFile(`${destination}.metadata.json`, JSON.stringify({ artifact: detail.artifact, tags: detail.tags, ratings: detail.ratings, evaluation: detail.evaluation }, null, 2));
+        }
+        if (record.options.includeLineageReport === true) {
+          await writeFile(`${destination}.lineage.json`, JSON.stringify({ artifactId: artifact.id, lineage: detail.lineage }, null, 2));
+        }
+      }
+    }
   }
 
   private attachScheduler(): void {
@@ -1504,12 +1539,51 @@ function safeFileName(value: string): string {
   return safe.length === 0 ? "artifact" : safe.slice(0, 180);
 }
 
-function exportName(template: string, artifact: Artifact): string {
+function exportName(
+  template: string,
+  artifact: Artifact,
+  format: "original" | "png" | "jpeg" | "webp" = "original"
+): string {
   const expanded = template
     .replaceAll("{artifact}", artifact.id)
     .replaceAll("{id}", artifact.id)
     .replaceAll("{version}", artifact.source.outputVersionId);
-  return `${safeFileName(expanded)}${extensionForMediaType(artifact.mediaType)}`;
+  const extension = format === "original" ? extensionForMediaType(artifact.mediaType) : exportFormatExtension(format);
+  return `${safeFileName(expanded)}${extension}`;
+}
+
+function exportFormat(value: unknown): "original" | "png" | "jpeg" | "webp" {
+  return value === "png" || value === "jpeg" || value === "webp" ? value : "original";
+}
+
+function exportFormatExtension(format: "png" | "jpeg" | "webp"): string {
+  return format === "jpeg" ? ".jpg" : `.${format}`;
+}
+
+export async function transcodeArtifactForExport(
+  source: Uint8Array,
+  mediaType: string,
+  format: "original" | "png" | "jpeg" | "webp"
+): Promise<Buffer> {
+  if (format === "original") return Buffer.from(source);
+  if (!mediaType.startsWith("image/")) {
+    throw new ApplicationServiceError(
+      "EXPORT_FORMAT_NOT_IMAGE",
+      `Cannot convert ${mediaType} to ${format.toUpperCase()}; converted formats require an image artifact.`
+    );
+  }
+  try {
+    const pipeline = sharp(source, { failOn: "error" }).rotate();
+    if (format === "png") return await pipeline.png({ compressionLevel: 9 }).toBuffer();
+    if (format === "jpeg") return await pipeline.jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+    return await pipeline.webp({ quality: 90 }).toBuffer();
+  } catch (error) {
+    throw new ApplicationServiceError(
+      "EXPORT_IMAGE_DECODE_FAILED",
+      `The image could not be decoded for ${format.toUpperCase()} export.`,
+      { cause: error instanceof Error ? error.message : String(error) }
+    );
+  }
 }
 
 function stableApplicationId(prefix: string, ...parts: string[]): string {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  ArtifactDetailSchema,
   ArtifactLineageSchema,
   ArtifactSchema,
   CollectionMembershipSchema,
@@ -140,6 +141,7 @@ export const applicationQueryNames = [
   "job.timeline",
   "job.workItems",
   "job.attempts",
+  "review.checkpoints",
   "artifact.search",
   "artifact.detail",
   "collection.list",
@@ -316,7 +318,11 @@ export const applicationCommandPayloadSchemas = {
       artifactIds: z.array(idSchema).min(1),
       pathGrantId: idSchema,
       namingTemplate: z.string().min(1),
-      collisionPolicy: z.enum(["rename", "skip", "error"])
+      collisionPolicy: z.enum(["rename", "skip", "error"]),
+      format: z.enum(["original", "png", "jpeg", "webp"]).optional(),
+      hierarchy: z.enum(["flat", "collection"]).optional(),
+      includeMetadataSidecar: z.boolean().optional(),
+      includeLineageReport: z.boolean().optional()
     })
     .strict(),
   "artifact.dragExport": z
@@ -380,6 +386,12 @@ export const applicationQueryPayloadSchemas = {
   "job.timeline": jobIdPayloadSchema,
   "job.workItems": jobIdPayloadSchema,
   "job.attempts": jobIdPayloadSchema,
+  "review.checkpoints": z.object({
+    planId: idSchema.optional(),
+    state: z.enum(["waiting-review", "completed", "rejected", "needs-attention", "cancelled"]).optional(),
+    cursor: z.string().min(1).nullable().optional(),
+    limit: z.number().int().positive().max(200).optional()
+  }).strict(),
   "artifact.search": z
     .object({
       text: z.string(),
@@ -392,7 +404,9 @@ export const applicationQueryPayloadSchemas = {
       runId: idSchema.nullable(),
       graphId: idSchema.nullable(),
       createdAfter: TimestampSchema.nullable(),
-      createdBefore: TimestampSchema.nullable()
+      createdBefore: TimestampSchema.nullable(),
+      cursor: z.string().min(1).nullable().optional(),
+      limit: z.number().int().positive().max(500).optional()
     })
     .strict(),
   "artifact.detail": z.object({ artifactId: idSchema }).strict(),
@@ -717,6 +731,7 @@ export const ApplicationQuerySchema = z.discriminatedUnion("name", [
   queryMessage("job.timeline", applicationQueryPayloadSchemas["job.timeline"]),
   queryMessage("job.workItems", applicationQueryPayloadSchemas["job.workItems"]),
   queryMessage("job.attempts", applicationQueryPayloadSchemas["job.attempts"]),
+  queryMessage("review.checkpoints", applicationQueryPayloadSchemas["review.checkpoints"]),
   queryMessage("artifact.search", applicationQueryPayloadSchemas["artifact.search"]),
   queryMessage("artifact.detail", applicationQueryPayloadSchemas["artifact.detail"]),
   queryMessage("collection.list", applicationQueryPayloadSchemas["collection.list"]),
@@ -883,7 +898,7 @@ const executionPlanResponseSchema = z.object({ plan: ExecutionPlanSchema }).stri
 const executionJobResponseSchema = z.object({ job: ExecutionJobSchema }).strict();
 const exportResponseSchema = z.object({ records: z.array(ExportRecordSchema) }).strict();
 const dragExportResponseSchema = z
-  .object({ materializationId: idSchema, expiresAt: TimestampSchema })
+  .object({ materializationId: idSchema, expiresAt: TimestampSchema, paths: z.array(z.string().min(1)) })
   .strict();
 const providerProbeResponseSchema = z.object({ health: ProviderHealthResultSchema }).strict();
 const providerRefreshResponseSchema = z
@@ -962,10 +977,25 @@ const jobWorkItemsResponseSchema = z
 const jobAttemptsResponseSchema = z
   .object({ jobId: idSchema, attempts: z.array(ExecutionAttemptSchema) })
   .strict();
+const reviewCheckpointSchema = z.object({
+  id: idSchema,
+  planId: idSchema,
+  stepId: idSchema,
+  workItemId: idSchema.nullable(),
+  state: z.enum(["waiting-review", "completed", "rejected", "needs-attention", "cancelled"]),
+  selectedOutputVersionIds: z.array(idSchema),
+  completion: JsonObjectSchema.nullable(),
+  createdAt: TimestampSchema,
+  completedAt: TimestampSchema.nullable()
+}).strict();
+const reviewCheckpointsResponseSchema = z.object({
+  checkpoints: z.array(reviewCheckpointSchema),
+  nextCursor: z.string().min(1).nullable()
+}).strict();
 const artifactSearchResponseSchema = z
-  .object({ artifacts: z.array(ArtifactSchema), total: z.number().int().nonnegative() })
+  .object({ artifacts: z.array(ArtifactSchema), total: z.number().int().nonnegative(), nextCursor: z.string().min(1).nullable() })
   .strict();
-const artifactDetailResponseSchema = z.object({ artifact: ArtifactSchema }).strict();
+const artifactDetailResponseSchema = ArtifactDetailSchema;
 const referenceListResponseSchema = z.object({ references: z.array(LinkedReferenceSchema) }).strict();
 const referenceDetailResponseSchema = z.object({ reference: LinkedReferenceSchema }).strict();
 const outputDetailResponseSchema = z.object({ output: NodeOutputVersionSchema }).strict();
@@ -1095,6 +1125,7 @@ export const applicationResponsePayloadSchemas = {
   "job.timeline": jobTimelineResponseSchema,
   "job.workItems": jobWorkItemsResponseSchema,
   "job.attempts": jobAttemptsResponseSchema,
+  "review.checkpoints": reviewCheckpointsResponseSchema,
   "artifact.search": artifactSearchResponseSchema,
   "artifact.detail": artifactDetailResponseSchema,
   "collection.list": collectionListResponseSchema,
@@ -1297,6 +1328,7 @@ export const ApplicationQueryResponseSchema = z.discriminatedUnion("name", [
   responseMessage("job.timeline", applicationResponsePayloadSchemas["job.timeline"]),
   responseMessage("job.workItems", applicationResponsePayloadSchemas["job.workItems"]),
   responseMessage("job.attempts", applicationResponsePayloadSchemas["job.attempts"]),
+  responseMessage("review.checkpoints", applicationResponsePayloadSchemas["review.checkpoints"]),
   responseMessage("artifact.search", applicationResponsePayloadSchemas["artifact.search"]),
   responseMessage("artifact.detail", applicationResponsePayloadSchemas["artifact.detail"]),
   responseMessage("collection.list", applicationResponsePayloadSchemas["collection.list"]),

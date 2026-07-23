@@ -298,6 +298,35 @@ describe("durable document repositories", () => {
         }
       }, { appDataRoot: root });
       expect(imported.contentKey).toHaveLength(64);
+      await importBlob(store, {
+        sourcePath: blobPath,
+        mediaType: "application/octet-stream",
+        artifact: {
+          id: "artifact-child",
+          channel: "text",
+          mediaType: "application/octet-stream",
+          source: { outputVersionId: outputTwo.version.id, payloadId: outputTwo.payloads[0]!.id },
+          createdAt: manualAt,
+          metadata: { title: "Child artifact" }
+        }
+      }, { appDataRoot: root });
+      await store.transaction(({ artifacts }) => artifacts.addLineage({
+        artifactId: "artifact-child",
+        parentArtifactId: "artifact-durable",
+        relation: "derived-from",
+        sourceOutputVersionId: outputTwo.version.id,
+        metadata: { id: "lineage-parent-child", createdAt: manualAt, role: "general" }
+      }));
+      const lineageViews = await store.read(({ artifacts }) => ({
+        child: artifacts.detail("artifact-child")!.lineage,
+        parent: artifacts.detail("artifact-durable")!.lineage
+      }));
+      expect(lineageViews.child).toContainEqual(expect.objectContaining({
+        id: "lineage-parent-child", parentArtifactId: "artifact-durable", childArtifactId: "artifact-child"
+      }));
+      expect(lineageViews.parent).toContainEqual(expect.objectContaining({
+        id: "lineage-parent-child", parentArtifactId: "artifact-durable", childArtifactId: "artifact-child"
+      }));
       await store.transaction(({ collections }) => {
         collections.create({ id: "collection-a", title: "A", description: "first", primary: true });
         collections.create({ id: "collection-b", title: "B", description: "second", primary: false });

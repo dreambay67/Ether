@@ -44,6 +44,7 @@ export const testSuites = {
     "tests/provider-lifecycle.test.ts",
     "tests/provider-registry.test.ts",
     "tests/execution-plan.test.ts",
+    "tests/export-codec.test.ts",
     "tests/batch-scheduler.test.ts",
     "tests/application-contract-4.0.test.ts",
     "tests/live-output.test.ts",

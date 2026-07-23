@@ -1,4 +1,4 @@
-import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from "electron";
+import { nativeImage, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent } from "electron";
 
 import { desktopIpcChannels } from "../../shared/ipc/channels.js";
 import {
@@ -48,6 +48,17 @@ export function registerDocumentHandlers(options: {
       return service.searchArtifacts(search.documentId, search.text);
     }],
     [desktopIpcChannels.artifacts.generateFake, (request) => service.generateFakeArtifact(scopedId(request))],
+    [desktopIpcChannels.artifacts.startDrag, async (request) => {
+      const drag = request as { documentId: string; artifactIds: string[] };
+      const paths = await service.prepareArtifactDrag(drag.documentId, drag.artifactIds);
+      if (paths[0] === undefined) throw new Error("Drag export produced no files.");
+      mainWindow.webContents.startDrag({ file: paths[0], icon: nativeImage.createEmpty() });
+      return null;
+    }],
+    [desktopIpcChannels.permissions.grantFolder, (request) => {
+      const grant = request as { documentId: string; purpose: "export" | "live-output" };
+      return service.grantFolder(grant.documentId, grant.purpose);
+    }],
     [desktopIpcChannels.references.list, (request) => service.listReferences(scopedId(request))],
     [desktopIpcChannels.references.act, (request) => {
       const action = request as { documentId: string; referenceId: string; action: string };

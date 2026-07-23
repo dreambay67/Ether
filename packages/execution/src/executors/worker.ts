@@ -68,14 +68,42 @@ export class WorkerExecutor implements StepExecutor {
         : undefined,
       requestedAt: context.claim.attempt.startedAt ?? context.claim.attempt.createdAt
     });
+    const rubric = Array.isArray(context.step.parameters.rubric) ? context.step.parameters.rubric : [];
+    const modelId = typeof context.step.parameters.model === "string"
+      ? context.step.parameters.model
+      : typeof result.metadata?.modelId === "string"
+        ? result.metadata.modelId
+        : "provider-default";
+    const provenance = jsonObject({
+      ...result.metadata,
+      evaluationProviderId: result.providerId,
+      evaluationModelId: modelId,
+      evaluationInstruction: context.step.compiledPrompt,
+      evaluationRubric: rubric,
+      evaluationReasoningEffort: typeof context.step.parameters.reasoningEffort === "string"
+        ? context.step.parameters.reasoningEffort
+        : null
+    });
     return {
       kind: "complete",
       outputs: [{
         channel: "data",
         role: "general",
         content: { kind: "object", value: { summary: result.summary, items: result.items }, schemaId: "ether.evaluation.v1" },
-        metadata: jsonObject(result.metadata)
-      }]
+        metadata: provenance
+      }, {
+        channel: "text",
+        role: "general",
+        content: { kind: "text", value: result.summary },
+        metadata: provenance
+      }, ...context.inputs
+        .filter((input) => input.channel !== "text" && input.channel !== "data")
+        .map((input) => ({
+          channel: input.channel,
+          role: input.role,
+          content: input.content,
+          metadata: { ...input.metadata, ...provenance, evaluationPassthrough: true }
+        }))]
     };
   }
 }

@@ -56,6 +56,7 @@ export interface NativeDialogPort {
   saveDocument(kind?: "save-as" | "save-copy"): Promise<string | null>;
   locateReference(referenceId: string): Promise<string | null>;
   searchReferenceFolder(referenceId: string): Promise<string | null>;
+  chooseOutputFolder?(purpose: "export" | "live-output"): Promise<string | null>;
   confirmPortable(input: {
     expectedBytes: number;
     expectedCount: number;
@@ -228,11 +229,13 @@ export class OpenDocumentController {
   }
 }
 
+type DesktopGrantOperation = ReferenceGrantPathRequest["operation"] | "export" | "live-output";
+
 interface GrantBinding {
   documentId: string;
   documentPath: string;
   grantId: string;
-  operation: ReferenceGrantPathRequest["operation"];
+  operation: DesktopGrantOperation;
   path: string;
   fingerprint?: string;
 }
@@ -287,7 +290,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     this.activeDocuments.delete(documentId);
   }
 
-  grant(documentId: string, operation: ReferenceGrantPathRequest["operation"], filePath: string): string {
+  grant(documentId: string, operation: DesktopGrantOperation, filePath: string): string {
     const documentPath = this.activeDocuments.get(documentId) ?? this.memoryDocumentPath(documentId);
     const grantId = randomUUID();
     const next = new Map(this.grants);
@@ -345,21 +348,20 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     documentId: string;
     pathGrantId: string;
     purpose: "live-output" | "export" | "reference";
-  }): { displayName: string; kind: "file"; path: string } {
-    if (input.purpose !== "reference") {
-      throw codedError("PATH_PERMISSION_REQUIRED", "This desktop service has no grant for that destination.");
-    }
+  }): { displayName: string; kind: "directory" | "file"; path: string } {
     const key = grantKey(input.pathGrantId, input.documentId);
     const grant = this.grants.get(key);
     if (
       grant === undefined ||
       this.pendingRevocations.has(key) ||
       grant.documentPath !== this.activeDocuments.get(input.documentId) ||
-      (grant.operation !== "link" && grant.operation !== "relink")
+      (input.purpose === "reference"
+        ? grant.operation !== "link" && grant.operation !== "relink"
+        : grant.operation !== input.purpose)
     ) {
       throw codedError("PATH_PERMISSION_REQUIRED", "The selected reference is no longer authorized for this document.");
     }
-    return { displayName: path.basename(grant.path), kind: "file", path: grant.path };
+    return { displayName: path.basename(grant.path), kind: input.purpose === "reference" ? "file" : "directory", path: grant.path };
   }
 
   prepareRevocation(grantId: string, documentId: string): void {
@@ -716,6 +718,7 @@ export interface DesktopApplicationServiceOptions {
   appVersion: string;
   dialogs: NativeDialogPort;
   provider: GenerationProvider;
+  executionProviders?: ConstructorParameters<typeof EtherApplication>[0]["executionProviders"];
   providerLifecycle?: {
     clearDocument(documentId: string): void;
   };
@@ -1043,6 +1046,28 @@ export class DesktopApplicationService {
 
   async generateFakeArtifact(documentId: string) {
     return this.enqueueLifecycle(() => this.generateFakeArtifactNow(documentId));
+  }
+
+  async grantFolder(documentId: string, purpose: "export" | "live-output"): Promise<{ grantId: string; displayName: string } | null> {
+    if (this.current?.documentId !== documentId || this.application === null) throw codedError("DOCUMENT_SCOPE_REJECTED", "The active document does not match this request.");
+    if (this.options.dialogs.chooseOutputFolder === undefined) throw codedError("PATH_PERMISSION_REQUIRED", "Folder selection is unavailable in this desktop host.");
+    const selected = await this.options.dialogs.chooseOutputFolder(purpose);
+    if (selected === null) return null;
+    if (!(await lstat(selected)).isDirectory()) throw codedError("PATH_GRANT_KIND_MISMATCH", "The selected output destination is not a folder.");
+    const grantId = this.pathGrants.grant(documentId, purpose, selected);
+    try {
+      await this.application.grantPathPermit(randomUUID(), grantId, purpose);
+      return { grantId, displayName: path.basename(selected) };
+    } catch (error) {
+      this.pathGrants.revoke(grantId, documentId);
+      throw error;
+    }
+  }
+
+  async prepareArtifactDrag(documentId: string, artifactIds: readonly string[]): Promise<string[]> {
+    if (this.current?.documentId !== documentId) throw codedError("DOCUMENT_SCOPE_REJECTED", "The active document does not match this request.");
+    const result = await this.requireApplication().createDragExport(randomUUID(), artifactIds, 24);
+    return result.paths;
   }
 
   subscribeApplication(listener: (event: ApplicationEvent) => void): () => void {
@@ -1453,6 +1478,7 @@ export class DesktopApplicationService {
       appDataRoot: this.options.appDataRoot,
       appVersion: this.options.appVersion,
       provider: this.options.provider,
+      executionProviders: this.options.executionProviders,
       pathGrantResolver: {
         resolve: (input) => this.pathGrants.resolveApplicationPathGrant(input)
       },
@@ -1650,7 +1676,7 @@ function isGrantBinding(value: unknown): value is {
   documentId: string;
   documentPath: string;
   grantId: string;
-  operation: ReferenceGrantPathRequest["operation"];
+  operation: DesktopGrantOperation;
   path: string;
   fingerprint?: string;
 } {
@@ -1659,7 +1685,7 @@ function isGrantBinding(value: unknown): value is {
   return typeof binding.documentId === "string" &&
     typeof binding.documentPath === "string" &&
     typeof binding.grantId === "string" &&
-    ["link", "relink", "resolve"].includes(String(binding.operation)) &&
+    ["link", "relink", "resolve", "export", "live-output"].includes(String(binding.operation)) &&
     typeof binding.path === "string" &&
     (binding.fingerprint === undefined || typeof binding.fingerprint === "string");
 }

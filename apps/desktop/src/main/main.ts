@@ -85,6 +85,11 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
           notes: ["Task 9 production lifecycle does not install a generation provider."]
         }, "No production image provider is configured."),
     simulationMode: options.simulationMode === true,
+    ...(providerService ? { executionProviders: {
+      image: providerService.codex.generation,
+      worker: providerService.codex.assistant,
+      evaluation: providerService.codex.evaluation
+    } } : {}),
     ...(providerService ? { providerLifecycle: providerService } : {}),
     ...(options.locationCapability !== undefined
       ? { locationCapability: options.locationCapability }
@@ -292,6 +297,13 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
       const result = await dialog.showOpenDialog(getWindow(), {
         title: "Search Folder for References",
         properties: ["openDirectory"]
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
+    chooseOutputFolder: async (purpose) => {
+      const result = await dialog.showOpenDialog(getWindow(), {
+        title: purpose === "export" ? "Choose Export Folder" : "Choose Live Output Folder",
+        properties: ["openDirectory", "createDirectory"]
       });
       return result.canceled ? null : result.filePaths[0] ?? null;
     },

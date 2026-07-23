@@ -455,6 +455,7 @@ describe("desktop IPC contract", () => {
       "artifacts",
       "document",
       "graph",
+      "permissions",
       "references",
       "runtime"
     ]);
