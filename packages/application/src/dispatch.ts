@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import type { DocumentStore } from "@ether/document";
 import { validateFullGraphState } from "@ether/graph-kernel";
 import type { GenerationProvider } from "@ether/providers";
+import { BUILTIN_RECIPES, instantiateRecipe, recipeById } from "@ether/recipes";
 import {
   ApplicationCommandResponseSchema,
   ApplicationQueryResponseSchema,
@@ -157,7 +158,8 @@ async function providerHealth(provider: GenerationProvider): Promise<ProviderHea
 
 async function providerCapabilities(provider: GenerationProvider): Promise<ProviderCapability[]> {
   const diagnostic = await provider.diagnose();
-  return (diagnostic.profiles ?? []).flatMap((profile) => {
+  const profiles = (diagnostic.profiles ?? []).flatMap((profile) => {
+    if (profile.availability !== "available" || profile.status !== "ready") return [];
     if (profile.operation !== "image.generate" && profile.operation !== "image.edit") return [];
     return [{
       providerId: profile.providerId,
@@ -167,15 +169,76 @@ async function providerCapabilities(provider: GenerationProvider): Promise<Provi
       outputChannels: [...profile.outputChannels],
       aspectRatios: [],
       resolutions: [],
-      maxReferences: profile.mediaLimits?.maxInputs ?? 0,
+      maxReferences: profile.mediaLimits?.maxInputs ?? (profile.inputChannels.includes("image") ? 1 : 0),
       maxOutputsPerCall: 1,
       ...(profile.maxParallelism === undefined ? {} : { maxParallelism: profile.maxParallelism }),
-      supportsCancellation: false,
+      supportsCancellation: true,
       supportsSeed: false,
       provenance: "runtime-discovered",
       limitations: profile.messages ?? []
     } satisfies ProviderCapability];
   });
+  if (profiles.length > 0 || diagnostic.availability !== "available") return profiles;
+  const profileId = diagnostic.route === "local-fake" ? "fake-image-default" : "default";
+  const fallback: ProviderCapability[] = [];
+  const base = {
+    providerId: diagnostic.id, profileId, aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 32,
+    supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered" as const, limitations: diagnostic.messages
+  };
+  if (diagnostic.capabilities.includes("image.generate")) fallback.push({
+    ...base, operation: "generate-image", inputChannels: ["text", "image", "data"], outputChannels: ["image"]
+  });
+  if (diagnostic.capabilities.includes("image.edit")) fallback.push({
+    ...base, operation: "edit-image", inputChannels: ["text", "image", "mask", "data"], outputChannels: ["image"]
+  });
+  return fallback;
+}
+
+async function recipeCapabilities(app: EtherApplication): Promise<ProviderCapability[]> {
+  let discovered: ProviderCapability[] = [];
+  try {
+    discovered = await providerCapabilities(app.boundaryProvider());
+  } catch {
+    // Recipe blockers should name the missing capability even when provider
+    // diagnosis itself is unavailable.
+  }
+  const execution = app.boundaryExecutionProviderAvailability();
+  const intelligence: ProviderCapability[] = [
+    ...(execution.worker ? [{
+      providerId: "ether-intelligence", profileId: "worker", operation: "llm" as const,
+      inputChannels: ["text", "image", "data"] as ProviderCapability["inputChannels"], outputChannels: ["text"] as ProviderCapability["outputChannels"],
+      aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4,
+      supportsCancellation: true, supportsSeed: false, provenance: "static-constraint" as const, limitations: []
+    }] : []),
+    ...(execution.evaluation ? [{
+      providerId: "ether-intelligence", profileId: "evaluation", operation: "llm" as const,
+      inputChannels: ["text", "image", "data"] as ProviderCapability["inputChannels"], outputChannels: ["data"] as ProviderCapability["outputChannels"],
+      aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4,
+      supportsCancellation: true, supportsSeed: false, provenance: "static-constraint" as const, limitations: []
+    }] : [])
+  ];
+  const combined = [...app.boundaryConfiguredProviderCapabilities(), ...discovered, ...intelligence];
+  return combined.filter((capability, index) => combined.findIndex((candidate) =>
+    candidate.providerId === capability.providerId
+    && candidate.profileId === capability.profileId
+    && candidate.operation === capability.operation
+  ) === index);
+}
+
+function requireRecipe(recipeId: string, version: string) {
+  const recipe = recipeById(recipeId, version);
+  if (recipe !== undefined) return recipe;
+  const error = new Error(`Recipe ${recipeId}@${version} is not installed.`) as Error & { code: string };
+  error.code = "RECIPE_NOT_FOUND";
+  throw error;
+}
+
+function recipeBlocked(blockers: readonly { code: string; message: string }[]): never {
+  const error = new Error(blockers.map((blocker) => blocker.message).join(" ")) as Error & { code: string };
+  error.code = blockers.some((blocker) => blocker.code === "CAPABILITY_MISSING")
+    ? "RECIPE_CAPABILITY_BLOCKED"
+    : "RECIPE_SETUP_BLOCKED";
+  throw error;
 }
 
 export async function executeApplicationCommand(
@@ -366,13 +429,51 @@ export async function executeApplicationCommand(
       await app.removeDocumentReference(command.payload.referenceId);
       return commandResponse(command, acknowledgement());
     case "graph.layout":
-    case "recipe.preview":
-    case "recipe.instantiate":
     case "provider.configure":
     case "provider.disable":
     case "recipe.install":
     case "recipe.remove":
       throw new BoundaryUnavailableError(`${command.name} needs the corresponding desktop, recipe, or Live Output service injection.`);
+    case "recipe.preview": {
+      const manifest = requireRecipe(command.payload.recipeId, command.payload.version);
+      const snapshot = await store.read(({ graphs, revisions }) => ({ graphs: graphs.list(), head: revisions.head() }));
+      const target = snapshot.graphs.filter((graph) => graph.kind === "root").sort((left, right) => left.id.localeCompare(right.id))[0];
+      if (target === undefined) recipeBlocked([{ code: "TARGET_GRAPH_MISSING", message: "This document has no root graph for recipe preview." }]);
+      const result = instantiateRecipe({
+        manifest,
+        graphs: snapshot.graphs,
+        targetGraphId: target.id,
+        baseDocumentRevisionId: snapshot.head.documentRevisionId,
+        baseGraphRevisions: snapshot.head.graphRevisions,
+        parameters: command.payload.parameters,
+        providerCapabilities: await recipeCapabilities(app),
+        transactionId: `recipe-preview-${command.id}`
+      });
+      if (result.kind === "blocked") recipeBlocked(result.blockers);
+      const warnings = [
+        `Preview targets the first root graph (${target.title}) because recipe.preview does not carry a target graph ID.`,
+        ...result.providers.filter((provider) => provider.mode === "substitution").map((provider) =>
+          `${provider.requirementId} will use ${provider.capability.providerId}/${provider.capability.profileId} as a declared substitution.`)
+      ];
+      return commandResponse(command, { transaction: result.transaction, warnings });
+    }
+    case "recipe.instantiate": {
+      const manifest = requireRecipe(command.payload.recipeId, command.payload.version);
+      const snapshot = await store.read(({ graphs, revisions }) => ({ graphs: graphs.list(), head: revisions.head() }));
+      const result = instantiateRecipe({
+        manifest,
+        graphs: snapshot.graphs,
+        targetGraphId: command.payload.targetGraphId,
+        baseDocumentRevisionId: snapshot.head.documentRevisionId,
+        baseGraphRevisions: snapshot.head.graphRevisions,
+        parameters: command.payload.parameters,
+        providerCapabilities: await recipeCapabilities(app),
+        transactionId: `recipe-${command.id}`
+      });
+      if (result.kind === "blocked") recipeBlocked(result.blockers);
+      const revision = await app.applyGraphTransaction({ commandId: command.id, transaction: result.transaction });
+      return commandResponse(command, revisionPayload(revision));
+    }
     case "artifact.export": {
       return commandResponse(command, { records: await app.exportArtifacts({ commandId: command.id, ...command.payload }) });
     }
@@ -482,7 +583,7 @@ export async function executeApplicationQuery(
       if (output === undefined) throw new Error(`Unknown output ${query.payload.outputVersionId}.`);
       return queryResponse(query, { output });
     }
-    case "provider.capabilities": return queryResponse(query, { capabilities: await providerCapabilities(app.boundaryProvider()) });
+    case "provider.capabilities": return queryResponse(query, { capabilities: await recipeCapabilities(app) });
     case "provider.health": return queryResponse(query, { providers: [await providerHealth(app.boundaryProvider())] });
     case "plan.summary": return queryResponse(query, { plan: await app.queryPlan(query.payload.planId) });
     case "job.summary": return queryResponse(query, { job: await app.queryJob(query.payload.jobId) });
@@ -525,8 +626,10 @@ export async function executeApplicationQuery(
       const [file, blobs] = await Promise.all([stat(store.path), store.read(({ blobs }) => blobs.list())]);
       return queryResponse(query, { documentBytes: file.size, blobBytes: blobs.reduce((total, blob) => total + blob.byteLength, 0), reclaimableBytes: 0 });
     }
-    case "recipe.catalog":
-    case "recipe.setupSchema":
-      throw new BoundaryUnavailableError(`${query.name} needs its compiler, recipe, recovery, or Live Output service injection.`);
+    case "recipe.catalog": return queryResponse(query, { recipes: BUILTIN_RECIPES });
+    case "recipe.setupSchema": {
+      const manifest = requireRecipe(query.payload.recipeId, query.payload.version);
+      return queryResponse(query, { recipeId: manifest.id, version: manifest.version, parameters: manifest.parameters });
+    }
   }
 }

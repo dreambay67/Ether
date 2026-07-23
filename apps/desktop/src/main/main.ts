@@ -11,6 +11,11 @@ import {
   type MenuItemConstructorOptions
 } from "electron";
 import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
+import {
+  startEtherMcpApplicationBridge,
+  type EtherMcpApplicationBridge,
+  type EtherMcpBridgeHost
+} from "@ether/mcp-server/bridge";
 
 import { registerDocumentHandlers } from "./ipc/registerDocumentHandlers.js";
 import { registerGraphHandlers } from "./ipc/registerGraphHandlers.js";
@@ -31,6 +36,7 @@ import {
 } from "./services/applicationService.js";
 import { createCodexRuntimeService } from "./services/codexRuntime.js";
 import { createProviderService, type ProviderService } from "./services/providerService.js";
+import { createDesktopMcpBridgeHost } from "./services/mcpApplicationBridge.js";
 import { createMainWindowOptions } from "./windowOptions.js";
 
 registerEtherAssetScheme(protocol);
@@ -46,12 +52,14 @@ export interface DesktopStartOptions {
   autosaveOperation?: DesktopApplicationServiceOptions["autosaveOperation"];
   serviceFactory?: (options: DesktopApplicationServiceOptions) => DesktopApplicationService;
   providerService?: ProviderService;
+  mcpBridgeFactory?: false | ((host: EtherMcpBridgeHost) => Promise<EtherMcpApplicationBridge>);
 }
 
 export async function startEtherDesktop(options: DesktopStartOptions = {}): Promise<{
   mainWindow: BrowserWindow;
   service: DesktopApplicationService;
   providerService: ProviderService | null;
+  mcpBridge: EtherMcpApplicationBridge | null;
 }> {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -99,6 +107,9 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     ...(options.autosaveOperation === undefined ? {} : { autosaveOperation: options.autosaveOperation })
   };
   const service = options.serviceFactory?.(serviceOptions) ?? new DesktopApplicationService(serviceOptions);
+  const mcpBridge = options.mcpBridgeFactory === false
+    ? null
+    : await (options.mcpBridgeFactory ?? startEtherMcpApplicationBridge)(createDesktopMcpBridgeHost(service));
   const settings = createDesktopSettingsStore(() => path.join(app.getPath("userData"), "settings.json"));
 
   const rememberCurrentDocument = async () => {
@@ -121,7 +132,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   let quitDrain: Promise<void> | null = null;
   const requestQuitDrain = () => {
     if (quitDrain !== null) return;
-    quitDrain = service.close().then(() => providerService?.close()).then(() => {
+    quitDrain = (mcpBridge?.close() ?? Promise.resolve()).then(() => service.close()).then(() => providerService?.close()).then(() => {
       lifecycleDrainedForQuit = true;
       app.quit();
     }, async (error) => {
@@ -216,7 +227,60 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     })
   );
 
-  const disposeApplicationMenu = installApplicationMenu(service, openDocument, run);
+  const approveMcpEdit = async () => {
+    const active = service.snapshot();
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      title: "Allow Codex to edit?",
+      message: `Allow Codex to edit ${active.displayName}?`,
+      detail: "This grants a temporary Edit Permit for the active document. Codex cannot grant this permission to itself.",
+      buttons: ["Grant Edit Permit", "Cancel"],
+      defaultId: 1,
+      cancelId: 1
+    });
+    if (confirmation.response !== 0) return;
+    await service.grantMcpEditPermit(active.documentId, new Date(Date.now() + 15 * 60_000).toISOString());
+    await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Codex edit access granted",
+      message: "Codex can now discover the Edit Permit and apply a previewed change to this document for 15 minutes."
+    });
+  };
+  const approveMcpRun = async () => {
+    const active = service.snapshot();
+    const plan = service.latestMcpRunPlan(active.documentId);
+    if (plan === null) {
+      await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "No Codex plan to approve",
+        message: "Ask Codex to preview a run plan first, then approve it here."
+      });
+      return;
+    }
+    const confirmation = await dialog.showMessageBox(mainWindow, {
+      type: "question",
+      title: "Approve Codex run plan?",
+      message: `Approve ${plan.workItems.length.toLocaleString()} work item${plan.workItems.length === 1 ? "" : "s"} in ${active.displayName}?`,
+      detail: `Plan ${plan.id}\n${plan.estimatedCalls.toLocaleString()} estimated provider call${plan.estimatedCalls === 1 ? "" : "s"}\n${plan.contentHash}`,
+      buttons: ["Approve Exact Plan", "Cancel"],
+      defaultId: 1,
+      cancelId: 1
+    });
+    if (confirmation.response !== 0) return;
+    await service.approveLatestMcpRunPlan(active.documentId);
+    await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "Codex run plan approved",
+      message: "Codex can now discover a Run Permit for this exact immutable plan."
+    });
+  };
+  const disposeApplicationMenu = installApplicationMenu(
+    service,
+    openDocument,
+    run,
+    () => run(approveMcpEdit),
+    () => run(approveMcpRun)
+  );
   installWindowSecurity(mainWindow, rendererUrl);
   app.setJumpList([{ type: "recent" }]);
 
@@ -248,7 +312,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   else await service.bootstrap();
   if (quitDrain !== null) {
     await quitDrain;
-    return { mainWindow, service, providerService };
+    return { mainWindow, service, providerService, mcpBridge };
   }
 
   await mainWindow.loadURL(rendererUrl);
@@ -259,7 +323,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     disposeApplicationMenu();
     disposeRecentSubscription();
   });
-  return { mainWindow, service, providerService };
+  return { mainWindow, service, providerService, mcpBridge };
 }
 
 function resolveRendererUrl(): string {
@@ -328,7 +392,9 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
 function installApplicationMenu(
   service: DesktopApplicationService,
   openDocument: () => Promise<unknown>,
-  run: (operation: () => Promise<unknown>, remember?: boolean) => void
+  run: (operation: () => Promise<unknown>, remember?: boolean) => void,
+  grantMcpEdit: () => void,
+  approveMcpRun: () => void
 ): () => void {
   type Command = keyof ReturnType<DesktopApplicationService["snapshot"]>["commands"];
   let commands: Record<Command, boolean> = {
@@ -367,7 +433,13 @@ function installApplicationMenu(
       { type: "separator" },
       { role: "quit" }
     ]
-  }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }];
+  }, { role: "editMenu" }, {
+    label: "Codex",
+    submenu: [
+      { id: "codex.grant-edit", label: "Grant Edit Permit…", click: grantMcpEdit },
+      { id: "codex.approve-run", label: "Approve Latest Run Plan…", click: approveMcpRun }
+    ]
+  }, { role: "viewMenu" }, { role: "windowMenu" }];
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
   const update = (next: ReturnType<DesktopApplicationService["snapshot"]>["commands"]) => {

@@ -30,6 +30,7 @@ import {
   ApplicationEventSchema,
   ApplicationQueryResponseSchema,
   ApplicationQuerySchema,
+  ExecutionPlanSchema,
   type ApplicationCommand,
   type ApplicationCommandResponse,
   type ApplicationEvent,
@@ -37,6 +38,7 @@ import {
   type ApplicationQueryResponse,
   type EtherError,
   type EtherGraph,
+  type ExecutionPlan,
   type GraphTransaction,
   type LinkedReference
 } from "@ether/schema";
@@ -728,6 +730,7 @@ export interface DesktopApplicationServiceOptions {
     "leaseRoot" | "recoveryRoot" | "referenceGrantAuthority" | "locationCapability"
   >;
   simulationMode?: boolean;
+  dispatchMode?: ConstructorParameters<typeof EtherApplication>[0]["dispatchMode"];
   autosaveOperation?: (application: EtherApplication) => Promise<void>;
   pathGrantPersistenceCheckpoint?: (
     stage: "write" | "fsync" | "rename",
@@ -756,6 +759,7 @@ export class DesktopApplicationService {
   private lifecycleAccepting = true;
   private closePromise: Promise<void> | null = null;
   private referenceSearchController: AbortController | null = null;
+  private latestMcpPlanPreview: { documentId: string; plan: ExecutionPlan } | null = null;
 
   constructor(private readonly options: DesktopApplicationServiceOptions) {
     this.pathGrants = new DesktopPathGrantAuthority({
@@ -1101,6 +1105,135 @@ export class DesktopApplicationService {
     const response = await this.requireApplication().query(parsed);
     if (response.kind === "error") throw boundaryError(response.error);
     return redactApplicationQueryResponse(ApplicationQueryResponseSchema.parse(response));
+  }
+
+  mcpActiveDocument(): { documentId: string } | null {
+    return this.current === null ? null : { documentId: this.current.documentId };
+  }
+
+  async grantMcpEditPermit(documentId: string, expiresAt: string | null = null) {
+    this.assertScope(documentId);
+    return this.requireApplication().grantEditPermit(`mcp-edit-${randomUUID()}`, expiresAt);
+  }
+
+  async grantMcpRunPermit(documentId: string, planId: string, contentHash: string) {
+    this.assertScope(documentId);
+    return this.requireApplication().grantRunPermit({
+      commandId: `mcp-run-${randomUUID()}`,
+      planId,
+      contentHash
+    });
+  }
+
+  latestMcpRunPlan(documentId: string): ExecutionPlan | null {
+    this.assertScope(documentId);
+    if (this.latestMcpPlanPreview?.documentId !== documentId) return null;
+    return structuredClone(this.latestMcpPlanPreview.plan);
+  }
+
+  async approveLatestMcpRunPlan(documentId: string) {
+    this.assertScope(documentId);
+    const latest = this.latestMcpPlanPreview;
+    if (latest === null || latest.documentId !== documentId) {
+      throw codedError("MCP_PLAN_APPROVAL_UNAVAILABLE", "Codex has not previewed a run plan for the active document yet.");
+    }
+    const persisted = await this.requireApplication().queryPlan(latest.plan.id);
+    if (persisted.documentId !== documentId || persisted.contentHash !== latest.plan.contentHash) {
+      throw codedError("MCP_PLAN_APPROVAL_STALE", "The latest Codex plan no longer matches its persisted immutable plan.");
+    }
+    return this.grantMcpRunPermit(documentId, persisted.id, persisted.contentHash);
+  }
+
+  mcpInspectPermits(documentId: string) {
+    this.assertScope(documentId);
+    return this.requireApplication().inspectPermits();
+  }
+
+  async executeMcpCommand(command: ApplicationCommand): Promise<ApplicationCommandResponse> {
+    const parsed = ApplicationCommandSchema.parse(command);
+    if (!new Set<ApplicationCommand["name"]>(["recipe.preview", "run.preview", "run.start"]).has(parsed.name)) {
+      throw codedError("MCP_COMMAND_REJECTED", `The MCP bridge cannot execute ${parsed.name} through its generic command lane.`);
+    }
+    const response = await this.executeApplicationCommand(parsed);
+    if (parsed.name === "run.preview") {
+      const plan = ExecutionPlanSchema.parse((response.payload as { plan?: unknown }).plan);
+      if (plan.documentId !== parsed.documentId) {
+        throw codedError("MCP_PLAN_SCOPE_MISMATCH", "The previewed run plan does not belong to the active document.");
+      }
+      this.latestMcpPlanPreview = { documentId: plan.documentId, plan };
+    }
+    return response;
+  }
+
+  executeMcpQuery(query: ApplicationQuery): Promise<ApplicationQueryResponse> {
+    return this.executeApplicationQuery(ApplicationQuerySchema.parse(query));
+  }
+
+  async previewMcpGraphTransaction(documentId: string, transaction: GraphTransaction) {
+    this.assertScope(documentId);
+    return this.requireApplication().previewGraphTransaction(transaction);
+  }
+
+  async applyMcpGraphTransaction(input: {
+    commandId: string;
+    documentId: string;
+    editPermitId: string;
+    transaction: GraphTransaction;
+  }) {
+    return this.enqueueLifecycle(async () => {
+      this.assertScope(input.documentId);
+      const result = await this.requireApplication().applyGraphTransactionWithEditPermit(input);
+      this.autosaveCoordinator?.markDirty();
+      await this.refresh("graph", "saving");
+      return result;
+    });
+  }
+
+  async instantiateMcpRecipe(input: { command: ApplicationCommand; editPermitId: string }) {
+    return this.enqueueLifecycle(async () => {
+      const command = ApplicationCommandSchema.parse(input.command);
+      if (command.name !== "recipe.instantiate" || !("documentId" in command)) {
+        throw codedError("MCP_COMMAND_REJECTED", "The recipe bridge lane accepts only document-scoped recipe.instantiate commands.");
+      }
+      this.assertScope(command.documentId);
+      const application = this.requireApplication();
+      application.requireEditPermit(input.editPermitId);
+      const response = await application.execute(command);
+      if (response.kind === "error") throw boundaryError(response.error);
+      const validated = ApplicationCommandResponseSchema.parse(response);
+      this.autosaveCoordinator?.markDirty();
+      await this.refresh("graph", "saving");
+      return validated.payload as Record<string, unknown>;
+    });
+  }
+
+  async cancelMcpRun(input: {
+    commandId: string;
+    contentHash: string;
+    documentId: string;
+    jobId: string;
+    planId: string;
+    runPermitId: string;
+  }) {
+    return this.enqueueLifecycle(async () => {
+      this.assertScope(input.documentId);
+      return { job: await this.requireApplication().cancelRunWithPermit(input) };
+    });
+  }
+
+  async retryMcpRun(input: {
+    commandId: string;
+    contentHash: string;
+    documentId: string;
+    jobId: string;
+    planId: string;
+    runPermitId: string;
+    workItemIds: readonly string[];
+  }) {
+    return this.enqueueLifecycle(async () => {
+      this.assertScope(input.documentId);
+      return { job: await this.requireApplication().retryRunWithPermit(input) };
+    });
   }
 
   async chooseAndLinkReference(input: {
@@ -1456,6 +1589,7 @@ export class DesktopApplicationService {
     this.current = null;
     this.currentPath = null;
     this.untitled = false;
+    this.latestMcpPlanPreview = null;
   }
 
   private abortReferenceSearch(): void {
@@ -1479,6 +1613,7 @@ export class DesktopApplicationService {
       appVersion: this.options.appVersion,
       provider: this.options.provider,
       executionProviders: this.options.executionProviders,
+      dispatchMode: this.options.dispatchMode,
       pathGrantResolver: {
         resolve: (input) => this.pathGrants.resolveApplicationPathGrant(input)
       },
@@ -1506,6 +1641,7 @@ export class DesktopApplicationService {
     filePath: string,
     untitled: boolean
   ): void {
+    this.latestMcpPlanPreview = null;
     this.pathGrants.activateDocument(documentId, filePath);
     this.application = application;
     this.currentPath = filePath;

@@ -15,7 +15,9 @@ const workspacePackages = [
   ["@ether/document", "packages/document"],
   ["@ether/execution", "packages/execution"],
   ["@ether/graph-kernel", "packages/graph-kernel"],
+  ["@ether/mcp-server", "packages/mcp-server"],
   ["@ether/providers", "packages/providers"],
+  ["@ether/recipes", "packages/recipes"],
   ["@ether/schema", "packages/schema"]
 ];
 

@@ -1,0 +1,75 @@
+import { expect, test } from "@playwright/test";
+
+test("loads typed recipe setup, previews blockers, inserts atomically, reloads, and focuses", async ({ page }) => {
+  await page.addInitScript(() => {
+    const node = {
+      id: "prompt-to-image-prompt", definitionId: "prompt.text", title: "Recipe brief",
+      position: { x: 80, y: 80 }, size: { width: 220, height: 140 },
+      config: { kind: "prompt.text", body: "A precise editorial still life", assembly: "replace" },
+      presentation: { collapsed: false, accent: "#37e6ea", previewMode: "content" }
+    };
+    let graph = {
+      id: "graph-root", title: "Recipe canvas", kind: "root", createdAt: "2026-07-23T00:00:00.000Z", updatedAt: "2026-07-23T00:00:00.000Z",
+      nodes: [] as typeof node[], edges: [], groups: [], modules: [],
+      viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
+    };
+    const recipe = (id: string, title: string) => ({
+      id, version: "4.0.0", title, description: "A typed application-boundary recipe.",
+      capabilityRequirements: [{ id: "prompt", operation: "generate-image" }],
+      expectedWork: { minimumCalls: 1, maximumCalls: 1, minimumWorkItems: 1, maximumWorkItems: 1 },
+      layout: { focusNodeRef: "prompt" }
+    });
+    const recipes = [recipe("prompt-to-image", "Prompt to Image"), recipe("provider-blocked", "Provider Blocked")];
+    const descriptor = {
+      documentId: "recipe-document", displayName: "Recipes", named: true, mode: "writable", readOnlyReason: null,
+      commands: { save: true, saveAs: true, saveCopy: true, compact: true, makePortable: true }, saveState: "saved",
+      documentRevisionId: "revision-1", graphId: "graph-root", graphRevisionId: "graph-revision-1", simulationEnabled: false, revision: 1
+    };
+    const preview = {
+      id: "recipe-preview", baseDocumentRevisionId: "revision-1", baseGraphRevisions: { "graph-root": "graph-revision-1" },
+      title: "Insert recipe", actor: "recipe", layoutPolicy: "preserve",
+      operations: [{ type: "addNode", graphId: "graph-root", node }]
+    };
+    Object.defineProperty(window, "ether", { value: {
+      document: {
+        onEvent: () => () => undefined, bootstrap: async () => descriptor, new: async () => descriptor, open: async () => descriptor,
+        openDropped: async () => descriptor, save: async () => descriptor, saveAs: async () => descriptor, saveCopy: async () => descriptor,
+        compact: async () => ({ beforeBytes: 1, afterBytes: 1 }), makePortable: async () => ({ cancelled: false, embeddedCount: 0, embeddedBytes: 0, expectedBytes: 0, expectedCount: 0, missingReferences: [] }), close: async () => null
+      },
+      graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) },
+      application: {
+        onEvent: () => () => undefined,
+        query: async (query: { name: string }) => query.name === "recipe.catalog"
+          ? { payload: { recipes } }
+          : query.name === "recipe.setupSchema"
+            ? { payload: { parameters: [{ id: "brief", title: "Creative brief", description: "The direction for this graph.", type: "string", required: true, defaultValue: "A precise editorial still life", minLength: 3, maxLength: 1200 }] } }
+            : { payload: { graph, documentRevisionId: "revision-1", graphRevisionId: "graph-revision-1" } },
+        command: async (command: { name: string; payload: { recipeId?: string } }) => {
+          if (command.name === "recipe.preview") {
+            if (command.payload.recipeId === "provider-blocked") throw new Error("No enabled provider can satisfy prompt (generate-image).");
+            return { payload: { transaction: preview, warnings: ["Preview targets the first root graph (Recipe canvas)."] } };
+          }
+          if (command.name === "recipe.instantiate") graph = { ...graph, nodes: [node] };
+          return { payload: { kind: "revision", documentRevisionId: "revision-2", graphRevisions: [{ graphId: "graph-root", revisionId: "graph-revision-2" }] } };
+        }
+      },
+      artifacts: { search: async () => [], generateFake: async () => [] }, references: { list: async () => [], act: async () => [] },
+      runtime: { versions: async () => ({ electron: "43", node: "24" }) }
+    } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Recipes" }).click();
+  await expect(page.getByTestId("recipe-gallery")).toBeVisible();
+  await page.getByTestId("recipe-card-provider-blocked").click();
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByTestId("recipe-gallery-status")).toContainText("Blocked: No enabled provider");
+
+  await page.getByTestId("recipe-card-prompt-to-image").click();
+  await page.getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByTestId("recipe-gallery-status")).toContainText("Preview ready");
+  await page.getByRole("button", { name: "Insert recipe" }).click();
+  await expect(page.locator('[data-testid="rf__node-prompt-to-image-prompt"]')).toBeVisible();
+  await expect(page.getByTestId("recipe-gallery-status")).toContainText("inserted");
+  await expect(page.getByTestId("canvas-status")).toContainText("Focused the inserted recipe node");
+});

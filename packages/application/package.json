@@ -14,9 +14,9 @@
     "dist"
   ],
   "scripts": {
-    "prebuild": "pnpm --filter @ether/execution build",
+    "prebuild": "pnpm --filter @ether/execution build && pnpm --filter @ether/recipes build",
     "build": "tsc -p tsconfig.json",
-    "pretypecheck": "pnpm --filter @ether/execution build",
+    "pretypecheck": "pnpm --filter @ether/execution build && pnpm --filter @ether/recipes build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0"
   },
@@ -25,6 +25,7 @@
     "@ether/execution": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
     "@ether/providers": "workspace:*",
+    "@ether/recipes": "workspace:*",
     "@ether/schema": "workspace:*",
     "sharp": "^0.35.3"
   }

@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "pretest:unit": "pnpm --filter @ether/schema build && pnpm --filter @ether/graph-kernel build",
     "test:unit": "vitest run --config vitest.config.ts",
-    "pretest:integration": "pnpm --filter @ether/providers build && pnpm --filter @ether/application build",
+    "pretest:integration": "pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "pretest:performance": "pnpm --filter @ether/schema build",
     "test:performance": "vitest run --config vitest.performance.config.ts",
@@ -33,6 +33,7 @@
     "@ether/graph-kernel": "workspace:*",
     "@ether/intelligence": "workspace:*",
     "@ether/providers": "workspace:*",
-    "@ether/schema": "workspace:*"
+    "@ether/schema": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

@@ -72,6 +72,7 @@ import { executeApplicationCommand, executeApplicationQuery } from "./dispatch.j
 import {
   ApplicationPermitStore,
   type ApplicationPermit,
+  type ApplicationPermitInspection,
   type PathGrantPurpose,
   type PathGrantResolver,
   type ResolvedPathGrant
@@ -152,10 +153,35 @@ export class EtherApplication implements EtherApplicationService {
     return this.options.provider;
   }
 
+  /** @internal Recipe previews combine configured profiles with provider diagnosis. */
+  boundaryConfiguredProviderCapabilities(): readonly ProviderCapability[] {
+    return this.options.providerCapabilities ?? [];
+  }
+
+  /** @internal Recipe setup checks optional text and evaluation execution facets. */
+  boundaryExecutionProviderAvailability(): { worker: boolean; evaluation: boolean } {
+    return {
+      worker: this.options.executionProviders?.worker !== undefined,
+      evaluation: this.options.executionProviders?.evaluation !== undefined
+    };
+  }
+
   async grantEditPermit(commandId: string, expiresAt: string | null): Promise<ApplicationPermit> {
     const permit = this.permits.grantEdit(commandId, expiresAt);
     this.publishPermission(permit, "granted");
     return permit;
+  }
+
+  inspectPermits(): ApplicationPermitInspection[] {
+    return deepFreezeSnapshot(this.permits.inspect());
+  }
+
+  requireEditPermit(permitId: string): void {
+    try {
+      this.permits.requireEdit(permitId);
+    } catch (error) {
+      throw mapError(error);
+    }
   }
 
   async grantPathPermit(
@@ -523,6 +549,64 @@ export class EtherApplication implements EtherApplicationService {
     }
   }
 
+  async previewGraphTransaction(transaction: GraphTransaction): Promise<{
+    documentId: string;
+    transaction: GraphTransaction;
+    tempIds: Record<string, string>;
+    summary: {
+      operationCount: number;
+      affectedGraphIds: string[];
+      addedNodes: number;
+      addedEdges: number;
+      removedNodes: number;
+      removedEdges: number;
+    };
+    warnings: string[];
+  }> {
+    try {
+      const store = this.requireStore();
+      const snapshot = await store.read(({ graphs, revisions }) => ({ graphs: graphs.list(), head: revisions.head() }));
+      if (snapshot.head.documentRevisionId !== transaction.baseDocumentRevisionId) {
+        throw new ApplicationServiceError("STALE_REVISION", "The graph transaction must be rebased onto the current document revision.");
+      }
+      for (const [graphId, baseRevisionId] of Object.entries(transaction.baseGraphRevisions)) {
+        if (snapshot.head.graphRevisions[graphId] !== baseRevisionId) {
+          throw new ApplicationServiceError("STALE_REVISION", `Graph ${graphId} changed after the transaction was authored.`);
+        }
+      }
+      const preview = previewGraphTransaction({ graphs: snapshot.graphs, transaction });
+      const canonicalTransaction: GraphTransaction = {
+        ...transaction,
+        operations: preview.forwardOperations
+      };
+      return deepFreezeSnapshot({
+        documentId: store.documentId,
+        transaction: canonicalTransaction,
+        tempIds: preview.tempIds,
+        summary: {
+          operationCount: preview.forwardOperations.length,
+          affectedGraphIds: [...new Set(preview.forwardOperations.map((operation) => operation.graphId))],
+          addedNodes: preview.forwardOperations.filter((operation) => operation.type === "addNode").length,
+          addedEdges: preview.forwardOperations.filter((operation) => operation.type === "addEdge").length,
+          removedNodes: preview.forwardOperations.filter((operation) => operation.type === "removeNode").length,
+          removedEdges: preview.forwardOperations.filter((operation) => operation.type === "removeEdge").length
+        },
+        warnings: []
+      });
+    } catch (error) {
+      throw mapError(error);
+    }
+  }
+
+  async applyGraphTransactionWithEditPermit(input: {
+    commandId: string;
+    editPermitId: string;
+    transaction: GraphTransaction;
+  }): Promise<{ documentRevisionId: string; graphRevisions: Record<string, string> }> {
+    this.requireEditPermit(input.editPermitId);
+    return this.applyGraphTransaction({ commandId: input.commandId, transaction: input.transaction });
+  }
+
   async pinOutput(input: {
     baseDocumentRevisionId: string;
     commandId: string;
@@ -708,10 +792,17 @@ export class EtherApplication implements EtherApplicationService {
     runPermitId: string;
   }): Promise<ExecutionJob> {
     try {
-      this.permits.requireRun(input.runPermitId, input.planId, input.contentHash);
-      const job = await this.requireWritableStore().transaction(({ execution }) =>
-        execution.startJob(input)
-      );
+      this.permits.requireRun(input.runPermitId, input.planId, input.contentHash, input.commandId);
+      this.permits.consumeRun(input.runPermitId, input.commandId);
+      let job: ExecutionJob;
+      try {
+        job = await this.requireWritableStore().transaction(({ execution }) =>
+          execution.startJob(input)
+        );
+      } catch (error) {
+        this.permits.releaseRun(input.runPermitId, input.commandId);
+        throw error;
+      }
       await this.drainEvents();
       if (this.options.dispatchMode !== "manual") void this.scheduler!.run(job.id);
       return deepFreezeSnapshot(job);
@@ -736,6 +827,22 @@ export class EtherApplication implements EtherApplicationService {
     return deepFreezeSnapshot(job);
   }
 
+  async cancelRunWithPermit(input: {
+    commandId: string;
+    contentHash: string;
+    jobId: string;
+    planId: string;
+    runPermitId: string;
+  }): Promise<ExecutionJob> {
+    const job = await this.queryJob(input.jobId);
+    if (job.planId !== input.planId || job.planContentHash !== input.contentHash) {
+      throw new ApplicationServiceError("RUN_PERMIT_MISMATCH", "The job does not belong to the authorized immutable plan.");
+    }
+    this.permits.requireRunControl(input.runPermitId, input.planId, input.contentHash);
+    const cancelled = await this.cancelRun({ commandId: input.commandId, jobId: input.jobId });
+    return cancelled;
+  }
+
   async retryRun(input: {
     commandId: string;
     jobId: string;
@@ -747,6 +854,23 @@ export class EtherApplication implements EtherApplicationService {
     await this.drainEvents();
     if (this.options.dispatchMode !== "manual") void this.requireScheduler().run(job.id);
     return deepFreezeSnapshot(job);
+  }
+
+  async retryRunWithPermit(input: {
+    commandId: string;
+    contentHash: string;
+    jobId: string;
+    planId: string;
+    runPermitId: string;
+    workItemIds?: readonly string[];
+  }): Promise<ExecutionJob> {
+    const job = await this.queryJob(input.jobId);
+    if (job.planId !== input.planId || job.planContentHash !== input.contentHash) {
+      throw new ApplicationServiceError("RUN_PERMIT_MISMATCH", "The job does not belong to the authorized immutable plan.");
+    }
+    this.permits.requireRunControl(input.runPermitId, input.planId, input.contentHash);
+    const retried = await this.retryRun({ commandId: input.commandId, jobId: input.jobId, workItemIds: input.workItemIds });
+    return retried;
   }
 
   async resumeRun(input: { commandId: string; jobId: string }): Promise<ExecutionJob> {

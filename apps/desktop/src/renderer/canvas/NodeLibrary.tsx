@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { CanvasTemplateId } from "@ether/engine/graph/reviewRouterTemplate";
 import type { EtherNodeDefinition } from "@ether/engine/graph/nodeCatalog";
 import { AddNodePalette } from "./library/AddNodePalette";
-import { TemplateGallery } from "./library/TemplateGallery";
 
 type NodeLibraryProps = {
   onAddNode(definition: EtherNodeDefinition): void;
@@ -10,7 +9,7 @@ type NodeLibraryProps = {
   templateFocusSignal: number;
 };
 
-export function NodeLibrary({ onAddNode, onAddTemplate, templateFocusSignal }: NodeLibraryProps) {
+export function NodeLibrary({ onAddNode, templateFocusSignal }: NodeLibraryProps) {
   const [activeSection, setActiveSection] = useState<"nodes" | "templates">("nodes");
   const templateButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -45,7 +44,7 @@ export function NodeLibrary({ onAddNode, onAddTemplate, templateFocusSignal }: N
       {activeSection === "nodes" ? (
         <AddNodePalette onAddNode={onAddNode} />
       ) : (
-        <TemplateGallery onAddTemplate={onAddTemplate} />
+        <p className="node-palette-empty">Versioned templates now live in the active Recipe Gallery.</p>
       )}
     </div>
   );

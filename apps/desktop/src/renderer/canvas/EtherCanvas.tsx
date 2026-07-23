@@ -11,7 +11,7 @@ import { useTransactionCommands, type GraphRevisionSeed } from "./commands/useTr
 import type { InspectorContext } from "./inspector/types";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 
-export type EtherCanvasHandle = { addPrompt(): void; addImage(): void; };
+export type EtherCanvasHandle = { addPrompt(): void; addImage(): void; focusNode(nodeId: string): void; };
 export type EtherCanvasProps = { graph: EtherGraph | null; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onStatus(message: string): void; onInspectorChange?(context: InspectorContext | null): void; };
 type ParentFrame = { graph: EtherGraph; moduleId: string; selectedIds: string[] };
 type ApplicationQueryBridge = {
@@ -116,7 +116,17 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; viewport?
     }
   }, [document.documentId, graph.id, onGraph, report]);
   useEffect(() => { onInspectorChange?.(selectedEdgeId ? { graph, document, nodeId: null, edgeId: selectedEdgeId, apply: transactions.apply, refreshGraph, report } : selectedIds.length === 1 ? { graph, document, nodeId: selectedIds[0]!, edgeId: null, apply: transactions.apply, refreshGraph, report } : null); }, [document, graph, onInspectorChange, refreshGraph, report, selectedEdgeId, selectedIds, transactions.apply]);
-  useImperativeHandle(ref, () => ({ addPrompt: () => nodes.createNode("prompt.text"), addImage: () => nodes.createNode("generation.image") }), [nodes]);
+  useImperativeHandle(ref, () => ({
+    addPrompt: () => nodes.createNode("prompt.text"),
+    addImage: () => nodes.createNode("generation.image"),
+    focusNode: (nodeId: string) => {
+      if (graph.nodes.some((node) => node.id === nodeId)) {
+        setSelectedEdgeId(null);
+        setSelectedIds([nodeId]);
+        report("Focused the inserted recipe node");
+      }
+    }
+  }), [graph.nodes, nodes, report, setSelectedIds]);
   const persistViewport = async () => { const next = viewport ?? graph.viewState.viewport; return transactions.apply([{ type: "updateGraphProperties", graphId: graph.id, viewState: { ...graph.viewState, viewport: next } }], "Save canvas viewport"); };
   const toggleModule = (id: string) => { if (readOnly) return; const module = graph.modules.find((item) => item.id === id); if (module) void transactions.apply([{ type: "updateModule", graphId: graph.id, moduleId: id, module: { ...module, collapsed: !module.collapsed } }], module.collapsed ? "Expand module" : "Collapse module"); };
   const enter = async (id: string) => { if (readOnly || await persistViewport()) onEnterModule(id, graph); };

@@ -1,22 +1,29 @@
 {
   "name": "@ether/mcp-server",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./bridge": "./dist/bridge.js"
+  },
   "bin": {
     "ether-mcp-server": "dist/index.js"
   },
   "scripts": {
-    "build": "pnpm --filter @ether/engine build && pnpm --filter @ether/providers build && tsc -p tsconfig.json",
-    "pretypecheck": "pnpm --filter @ether/engine build && pnpm --filter @ether/providers build",
+    "prebuild": "pnpm --filter @ether/application build",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "pnpm --filter @ether/application build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
-    "@ether/engine": "workspace:*",
-    "@ether/providers": "workspace:*"
+    "@ether/application": "workspace:*",
+    "@ether/schema": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "@types/node": "^22.15.32"

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { packageWindowsApp, requiredPackageInputs } from "../../../scripts/package-windows.mjs";
 
 const repoRoot = path.resolve(__dirname, "../../..");
-const workspacePackages = ["application", "document", "execution", "graph-kernel", "providers", "schema"];
+const workspacePackages = ["application", "document", "execution", "graph-kernel", "mcp-server", "providers", "recipes", "schema"];
 
 async function createFile(filePath: string, content = "") {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -70,7 +70,9 @@ describe("Windows desktop package", () => {
         "packages\\document\\dist\\index.js",
         "packages\\execution\\dist\\index.js",
         "packages\\graph-kernel\\dist\\index.js",
+        "packages\\mcp-server\\dist\\index.js",
         "packages\\providers\\dist\\index.js",
+        "packages\\recipes\\dist\\index.js",
         "packages\\schema\\dist\\index.js",
         "packages\\providers\\protocol\\codex-0.144.2\\manifest.json",
         "packages\\schema\\node_modules\\zod\\package.json"

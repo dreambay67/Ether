@@ -24,8 +24,15 @@ export interface ApplicationPermit {
   permission: "edit" | "path" | "run";
 }
 
+export interface ApplicationPermitInspection extends ApplicationPermit {
+  contentHash?: string;
+  planId?: string;
+  state: "active" | "start-consumed" | "expired" | "revoked";
+}
+
 interface StoredPermit extends ApplicationPermit {
   commandId: string;
+  consumedByCommandId?: string;
   contentHash?: string;
   pathGrantId?: string;
   planId?: string;
@@ -79,17 +86,53 @@ export class ApplicationPermitStore {
       id: permitId,
       permission: "run",
       planId,
-      revoked: false
+      revoked: false,
+      consumedByCommandId: undefined
     };
     this.permits.set(permit.id, permit);
     this.permitByCommand.set(commandId, permit.id);
     return publicPermit(permit);
   }
 
-  requireRun(permitId: string, planId: string, contentHash: string): void {
+  requireEdit(permitId: string): void {
+    const permit = this.requireActive(permitId);
+    if (permit.permission !== "edit") {
+      throw permitError("EDIT_PERMISSION_REQUIRED", "An active Edit Permit is required.");
+    }
+  }
+
+  requireRun(permitId: string, planId: string, contentHash: string, commandId?: string): void {
     const permit = this.requireActive(permitId);
     if (permit.permission !== "run" || permit.planId !== planId || permit.contentHash !== contentHash) {
       throw permitError("RUN_PERMIT_MISMATCH", "The run permit does not authorize this exact immutable plan.");
+    }
+    if (permit.consumedByCommandId !== undefined && permit.consumedByCommandId !== commandId) {
+      throw permitError("RUN_PERMIT_INVALID", "The run permit has already been consumed.");
+    }
+  }
+
+  requireRunControl(permitId: string, planId: string, contentHash: string): void {
+    const permit = this.requireActive(permitId);
+    if (permit.permission !== "run" || permit.planId !== planId || permit.contentHash !== contentHash) {
+      throw permitError("RUN_PERMIT_MISMATCH", "The run permit does not authorize this exact immutable plan.");
+    }
+  }
+
+  consumeRun(permitId: string, commandId: string): void {
+    const permit = this.permits.get(permitId);
+    if (permit === undefined || permit.permission !== "run") {
+      throw permitError("RUN_PERMIT_INVALID", "The run permit is missing or invalid.");
+    }
+    if (permit.consumedByCommandId !== undefined && permit.consumedByCommandId !== commandId) {
+      throw permitError("RUN_PERMIT_INVALID", "The run permit has already been consumed.");
+    }
+    permit.consumedByCommandId = commandId;
+  }
+
+  releaseRun(permitId: string, commandId: string): void {
+    const permit = this.permits.get(permitId);
+    if (permit?.permission === "run" && permit.consumedByCommandId === commandId) {
+      permit.consumedByCommandId = undefined;
     }
   }
 
@@ -130,7 +173,20 @@ export class ApplicationPermitStore {
 
   isActive(permitId: string): boolean {
     const permit = this.permits.get(permitId);
-    return permit !== undefined && !permit.revoked && !expired(permit);
+    return permit !== undefined && !permit.revoked && !expired(permit) && permit.consumedByCommandId === undefined;
+  }
+
+  inspect(): ApplicationPermitInspection[] {
+    return [...this.permits.values()].map((permit) => ({
+      ...publicPermit(permit),
+      state: permit.revoked
+        ? "revoked"
+        : expired(permit)
+          ? "expired"
+          : permit.consumedByCommandId === undefined ? "active" : "start-consumed",
+      ...(permit.planId === undefined ? {} : { planId: permit.planId }),
+      ...(permit.contentHash === undefined ? {} : { contentHash: permit.contentHash })
+    }));
   }
 
   private grant(

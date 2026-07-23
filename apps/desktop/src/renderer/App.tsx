@@ -1,7 +1,7 @@
 import "@xyflow/react/dist/style.css";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink } from "lucide-react";
-import type { EtherGraph } from "@ether/schema";
+import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink, Workflow } from "lucide-react";
+import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, RecipeManifest, RecipeParameter } from "@ether/schema";
 
 import type {
   DesktopReference,
@@ -20,6 +20,7 @@ import type { InspectorContext } from "./canvas/inspector/types";
 import { ReferenceDesk } from "./references/ReferenceDesk";
 import { BatchMatrix } from "./batches/BatchMatrix";
 import { JobCenter } from "./jobs/JobCenter";
+import { TemplateGallery, type RecipeSetupRequest } from "./canvas/library/TemplateGallery";
 
 export function App() {
   const { state, document } = useProjectSession();
@@ -28,6 +29,9 @@ export function App() {
   const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
   const [inspectorContext, setInspectorContext] = useState<InspectorContext | null>(null);
+  const [recipesOpen, setRecipesOpen] = useState(false);
+  const [recipes, setRecipes] = useState<readonly RecipeManifest[]>([]);
+  const [recipeCatalogError, setRecipeCatalogError] = useState<string | null>(null);
   const canvasRef = useRef<EtherCanvasHandle>(null);
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
@@ -46,6 +50,21 @@ export function App() {
       setMessage(error instanceof Error ? error.message : "The graph needs attention.");
     });
   }, [document, loadGraph]);
+
+  useEffect(() => {
+    if (!recipesOpen || !applicationAvailable) return;
+    let current = true;
+    setRecipeCatalogError(null);
+    const query: ApplicationQuery = {
+      kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "recipe.catalog", payload: {}
+    };
+    void window.ether.application.query(query).then((response) => {
+      if (current) setRecipes((response.payload as { recipes: RecipeManifest[] }).recipes);
+    }).catch((error) => {
+      if (current) setRecipeCatalogError(error instanceof Error ? error.message : "Recipe catalog unavailable.");
+    });
+    return () => { current = false; };
+  }, [applicationAvailable, recipesOpen]);
 
   useEffect(() => {
     if (state.commandResult !== null) setMessage(formatDocumentCommandResult(state.commandResult));
@@ -112,6 +131,39 @@ export function App() {
     }
   };
 
+  const loadRecipeSetup = async (recipeId: string, version: string): Promise<readonly RecipeParameter[]> => {
+    const response = await window.ether.application.query({
+      kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "recipe.setupSchema", payload: { recipeId, version }
+    } as ApplicationQuery);
+    return (response.payload as { parameters: RecipeParameter[] }).parameters;
+  };
+
+  const previewRecipe = async (request: RecipeSetupRequest): Promise<{ transaction: GraphTransaction; warnings: readonly string[] }> => {
+    if (document === null) throw new Error("Open a document before previewing a recipe.");
+    const response = await window.ether.application.command({
+      kind: "command", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "recipe.preview",
+      documentId: document.documentId, payload: request
+    } as ApplicationCommand);
+    return response.payload as { transaction: GraphTransaction; warnings: string[] };
+  };
+
+  const instantiateRecipe = async (request: RecipeSetupRequest): Promise<void> => {
+    if (document === null || graph === null) throw new Error("The active graph is not ready for recipe insertion.");
+    const preview = await previewRecipe(request);
+    const manifest = recipes.find((recipe) => recipe.id === request.recipeId && recipe.version === request.version);
+    const focusRef = manifest?.layout.focusNodeRef ?? null;
+    const focusOperation = focusRef === null ? undefined : preview.transaction.operations.find((operation) =>
+      operation.type === "addNode" && operation.node.id.endsWith(`-${focusRef}`));
+    const focusNodeId = focusOperation?.type === "addNode" ? focusOperation.node.id : null;
+    await window.ether.application.command({
+      kind: "command", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "recipe.instantiate",
+      documentId: document.documentId,
+      payload: { recipeId: request.recipeId, version: request.version, targetGraphId: graph.id, parameters: request.parameters }
+    } as ApplicationCommand);
+    await loadGraph(document);
+    if (focusNodeId !== null) window.setTimeout(() => canvasRef.current?.focusNode(focusNodeId), 0);
+  };
+
   if (document === null) {
     return (
       <StartScreen
@@ -174,6 +226,18 @@ export function App() {
           <button type="button" title="Reload graph" onClick={() => void loadGraph(document)}>
             <RefreshCcw size={16} aria-hidden="true" />Refresh
           </button>
+          <button type="button" title="Open Recipe Gallery" aria-expanded={recipesOpen} aria-pressed={recipesOpen} onClick={() => setRecipesOpen((open) => !open)}>
+            <Workflow size={16} aria-hidden="true" />Recipes
+          </button>
+          {recipesOpen ? applicationAvailable ? recipeCatalogError === null ? (
+            <TemplateGallery
+              recipes={recipes}
+              readOnly={document.mode === "read-only"}
+              onLoadSetup={loadRecipeSetup}
+              onPreviewRecipe={previewRecipe}
+              onInstantiateRecipe={instantiateRecipe}
+            />
+          ) : <p className="recipe-gallery-error" role="alert">Blocked: {recipeCatalogError}</p> : <p className="recipe-gallery-error" role="alert">Recipe Gallery needs the application service.</p> : null}
         </aside>
       )}
       canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
