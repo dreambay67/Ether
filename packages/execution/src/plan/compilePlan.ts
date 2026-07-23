@@ -73,6 +73,8 @@ export type PlanCompilationErrorCode =
   | "INVALID_CONNECTION"
   | "OUTPUT_SELECTOR_INVALID"
   | "PROVIDER_CAPABILITY_UNAVAILABLE"
+  | "EDIT_CAPABILITY_UNSUPPORTED"
+  | "EDIT_MASK_UNSUPPORTED"
   | "INVALID_PLAN";
 
 export class PlanCompilationError extends Error {
@@ -743,8 +745,32 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
       return makeProviderBinding(input, input.capability.providerId, config.model, config);
     case "generation.image":
       return makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
-    case "edit.image":
-      return makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
+    case "edit.image": {
+      if (config.workspace?.capability.mode === "unsupported") {
+        throw new PlanCompilationError(
+          "EDIT_CAPABILITY_UNSUPPORTED",
+          config.workspace.capability.detail ?? "The selected provider profile cannot execute image edits.",
+          { providerId: config.providerId, profileId: config.profileId }
+        );
+      }
+      const binding = makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
+      const capability = binding.capabilitySnapshot;
+      if (capability.operation !== "edit-image" || !capability.inputChannels.includes("image") || !capability.outputChannels.includes("image")) {
+        throw new PlanCompilationError(
+          "EDIT_CAPABILITY_UNSUPPORTED",
+          `Provider profile ${config.providerId}/${config.profileId} does not expose a verified image-edit capability.`,
+          { providerId: config.providerId, profileId: config.profileId, operation: capability.operation }
+        );
+      }
+      if (config.workspace !== undefined && !capability.inputChannels.includes("mask")) {
+        throw new PlanCompilationError(
+          "EDIT_MASK_UNSUPPORTED",
+          `Provider profile ${config.providerId}/${config.profileId} cannot consume the committed mask.`,
+          { providerId: config.providerId, profileId: config.profileId }
+        );
+      }
+      return binding;
+    }
     case "review.evaluate":
       return makeProviderBinding(input, input.capability.providerId, config.model, config);
     case "edit.mask":

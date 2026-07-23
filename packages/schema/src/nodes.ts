@@ -202,13 +202,57 @@ export const GenerationImageConfigSchema = z
   .strict();
 export type GenerationImageConfig = z.infer<typeof GenerationImageConfigSchema>;
 
+export const EditFrameSchema = z.object({
+  mode: z.enum(["source", "crop", "outpaint"]),
+  x: z.number().finite().nonnegative(),
+  y: z.number().finite().nonnegative(),
+  width: z.number().finite().positive().max(32_768),
+  height: z.number().finite().positive().max(32_768)
+}).strict();
+export type EditFrame = z.infer<typeof EditFrameSchema>;
+
+export const EditMaskPointSchema = z.object({
+  x: z.number().finite(), y: z.number().finite(), pressure: z.number().min(0).max(1)
+}).strict();
+export const EditMaskStrokeSchema = z.object({
+  id: z.string().min(1),
+  tool: z.enum(["brush", "eraser"]),
+  size: z.number().finite().positive().max(4096),
+  opacity: z.number().min(0).max(1),
+  points: z.array(EditMaskPointSchema).max(100_000)
+}).strict();
+export const EditMaskGeometrySchema = z.object({
+  width: z.number().int().positive().max(32_768),
+  height: z.number().int().positive().max(32_768),
+  strokes: z.array(EditMaskStrokeSchema).max(10_000)
+}).strict();
+export type EditMaskGeometry = z.infer<typeof EditMaskGeometrySchema>;
+
+export const ImageEditCapabilityStateSchema = z.object({
+  providerId: z.string().min(1),
+  profileId: z.string().min(1),
+  mode: z.enum(["native-inpainting", "guidance-only", "unsupported"]),
+  detail: z.string().optional()
+}).strict();
+export type ImageEditCapabilityState = z.infer<typeof ImageEditCapabilityStateSchema>;
+
+export const EditWorkspaceStateSchema = z.object({
+  sourceArtifactId: z.string().min(1),
+  recipeId: z.enum(["freeform", "product-cleanup", "object-removal", "outpaint-scene"]),
+  frame: EditFrameSchema,
+  maskGeometry: EditMaskGeometrySchema,
+  capability: ImageEditCapabilityStateSchema
+}).strict();
+export type EditWorkspaceState = z.infer<typeof EditWorkspaceStateSchema>;
+
 export const EditImageConfigSchema = z
   .object({
     kind: z.literal("edit.image"),
     providerId: z.string().min(1),
     profileId: z.string().min(1),
     strength: z.number().min(0).max(1),
-    outputCount: z.number().int().positive()
+    outputCount: z.number().int().positive(),
+    workspace: EditWorkspaceStateSchema.optional()
   })
   .strict();
 export type EditImageConfig = z.infer<typeof EditImageConfigSchema>;

@@ -1746,6 +1746,7 @@ export const applicationCommandMutationPolicy: Record<ApplicationCommand["name"]
   "reference.remove": true,
   "reference.assignToSet": true,
   "output.edit": true,
+  "editWorkspace.commit": true,
   "output.pin": true,
   "output.restore": true,
   "recipe.preview": false,

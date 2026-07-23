@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 
@@ -13,6 +13,7 @@ import {
   inspectReplacementRecovery,
   linkReference,
   materializeLiveOutput,
+  mediaSignatureMatches,
   reconcileLiveOutput,
   removeMirrorFiles,
   readBlobRange,
@@ -58,6 +59,7 @@ import type {
   ExportRecord,
   GraphTransaction,
   NodeOutputVersion,
+  PayloadEnvelope,
   ProviderCapability
 } from "@ether/schema";
 
@@ -1364,6 +1366,151 @@ export class EtherApplication implements EtherApplicationService {
     }));
   }
 
+  async commitEditWorkspace(input: {
+    commandId: string;
+    graphId: string;
+    nodeId: string;
+    kind: "drawing" | "mask";
+    channel: "text" | "image" | "mask" | "data" | "video" | "audio";
+    mediaType: "image/svg+xml" | "image/png";
+    width: number;
+    height: number;
+    byteLength: number;
+    content: { encoding: "utf8" | "base64"; data: string };
+    geometry?: import("@ether/schema").EditMaskGeometry;
+    drawing?: import("@ether/schema").CanvasDrawingConfig;
+    editState?: import("@ether/schema").EditWorkspaceState;
+  }): Promise<{ outputVersion: NodeOutputVersion; artifact: Artifact }> {
+    const store = this.requireWritableStore();
+    const duplicate = await store.read(({ execution }) => execution.getCommandResult(input.commandId, "editWorkspace.commit"));
+    if (duplicate !== undefined) return duplicate as { outputVersion: NodeOutputVersion; artifact: Artifact };
+    const graph = await store.read(({ graphs }) => graphs.get(input.graphId));
+    const node = graph?.nodes.find((candidate) => candidate.id === input.nodeId);
+    if (node === undefined) throw new ApplicationServiceError("LOCAL_OUTPUT_NODE_NOT_FOUND", "The target graph node does not exist.");
+    if (input.kind === "drawing" && node.config.kind !== "canvas.drawing") {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_KIND_MISMATCH", "Drawing output can only be published from a Drawing node.");
+    }
+    if (input.kind === "drawing" && (input.drawing === undefined || input.drawing.width !== input.width || input.drawing.height !== input.height)) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_DRAWING_INVALID", "Drawing publication requires matching editable stroke geometry.");
+    }
+    if (input.kind === "mask" && node.config.kind !== "edit.image" && node.config.kind !== "edit.mask") {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_KIND_MISMATCH", "Mask output can only be published from an Image Edit or Mask node.");
+    }
+    if ((input.kind === "drawing" && input.channel !== "image") || (input.kind === "mask" && input.channel !== "mask")) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_CHANNEL_MISMATCH", "The local output channel does not match its output kind.");
+    }
+    if (input.editState?.capability.mode === "unsupported") {
+      throw new ApplicationServiceError("EDIT_CAPABILITY_UNSUPPORTED", input.editState.capability.detail ?? "The selected provider cannot perform image editing.");
+    }
+    if (node.config.kind === "edit.image" && input.editState !== undefined && (
+      input.editState.capability.providerId !== node.config.providerId ||
+      input.editState.capability.profileId !== node.config.profileId
+    )) {
+      throw new ApplicationServiceError("EDIT_CAPABILITY_MISMATCH", "The committed edit capability does not match the Image Edit node provider profile.");
+    }
+    const bytes = decodeLocalOutput(input.content, input.byteLength);
+    if (!mediaSignatureMatches(bytes.subarray(0, 512), input.mediaType)) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_MEDIA_MISMATCH", "Published bytes do not match the declared media type.");
+    }
+    if (input.mediaType === "image/svg+xml" && /<script\b|<foreignObject\b|\bon[a-z]+\s*=|(?:href|src)\s*=\s*["'](?:https?:|file:|data:)/i.test(bytes.toString("utf8"))) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_SVG_UNSAFE", "SVG local outputs cannot contain scripts, event handlers, embedded data, or external resources.");
+    }
+    const image = await sharp(bytes, { failOn: "error" }).metadata().catch((error: unknown) => {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_IMAGE_INVALID", "The local image output could not be decoded.", { cause: error });
+    });
+    if (image.width !== input.width || image.height !== input.height) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_SIZE_MISMATCH", "Published dimensions do not match the encoded image.");
+    }
+    const sourceArtifact = input.editState === undefined
+      ? undefined
+      : await store.read(({ artifacts }) => artifacts.get(input.editState!.sourceArtifactId));
+    if (input.editState !== undefined && (sourceArtifact === undefined || !sourceArtifact.mediaType.startsWith("image/"))) {
+      throw new ApplicationServiceError("EDIT_SOURCE_INVALID", "The edit source must be an existing image artifact.");
+    }
+    const outputVersionId = stableApplicationId("local-output", store.documentId, input.commandId);
+    const payloadId = stableApplicationId("local-payload", store.documentId, input.commandId);
+    const artifactId = stableApplicationId("local-artifact", store.documentId, input.commandId);
+    const at = new Date().toISOString();
+    const head = await store.read(({ revisions }) => revisions.head());
+    const graphRevisionId = head.graphRevisions[input.graphId];
+    if (graphRevisionId === undefined) throw new ApplicationServiceError("LOCAL_OUTPUT_GRAPH_STALE", "The target graph has no current revision.");
+    const provenance = {
+      localPublication: true,
+      actor: "user",
+      outputKind: input.kind,
+      width: input.width,
+      height: input.height,
+      geometry: input.geometry ?? null,
+      drawing: input.drawing ?? null,
+      editWorkspace: input.editState ?? null,
+      editCapabilityMode: input.editState?.capability.mode ?? null,
+      maskSemantics: input.editState?.capability.mode === "guidance-only" ? "guidance-only-not-pixel-exact" : "native-or-not-applicable"
+    } as const;
+    const outputVersion: NodeOutputVersion = {
+      id: outputVersionId,
+      nodeId: input.nodeId,
+      graphId: input.graphId,
+      graphRevisionId,
+      inputPayloadIds: sourceArtifact ? [sourceArtifact.source.payloadId] : [],
+      selectedOutputVersionIds: sourceArtifact ? [sourceArtifact.source.outputVersionId] : [],
+      compiledContextHash: createHash("sha256").update(JSON.stringify(provenance)).digest("hex"),
+      producer: { kind: "local", executor: input.kind === "drawing" ? "drawing" : "mask" },
+      outputPayloadIds: [payloadId],
+      parentOutputVersionId: null,
+      approval: { state: "unreviewed" },
+      runId: null, stepId: null, workItemId: null, attemptId: null,
+      timing: { startedAt: at, completedAt: at },
+      failure: null,
+      createdAt: at
+    };
+    const payload: PayloadEnvelope = {
+      id: payloadId,
+      channel: input.channel,
+      role: "general",
+      content: { kind: "artifact", artifactId },
+      source: { nodeId: input.nodeId, outputVersionId, lineageKey: `${input.graphId}:${input.nodeId}:${input.commandId}` },
+      metadata: provenance
+    };
+    const temporaryRoot = path.join(this.options.appDataRoot, "local-output-ingress");
+    await mkdir(temporaryRoot, { recursive: true });
+    const temporaryPath = path.join(temporaryRoot, `${artifactId}.incoming`);
+    await writeFile(temporaryPath, bytes, { flag: "wx" }).catch(async (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+      const existing = await readFile(temporaryPath);
+      if (!existing.equals(bytes)) throw new ApplicationServiceError("LOCAL_OUTPUT_INGRESS_CONFLICT", "A conflicting local output ingress file already exists.");
+    });
+    try {
+      const blob = await importBlob(store, { sourcePath: temporaryPath, mediaType: input.mediaType }, { appDataRoot: this.options.appDataRoot });
+      const artifact: Artifact = {
+        id: artifactId,
+        contentKey: blob.contentKey,
+        channel: input.channel,
+        mediaType: input.mediaType,
+        byteLength: bytes.byteLength,
+        source: { outputVersionId, payloadId },
+        createdAt: at,
+        metadata: provenance
+      };
+      return await store.transaction(({ artifacts, execution, outputs }) => {
+        const raced = execution.getCommandResult(input.commandId, "editWorkspace.commit");
+        if (raced !== undefined) return raced as { outputVersion: NodeOutputVersion; artifact: Artifact };
+        outputs.insert(outputVersion, [payload]);
+        artifacts.attach(artifact);
+        if (sourceArtifact !== undefined) artifacts.addLineage({
+          artifactId, parentArtifactId: sourceArtifact.id, relation: "edited-from",
+          sourceOutputVersionId: outputVersionId,
+          metadata: { role: "general", editCapabilityMode: input.editState?.capability.mode ?? "unknown" }
+        });
+        return execution.completeCommand(input.commandId, "editWorkspace.commit", { outputVersion, artifact }, [
+          { name: "output.created", payload: { outputVersionId, parentOutputVersionId: null } },
+          { name: "artifact.changed", payload: { artifactId, change: "created" } }
+        ]) as { outputVersion: NodeOutputVersion; artifact: Artifact };
+      });
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined);
+    }
+  }
+
   private publishReferenceChanged(
     referenceId: string,
     state: "linked" | "embedded" | "missing" | "relinking" | "removed"
@@ -1554,6 +1701,28 @@ function exportName(
 
 function exportFormat(value: unknown): "original" | "png" | "jpeg" | "webp" {
   return value === "png" || value === "jpeg" || value === "webp" ? value : "original";
+}
+
+function decodeLocalOutput(
+  content: { encoding: "utf8" | "base64"; data: string },
+  declaredByteLength: number
+): Buffer {
+  let bytes: Buffer;
+  if (content.encoding === "utf8") {
+    bytes = Buffer.from(content.data, "utf8");
+  } else {
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content.data)) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_BASE64_INVALID", "The local output contains invalid Base64 data.");
+    }
+    bytes = Buffer.from(content.data, "base64");
+  }
+  if (bytes.byteLength !== declaredByteLength) {
+    throw new ApplicationServiceError("LOCAL_OUTPUT_LENGTH_MISMATCH", "Decoded local output length does not match its declaration.");
+  }
+  if (bytes.byteLength === 0 || bytes.byteLength > 16 * 1024 * 1024) {
+    throw new ApplicationServiceError("LOCAL_OUTPUT_TOO_LARGE", "Local outputs must be between 1 byte and 16 MiB.");
+  }
+  return bytes;
 }
 
 function exportFormatExtension(format: "png" | "jpeg" | "webp"): string {

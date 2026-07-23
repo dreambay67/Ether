@@ -69,6 +69,10 @@ export function mediaSignatureMatches(bytes: Uint8Array, mediaType: string): boo
     case "image/webp":
       return bytesEqual(bytes, [0x52, 0x49, 0x46, 0x46]) &&
         bytesEqual(bytes, [0x57, 0x45, 0x42, 0x50], 8);
+    case "image/svg+xml": {
+      const prefix = Buffer.from(bytes).toString("utf8").trimStart().toLowerCase();
+      return prefix.startsWith("<svg") || (prefix.startsWith("<?xml") && prefix.includes("<svg"));
+    }
     case "audio/wav":
     case "audio/wave":
       return bytesEqual(bytes, [0x52, 0x49, 0x46, 0x46]) &&

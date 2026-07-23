@@ -255,6 +255,8 @@ export async function executeApplicationCommand(
       }, [{ name: "output.created", payload: { outputVersionId: command.payload.outputVersionId, parentOutputVersionId: command.payload.outputVersionId } }]);
       return commandResponse(command, { outputVersion: output });
     }
+    case "editWorkspace.commit":
+      return commandResponse(command, await app.commitEditWorkspace({ commandId: command.id, ...command.payload }));
     case "output.restore": {
       const output = await commandOnce(app, command, "output", (repositories) => {
         const parent = repositories.outputs.getVersion(command.payload.outputVersionId);

@@ -63,6 +63,15 @@ export class ImageEditExecutor implements StepExecutor {
     const mask = context.inputs.find((input) => input.channel === "mask");
     const maskPath = mask === undefined ? undefined : readStringMetadata(mask, "assetPath");
     const operation = stringParameter(context.step.parameters, "operation", "inpaint");
+    const workspace = context.step.parameters.workspace;
+    const capabilityMode = workspace !== null && typeof workspace === "object" && !Array.isArray(workspace)
+      && workspace.capability !== null && typeof workspace.capability === "object" && !Array.isArray(workspace.capability)
+      && typeof workspace.capability.mode === "string"
+      ? workspace.capability.mode
+      : null;
+    if (capabilityMode === "unsupported") {
+      throw new ExecutorFailure("EDIT_CAPABILITY_UNSUPPORTED", "The persisted edit workspace marks this provider capability as unsupported.");
+    }
     if (!isEditOperation(operation)) {
       throw new ExecutorFailure("EDIT_OPERATION_INVALID", `Unsupported image edit operation ${operation}.`);
     }
@@ -77,7 +86,9 @@ export class ImageEditExecutor implements StepExecutor {
       prompt: context.step.compiledPrompt,
       negativePrompt: stringParameter(context.step.parameters, "negativePrompt"),
       instruction: context.step.compiledPrompt,
-      notes: "",
+      notes: capabilityMode === "guidance-only"
+        ? "The mask is guidance-only and is not guaranteed to produce pixel-exact native inpainting."
+        : "",
       sections: [],
       references: references(context),
       edgeRoles: [],
@@ -89,7 +100,11 @@ export class ImageEditExecutor implements StepExecutor {
       mask: maskPath === undefined ? null : {
         assetId: mask?.content.kind === "artifact" ? mask.content.artifactId : undefined,
         assetPath: maskPath,
-        assetMetadata: mask?.metadata
+        assetMetadata: {
+          ...mask?.metadata,
+          editCapabilityMode: capabilityMode,
+          maskSemantics: capabilityMode === "guidance-only" ? "guidance-only-not-pixel-exact" : "native-or-unspecified"
+        }
       },
       inputs: context.providerInputs,
       model: binding?.modelId ?? provider.descriptor.model,

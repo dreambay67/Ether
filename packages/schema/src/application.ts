@@ -35,6 +35,9 @@ import {
 } from "./graph.js";
 import {
   ConnectionRoleSchema,
+  CanvasDrawingConfigSchema,
+  EditMaskGeometrySchema,
+  EditWorkspaceStateSchema,
   EtherNodeSchema,
   PayloadChannelSchema,
   ReferenceSetMemberSchema
@@ -71,6 +74,7 @@ export const applicationCommandNames = [
   "reference.remove",
   "reference.assignToSet",
   "output.edit",
+  "editWorkspace.commit",
   "output.pin",
   "output.restore",
   "recipe.preview",
@@ -256,6 +260,30 @@ export const applicationCommandPayloadSchemas = {
   "output.edit": z
     .object({ outputVersionId: idSchema, payload: JsonObjectSchema, note: z.string().optional() })
     .strict(),
+  "editWorkspace.commit": z.object({
+    graphId: idSchema,
+    nodeId: idSchema,
+    kind: z.enum(["drawing", "mask"]),
+    channel: PayloadChannelSchema,
+    mediaType: z.enum(["image/svg+xml", "image/png"]),
+    width: z.number().int().positive().max(32_768),
+    height: z.number().int().positive().max(32_768),
+    byteLength: z.number().int().positive().max(16 * 1024 * 1024),
+    content: z.object({
+      encoding: z.enum(["utf8", "base64"]),
+      data: z.string().min(1).max(24 * 1024 * 1024)
+    }).strict(),
+    geometry: EditMaskGeometrySchema.optional(),
+    drawing: CanvasDrawingConfigSchema.optional(),
+    editState: EditWorkspaceStateSchema.optional()
+  }).strict().superRefine((value, context) => {
+    if (value.kind === "drawing" && value.channel !== "image") context.addIssue({ code: z.ZodIssueCode.custom, path: ["channel"], message: "Drawing outputs use the Image channel." });
+    if (value.kind === "drawing" && value.drawing === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["drawing"], message: "Drawing outputs require their editable stroke document." });
+    if (value.drawing && (value.drawing.width !== value.width || value.drawing.height !== value.height)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["drawing"], message: "Drawing geometry must match the published raster dimensions." });
+    if (value.kind === "mask" && value.channel !== "mask") context.addIssue({ code: z.ZodIssueCode.custom, path: ["channel"], message: "Mask outputs use the Mask channel." });
+    if (value.kind === "mask" && value.geometry === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["geometry"], message: "Mask outputs require editable geometry." });
+    if (value.geometry && (value.geometry.width !== value.width || value.geometry.height !== value.height)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["geometry"], message: "Mask geometry must match the published raster dimensions." });
+  }),
   "output.pin": z
     .object({ edgeId: idSchema, outputVersionId: idSchema, baseDocumentRevisionId: idSchema })
     .strict(),
@@ -659,6 +687,7 @@ export const ApplicationCommandSchema = z.discriminatedUnion("name", [
   commandMessage("reference.remove", applicationCommandPayloadSchemas["reference.remove"]),
   commandMessage("reference.assignToSet", applicationCommandPayloadSchemas["reference.assignToSet"]),
   commandMessage("output.edit", applicationCommandPayloadSchemas["output.edit"]),
+  commandMessage("editWorkspace.commit", applicationCommandPayloadSchemas["editWorkspace.commit"]),
   commandMessage("output.pin", applicationCommandPayloadSchemas["output.pin"]),
   commandMessage("output.restore", applicationCommandPayloadSchemas["output.restore"]),
   commandMessage("recipe.preview", applicationCommandPayloadSchemas["recipe.preview"]),
@@ -890,6 +919,7 @@ const documentLocationResponseSchema = z
   .strict();
 const referenceResponseSchema = z.object({ referenceId: idSchema }).strict();
 const outputVersionResponseSchema = z.object({ outputVersion: NodeOutputVersionSchema }).strict();
+const localOutputResponseSchema = z.object({ outputVersion: NodeOutputVersionSchema, artifact: ArtifactSchema }).strict();
 const collectionResponseSchema = z.object({ collection: CollectionSchema }).strict();
 const recipePreviewResponseSchema: z.ZodType<{ transaction: GraphTransaction; warnings: string[] }> = z
   .object({ transaction: GraphTransactionSchema, warnings: z.array(z.string()) })
@@ -1060,6 +1090,7 @@ export const applicationResponsePayloadSchemas = {
   "reference.remove": AcknowledgementResponsePayloadSchema,
   "reference.assignToSet": AcknowledgementResponsePayloadSchema,
   "output.edit": outputVersionResponseSchema,
+  "editWorkspace.commit": localOutputResponseSchema,
   "output.pin": RevisionResponsePayloadSchema,
   "output.restore": outputVersionResponseSchema,
   "recipe.preview": recipePreviewResponseSchema,
@@ -1245,6 +1276,7 @@ export const ApplicationCommandResponseSchema = z.discriminatedUnion("name", [
   responseMessage("reference.remove", applicationResponsePayloadSchemas["reference.remove"]),
   responseMessage("reference.assignToSet", applicationResponsePayloadSchemas["reference.assignToSet"]),
   responseMessage("output.edit", applicationResponsePayloadSchemas["output.edit"]),
+  responseMessage("editWorkspace.commit", applicationResponsePayloadSchemas["editWorkspace.commit"]),
   responseMessage("output.pin", applicationResponsePayloadSchemas["output.pin"]),
   responseMessage("output.restore", applicationResponsePayloadSchemas["output.restore"]),
   responseMessage("recipe.preview", applicationResponsePayloadSchemas["recipe.preview"]),
