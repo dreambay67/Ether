@@ -15,6 +15,8 @@ import { useProjectHealth } from "./project/useProjectHealth";
 import { useProjectSession } from "./project/useProjectSession";
 import { EtherShell } from "./shell/EtherShell";
 import { EtherCanvas, type EtherCanvasHandle } from "./canvas/EtherCanvas";
+import { InspectorPanel } from "./canvas/InspectorPanel";
+import type { InspectorContext } from "./canvas/inspector/types";
 
 export function App() {
   const { state, document } = useProjectSession();
@@ -22,6 +24,7 @@ export function App() {
   const [message, setMessage] = useState("Preparing an untitled document...");
   const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
+  const [inspectorContext, setInspectorContext] = useState<InspectorContext | null>(null);
   const canvasRef = useRef<EtherCanvasHandle>(null);
   const health = useProjectHealth(references);
 
@@ -157,7 +160,8 @@ export function App() {
           </button>
         </aside>
       )}
-      canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} />}
+      canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
+      inspector={<InspectorPanel context={inspectorContext} />}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
           <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>

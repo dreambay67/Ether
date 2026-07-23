@@ -80,6 +80,9 @@ importers:
       '@ether/document':
         specifier: workspace:*
         version: link:../../packages/document
+      '@ether/graph-kernel':
+        specifier: workspace:*
+        version: link:../../packages/graph-kernel
       '@ether/providers':
         specifier: workspace:*
         version: link:../../packages/providers

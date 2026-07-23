@@ -12,6 +12,7 @@ export function EtherShell({
   header,
   tools,
   canvas,
+  inspector,
   references,
   artifactRevision,
   status,
@@ -23,6 +24,7 @@ export function EtherShell({
   header: (artifactsVisible: boolean, toggleArtifacts: () => void) => ReactNode;
   tools: ReactNode;
   canvas: ReactNode;
+  inspector?: ReactNode;
   references: DesktopReference[];
   artifactRevision: number;
   status: ReactNode;
@@ -89,12 +91,12 @@ export function EtherShell({
             onResize={(size) => shell.setPanelSize("inspector", size)}
             onToggle={() => shell.togglePanel("inspector")}
           >
-            <div className="shell-lens">
+            {inspector ?? <div className="shell-lens">
               <PanelRight size={16} aria-hidden="true" />
               <strong>{shell.workspace === "focus" ? "Focus lens" : "Project lens"}</strong>
               <p>{references.length === 0 ? "No linked reference attention." : `${references.length} linked reference${references.length === 1 ? "" : "s"} in this document.`}</p>
               <button type="button" onClick={() => shell.setWorkspace("focus")}>Focus canvas</button>
-            </div>
+            </div>}
           </ResizablePane>
         </div>
         <ResizablePane

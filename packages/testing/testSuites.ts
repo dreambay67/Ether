@@ -71,7 +71,8 @@ export const testSuites = {
   smoke: [
     "tests/smoke.spec.ts",
     "tests/desktop/shell-layout.spec.ts",
-    "tests/desktop/canvas.spec.ts"
+    "tests/desktop/canvas.spec.ts",
+    "tests/desktop/inspectors.spec.ts"
   ],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
   packaged: ["tests/desktop/document-lifecycle.packaged.ts"]

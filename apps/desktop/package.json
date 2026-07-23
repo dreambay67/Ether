@@ -21,6 +21,7 @@
     "@ether/application": "workspace:*",
     "@ether/brand": "workspace:*",
     "@ether/document": "workspace:*",
+    "@ether/graph-kernel": "workspace:*",
     "@ether/providers": "workspace:*",
     "@ether/schema": "workspace:*",
     "@xyflow/react": "^12.11.0",

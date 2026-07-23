@@ -1,0 +1,13 @@
+import { connectionRoles, type ConnectionRole } from "@ether/schema";
+import { Help, InspectorSection } from "./NodeSetup";
+import { roleLabels } from "./inspectorConfig";
+import type { InspectorEdgeContext } from "./types";
+
+export function EdgeInspector({ context }: { context: InspectorEdgeContext }) {
+  const { edge, graph, apply, document } = context;
+  const update = (next: Partial<typeof edge>, title: string) => void apply([{ type: "updateEdge", graphId: graph.id, edgeId: edge.id, edge: { ...edge, ...next } }], title);
+  const sourceEndpoint = edge.from; const targetEndpoint = edge.to;
+  const source = sourceEndpoint.kind === "node" ? graph.nodes.find((node) => node.id === sourceEndpoint.nodeId)?.title ?? sourceEndpoint.nodeId : `Module ${sourceEndpoint.portId}`;
+  const target = targetEndpoint.kind === "node" ? graph.nodes.find((node) => node.id === targetEndpoint.nodeId)?.title ?? targetEndpoint.nodeId : `Module ${targetEndpoint.portId}`;
+  return <div className="ether-inspector" data-testid="edge-inspector"><InspectorSection title="Connection" help="A connection moves one of Ether's six channels and gives the receiver one explicit role."><div className="inspector-route"><strong>{source}</strong><span>{edge.from.channel} to {edge.to.channel}</span><strong>{target}</strong></div><label>Role <Help label="Connection role" text="The role is visible on the lane and determines how the receiver interprets this payload." /><select aria-label="Connection role" disabled={document.mode !== "writable"} value={edge.role} onChange={(event) => update({ role: event.target.value as ConnectionRole }, "Change connection role")}>{connectionRoles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}</select></label><label>Output selection <Help label="Output selection" text="An edge can consume the latest approved output, latest output, every variant, or one explicitly pinned version." /><select aria-label="Output selection" disabled={document.mode !== "writable"} value={edge.selector.kind} onChange={(event) => { const kind = event.target.value as "latest-approved" | "latest" | "all"; update({ selector: { kind } }, "Change output selection"); }}><option value="latest-approved">Latest approved</option><option value="latest">Latest output</option><option value="all">All variants</option></select></label></InspectorSection><InspectorSection advanced title="Connection diagnostics" help="Technical channel and adapter context stays collapsed until it is needed."><p>Adapter: {edge.adapter.kind}</p><p>Lane order: {edge.order + 1}</p><p>{edge.enabled ? "Enabled" : "Disabled"}</p></InspectorSection></div>;
+}
