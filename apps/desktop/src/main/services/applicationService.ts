@@ -1084,10 +1084,11 @@ export class DesktopApplicationService {
     nodeId: string;
     role: import("@ether/schema").ConnectionRole;
     storage: "link" | "embed";
+    droppedPath?: string;
   }): Promise<{ cancelled: true } | { cancelled: false; referenceId: string }> {
     return this.enqueueLifecycle(async () => {
       this.assertScope(input.documentId);
-      const selected = await this.options.dialogs.locateReference(input.nodeId);
+      const selected = input.droppedPath ?? await this.options.dialogs.locateReference(input.nodeId);
       if (selected === null) return { cancelled: true };
       const grantId = this.pathGrants.grant(input.documentId, "link", selected);
       const application = this.requireApplication();

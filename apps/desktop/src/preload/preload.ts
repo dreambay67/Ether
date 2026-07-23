@@ -15,6 +15,10 @@ const bridge = createEtherBridge({
   openDroppedDocument: (file) => ipcRenderer.invoke(
     desktopIpcChannels.document.openDropped,
     { path: webUtils.getPathForFile(file) }
+  ) as Promise<NormalizedResult<unknown>>,
+  importDroppedReference: (file, input) => ipcRenderer.invoke(
+    desktopIpcChannels.references.chooseAndLink,
+    { ...input, droppedPath: webUtils.getPathForFile(file) }
   ) as Promise<NormalizedResult<unknown>>
 });
 

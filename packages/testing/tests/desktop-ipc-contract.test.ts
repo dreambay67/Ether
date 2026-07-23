@@ -218,9 +218,14 @@ describe("desktop IPC contract", () => {
       ...pickerRequest,
       path: "C:\\private\\reference.png"
     }).success).toBe(false);
+    expect(desktopIpcContracts[desktopIpcChannels.references.chooseAndLink].request.parse({
+      ...pickerRequest,
+      droppedPath: "C:\\private\\dropped-reference.png"
+    })).toMatchObject({ droppedPath: "C:\\private\\dropped-reference.png" });
 
     let subscription: ((payload: unknown) => void) | undefined;
     const invocations: Array<{ channel: string; request: unknown }> = [];
+    const droppedImports: Array<{ name: string; input: unknown }> = [];
     const bridge = createEtherBridge({
       invoke: async (channel, request) => {
         invocations.push({ channel, request });
@@ -230,7 +235,11 @@ describe("desktop IPC contract", () => {
         if (channel === desktopIpcChannels.application.event) subscription = listener;
         return () => { subscription = undefined; };
       },
-      openDroppedDocument: async () => ({ ok: true, value: undefined })
+      openDroppedDocument: async () => ({ ok: true, value: undefined }),
+      importDroppedReference: async (file, input) => {
+        droppedImports.push({ name: file.name, input });
+        return { ok: true, value: { cancelled: false, referenceId: "reference-drop" } };
+      }
     });
     const received: unknown[] = [];
     const dispose = bridge.application.onEvent((payload) => received.push(payload));
@@ -239,8 +248,13 @@ describe("desktop IPC contract", () => {
       cancelled: false,
       referenceId: "reference-1"
     });
+    await expect(bridge.references.importDropped(new File(["image"], "dropped.png"), pickerRequest)).resolves.toEqual({
+      cancelled: false,
+      referenceId: "reference-drop"
+    });
     expect(received).toEqual([event]);
     expect(invocations).toEqual([{ channel: desktopIpcChannels.references.chooseAndLink, request: pickerRequest }]);
+    expect(droppedImports).toEqual([{ name: "dropped.png", input: pickerRequest }]);
     dispose();
   });
 

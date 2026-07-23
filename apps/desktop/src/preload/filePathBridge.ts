@@ -28,6 +28,10 @@ type BridgeTransport = {
     listener: (event: unknown) => void
   ): () => void;
   openDroppedDocument(file: File): Promise<NormalizedResult<unknown>>;
+  importDroppedReference?: (
+    file: File,
+    input: { documentId: string; graphId: string; nodeId: string; role: import("@ether/schema").ConnectionRole; storage: "link" | "embed" }
+  ) => Promise<NormalizedResult<unknown>>;
 };
 
 async function unwrap<T>(promise: Promise<NormalizedResult<unknown>>): Promise<T> {
@@ -77,7 +81,19 @@ export function createEtherBridge(transport: BridgeTransport) {
         storage: "link" | "embed";
       }) => unwrap<ReferenceFileSelectionResult>(
         transport.invoke(desktopIpcChannels.references.chooseAndLink, input)
-      )
+      ),
+      importDropped: (file: File, input: {
+        documentId: string;
+        graphId: string;
+        nodeId: string;
+        role: import("@ether/schema").ConnectionRole;
+        storage: "link" | "embed";
+      }) => {
+        if (transport.importDroppedReference === undefined) {
+          return Promise.reject(new Error("Dropped reference import is not available in this renderer."));
+        }
+        return unwrap<ReferenceFileSelectionResult>(transport.importDroppedReference(file, input));
+      }
     },
     application: {
       command: (command: ApplicationCommand) =>

@@ -182,7 +182,8 @@ export const desktopIpcContracts = {
       graphId: id,
       nodeId: id,
       role: ConnectionRoleSchema,
-      storage: z.enum(["link", "embed"])
+      storage: z.enum(["link", "embed"]),
+      droppedPath: z.string().min(1).optional()
     }).strict(),
     response: resultSchema(ReferenceFileSelectionResultSchema)
   },

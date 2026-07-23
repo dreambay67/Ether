@@ -11,15 +11,15 @@ type PanelLayout = Record<ShellPanelId, PanelState>;
 export const shellPanelLimits: Record<ShellPanelId, { min: number; max: number }> = {
   tools: { min: 148, max: 320 },
   inspector: { min: 220, max: 400 },
-  artifacts: { min: 120, max: 180 },
-  runs: { min: 104, max: 180 }
+  artifacts: { min: 120, max: 300 },
+  runs: { min: 104, max: 260 }
 };
 
 const initialWorkspacePanels: Record<WorkspaceId, PanelLayout> = {
   build: {
     tools: { size: 184, collapsed: false },
     inspector: { size: 260, collapsed: false },
-    artifacts: { size: 220, collapsed: true },
+    artifacts: { size: 300, collapsed: false },
     runs: { size: 148, collapsed: true }
   },
   focus: {
@@ -31,7 +31,7 @@ const initialWorkspacePanels: Record<WorkspaceId, PanelLayout> = {
   run: {
     tools: { size: 184, collapsed: true },
     inspector: { size: 280, collapsed: false },
-    artifacts: { size: 180, collapsed: true },
+    artifacts: { size: 180, collapsed: false },
     runs: { size: 220, collapsed: false }
   },
   review: {

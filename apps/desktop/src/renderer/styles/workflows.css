@@ -1,0 +1,166 @@
+.reference-desk,
+.batch-matrix,
+.job-center {
+  height: 100%;
+  min-height: 0;
+  color: #dce9f4;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(20, 112, 219, .12), transparent 36%),
+    #0a1018;
+}
+
+.reference-desk,
+.batch-matrix { overflow: auto; padding: 14px; }
+.reference-desk > header,
+.batch-matrix > header,
+.job-center > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.reference-desk h2,
+.batch-matrix h2,
+.job-center h2 { margin: 2px 0 0; color: #f4fbff; font-size: 16px; letter-spacing: -.02em; }
+.eyebrow { color: #37e6ea; font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.reference-desk button,
+.batch-matrix button,
+.job-center button { min-height: 30px; border: 1px solid #26384b; border-radius: 5px; background: #101a26; color: #d7e5f1; }
+.reference-desk button:hover:not(:disabled),
+.batch-matrix button:hover:not(:disabled),
+.job-center button:hover:not(:disabled),
+.reference-desk button:focus-visible,
+.batch-matrix button:focus-visible,
+.job-center button:focus-visible { border-color: #37e6ea; outline: 0; box-shadow: 0 0 0 2px rgba(55, 230, 234, .12); }
+.reference-desk button:disabled,
+.batch-matrix button:disabled,
+.job-center button:disabled { opacity: .45; }
+
+.reference-desk-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 6px 0; padding: 6px 8px; border: 1px solid #1d2a39; border-radius: 7px; background: rgba(12, 21, 31, .86); }
+.reference-desk-actions label,
+.batch-policy { display: grid; gap: 5px; color: #93a6b8; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.reference-desk select,
+.batch-matrix select,
+.reference-row select { min-height: 30px; border: 1px solid #2a3c50; border-radius: 4px; background: #09121d; color: #edf7ff; }
+.reference-drop-hint { display: inline-flex; align-items: center; align-self: center; gap: 6px; margin-left: auto; color: #79a8c2; font-size: 10px; }
+.reference-view-toolbar { display: flex; flex-wrap: wrap; gap: 5px; margin: 5px 0; }
+.reference-view-toolbar button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; }
+.reference-view-toolbar button[aria-pressed="true"] { border-color: #37e6ea; background: rgba(20, 112, 219, .2); color: #f4fbff; }
+.reference-grid { position: relative; overflow: auto; border: 1px solid #1e2c3b; border-radius: 7px; background: #070c12; }
+.reference-grid-window { position: relative; min-width: 660px; }
+.reference-row { position: absolute; right: 0; left: 0; display: grid; grid-template-columns: minmax(56px, auto) minmax(180px, 1fr) minmax(66px, auto) 150px; align-items: center; gap: 10px; padding: 7px 10px; border-bottom: 1px solid #182432; }
+.reference-row:hover { background: rgba(25, 53, 77, .34); }
+.reference-row.state-missing { border-left: 3px solid #ffb55b; }
+.reference-select { display: flex; align-items: center; gap: 8px; }
+.reference-preview { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #30465d; border-radius: 5px; background: linear-gradient(145deg, #172738, #0b1119); color: #6ddfe4; font-size: 8px; font-weight: 800; text-align: center; }
+.reference-poster { padding: 3px; color: #a6b8ca; font-size: 7px; }
+.reference-wave { display: flex; align-items: center; justify-content: center; gap: 2px; width: min(280px, 42vw); }
+.reference-wave i { width: 3px; border-radius: 2px; background: linear-gradient(#37e6ea, #1470db); }
+.reference-wave-unavailable { width: min(280px, 42vw); color: #71879a; }
+.reference-identity { display: grid; min-width: 0; gap: 3px; }
+.reference-identity strong { overflow: hidden; color: #eef8ff; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.reference-identity span,
+.reference-row label { color: #8fa2b6; font-size: 10px; }
+.reference-row label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.reference-recover { min-height: 25px !important; padding: 3px 7px; color: #ffc47b !important; }
+.reference-grid.view-grid .reference-grid-window { min-width: 900px; }
+.reference-grid.view-filmstrip .reference-grid-window { min-width: 760px; }
+.reference-grid.view-grid .reference-row,
+.reference-grid.view-filmstrip .reference-row { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto auto; align-content: start; gap: 5px 8px; border-right: 1px solid #182432; }
+.reference-grid.view-grid .reference-select,
+.reference-grid.view-filmstrip .reference-select { grid-row: 1 / 3; align-items: start; }
+.reference-grid.view-grid .reference-preview { width: 64px; height: 64px; }
+.reference-grid.view-filmstrip .reference-preview { width: 86px; height: 54px; }
+.reference-grid.view-grid .reference-identity,
+.reference-grid.view-filmstrip .reference-identity { align-self: center; }
+.reference-grid.view-grid .reference-include,
+.reference-grid.view-grid .reference-role,
+.reference-grid.view-filmstrip .reference-include,
+.reference-grid.view-filmstrip .reference-role { justify-content: flex-start; font-size: 9px; }
+.reference-grid.view-grid .reference-role select,
+.reference-grid.view-filmstrip .reference-role select { min-width: 82px; min-height: 24px; }
+.reference-grid.view-grid .reference-recover,
+.reference-grid.view-filmstrip .reference-recover { grid-column: 1 / -1; }
+.reference-grid.view-waveform .reference-row { grid-template-columns: minmax(210px, 1fr) minmax(180px, 1fr) 70px 150px auto; }
+.reference-grid.view-waveform .reference-select { justify-content: flex-start; }
+.reference-grid.view-list .reference-row { grid-template-columns: minmax(56px, auto) minmax(180px, 1fr) minmax(66px, auto) 150px auto; }
+.reference-grid.view-list .reference-preview { width: 34px; height: 34px; }
+.reference-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 8px 0; }
+.reference-comparison article { display: grid; gap: 3px; padding: 8px; border: 1px solid #3a3157; border-radius: 6px; background: rgba(138, 92, 255, .08); }
+.reference-comparison strong { overflow: hidden; color: #f3ecff; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.reference-comparison span, .reference-comparison code { color: #9cacc0; font-size: 9px; }
+.reference-desk > footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; color: #8fa2b6; font-size: 11px; }
+.reference-desk > footer div { display: flex; flex-wrap: wrap; gap: 7px; }
+.reference-batch-send { align-items: center; }
+.reference-empty,
+.batch-empty,
+.job-empty { padding: 18px; border: 1px dashed #2b3b4c; border-radius: 7px; color: #8da1b4; }
+
+.batch-summary { display: grid; grid-template-columns: repeat(3, minmax(100px, 1fr)); gap: 8px; margin: 14px 0; }
+.batch-summary > div { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 8px; min-height: 58px; padding: 9px; border: 1px solid #213144; border-radius: 6px; background: #0d1722; }
+.batch-summary span { color: #8fa3b7; font-size: 10px; }
+.batch-summary strong { grid-column: 1 / -1; color: #f5fbff; font-size: 17px; }
+.batch-policy { max-width: 330px; }
+.batch-cap,
+.batch-warning { margin: 8px 0; color: #8da3b8; font-size: 11px; }
+.batch-warning { color: #ffc47b; }
+.batch-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; margin-top: 12px; }
+.batch-cells button { display: grid; min-height: 62px; padding: 7px; text-align: left; }
+.batch-cells button span,
+.batch-cells button small { color: #8296a9; font-size: 9px; }
+.batch-cells button strong { overflow: hidden; color: #deebf5; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.batch-cells button.is-excluded { border-style: dashed; background: #0a0f15; opacity: .62; }
+
+.job-center { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; padding: 10px; }
+.job-groups { display: flex; gap: 5px; min-width: 0; padding: 9px 0 7px; overflow-x: auto; scrollbar-width: thin; }
+.job-groups button { display: grid; grid-template-columns: 6px auto minmax(18px, auto); align-items: center; gap: 6px; min-width: max-content; padding: 4px 7px; border-color: #1e3041; background: #0a141e; color: #8ea2b5; }
+.job-groups button > span { width: 6px; height: 6px; border-radius: 50%; background: #61788d; box-shadow: 0 0 0 2px rgba(97, 120, 141, .1); }
+.job-groups button strong { font-size: 9px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.job-groups button small { min-width: 18px; padding: 2px 4px; border-radius: 9px; background: #172433; color: #b9c8d5; font-size: 9px; font-variant-numeric: tabular-nums; text-align: center; }
+.job-groups button[data-group="queued"] > span { background: #73a9d8; }
+.job-groups button[data-group="active"] > span { background: #37e6ea; box-shadow: 0 0 7px rgba(55, 230, 234, .55); }
+.job-groups button[data-group="done"] > span { background: #67d69f; }
+.job-groups button[data-group="attention"] > span { background: #ffad67; box-shadow: 0 0 7px rgba(255, 173, 103, .35); }
+.job-groups button.is-active { border-color: #3c718a; background: #122333; color: #eff9ff; }
+.job-groups button.is-active small { background: #20374a; color: #f3fbff; }
+.job-center-body { display: grid; grid-template-columns: minmax(210px, 29%) minmax(0, 1fr); min-height: 0; border: 1px solid #1e2d3e; border-radius: 7px; overflow: hidden; }
+.job-list { min-height: 0; overflow: auto; border-right: 1px solid #213143; background: #080d13; }
+.job-list button { position: absolute; right: 0; left: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border: 0; border-bottom: 1px solid #172332; border-radius: 0; background: transparent; text-align: left; }
+.job-list button.is-selected { border-left: 3px solid #37e6ea; background: rgba(20, 112, 219, .17); }
+.job-list button[data-group="attention"] { box-shadow: inset 2px 0 0 #ffad67; }
+.job-list button[data-group="done"] svg { color: #67d69f; }
+.job-list button[data-group="queued"] svg { color: #73a9d8; }
+.job-list button[data-group="active"] svg { color: #37e6ea; }
+.job-list button[data-group="attention"] svg { color: #ffad67; }
+.job-list button span { display: grid; min-width: 0; }
+.job-list button strong { color: #dceaf5; font-size: 10px; text-transform: uppercase; }
+.job-list button small { overflow: hidden; color: #778ca0; text-overflow: ellipsis; white-space: nowrap; }
+.job-list time { color: #7f93a6; font-size: 9px; }
+.job-detail-slot { min-width: 0; min-height: 0; overflow: auto; }
+.job-detail { padding: 12px; }
+.job-detail > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.job-detail h3 { margin: 3px 0 0; color: #f2f9ff; font-size: 13px; word-break: break-all; }
+.job-detail header span { color: #37e6ea; font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.job-detail header time { color: #8094a7; font-size: 10px; }
+.job-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0; }
+.job-metrics { display: flex; flex-wrap: wrap; gap: 6px; }
+.job-metrics span { padding: 5px 7px; border: 1px solid #24364a; border-radius: 4px; color: #a9bac9; font-size: 10px; }
+.job-detail details { margin-top: 10px; padding: 8px; border: 1px solid #1f3042; border-radius: 5px; }
+.job-detail summary { color: #bfd0dd; font-size: 11px; font-weight: 700; cursor: pointer; }
+.job-detail p { color: #8499ad; font-size: 10px; }
+.job-warning.is-blocking { color: #ffb36b; }
+.job-timeline { display: grid; gap: 0; padding: 0; list-style: none; }
+.job-timeline li { display: grid; grid-template-columns: 72px 100px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid #172431; color: #859aad; font-size: 10px; }
+.job-timeline strong { color: #c7d7e4; }
+.job-center > footer { padding-top: 7px; color: #72879a; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+
+@media (max-width: 840px) {
+  .reference-row { grid-template-columns: 58px minmax(150px, 1fr) 130px; }
+  .reference-row > label:nth-last-child(2) { display: none; }
+  .job-center-body { grid-template-columns: 190px minmax(0, 1fr); }
+}
+
+@media (max-width: 660px) {
+  .batch-summary { grid-template-columns: 1fr; }
+  .job-center-body { grid-template-columns: 1fr; grid-template-rows: 170px minmax(0, 1fr); }
+  .job-list { border-right: 0; border-bottom: 1px solid #213143; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reference-desk *, .batch-matrix *, .job-center * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}

@@ -13,6 +13,9 @@ export function EtherShell({
   tools,
   canvas,
   inspector,
+  referenceDesk,
+  batchMatrix,
+  jobCenter,
   references,
   artifactRevision,
   status,
@@ -25,6 +28,9 @@ export function EtherShell({
   tools: ReactNode;
   canvas: ReactNode;
   inspector?: ReactNode;
+  referenceDesk: ReactNode;
+  batchMatrix: ReactNode;
+  jobCenter: ReactNode;
   references: DesktopReference[];
   artifactRevision: number;
   status: ReactNode;
@@ -40,6 +46,13 @@ export function EtherShell({
     run: "Follow execution work and output readiness.",
     review: "Compare embedded artifacts and project attention."
   }[shell.workspace];
+  const upperPane = shell.workspace === "build"
+    ? { label: "Reference Desk", content: referenceDesk }
+    : shell.workspace === "run"
+      ? { label: "Batch Matrix", content: batchMatrix }
+      : shell.workspace === "review"
+        ? { label: "Artifact Observatory", content: <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /> }
+        : { label: "Live output", content: <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /> };
 
   return (
     <main className="ether-shell task-nine-shell task-fifteen-shell" aria-label="Ether desktop workspace" onDragOver={onDragOver} onDrop={onDrop}>
@@ -52,7 +65,7 @@ export function EtherShell({
         </div>
         <ResizablePane
           id="artifacts"
-          label={shell.workspace === "review" ? "Artifact Observatory" : "Live output"}
+          label={upperPane.label}
           direction="vertical"
           side="start"
           size={panels.artifacts.size}
@@ -62,7 +75,7 @@ export function EtherShell({
           onResize={(size) => shell.setPanelSize("artifacts", size)}
           onToggle={() => shell.togglePanel("artifacts")}
         >
-          <ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} />
+          {upperPane.content}
         </ResizablePane>
         <div className="adaptive-workspace-main">
           <ResizablePane
@@ -111,13 +124,13 @@ export function EtherShell({
           onResize={(size) => shell.setPanelSize("runs", size)}
           onToggle={() => shell.togglePanel("runs")}
         >
-          <div className="shell-run-desk">
+          {shell.workspace === "run" ? jobCenter : <div className="shell-run-desk">
             <Activity size={16} aria-hidden="true" />
-            <div><strong>{shell.workspace === "run" ? "Ready to run" : "Run desk"}</strong><p>Execution stays local to this portable Ether document.</p></div>
+            <div><strong>Run desk</strong><p>Execution stays local to this portable Ether document.</p></div>
             <Boxes size={16} aria-hidden="true" />
             <span>{references.some((reference) => reference.state === "missing") ? "Attention required" : "No active work"}</span>
             <Sparkles size={15} aria-hidden="true" />
-          </div>
+          </div>}
         </ResizablePane>
       </section>
       {status}

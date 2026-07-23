@@ -17,6 +17,9 @@ import { EtherShell } from "./shell/EtherShell";
 import { EtherCanvas, type EtherCanvasHandle } from "./canvas/EtherCanvas";
 import { InspectorPanel } from "./canvas/InspectorPanel";
 import type { InspectorContext } from "./canvas/inspector/types";
+import { ReferenceDesk } from "./references/ReferenceDesk";
+import { BatchMatrix } from "./batches/BatchMatrix";
+import { JobCenter } from "./jobs/JobCenter";
 
 export function App() {
   const { state, document } = useProjectSession();
@@ -27,6 +30,7 @@ export function App() {
   const [inspectorContext, setInspectorContext] = useState<InspectorContext | null>(null);
   const canvasRef = useRef<EtherCanvasHandle>(null);
   const health = useProjectHealth(references);
+  const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
 
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
     const result = await window.ether.graph.snapshot(active.documentId);
@@ -45,6 +49,15 @@ export function App() {
   useEffect(() => {
     if (state.commandResult !== null) setMessage(formatDocumentCommandResult(state.commandResult));
   }, [state.commandResult]);
+
+  useEffect(() => {
+    if (document === null) return;
+    return window.ether.application.onEvent((event) => {
+      if (event.name === "reference.setMembershipChanged" && event.documentId === document.documentId) {
+        void loadGraph(document);
+      }
+    });
+  }, [document, loadGraph]);
 
   const runDocumentCommand = async (command: (id: string) => Promise<unknown>) => {
     if (document === null) return;
@@ -162,6 +175,9 @@ export function App() {
       )}
       canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
       inspector={<InspectorPanel context={inspectorContext} />}
+      referenceDesk={graph ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>Loading references…</p>}
+      batchMatrix={graph ? <BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>Loading batch plan…</p>}
+      jobCenter={<JobCenter documentId={document.documentId} onStatus={setMessage} />}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
           <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>
@@ -169,9 +185,9 @@ export function App() {
         </footer>
       )}
     >
-      {health.missing.length > 0 ? (
+      {actionableMissing.length > 0 ? (
         <section className="missing-reference-strip" aria-label="Missing references">
-          {health.missing.map((reference) => (
+          {actionableMissing.map((reference) => (
             <div key={reference.id}>
               <Unlink size={15} aria-hidden="true" />
               <strong>{reference.displayName}</strong>
