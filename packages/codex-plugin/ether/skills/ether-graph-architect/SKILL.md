@@ -1,44 +1,18 @@
 ---
 name: ether-graph-architect
-description: Use when an Ether project needs graph topology design, node role channel model wiring, node template selection, graph patch preview, or run preview.
+description: Use when an Ether 4.0 graph or module needs atomic construction, topology repair, temporary-reference wiring, or revision-aware validation.
 ---
 
 # Ether Graph Architect
 
-Design Ether graph structure before touching execution. Favor readable node function topology, role-bearing edges, and reversible edits.
+Inspect `ether.node.catalog`, `ether.graph.catalog`, `ether.graph.inspect`, and `ether.graph.validate` before designing a change.
 
-## Ether 2.5 Model
+Channels: text, image, mask, data, video, audio
 
-- Channels: text, image, mask, data, video, audio
-- Roles: general, negative, subject, product, face, clothing, pose, setting, composition, style, lighting, colourPalette, typography, motion, timing
-- Prompt family: Prompt, Brainstormer, Mutator, Expander, Reinforcer
-- Ether 2.5 has one Prompt family, 15 roles, and six channels.
-- Use the connection role grid to assign edge intent after choosing source and target channels.
-- Assistant is not a node family in Ether 2.5.
-- Multimodal media routing belongs in the edge contract and provider capability check, not in hidden node naming.
+Roles: general, negative, subject, product, face, clothing, pose, setting, composition, style, lighting, colourPalette, typography, motion, timing
 
-## Safety Rules
+A transaction names `baseDocumentRevisionId`, every affected existing graph in `baseGraphRevisions`, actor `codex`, explicit operations, and a layout policy. Create and connect entities atomically with declared identities such as `$temp:node:campaign-worker` and `$temp:edge:worker-generation`. The exact grammar is `$temp:<graph|node|edge|group|module>:<name>`; kind must match the identity field. Never use an undeclared or abbreviated temporary reference.
 
-- Inspect the current Ether graph before editing or execution.
-- Keep project-local files, prompts, asset metadata, provider logs, and run plans inside the Ether project unless the user explicitly asks for another destination.
-- Do not run generation, evaluation, routing, provider calls, or file operations unless the user explicitly asks.
-- Never make silent generation or execution runs.
-- Preview graph patches before saving meaningful topology changes.
-- Preview run plans before any execution request.
+Use `ether.graph.transaction.preview`, inspect its resolved `tempIds`, summary, warnings, and validation, then check `ether.permission.inspect`. The host-issued Edit Permit supplies the `editPermitId`; MCP cannot grant it. Apply exactly once with `ether.graph.transaction.apply`, or close the proposal with `ether.graph.transaction.reject`. On a base conflict, refresh `ether.document.inspect` and `ether.graph.inspect`, rebase, preview again, and never overwrite current state. Confirm with `ether.graph.validate` and `ether.project.doctor`.
 
-## Graph Moves
-
-- Start with `ether_graph_get` and `ether_node_contracts`; identify existing node ids, node families, branch boundaries, channels, roles, adapters, and collection exits.
-- Use templates only when they reduce ambiguity. Name the template purpose, then map each template node to the user's goal.
-- Keep topology legible: Prompt family spine, reference fan-in, variant fan-out, review funnel, and collection exits are usually enough.
-- Wire only canonical channel and role combinations. If a cross-channel edge needs media interpretation, add an explicit adapter or disable it with a clear reason.
-- Keep the graph patch lane explicit: list node creates, node updates, edge creates, edge deletes, source channels, target channels, roles, adapters, and collection changes before `ether_graph_save`.
-- For run preview, name the selected node or branch, cap, upstream dependencies, channel/operation capability checks, expected artifacts, review checkpoint, and recovery point.
-
-## Useful Patterns
-
-- Style branch: `Prompt -> Mutator -> Generation -> Compare`, with text/style into image/general.
-- Reference branch: `Image Reference -> Generation`, with image/style, image/product, image/face, or image/pose roles.
-- Edit branch: `Image + Mask + Prompt -> Edit`, with image/general, mask/general, and text/composition or text/negative roles.
-- Review branch: `Generation -> Compare -> Evaluation -> Filter -> Collection`, with image/data and data/data handoffs.
-- Media branch: audio or video references stay disabled for text interpretation until provider capability is explicit.
+`../../examples/editorial-campaign.transaction.json` is the tested portable construction template. Replace every `{{...}}` value with active graph revisions and selected references learned through MCP, plus a real host-issued export `pathGrantId`; without that grant, omit the export node and its edge. `../../examples/review-repair.transaction.json` is the matching portable repair template: hydrate it only with current entities and revisions returned by `ether.graph.inspect`, the construction proposal's `tempIds`, and the construction apply result. Both pass the real MCP preview/apply handler and contain no run call.

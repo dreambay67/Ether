@@ -1,8 +1,0 @@
-interface:
-  display_name: "Ether Recovery"
-  short_description: "Recover Ether 2.5 graph and asset state"
-  brand_color: "#1470DB"
-  default_prompt: "Use $ether-recovery to inspect Ether 2.5 migration, graph health, assets, and provider logs."
-
-policy:
-  allow_implicit_invocation: true

@@ -1,0 +1,127 @@
+{
+  "id": "plugin-editorial-campaign",
+  "baseDocumentRevisionId": "{{baseDocumentRevisionId}}",
+  "baseGraphRevisions": { "{{targetGraphId}}": "{{baseGraphRevisionId}}" },
+  "title": "Build editorial campaign workflow",
+  "actor": "codex",
+  "layoutPolicy": "preserve",
+  "operations": [
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-prompt",
+        "definitionId": "prompt.text",
+        "title": "Campaign brief",
+        "position": { "x": 0, "y": 120 },
+        "size": { "width": 240, "height": 160 },
+        "config": { "kind": "prompt.text", "body": "Create a moody editorial campaign with consistent product identity.", "assembly": "append" },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "content" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-worker",
+        "definitionId": "prompt.worker",
+        "title": "Editorial prompt worker",
+        "position": { "x": 300, "y": 120 },
+        "size": { "width": 260, "height": 180 },
+        "config": {
+          "kind": "prompt.worker",
+          "behavior": "rewrite",
+          "instruction": "Return a concise production prompt tailored to the selected image model; preserve product identity and editorial mood.",
+          "profile": "balanced",
+          "model": "gpt-5",
+          "reasoningEffort": "medium",
+          "variation": 0.25,
+          "contextPolicy": { "includeUpstream": true, "includeDownstreamCapabilities": true, "maxTokens": 4000 },
+          "memoryPolicy": { "mode": "per-branch" },
+          "outputContract": { "channel": "text", "count": 1, "selectionPolicy": "latest" }
+        },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "summary" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-references",
+        "definitionId": "reference.set",
+        "title": "Campaign references",
+        "position": { "x": 300, "y": 360 },
+        "size": { "width": 240, "height": 160 },
+        "config": {
+          "kind": "reference.set",
+          "members": [
+            { "kind": "linked-reference", "referenceId": "{{productReferenceId}}", "enabled": true, "roleOverride": "product" },
+            { "kind": "linked-reference", "referenceId": "{{styleReferenceId}}", "enabled": true, "roleOverride": "style" },
+            { "kind": "linked-reference", "referenceId": "{{compositionReferenceId}}", "enabled": true, "roleOverride": "composition" }
+          ],
+          "enabledChannels": ["image"],
+          "ordering": "manual"
+        },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "summary" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-generation",
+        "definitionId": "generation.image",
+        "title": "Campaign generation",
+        "position": { "x": 640, "y": 160 },
+        "size": { "width": 250, "height": 180 },
+        "config": { "kind": "generation.image", "providerId": "codex", "profileId": "image-default", "aspectRatio": "4:5", "resolution": { "width": 1024, "height": 1280 }, "outputCount": 4 },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "output" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-review",
+        "definitionId": "review.compare",
+        "title": "Campaign review",
+        "position": { "x": 960, "y": 160 },
+        "size": { "width": 230, "height": 160 },
+        "config": { "kind": "review.compare", "selectionMode": "many", "minimumSelections": 1 },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "output" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-collection",
+        "definitionId": "output.collection",
+        "title": "Approved campaign",
+        "position": { "x": 1260, "y": 160 },
+        "size": { "width": 230, "height": 150 },
+        "config": { "kind": "output.collection", "collectionId": "editorial-campaign", "membershipMode": "add", "makePrimary": true },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "summary" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-export",
+        "definitionId": "output.export",
+        "title": "Export preparation",
+        "position": { "x": 1560, "y": 160 },
+        "size": { "width": 230, "height": 150 },
+        "config": { "kind": "output.export", "pathGrantId": "{{pathGrantId}}", "namingTemplate": "editorial-{index}", "format": "png", "collisionPolicy": "rename", "includeMetadata": true },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "summary" }
+      }
+    },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:prompt-worker", "from": { "kind": "node", "nodeId": "$temp:node:campaign-prompt", "channel": "text" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-worker", "channel": "text" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:worker-generation", "from": { "kind": "node", "nodeId": "$temp:node:campaign-worker", "channel": "text" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-generation", "channel": "text" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:references-generation", "from": { "kind": "node", "nodeId": "$temp:node:campaign-references", "channel": "image" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-generation", "channel": "image" }, "role": "product", "order": 1, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:generation-review", "from": { "kind": "node", "nodeId": "$temp:node:campaign-generation", "channel": "image" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-review", "channel": "image" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:review-collection", "from": { "kind": "node", "nodeId": "$temp:node:campaign-review", "channel": "image" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-collection", "channel": "image" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:collection-export", "from": { "kind": "node", "nodeId": "$temp:node:campaign-collection", "channel": "image" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-export", "channel": "image" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } }
+  ]
+}

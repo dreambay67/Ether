@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Review Director
+  short_description: Build Ether 4.0 review and approval flows.
+  default_prompt: Use $ether-review-director to propose an Ether 4.0 review funnel without execution.

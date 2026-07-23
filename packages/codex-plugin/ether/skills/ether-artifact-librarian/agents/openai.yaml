@@ -1,8 +1,4 @@
 interface:
-  display_name: "Ether Artifact Librarian"
-  short_description: "Organize Ether 2.5 six-channel assets"
-  brand_color: "#1470DB"
-  default_prompt: "Use $ether-artifact-librarian to organize Ether 2.5 six-channel assets and collections."
-
-policy:
-  allow_implicit_invocation: true
+  display_name: Ether Artifact Librarian
+  short_description: Curate Ether 4.0 artifacts, lineage, and export preparation.
+  default_prompt: Use $ether-artifact-librarian to inspect Ether 4.0 artifact lineage and collection readiness.

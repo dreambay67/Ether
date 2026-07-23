@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Project Doctor
+  short_description: Diagnose and safely repair an Ether 4.0 document.
+  default_prompt: Use $ether-project-doctor to inspect and propose repair for this Ether 4.0 document.

@@ -1,0 +1,26 @@
+{
+  "id": "plugin-review-repair",
+  "baseDocumentRevisionId": "{{baseDocumentRevisionId}}",
+  "baseGraphRevisions": { "{{targetGraphId}}": "{{baseGraphRevisionId}}" },
+  "title": "Insert an evaluation stage into review",
+  "actor": "codex",
+  "layoutPolicy": "preserve",
+  "operations": [
+    { "type": "removeEdge", "graphId": "{{targetGraphId}}", "edgeId": "{{reviewCollectionEdgeId}}" },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:campaign-evaluation",
+        "definitionId": "review.evaluate",
+        "title": "Editorial evaluation",
+        "position": { "x": 1120, "y": 380 },
+        "size": { "width": 250, "height": 170 },
+        "config": { "kind": "review.evaluate", "instruction": "Score product fidelity, editorial mood, composition, and technical quality.", "rubric": [{ "id": "fidelity", "label": "Product fidelity", "weight": 1 }, { "id": "mood", "label": "Editorial mood", "weight": 1 }], "profile": "balanced", "model": "gpt-5", "reasoningEffort": "medium" },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "summary" }
+      }
+    },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:review-evaluation", "from": { "kind": "node", "nodeId": "{{reviewNodeId}}", "channel": "image" }, "to": { "kind": "node", "nodeId": "$temp:node:campaign-evaluation", "channel": "image" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } },
+    { "type": "addEdge", "graphId": "{{targetGraphId}}", "edge": { "id": "$temp:edge:evaluation-collection", "from": { "kind": "node", "nodeId": "$temp:node:campaign-evaluation", "channel": "image" }, "to": { "kind": "node", "nodeId": "{{collectionNodeId}}", "channel": "image" }, "role": "general", "order": 0, "selector": { "kind": "latest-approved" }, "adapter": { "kind": "auto" }, "enabled": true } }
+  ]
+}

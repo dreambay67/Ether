@@ -1,8 +1,0 @@
-interface:
-  display_name: "Ether Connection Model"
-  short_description: "Apply Ether 2.5 roles, channels, and media routing"
-  brand_color: "#1470DB"
-  default_prompt: "Use $ether-connection-model to apply Ether 2.5 channels, roles, and multimodal media routing."
-
-policy:
-  allow_implicit_invocation: true

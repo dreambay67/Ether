@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Intelligence Director
+  short_description: Design model-aware Ether 4.0 Worker chains.
+  default_prompt: Use $ether-intelligence-director to propose an Ether 4.0 Worker chain without running it.

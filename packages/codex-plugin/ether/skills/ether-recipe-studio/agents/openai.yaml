@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Recipe Studio
+  short_description: Preview and instantiate executable Ether 4.0 recipes.
+  default_prompt: Use $ether-recipe-studio to preview a suitable Ether 4.0 recipe and its transaction.

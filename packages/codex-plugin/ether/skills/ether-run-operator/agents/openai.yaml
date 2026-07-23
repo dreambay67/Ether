@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Run Operator
+  short_description: Preview and explicitly run a plan-bound Ether 4.0 scope.
+  default_prompt: Use $ether-run-operator to preview an Ether 4.0 plan without starting it.

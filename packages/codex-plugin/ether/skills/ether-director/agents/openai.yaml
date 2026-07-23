@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Director
+  short_description: Design and safely construct an Ether 4.0 workflow.
+  default_prompt: Use $ether-director to inspect this Ether 4.0 document and propose one tailored, non-executing transaction.

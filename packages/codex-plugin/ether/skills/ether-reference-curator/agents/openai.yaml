@@ -1,0 +1,4 @@
+interface:
+  display_name: Ether Reference Curator
+  short_description: Curate Ether 4.0 document references and provenance.
+  default_prompt: Use $ether-reference-curator to inspect and safely wire references in this Ether 4.0 document.

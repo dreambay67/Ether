@@ -1,91 +1,35 @@
 {
   "name": "ether",
-  "version": "0.1.0",
-  "description": "Local Ether 2.5 node canvas workflow control for Codex with node-role-channel graph, prompt, review, artifact, provider safety, media routing, and recovery guidance.",
-  "author": {
-    "name": "DreamBay",
-    "email": "local@dreambay.invalid"
-  },
+  "version": "4.0.0",
+  "description": "Local Ether 4.0 document workflow control for Codex.",
+  "author": { "name": "DreamBay", "email": "local@dreambay.invalid" },
   "license": "UNLICENSED",
-  "keywords": [
-    "ether",
-    "node-canvas",
-    "image-workflow",
-    "codex",
-    "graph-architecture",
-    "node-role-channel-model",
-    "multimodal-media-routing",
-    "prompt-systems",
-    "review-routing",
-    "artifact-organization"
-  ],
+  "keywords": ["ether", "ether-4.0", "creative-workflow", "graph-transactions", "codex"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Ether",
-    "shortDescription": "Local node canvas workflow control",
-    "longDescription": "Create, inspect, edit, and explicitly run local Ether 2.5 workflow graphs through Codex, with focused skills for the node role channel model, multimodal media routing, prompt systems, review routing, artifact organization, provider safety, and recovery.",
+    "displayName": "Ether 4.0",
+    "shortDescription": "Inspectable creative production documents",
+    "longDescription": "Inspect, construct, repair, preview, and explicitly run one Ether 4.0 .ether document through typed MCP tools. Graph changes are one undoable transaction; runs require a plan-bound Run Permit.",
     "developerName": "DreamBay",
     "category": "Productivity",
-    "capabilities": [
-      "Interactive",
-      "Write",
-      "2.5 Node Role Channel Model",
-      "Multimodal Media Routing",
-      "Advanced Graph Architecture",
-      "Prompt Systems",
-      "Review Routing",
-      "Artifact Organization",
-      "Provider Safety",
-      "Recovery"
-    ],
+    "capabilities": ["Interactive", "Inspect", "Edit Permit", "Run Permit", "Atomic graph transactions", "Immutable plan preview", "Recipes", "Artifact review", "Document recovery"],
     "skillHighlights": [
-      {
-        "skill": "ether-connection-model",
-        "capability": "2.5 Node Role Channel Model",
-        "useWhen": "Apply exact Ether 2.5 channels, roles, Prompt family subnodes, connection role grid, and multimodal media routing rules."
-      },
-      {
-        "skill": "ether-graph-architect",
-        "capability": "Advanced Graph Architecture",
-        "useWhen": "Design graph topology, node roles, channel routing, templates, patch previews, and run previews."
-      },
-      {
-        "skill": "ether-prompt-systems",
-        "capability": "Prompt Systems",
-        "useWhen": "Build Prompt family flows, connection roles, references, controls, presets, and variant strategy."
-      },
-      {
-        "skill": "ether-review-router",
-        "capability": "Review Routing",
-        "useWhen": "Build Compare, Evaluate, Filter, dry-run routing, manual override, and audit loops."
-      },
-      {
-        "skill": "ether-artifact-librarian",
-        "capability": "Artifact Organization",
-        "useWhen": "Organize six-channel asset imports, linked assets, copy and move flows, collections, lineage, and metadata."
-      },
-      {
-        "skill": "ether-provider-safety",
-        "capability": "Provider Safety",
-        "useWhen": "Choose CLI, MCP, API, Simulation, or Experimental provider modes without hidden fallback."
-      },
-      {
-        "skill": "ether-recovery",
-        "capability": "Recovery",
-        "useWhen": "Diagnose health, graph revisions, missing files, orphan artifacts, provider logs, and recovery actions."
-      }
+      { "skill": "ether-director", "capability": "Workflow direction", "useWhen": "Translate a creative goal into a safe Ether 4.0 document workflow." },
+      { "skill": "ether-graph-architect", "capability": "Atomic graphs", "useWhen": "Construct or repair a graph or module in one undoable transaction." },
+      { "skill": "ether-intelligence-director", "capability": "LLM Workers", "useWhen": "Design model-aware Codex Worker chains and output contracts." },
+      { "skill": "ether-reference-curator", "capability": "References", "useWhen": "Curate document-scoped references and their roles." },
+      { "skill": "ether-run-operator", "capability": "Plan-bound runs", "useWhen": "Preview, permit, start, cancel, or retry a declared run." },
+      { "skill": "ether-recipe-studio", "capability": "Recipes", "useWhen": "Preview and instantiate an executable recipe." },
+      { "skill": "ether-review-director", "capability": "Review", "useWhen": "Build review checkpoints, decisions, and collection routing." },
+      { "skill": "ether-artifact-librarian", "capability": "Artifacts", "useWhen": "Inspect artifacts, collections, lineage, and export preparation." },
+      { "skill": "ether-project-doctor", "capability": "Recovery", "useWhen": "Inspect document health and guide a repair." }
     ],
     "defaultPrompt": [
-      "Use Ether to create a new image workflow branch.",
-      "Inspect this Ether project graph before running anything.",
-      "Use $ether-connection-model to explain Ether 2.5 roles, channels, and media routing.",
-      "Use $ether-graph-architect to preview a graph patch for a new branch.",
-      "Use $ether-prompt-systems to design role-based prompt variants.",
-      "Use $ether-review-router to add a dry-run review funnel.",
-      "Use $ether-artifact-librarian to organize generated assets into collections.",
-      "Use $ether-provider-safety to explain the provider mode for this run.",
-      "Use $ether-recovery to inspect project health and propose recovery actions."
+      "Use $ether-director to inspect this Ether document and propose a tailored graph.",
+      "Use $ether-graph-architect to apply the approved graph transaction with temporary references.",
+      "Use $ether-run-operator to preview a plan; do not execute unless I explicitly request it.",
+      "Use $ether-project-doctor to inspect and repair this Ether document."
     ],
     "brandColor": "#1470DB"
   }
