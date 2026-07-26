@@ -259,7 +259,7 @@ export async function cleanupReleaseStaging(rootDir = workspaceRoot) {
   ];
   for (const target of targets) {
     if (!isWithin(resolvedRoot, target)) throw new Error(`Refusing to clean release staging outside ${resolvedRoot}.`);
-    await rm(target, { recursive: true, force: true });
+    await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

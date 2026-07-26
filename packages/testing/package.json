@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "pretest:unit": "pnpm --filter @ether/schema build && pnpm --filter @ether/graph-kernel build",
     "test:unit": "vitest run --config vitest.config.ts",
-    "pretest:integration": "pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/intelligence build",
+    "pretest:integration": "pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/intelligence build && pnpm --filter @ether/desktop build && node ../../scripts/create-installer-assets.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "pretest:destructive-chaos": "pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/intelligence build",
     "test:destructive-chaos": "cross-env ETHER_TEST_SUITE=destructive-chaos vitest run --config vitest.integration.config.ts",
