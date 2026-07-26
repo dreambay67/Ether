@@ -1,3 +1,7 @@
+overrides:
+  '@hono/node-server': 2.0.12
+  fast-uri: 3.1.4
+
 packages:
   - "apps/*"
   - "packages/*"
@@ -13,3 +17,5 @@ allowBuilds:
   # electron-builder selects NSIS directly; its legacy Squirrel helper is never executed.
   electron-winstaller: false
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@hono/node-server@2.0.12'
