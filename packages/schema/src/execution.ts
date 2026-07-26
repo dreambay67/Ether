@@ -49,6 +49,17 @@ export const ExecutionPlanStatusSchema = z.enum([
 ]);
 export type ExecutionPlanStatus = z.infer<typeof ExecutionPlanStatusSchema>;
 
+export const ProviderBindingSchema = z
+  .object({
+    providerId: z.string().min(1),
+    profileId: z.string().min(1),
+    modelId: z.string().min(1),
+    settings: JsonObjectSchema,
+    capabilitySnapshot: ProviderCapabilitySchema
+  })
+  .strict();
+export type ProviderBinding = z.infer<typeof ProviderBindingSchema>;
+
 export const PlanStepSchema = z
   .object({
     id: z.string().min(1),
@@ -66,26 +77,10 @@ export const PlanStepSchema = z
     parameters: JsonObjectSchema,
     selectors: z.array(JsonObjectSchema),
     executorConfig: JsonObjectSchema.optional(),
-    provider: z
-      .object({
-        providerId: z.string().min(1),
-        profileId: z.string().min(1),
-        modelId: z.string().min(1),
-        settings: JsonObjectSchema,
-        capabilitySnapshot: ProviderCapabilitySchema
-      })
-      .strict(),
+    provider: ProviderBindingSchema,
     // New plans use this nullable binding for local and human work; provider remains
     // required for the already-compiled provider plan callers.
-    providerBinding: z
-      .object({
-        providerId: z.string().min(1),
-        profileId: z.string().min(1),
-        modelId: z.string().min(1),
-        settings: JsonObjectSchema,
-        capabilitySnapshot: ProviderCapabilitySchema
-      })
-      .strict()
+    providerBinding: ProviderBindingSchema
       .nullable()
       .optional()
   })
@@ -118,7 +113,8 @@ export const PlannedWorkItemSchema = z
     ordinal: z.number().int().nonnegative(),
     inputs: z.array(PlannedInputSchema),
     parameters: z.array(PlannedParameterSchema),
-    dependencyWorkItemIds: z.array(z.string().min(1)).optional()
+    dependencyWorkItemIds: z.array(z.string().min(1)).optional(),
+    providerBindingOverride: ProviderBindingSchema.optional()
   })
   .strict();
 export type PlannedWorkItem = z.infer<typeof PlannedWorkItemSchema>;

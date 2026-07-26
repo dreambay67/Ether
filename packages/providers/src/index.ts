@@ -174,6 +174,7 @@ export type {
   ProviderDiagnostic,
   ProviderDiagnosticContext,
   ProviderExecutionContext,
+  ProviderExecutionPhase,
   ProviderGenerationResult,
   ProviderMediaLimits,
   ProviderMatrixStatus,

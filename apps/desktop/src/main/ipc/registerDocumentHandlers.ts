@@ -14,17 +14,23 @@ import type { ProviderService } from "../services/providerService.js";
 type Handler = (request: Record<string, unknown>) => Promise<unknown> | unknown;
 
 export function registerDocumentHandlers(options: {
+  appVersion: string;
   ipcMain: IpcMain;
   mainWindow: BrowserWindow;
   rendererUrl: string;
   service: DesktopApplicationService;
   providerService?: ProviderService | null;
+  getProviderPolicy?: () => { antigravityCreditOveragesConfirmed: boolean };
+  setProviderPolicy?: (confirmed: boolean) => Promise<{
+    antigravityCreditOveragesConfirmed: boolean;
+  }>;
+  bootstrapDocument?: () => Promise<unknown>;
   openDocument(): Promise<unknown>;
   openPath(filePath: string): Promise<unknown>;
 }): () => void {
-  const { ipcMain, mainWindow, rendererUrl, service, openDocument, openPath, providerService } = options;
+  const { appVersion, ipcMain, mainWindow, rendererUrl, service, openDocument, openPath, providerService } = options;
   const registrations: Array<[DesktopIpcChannel, Handler]> = [
-    [desktopIpcChannels.document.bootstrap, () => service.bootstrap()],
+    [desktopIpcChannels.document.bootstrap, () => options.bootstrapDocument?.() ?? service.bootstrap()],
     [desktopIpcChannels.document.new, () => service.newDocument()],
     [desktopIpcChannels.document.open, () => openDocument()],
     [desktopIpcChannels.document.openDropped, (request) => {
@@ -71,6 +77,7 @@ export function registerDocumentHandlers(options: {
       return service.actOnReference(action.documentId, action.referenceId, action.action);
     }],
     [desktopIpcChannels.runtime.versions, () => ({
+      app: appVersion,
       electron: process.versions.electron ?? "unknown",
       node: process.versions.node
     })],
@@ -90,7 +97,21 @@ export function registerDocumentHandlers(options: {
       threadId: null,
       turnId: null,
       timing: { startedAt: null, initializedAt: null, initializationMs: null, lastExitAt: null }
-    })]
+    })],
+    [desktopIpcChannels.runtime.providerPolicy, () =>
+      options.getProviderPolicy?.() ?? {
+        antigravityCreditOveragesConfirmed: false
+      }],
+    [desktopIpcChannels.runtime.setProviderPolicy, async (request) => {
+      const policy = request as { antigravityCreditOveragesConfirmed: boolean };
+      if (options.setProviderPolicy === undefined) {
+        throw Object.assign(
+          new Error("Provider policy cannot be changed while providers are disabled."),
+          { category: "provider", code: "PROVIDER_POLICY_UNAVAILABLE" }
+        );
+      }
+      return options.setProviderPolicy(policy.antigravityCreditOveragesConfirmed);
+    }]
   ];
 
   for (const [channel, handler] of registrations) {

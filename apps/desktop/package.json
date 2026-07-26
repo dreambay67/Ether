@@ -1,11 +1,15 @@
 {
   "name": "@ether/desktop",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "main": "dist-electron/main/bootstrap.js",
+  "description": "ETHER by DreamBay - a local-first creative node canvas for portable .ether documents.",
+  "author": "DreamBay",
+  "homepage": "https://github.com/dreambay67/Ether",
   "type": "module",
   "scripts": {
     "build:electron": "pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && tsc -p tsconfig.electron.json && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload/preload.cjs",
+    "build:performance": "tsc -p tsconfig.electron.json && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload/preload.cjs && vite build",
     "pretypecheck": "pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build",
     "typecheck": "tsc -p tsconfig.electron.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.renderer.json",
     "lint": "eslint . --max-warnings=0",

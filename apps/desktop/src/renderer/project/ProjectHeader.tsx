@@ -3,10 +3,12 @@ import {
   Copy,
   FilePlus2,
   FolderOpen,
+  HeartPulse,
   Images,
   PackageCheck,
   Save,
-  SaveAll
+  SaveAll,
+  Settings2
 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -23,7 +25,9 @@ export function ProjectHeader({
   onSaveCopy,
   onCompact,
   onMakePortable,
-  onToggleArtifacts
+  onToggleArtifacts,
+  onProviderHealth,
+  onSettings
 }: {
   document: DocumentDescriptor;
   artifactsOpen: boolean;
@@ -35,6 +39,8 @@ export function ProjectHeader({
   onCompact(): void;
   onMakePortable(): void;
   onToggleArtifacts(): void;
+  onProviderHealth(): void;
+  onSettings(): void;
 }) {
   return (
     <header className="project-header task-nine-header" data-testid="project-header">
@@ -62,6 +68,8 @@ export function ProjectHeader({
           <Images size={16} aria-hidden="true" />
           Artifacts
         </button>
+        <IconCommand label="Provider Health" icon={<HeartPulse size={16} />} onClick={onProviderHealth} />
+        <IconCommand label="Settings" icon={<Settings2 size={16} />} onClick={onSettings} />
       </nav>
     </header>
   );

@@ -131,6 +131,8 @@ export const PromptWorkerConfigSchema = z
     behavior: WorkerBehaviorSchema,
     instruction: z.string(),
     profile: WorkerProfileSchema,
+    providerId: z.string().min(1).optional(),
+    profileId: z.string().min(1).optional(),
     model: z.string().min(1),
     reasoningEffort: z.string().min(1),
     variation: z.number().min(0).max(1),
@@ -352,11 +354,24 @@ export const BatchDimensionSchema = z
   .strict();
 export type BatchDimension = z.infer<typeof BatchDimensionSchema>;
 
+export const BatchProviderAllocationSchema = z
+  .object({
+    id: z.string().min(1),
+    targetNodeId: z.string().min(1),
+    count: z.number().int().positive().max(10_000),
+    providerId: z.string().min(1),
+    profileId: z.string().min(1),
+    modelId: z.string().min(1)
+  })
+  .strict();
+export type BatchProviderAllocation = z.infer<typeof BatchProviderAllocationSchema>;
+
 export const FlowBatchConfigSchema = z
   .object({
     kind: z.literal("flow.batch"),
     dimensions: z.array(BatchDimensionSchema),
     exclusions: z.array(z.object({ values: JsonObjectSchema }).strict()).optional(),
+    allocations: z.array(BatchProviderAllocationSchema).optional(),
     parallelism: z.number().int().positive()
   })
   .strict();

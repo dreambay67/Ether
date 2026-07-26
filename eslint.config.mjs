@@ -10,6 +10,9 @@ export default tseslint.config(
       "**/dist/**",
       "**/dist-electron/**",
       "**/node_modules/**",
+      "apps/desktop/.release-runtime/**",
+      "apps/desktop/.release-project/**",
+      "release/**",
       "**/playwright-report/**",
       "**/test-results/**"
     ]

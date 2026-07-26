@@ -1,5 +1,12 @@
 import {
   ETHER_DOCUMENT_FORMAT,
+  ETHER_4_FORMAT_CONTRACT,
+  ETHER_4_CHANNELS,
+  ETHER_4_ROLES,
+  ETHER_4_CANONICAL_NODES,
+  ETHER_4_GRAPH_TRANSACTION_CONTRACT_HASH,
+  ETHER_4_DOCUMENT_TRANSACTION_CONTRACT_HASH,
+  ETHER_4_RECIPE_MANIFEST_CONTRACT_HASH,
   ETHER_FTS_TABLES,
   ETHER_SCHEMA_TABLES,
   EtherDocumentError,
@@ -12,7 +19,10 @@ import {
   ETHER_FORMAT_MARKER,
   ETHER_FORMAT_VERSION,
   ETHER_SCHEMA_VERSION,
-  ETHER_SQLITE_APPLICATION_ID
+  ETHER_SQLITE_APPLICATION_ID,
+  canonicalNodeDefinitionIds,
+  connectionRoles,
+  payloadChannels
 } from "@ether/schema";
 import {
   __setDocumentBoundaryTestHooks,
@@ -223,7 +233,7 @@ describe("Ether 4.0 document format", () => {
     expect(deepImport.stderr).toMatch(/ERR_PACKAGE_PATH_NOT_EXPORTED|not defined by "exports"/);
   });
 
-  it("creates one validated Campaign.ether file with the provisional 4.0 identity", () => {
+  it("creates one validated Campaign.ether file with the frozen 4.0 identity", () => {
     const inspection = createEtherDocument(documentPath, {
       appVersion: "4.0.0",
       documentId: "document-campaign",
@@ -1324,13 +1334,28 @@ describe("Ether 4.0 document format", () => {
     expectFileUnchanged(documentPath, before);
   });
 
-  it("exports explicit provisional format metadata until the Phase 5 freeze", () => {
+  it("exports immutable Ether 4.0 format metadata after the Phase 5 freeze", () => {
     expect(ETHER_DOCUMENT_FORMAT).toMatchObject({
-      formatFrozen: false,
+      formatFrozen: true,
       freezePhase: 5,
       pageSize: 16_384,
-      pageSizeProvisional: true,
-      schemaProvisional: true
+      pageSizeProvisional: false,
+      schemaProvisional: false
     });
+    expect(ETHER_4_FORMAT_CONTRACT).toMatchObject({
+      applicationId: ETHER_SQLITE_APPLICATION_ID,
+      formatVersion: ETHER_FORMAT_VERSION,
+      pageSize: 16_384,
+      schemaVersion: ETHER_SCHEMA_VERSION
+    });
+    expect(ETHER_4_CHANNELS).toEqual(["text", "image", "mask", "data", "video", "audio"]);
+    expect(ETHER_4_ROLES).toEqual(["general", "negative", "subject", "product", "face", "clothing", "pose", "setting", "composition", "style", "lighting", "colourPalette", "typography", "motion", "timing"]);
+    expect(ETHER_4_CANONICAL_NODES).toEqual(["prompt.text", "prompt.worker", "reference.set", "generation.image", "edit.image", "edit.mask", "edit.transform", "review.compare", "review.evaluate", "review.filter", "flow.variables", "flow.batch", "flow.join", "output.collection", "output.export", "canvas.note", "canvas.drawing"]);
+    expect([...payloadChannels]).toEqual(ETHER_4_CHANNELS);
+    expect([...connectionRoles]).toEqual(ETHER_4_ROLES);
+    expect([...canonicalNodeDefinitionIds]).toEqual(ETHER_4_CANONICAL_NODES);
+    expect(ETHER_4_GRAPH_TRANSACTION_CONTRACT_HASH).toBe("a22d726b274e321052779591b00def64549f0cefac632ac37e68cc4d8866aacc");
+    expect(ETHER_4_DOCUMENT_TRANSACTION_CONTRACT_HASH).toBe("9422e3cbd8685d7c38b5ce5f0608b434dbdacdbe68b3043bc083df814ef15f93");
+    expect(ETHER_4_RECIPE_MANIFEST_CONTRACT_HASH).toBe("4aea798bd9ab7d63418f16e351656b0d01c7f5eb6c6a01e0ca707995a4f4d2e5");
   });
 });

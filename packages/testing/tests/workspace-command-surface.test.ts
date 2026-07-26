@@ -58,6 +58,7 @@ describe("workspace command surface", () => {
       typecheck: "pnpm -r typecheck",
       lint: "eslint . --max-warnings=0",
       "test:integration": "pnpm --filter @ether/testing test:integration",
+      "test:destructive-chaos": "pnpm --filter @ether/testing test:destructive-chaos",
       "test:packaged": "pnpm --filter @ether/testing test:packaged",
       "test:performance": "pnpm --filter @ether/testing test:performance",
       "test:conformance:codex": "pnpm --filter @ether/testing test:conformance:codex",
@@ -104,9 +105,20 @@ describe("workspace command surface", () => {
     expect(manifest.scripts).toMatchObject({
       "test:unit": "vitest run --config vitest.config.ts",
       "test:integration": "vitest run --config vitest.integration.config.ts",
-      "test:performance": "vitest run --config vitest.performance.config.ts"
+      "test:destructive-chaos": "cross-env ETHER_TEST_SUITE=destructive-chaos vitest run --config vitest.integration.config.ts",
+      "test:performance": "vitest run --config vitest.performance.config.ts && playwright test --config playwright.performance.config.ts"
     });
     expect(manifest.scripts?.["test:contracts"]).toContain("vitest run");
+    const suiteConfig = await readFile(
+      path.join(repositoryRoot, "packages/testing/vitest.integration.config.ts"),
+      "utf8"
+    );
+    const workflow = await readFile(path.join(repositoryRoot, ".github/workflows/ci.yml"), "utf8");
+    expect(suiteConfig).toContain('requestedSuite === "destructive-chaos"');
+    expect(suiteConfig).toContain('process.env.ETHER_RUN_DESTRUCTIVE_CHAOS !== "1"');
+    expect(workflow).toContain("pnpm.cmd run test:destructive-chaos");
+    expect(workflow).toContain('ETHER_RUN_DESTRUCTIVE_CHAOS: "1"');
+    expect(workflow).not.toContain("test:integration -- --run tests/document-chaos.integration.ts");
     await expect(
       access(path.join(repositoryRoot, "packages/testing/vitest.integration.config.ts"))
     ).resolves.toBeUndefined();
@@ -139,7 +151,7 @@ describe("workspace command surface", () => {
     const runnableSources = (await readdir(path.join(repositoryRoot, "packages/testing/tests"), {
       recursive: true
     }))
-      .filter((entry) => /\.(?:test|spec|packaged|conformance)\.ts$/.test(entry))
+      .filter((entry) => /\.(?:test|spec|packaged|conformance|performance|integration)\.ts$/.test(entry))
       .map((entry) => `tests/${entry.replaceAll("\\", "/")}`)
       .sort();
 

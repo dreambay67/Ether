@@ -27,6 +27,7 @@
     "@ether/providers": "workspace:*",
     "@ether/recipes": "workspace:*",
     "@ether/schema": "workspace:*",
+    "@img/sharp-win32-x64": "0.35.3",
     "sharp": "^0.35.3"
   }
 }

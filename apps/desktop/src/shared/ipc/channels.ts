@@ -37,7 +37,10 @@ export const desktopIpcChannels = {
   },
   runtime: {
     versions: "ether:runtime:versions",
-    providerHealth: "ether:runtime:provider-health"
+    providerHealth: "ether:runtime:provider-health",
+    providerPolicy: "ether:runtime:provider-policy",
+    setProviderPolicy: "ether:runtime:set-provider-policy",
+    rendererInteractive: "ether:runtime:renderer-interactive"
   }
 } as const;
 

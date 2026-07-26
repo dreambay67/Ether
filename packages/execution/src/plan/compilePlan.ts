@@ -8,6 +8,7 @@ import {
 } from "@ether/graph-kernel";
 import {
   ExecutionPlanSchema,
+  type BatchProviderAllocation,
   type ConnectionRole,
   type EtherEdge,
   type EtherGraph,
@@ -19,6 +20,7 @@ import {
   type PayloadEnvelope,
   type PlanStep,
   type PlannedWorkItem,
+  type ProviderBinding,
   type ProviderCapability
 } from "@ether/schema";
 
@@ -29,6 +31,10 @@ import {
   type BatchExpansionResult
 } from "./batchExpansion.js";
 import { hashPlan } from "./hashPlan.js";
+import {
+  combinedProviderParallelismLimit,
+  SAFE_GLOBAL_PARALLELISM
+} from "./providerConcurrency.js";
 import {
   createPlannerTopology,
   isPlanStepNode,
@@ -96,8 +102,6 @@ export class PlanCompilationError extends Error {
   }
 }
 
-type ProviderBinding = NonNullable<PlanStep["providerBinding"]>;
-
 type EdgeResolution = {
   edge: EtherEdge;
   source: PlannerNode;
@@ -126,6 +130,11 @@ type EdgeResolution = {
 type StepDraft = {
   step: Omit<PlanStep, "workItemIds">;
   expansion: BatchExpansionResult;
+  allocations: Array<{
+    id: string;
+    count: number;
+    binding: ProviderBinding;
+  }>;
 };
 
 type InternalWorkItem = PlannedWorkItem & {
@@ -139,6 +148,7 @@ type BatchPlanContext = {
     values: JsonValue[];
   }>;
   exclusions: readonly BatchExclusion[];
+  allocations: readonly BatchProviderAllocation[];
   requestedParallelism: number | undefined;
 };
 
@@ -230,6 +240,7 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
         });
       }
       drafts.push({
+        allocations: [],
         expansion,
         step: makeAdapterStep({
           input,
@@ -252,6 +263,7 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
       });
     }
     drafts.push({
+      allocations: allocationBindingsFor(input, target, batchContext.allocations),
       expansion,
       step: makeNodeStep({
         input,
@@ -274,14 +286,23 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
     1,
     ...drafts.map((draft) => draft.expansion.requestedParallelism)
   );
-  const activeProviderCaps = steps.flatMap((step) => {
-    const maximum = step.providerBinding?.capabilitySnapshot.maxParallelism;
-    return maximum === undefined ? [] : [maximum];
-  });
+  const activeProviderBindings = [
+    ...steps.flatMap((step) => {
+      if (step.providerBinding === null || step.providerBinding === undefined) return [];
+      const items = workItems.byStep.get(step.id) ?? [];
+      return items.some((item) => item.providerBindingOverride === undefined)
+        ? [step.providerBinding]
+        : [];
+    }),
+    ...workItems.items.flatMap((item) =>
+      item.providerBindingOverride === undefined ? [] : [item.providerBindingOverride]
+    )
+  ];
   const effectiveParallelism = Math.min(
     requestedParallelism,
     Math.max(workItems.items.length, 1),
-    ...activeProviderCaps
+    SAFE_GLOBAL_PARALLELISM,
+    combinedProviderParallelismLimit(activeProviderBindings)
   );
   const batchSummary = batchNodes.length === 0
     ? undefined
@@ -337,6 +358,29 @@ function validateNodeConfigurations(topology: PlannerTopology): void {
         `Node ${node.id} has an invalid ${node.definitionId} configuration: ${result.error.message}`,
         { nodeId: node.id, definitionId: node.definitionId }
       );
+    }
+    if (
+      node.config.kind === "prompt.worker" &&
+      ((node.config.providerId === undefined) !== (node.config.profileId === undefined))
+    ) {
+      throw new PlanCompilationError(
+        "INVALID_NODE_CONFIG",
+        `Worker ${node.id} must select both a provider and profile, or leave both on the document default.`,
+        { nodeId: node.id }
+      );
+    }
+    if (node.config.kind === "flow.batch") {
+      const allocationIds = new Set<string>();
+      for (const allocation of node.config.allocations ?? []) {
+        if (allocationIds.has(allocation.id)) {
+          throw new PlanCompilationError(
+            "INVALID_NODE_CONFIG",
+            `Batch ${node.id} contains duplicate allocation id ${allocation.id}.`,
+            { allocationId: allocation.id, nodeId: node.id }
+          );
+        }
+        allocationIds.add(allocation.id);
+      }
     }
   }
 }
@@ -659,12 +703,50 @@ function editWorkspaceInputPolicy(
   ) ? "workspace-mask-overrides-connected" : undefined;
 }
 
+function allocationBindingsFor(
+  input: CompilePlanInput,
+  target: PlannerNode,
+  allocations: readonly BatchProviderAllocation[]
+): StepDraft["allocations"] {
+  const selected = allocations.filter((allocation) => allocation.targetNodeId === target.id);
+  if (selected.length === 0) return [];
+  if (target.config.kind !== "prompt.worker" && target.config.kind !== "generation.image") {
+    throw new PlanCompilationError(
+      "INVALID_NODE_CONFIG",
+      `Batch provider/model allocations can target only Worker or Image Generator nodes, not ${target.definitionId}.`,
+      { nodeId: target.id }
+    );
+  }
+  return selected.map((allocation) => ({
+    id: allocation.id,
+    count: allocation.count,
+    binding: makeProviderBinding(
+      input,
+      allocation.providerId,
+      allocation.modelId,
+      jsonObject({
+        allocationId: allocation.id,
+        targetNodeId: allocation.targetNodeId
+      }),
+      allocation.profileId
+    )
+  }));
+}
+
 function materializeWorkItems(drafts: readonly StepDraft[]): {
   items: PlannedWorkItem[];
   byStep: Map<string, InternalWorkItem[]>;
 } {
   const byStep = new Map<string, InternalWorkItem[]>();
   for (const draft of drafts) {
+    const allocatedCount = draft.allocations.reduce((total, allocation) => total + allocation.count, 0);
+    if (allocatedCount > draft.expansion.items.length) {
+      throw new PlanCompilationError(
+        "INVALID_NODE_CONFIG",
+        `Provider/model allocations for ${draft.step.nodeId} assign ${allocatedCount} items, but the batch has only ${draft.expansion.items.length}.`,
+        { allocatedCount, nodeId: draft.step.nodeId, workItemCount: draft.expansion.items.length }
+      );
+    }
     const items = draft.expansion.items.map((item) => ({
       id: item.id,
       stepId: draft.step.id,
@@ -681,6 +763,7 @@ function materializeWorkItems(drafts: readonly StepDraft[]): {
         }))
       ],
       dependencyWorkItemIds: [],
+      ...providerBindingOverrideFor(item.ordinal, draft.allocations),
       values: item.values
     }));
     byStep.set(draft.step.id, items);
@@ -706,6 +789,21 @@ function materializeWorkItems(drafts: readonly StepDraft[]): {
   return { items: flattened, byStep };
 }
 
+function providerBindingOverrideFor(
+  ordinal: number,
+  allocations: StepDraft["allocations"]
+): { providerBindingOverride?: ProviderBinding } {
+  let start = 0;
+  for (const allocation of allocations) {
+    const end = start + allocation.count;
+    if (ordinal >= start && ordinal < end) {
+      return { providerBindingOverride: allocation.binding };
+    }
+    start = end;
+  }
+  return {};
+}
+
 function assignmentIncludes(child: JsonObject, parent: JsonObject): boolean {
   const parentEntries = Object.entries(parent);
   if (parentEntries.length === 0) return true;
@@ -722,6 +820,7 @@ function batchContextForNode(
 ): BatchPlanContext {
   const dimensions: BatchPlanContext["dimensions"] = [];
   const exclusions: BatchExclusion[] = [...(input.batchExclusions ?? [])];
+  const allocations: BatchProviderAllocation[] = [];
   let requestedParallelism: number | undefined = input.requestedParallelism;
   const seenDimensionIds = new Set<string>();
   for (const batchNode of batchNodes) {
@@ -744,6 +843,7 @@ function batchContextForNode(
     }
     exclusions.push(...(batchNode.config.exclusions ?? []));
     exclusions.push(...(input.batchExclusionsByNode?.[batchNode.id] ?? []));
+    allocations.push(...(batchNode.config.allocations ?? []));
   }
   if (dimensions.length === 0 && input.batchDimensions !== undefined) {
     for (const dimension of input.batchDimensions) {
@@ -758,7 +858,7 @@ function batchContextForNode(
       dimensions.push(dimension);
     }
   }
-  return { dimensions, exclusions, requestedParallelism };
+  return { allocations, dimensions, exclusions, requestedParallelism };
 }
 
 function expandForStep(
@@ -832,10 +932,12 @@ function dependencyStepIdsForNode(
 function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): ProviderBinding | null {
   const config = node.config;
   switch (config.kind) {
-    case "prompt.worker":
-      return makeProviderBinding(input, input.capability.providerId, config.model, config);
+    case "prompt.worker": {
+      const providerId = config.providerId ?? input.capability.providerId;
+      return makeProviderBinding(input, providerId, config.model, config, config.profileId);
+    }
     case "generation.image":
-      return makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
+      return makeProviderBinding(input, config.providerId, undefined, config, config.profileId);
     case "edit.image": {
       if (config.workspace?.capability.mode === "unsupported") {
         throw new PlanCompilationError(
@@ -844,7 +946,7 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
           { providerId: config.providerId, profileId: config.profileId }
         );
       }
-      const binding = makeProviderBinding(input, config.providerId, config.profileId, config, config.profileId);
+      const binding = makeProviderBinding(input, config.providerId, undefined, config, config.profileId);
       const capability = binding.capabilitySnapshot;
       if (capability.operation !== "edit-image" || !capability.inputChannels.includes("image") || !capability.outputChannels.includes("image")) {
         throw new PlanCompilationError(
@@ -876,11 +978,11 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
 function makeProviderBinding(
   input: CompilePlanInput,
   providerId: string,
-  modelId: string,
+  requestedModelId: string | undefined,
   settings: unknown,
   requestedProfileId?: string
 ): ProviderBinding {
-  const capabilities = [input.capability, ...(input.providerCapabilities ?? [])];
+  const capabilities = [...(input.providerCapabilities ?? []), input.capability];
   const capability = requestedProfileId === undefined
     ? capabilities.find((candidate) => candidate.providerId === providerId)
     : capabilities.find((candidate) =>
@@ -893,10 +995,26 @@ function makeProviderBinding(
       { providerId, profileId: requestedProfileId }
     );
   }
+  if (
+    requestedModelId !== undefined &&
+    capability.modelId !== undefined &&
+    requestedModelId !== capability.modelId
+  ) {
+    throw new PlanCompilationError(
+      "PROVIDER_CAPABILITY_UNAVAILABLE",
+      `Model ${requestedModelId} is not the verified model for ${providerId}/${capability.profileId}.`,
+      {
+        providerId,
+        profileId: capability.profileId,
+        requestedModelId,
+        verifiedModelId: capability.modelId
+      }
+    );
+  }
   return {
     providerId,
     profileId: requestedProfileId ?? capability.profileId,
-    modelId,
+    modelId: capability.modelId ?? requestedModelId ?? capability.profileId,
     settings: settings as JsonObject,
     capabilitySnapshot: capability
   };

@@ -122,7 +122,16 @@ async function openShell(page: Page) {
     });
     const graph = {
       id: "graph-root", title: "Shell", kind: "root", createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z",
-      nodes: [], edges: [], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
+      nodes: [{
+        id: "shell-prompt",
+        definitionId: "prompt.text",
+        title: "Shell prompt",
+        position: { x: 120, y: 120 },
+        size: { width: 250, height: 150 },
+        config: { kind: "prompt.text", body: "Keep the canvas visible.", assembly: "append" },
+        presentation: { collapsed: false, accent: "default", previewMode: "content" }
+      }],
+      edges: [], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
     };
     Object.defineProperty(window, "ether", { value: {
       document: {

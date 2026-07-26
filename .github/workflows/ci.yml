@@ -1,0 +1,56 @@
+name: Ether 4.0 Windows CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+    inputs:
+      run_live_providers:
+        description: Run authenticated provider conformance with repository-local credentials.
+        required: false
+        default: false
+        type: boolean
+      run_destructive_chaos:
+        description: Run destructive recovery chaos in an isolated profile.
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  release-candidate:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: pnpm
+      - run: pnpm.cmd install --frozen-lockfile
+      - run: pnpm.cmd run typecheck
+      - run: pnpm.cmd run lint
+      - run: pnpm.cmd run test:unit
+      - run: pnpm.cmd run test:integration
+      - run: pnpm.cmd run test:smoke
+      - run: pnpm.cmd run desktop:build
+      - run: pnpm.cmd --filter @ether/codex-plugin validate
+      - run: pnpm.cmd run desktop:package:win
+      - run: pnpm.cmd run release:package:audit
+      - run: pnpm.cmd run test:packaged
+      - name: Optional authenticated provider conformance
+        if: github.event_name == 'workflow_dispatch' && inputs.run_live_providers
+        env:
+          ETHER_ANTIGRAVITY_LIVE: "1"
+          ETHER_ANTIGRAVITY_CREDIT_OVERAGES_NEVER: "1"
+        run: |
+          pnpm.cmd run test:conformance:codex
+          pnpm.cmd run test:conformance:antigravity
+      - name: Optional destructive recovery chaos
+        if: github.event_name == 'workflow_dispatch' && inputs.run_destructive_chaos
+        env:
+          ETHER_RUN_DESTRUCTIVE_CHAOS: "1"
+        run: pnpm.cmd run test:destructive-chaos

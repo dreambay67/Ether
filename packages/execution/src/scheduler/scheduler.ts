@@ -10,12 +10,26 @@ import {
   writeRecoveryJournal
 } from "@ether/document";
 import type { GenerationProviderInput, ImageEditProviderInput, ProviderGenerationResult } from "@ether/providers";
-import type { NodeOutputVersion, PayloadEnvelope, ProviderCompletionRecovery } from "@ether/schema";
+import {
+  canonicalJson,
+  type NodeOutputVersion,
+  type PayloadEnvelope,
+  type PlanStep,
+  type PlannedWorkItem,
+  type ProviderBinding,
+  type ProviderCompletionRecovery
+} from "@ether/schema";
+import sharp from "sharp";
 
 import { ExecutorRegistry } from "../executors/registry.js";
 import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets, ExecutionProviderResolver } from "../executors/types.js";
 import { ExecutorFailure } from "../executors/types.js";
 import { verifyPlanHash } from "../plan/hashPlan.js";
+import {
+  providerConcurrencyGroup,
+  providerParallelismLimit,
+  SAFE_GLOBAL_PARALLELISM
+} from "../plan/providerConcurrency.js";
 import { isCancellation } from "./cancellation.js";
 import { documentStorePersistence, isSchedulerPersistence, type DocumentStoreLike, type SchedulerPersistence } from "./persistence.js";
 import { effectiveParallelism, isTerminalJob } from "./transitions.js";
@@ -38,6 +52,8 @@ export class DurableScheduler {
   private readonly persistence: SchedulerPersistence;
   private readonly providers: ExecutionProviderFacets;
   private readonly executors: ExecutorRegistry;
+  private readonly globalGate = new ConcurrencyGate(SAFE_GLOBAL_PARALLELISM);
+  private readonly providerGates = new Map<string, ConcurrencyGate>();
 
   constructor(private readonly options: DurableSchedulerOptions) {
     if (options.persistence !== undefined) {
@@ -89,29 +105,36 @@ export class DurableScheduler {
 
   private async runLoop(jobId: string, controller: AbortController): Promise<void> {
     const running = new Set<Promise<void>>();
-    while (!controller.signal.aborted) {
-      const job = await this.persistence.getJob(jobId);
-      if (job === undefined) throw new ExecutorFailure("JOB_NOT_FOUND", `Unknown Ether job ${jobId}.`);
-      if (isTerminalJob(job) || job.status === "waiting-review") return;
-      const capacity = effectiveParallelism(job);
-      let claimed = false;
-      while (!controller.signal.aborted && running.size < capacity) {
-        const claim = await this.persistence.claimNext(jobId, `scheduler:${process.pid}:${randomUUID()}`);
-        if (claim === undefined) break;
-        claimed = true;
-        await this.options.onEventsAvailable?.();
-        const work = this.executeClaim(claim, controller.signal)
-          .catch(async (error) => this.handleClaimError(claim, error, controller.signal))
-          .finally(() => running.delete(work));
-        running.add(work);
+    try {
+      while (!controller.signal.aborted) {
+        const job = await this.persistence.getJob(jobId);
+        if (job === undefined) throw new ExecutorFailure("JOB_NOT_FOUND", `Unknown Ether job ${jobId}.`);
+        if (isTerminalJob(job) || job.status === "waiting-review") return;
+        const capacity = effectiveParallelism(job);
+        let claimed = false;
+        while (!controller.signal.aborted && running.size < capacity) {
+          const claim = await this.persistence.claimNext(jobId, `scheduler:${process.pid}:${randomUUID()}`);
+          if (claim === undefined) break;
+          claimed = true;
+          await this.options.onEventsAvailable?.();
+          const work = this.executeClaim(claim, controller.signal)
+            .catch(async (error) => this.handleClaimError(claim, error, controller.signal))
+            .finally(() => running.delete(work));
+          running.add(work);
+        }
+        if (running.size === 0) {
+          // No dependency-ready work remains. The durable repository owns the distinction
+          // between completed, waiting-review, failed, and a later explicit resume.
+          if (!claimed) return;
+          continue;
+        }
+        await Promise.race(running);
       }
-      if (running.size === 0) {
-        // No dependency-ready work remains. The durable repository owns the distinction
-        // between completed, waiting-review, failed, and a later explicit resume.
-        if (!claimed) return;
-        continue;
-      }
-      await Promise.race(running);
+    } finally {
+      // A failure can make the durable job terminal while sibling calls are still
+      // active. Retain scheduler ownership until every claimed call has settled so
+      // retry cannot create a second capacity domain around orphaned work.
+      await Promise.allSettled([...running]);
     }
   }
 
@@ -125,11 +148,31 @@ export class DurableScheduler {
         `Plan document ${claim.plan.documentId} does not match the open document ${this.persistence.documentId}.`
       );
     }
-    const step = claim.plan.steps.find((candidate) => candidate.workItemIds.includes(claim.workItem.plannedWorkItemId));
+    const plannedStep = claim.plan.steps.find((candidate) => candidate.workItemIds.includes(claim.workItem.plannedWorkItemId));
     const plannedWorkItem = claim.plan.workItems.find((candidate) => candidate.id === claim.workItem.plannedWorkItemId);
-    if (step === undefined || plannedWorkItem === undefined) {
+    if (plannedStep === undefined || plannedWorkItem === undefined) {
       throw new ExecutorFailure("PLAN_CORRUPT", "Claimed Ether work item is missing its persisted plan step.");
     }
+    const itemStep = effectiveStepForWorkItem(plannedStep, plannedWorkItem);
+    const binding = providerBindingForWorkItem(itemStep, plannedWorkItem);
+    const step = plannedWorkItem.providerBindingOverride === undefined
+      ? itemStep
+      : {
+          ...itemStep,
+          providerBinding: plannedWorkItem.providerBindingOverride,
+          parameters: {
+            ...itemStep.parameters,
+            model: plannedWorkItem.providerBindingOverride.modelId
+          },
+          compiledContext: {
+            ...itemStep.compiledContext,
+            providerBindingOverride: {
+              providerId: plannedWorkItem.providerBindingOverride.providerId,
+              profileId: plannedWorkItem.providerBindingOverride.profileId,
+              modelId: plannedWorkItem.providerBindingOverride.modelId
+            }
+          }
+        };
     const roots = resolveRecoveryRoots(this.options.appDataRoot);
     const stagingDirectory = path.join(roots.stagingRoot, "execution", claim.plan.documentId, claim.job.id, claim.attempt.id);
     ensureOwnedRecoveryDirectory(stagingDirectory, roots.appDataRoot);
@@ -150,27 +193,59 @@ export class DurableScheduler {
       sourceNodeId: input.source.nodeId,
       sourceEdgeId: input.source.edgeId
     }));
-    const providers = this.options.providerResolver === undefined
-      ? this.providers
-      : await this.options.providerResolver({ binding: step.providerBinding, step });
-    const result = await this.executors.execute({
-      claim,
-      step,
-      plannedWorkItem,
-      inputs,
-      providerInputs,
-      signal,
-      stagingDirectory,
-      providers
+    await this.withConcurrency(binding, signal, async () => {
+      const providers = this.options.providerResolver === undefined
+        ? this.providers
+        : await this.options.providerResolver({ binding, step });
+      const result = await this.executors.execute({
+        claim,
+        step,
+        plannedWorkItem,
+        inputs,
+        providerInputs,
+        signal,
+        stagingDirectory,
+        providers
+      });
+      if (result.kind === "provider-generation") {
+        await this.executeProviderCompletion(claim, step, binding, result, stagingDirectory, signal);
+      } else if (result.kind === "waiting-review") {
+        await this.persistence.waitForReview({ claim, ...result.checkpoint });
+      } else {
+        await this.acceptLocalCompletion(claim, step, inputs, result.outputs, result.effects, result.adapterIntermediates);
+      }
     });
-    if (result.kind === "provider-generation") {
-      await this.executeProviderCompletion(claim, step, result, stagingDirectory, signal);
-    } else if (result.kind === "waiting-review") {
-      await this.persistence.waitForReview({ claim, ...result.checkpoint });
-    } else {
-      await this.acceptLocalCompletion(claim, step, inputs, result.outputs, result.effects, result.adapterIntermediates);
-    }
     await this.options.onEventsAvailable?.();
+  }
+
+  private async withConcurrency<T>(
+    binding: ProviderBinding | null,
+    signal: AbortSignal,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    let releaseProvider: (() => void) | undefined;
+    let releaseGlobal: (() => void) | undefined;
+    try {
+      if (binding !== null) {
+        const group = providerConcurrencyGroup(binding.providerId);
+        const limit = providerParallelismLimit(binding);
+        let gate = this.providerGates.get(group);
+        if (gate === undefined) {
+          gate = new ConcurrencyGate(limit);
+          this.providerGates.set(group, gate);
+        } else {
+          gate.tighten(limit);
+        }
+        // Reserve provider-family capacity before global capacity. A saturated
+        // provider must not occupy every global slot while unrelated providers wait.
+        releaseProvider = await gate.acquire(signal);
+      }
+      releaseGlobal = await this.globalGate.acquire(signal);
+      return await operation();
+    } finally {
+      releaseGlobal?.();
+      releaseProvider?.();
+    }
   }
 
   private async acceptLocalCompletion(
@@ -238,11 +313,12 @@ export class DurableScheduler {
   private async executeProviderCompletion(
     claim: ExecutorClaim,
     step: ExecutorClaim["plan"]["steps"][number],
+    requestedBinding: ProviderBinding | null,
     invocation: Extract<Awaited<ReturnType<ExecutorRegistry["execute"]>>, { kind: "provider-generation" }>,
     stagingDirectory: string,
     signal: AbortSignal
   ): Promise<void> {
-    const binding = step.providerBinding ?? step.provider;
+    const binding = requestedBinding ?? step.providerBinding ?? step.provider;
     if (binding === undefined || binding === null || binding.providerId !== invocation.provider.descriptor.id) {
       throw new ExecutorFailure(
         "PROVIDER_MISMATCH",
@@ -269,6 +345,10 @@ export class DurableScheduler {
     let journalPath: string | undefined;
     let stagedCompletion: ProviderCompletionRecovery | undefined;
     let stagedOutputs: Awaited<ReturnType<typeof stageArtifacts>> = [];
+    let providerDispatchStartedAt = 0;
+    let firstProviderEventAt: number | null = null;
+    let providerGenerationCompletedAt: number | null = null;
+    let providerValidationCompletedAt: number | null = null;
     try {
       this.checkpoint("provider-output-before-journal");
       journalPath = writeRecoveryJournal({
@@ -295,6 +375,13 @@ export class DurableScheduler {
         if (stagedCompletion !== undefined) {
           throw new ExecutorFailure("PROVIDER_COMPLETION_PROTOCOL_INVALID", "Provider completed the same Ether attempt twice.");
         }
+        providerGenerationCompletedAt ??= performance.now();
+        recordBoundedPerformanceMeasure(
+          "provider-generation",
+          firstProviderEventAt ?? providerDispatchStartedAt,
+          providerGenerationCompletedAt,
+          { attemptId: claim.attempt.id }
+        );
         if (providerResult.providerId !== binding.providerId) {
           throw new ExecutorFailure("PROVIDER_MISMATCH", `Provider returned ${providerResult.providerId}, expected ${binding.providerId}.`);
         }
@@ -318,6 +405,10 @@ export class DurableScheduler {
             stagedPath: staged.path,
             fileName: staged.fileName,
             mediaType: staged.mediaType,
+            ...(staged.thumbnail === undefined ? {} : {
+              thumbnailStagedPath: staged.thumbnail.path,
+              thumbnailMediaType: staged.thumbnail.mediaType
+            }),
             artifactMetadata: {
               ...staged.metadata,
               title: staged.fileName,
@@ -346,16 +437,53 @@ export class DurableScheduler {
           }
         });
         await this.persistence.stageProviderCompletion(stagedCompletion);
+        providerValidationCompletedAt = performance.now();
+        recordBoundedPerformanceMeasure(
+          "provider-output-validation",
+          providerGenerationCompletedAt,
+          providerValidationCompletedAt,
+          { attemptId: claim.attempt.id }
+        );
         this.checkpoint("provider-output-staged");
       };
       let returned: ProviderGenerationResult | undefined;
       try {
+        providerDispatchStartedAt = performance.now();
+        const queueMs = Math.max(0, Date.now() - Date.parse(claim.attempt.createdAt));
+        recordBoundedPerformanceMeasure(
+          "provider-queue",
+          providerDispatchStartedAt - queueMs,
+          providerDispatchStartedAt,
+          { attemptId: claim.attempt.id }
+        );
+        this.checkpoint("provider-dispatch-started");
+        const reportPhase = (phase: import("@ether/providers").ProviderExecutionPhase): void => {
+          const observedAt = performance.now();
+          if (phase === "first-event" && firstProviderEventAt === null) {
+            firstProviderEventAt = observedAt;
+            recordBoundedPerformanceMeasure(
+              "provider-dispatch:first-event",
+              providerDispatchStartedAt,
+              observedAt,
+              { attemptId: claim.attempt.id }
+            );
+            this.checkpoint("provider-first-event");
+          } else if (phase === "generation-complete" && providerGenerationCompletedAt === null) {
+            providerGenerationCompletedAt = observedAt;
+            this.checkpoint("provider-generation-completed");
+          } else if (phase === "provider-validation-complete" && providerValidationCompletedAt === null) {
+            providerValidationCompletedAt = observedAt;
+            this.checkpoint("provider-validation-completed");
+          }
+        };
         returned = invocation.operation === "generate"
           ? await invocation.provider.generate(invocation.input as GenerationProviderInput, {
-            signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal, stagingDirectory, complete
+            signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal,
+            stagingDirectory, reportPhase, complete
           })
           : await invocation.provider.edit(invocation.input as ImageEditProviderInput, {
-            signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal, stagingDirectory, complete
+            signal, providerAttemptId: claim.providerAttemptId, attemptOrdinal: claim.attempt.ordinal,
+            stagingDirectory, reportPhase, complete
           });
       } catch (error) {
         if (error instanceof ExecutorFailure && error.code === "PROCESS_LOST") throw error;
@@ -373,6 +501,7 @@ export class DurableScheduler {
       if (completion === undefined) {
         throw new ExecutorFailure("PROVIDER_COMPLETION_PROTOCOL_INVALID", "Provider returned without a durable completion.");
       }
+      const artifactImportStartedAt = performance.now();
       await this.persistence.acceptProviderOutput({
         claim,
         identifiers: {
@@ -380,7 +509,14 @@ export class DurableScheduler {
           capabilitySnapshotId: completion.capabilitySnapshotId,
           acceptedAt: completion.acceptedAt
         },
-        outputs: stagedOutputs.map((staged, index) => ({ ...completion.outputs[index]!, bytes: staged.bytes })),
+        outputs: stagedOutputs.map((staged, index) => ({
+          ...completion.outputs[index]!,
+          bytes: staged.bytes,
+          ...(staged.thumbnail === undefined ? {} : {
+            thumbnailBytes: staged.thumbnail.bytes,
+            thumbnailMediaType: staged.thumbnail.mediaType
+          })
+        })),
         providerId: completion.providerId,
         modelId: binding.modelId,
         capabilitySnapshot: binding.capabilitySnapshot,
@@ -388,6 +524,13 @@ export class DurableScheduler {
         response: completion.response ?? {},
         metadata: completion.metadata ?? {}
       });
+      const artifactImportCompletedAt = performance.now();
+      recordBoundedPerformanceMeasure(
+        "artifact-import",
+        artifactImportStartedAt,
+        artifactImportCompletedAt,
+        { attemptId: claim.attempt.id }
+      );
       this.checkpoint("provider-output-accepted");
     } catch (error) {
       // A checkpoint interruption models abrupt process loss. Preserve the
@@ -423,7 +566,14 @@ async function stageArtifacts(
   result: ProviderGenerationResult,
   stagingDirectory: string,
   authorizedStagingDirectory: string
-): Promise<Array<{ bytes: Uint8Array; fileName: string; mediaType: string; metadata: Record<string, unknown>; path: string }>> {
+): Promise<Array<{
+  bytes: Uint8Array;
+  fileName: string;
+  mediaType: string;
+  metadata: Record<string, unknown>;
+  path: string;
+  thumbnail?: { bytes: Uint8Array; mediaType: string; path: string };
+}>> {
   const current = await realpath(stagingDirectory);
   if (!samePath(current, authorizedStagingDirectory)) {
     throw new ExecutorFailure("PROVIDER_OUTPUT_PATH_INVALID", "Provider replaced its owned staging directory.");
@@ -447,9 +597,51 @@ async function stageArtifacts(
         await destination?.close();
       }
     }
-    staged.push({ bytes, fileName: artifact.fileName, mediaType: artifact.mimeType, metadata: artifact.metadata ?? {}, path: stagedPath });
+    const thumbnailBytes = await createThumbnail(bytes, artifact.mimeType);
+    let thumbnail: { bytes: Uint8Array; mediaType: string; path: string } | undefined;
+    if (thumbnailBytes !== null) {
+      const thumbnailPath = path.resolve(
+        stagingDirectory,
+        `${String(ordinal).padStart(4, "0")}-${artifact.fileName}.thumbnail.webp`
+      );
+      assertContainedPath(stagingDirectory, thumbnailPath);
+      let destination;
+      try {
+        destination = await open(thumbnailPath, "wx", 0o600);
+        await destination.writeFile(thumbnailBytes);
+      } finally {
+        await destination?.close();
+      }
+      thumbnail = { bytes: thumbnailBytes, mediaType: "image/webp", path: thumbnailPath };
+    }
+    staged.push({
+      bytes,
+      fileName: artifact.fileName,
+      mediaType: artifact.mimeType,
+      metadata: artifact.metadata ?? {},
+      path: stagedPath,
+      ...(thumbnail === undefined ? {} : { thumbnail })
+    });
   }
   return staged;
+}
+
+async function createThumbnail(bytes: Uint8Array, mediaType: string): Promise<Buffer | null> {
+  if (!mediaType.startsWith("image/")) return null;
+  try {
+    return await sharp(bytes, { failOn: "error" })
+      .rotate()
+      .resize({ width: 320, height: 320, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 76, effort: 4 })
+      .toBuffer();
+  } catch (error) {
+    throw new ExecutorFailure(
+      "PROVIDER_OUTPUT_THUMBNAIL_INVALID",
+      "The provider image could not produce a safe embedded thumbnail.",
+      false,
+      { cause: error }
+    );
+  }
 }
 
 async function authorizeProviderSource(sourcePath: string, stagingDirectory: string): Promise<string> {
@@ -510,6 +702,120 @@ function samePath(left: string, right: string): boolean {
   return process.platform === "win32"
     ? path.resolve(left).toLocaleLowerCase() === path.resolve(right).toLocaleLowerCase()
     : path.resolve(left) === path.resolve(right);
+}
+
+const LEGACY_PROVIDER_EXECUTORS = new Set<PlanStep["executor"]>([
+  "codex-llm",
+  "codex-evaluation",
+  "image-provider",
+  "edit-provider"
+]);
+
+function providerBindingForWorkItem(
+  step: PlanStep,
+  workItem: PlannedWorkItem
+): ProviderBinding | null {
+  const explicit = workItem.providerBindingOverride ?? step.providerBinding;
+  if (explicit !== undefined && explicit !== null) return explicit;
+  // provider remains required in the persisted schema for compatibility with
+  // plans compiled before nullable providerBinding existed.
+  return LEGACY_PROVIDER_EXECUTORS.has(step.executor) ? step.provider : null;
+}
+
+function effectiveStepForWorkItem(step: PlanStep, workItem: PlannedWorkItem): PlanStep {
+  const batchParameters = workItem.parameters
+    .filter((parameter) => !Object.hasOwn(step.parameters, parameter.name))
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  if (batchParameters.length === 0) return step;
+  const batchItem = Object.fromEntries(
+    batchParameters.map((parameter) => [parameter.name, parameter.value])
+  );
+  const batchPrompt = batchParameters
+    .map((parameter) => `- ${parameter.name}: ${canonicalJson(parameter.value)}`)
+    .join("\n");
+  return {
+    ...step,
+    compiledPrompt: `${step.compiledPrompt}${step.compiledPrompt.length === 0 ? "" : "\n\n"}Batch item:\n${batchPrompt}`,
+    compiledContext: {
+      ...step.compiledContext,
+      batchItem
+    }
+  };
+}
+
+type ConcurrencyWaiter = {
+  resolve: (release: () => void) => void;
+  reject: (error: Error) => void;
+  signal: AbortSignal;
+  abort: () => void;
+};
+
+class ConcurrencyGate {
+  private active = 0;
+  private readonly waiters: ConcurrencyWaiter[] = [];
+
+  constructor(private limit: number) {}
+
+  tighten(limit: number): void {
+    this.limit = Math.min(this.limit, Math.max(1, Math.trunc(limit)));
+    this.drain();
+  }
+
+  acquire(signal: AbortSignal): Promise<() => void> {
+    if (signal.aborted) return Promise.reject(cancellationError());
+    return new Promise<() => void>((resolve, reject) => {
+      const waiter: ConcurrencyWaiter = {
+        resolve,
+        reject,
+        signal,
+        abort: () => {
+          const index = this.waiters.indexOf(waiter);
+          if (index >= 0) this.waiters.splice(index, 1);
+          reject(cancellationError());
+        }
+      };
+      signal.addEventListener("abort", waiter.abort, { once: true });
+      this.waiters.push(waiter);
+      this.drain();
+    });
+  }
+
+  private drain(): void {
+    while (this.active < this.limit && this.waiters.length > 0) {
+      const waiter = this.waiters.shift()!;
+      waiter.signal.removeEventListener("abort", waiter.abort);
+      if (waiter.signal.aborted) {
+        waiter.reject(cancellationError());
+        continue;
+      }
+      this.active += 1;
+      let released = false;
+      waiter.resolve(() => {
+        if (released) return;
+        released = true;
+        this.active -= 1;
+        this.drain();
+      });
+    }
+  }
+}
+
+function cancellationError(): Error {
+  return new DOMException("Scheduler capacity wait was cancelled.", "AbortError");
+}
+
+const MAX_RETAINED_PERFORMANCE_MEASURES = 1_024;
+
+function recordBoundedPerformanceMeasure(
+  name: string,
+  start: number,
+  end: number,
+  detail?: Record<string, string>
+): void {
+  performance.measure(name, { start, end, detail });
+  if (performance.getEntriesByName(name, "measure").length <= MAX_RETAINED_PERFORMANCE_MEASURES) return;
+  performance.clearMeasures(name);
+  performance.measure(name, { start, end, detail });
 }
 
 function errorCode(error: unknown): string {

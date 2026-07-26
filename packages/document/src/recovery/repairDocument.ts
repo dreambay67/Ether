@@ -11,6 +11,7 @@ import type {
   PreparedGraphCommit,
   RecoveryJournalEntry
 } from "@ether/schema";
+import { readArtifactThumbnailMetadata } from "@ether/schema";
 import { validateFullGraphState, type GraphDiagnostic } from "@ether/graph-kernel";
 
 import { importBlob } from "../blob/importBlob.js";
@@ -139,6 +140,47 @@ function diagnosticsAdded(
 ): GraphDiagnostic[] {
   const prior = new Set(before.map(diagnosticKey));
   return after.filter((diagnostic) => !prior.has(diagnosticKey(diagnostic)));
+}
+
+const thumbnailMetadataKeys = [
+  "thumbnailByteLength",
+  "thumbnailContentKey",
+  "thumbnailMediaType"
+] as const;
+
+function withoutThumbnailMetadata(artifact: Artifact): Artifact {
+  const metadata = { ...artifact.metadata };
+  for (const key of thumbnailMetadataKeys) delete metadata[key];
+  return { ...artifact, metadata };
+}
+
+function normalizeRepairThumbnail(
+  artifact: Artifact,
+  blobs: ReadonlyMap<string, { byteLength: number; mediaType: string }>,
+  losses: RepairLoss[]
+): Artifact {
+  const hasThumbnailMetadata = thumbnailMetadataKeys.some((key) =>
+    Object.prototype.hasOwnProperty.call(artifact.metadata, key)
+  );
+  if (!hasThumbnailMetadata) return artifact;
+  const thumbnail = readArtifactThumbnailMetadata(artifact.metadata);
+  const stored = thumbnail === null
+    ? undefined
+    : blobs.get(thumbnail.thumbnailContentKey.toLowerCase());
+  if (
+    thumbnail !== null &&
+    stored !== undefined &&
+    stored.byteLength === thumbnail.thumbnailByteLength &&
+    stored.mediaType === thumbnail.thumbnailMediaType
+  ) {
+    return artifact;
+  }
+  losses.push({
+    type: "artifact",
+    entityId: artifact.id,
+    reason: "Invalid or mismatched embedded thumbnail metadata was removed during repair."
+  });
+  return withoutThumbnailMetadata(artifact);
 }
 
 function edgeDiagnostic(
@@ -342,7 +384,7 @@ export async function repairDocument(
     ensureOwnedRecoveryDirectory(stagingDirectory, roots.appDataRoot);
     options.checkpoint?.("staging-created");
     const snapshot = await source[DOCUMENT_STORE_INTERNAL]("read", (repositories) => {
-      const artifacts = repositories.artifacts.list();
+      const artifacts = repositories.artifacts.listForRepair();
       return {
         artifacts,
         blobs: repositories.blobs.list(),
@@ -353,6 +395,24 @@ export async function repairDocument(
         references: repositories.references.list()
       };
     });
+    const sourceBlobByKey = new Map(snapshot.blobs.map((blob) => [
+      blob.contentKey,
+      { byteLength: blob.byteLength, mediaType: blob.mediaType }
+    ]));
+    const repairedArtifacts = snapshot.artifacts.map((artifact) =>
+      normalizeRepairThumbnail(artifact, sourceBlobByKey, losses)
+    );
+    const reachableContentKeys = new Set<string>();
+    for (const artifact of repairedArtifacts) {
+      reachableContentKeys.add(artifact.contentKey);
+      const thumbnail = readArtifactThumbnailMetadata(artifact.metadata);
+      if (thumbnail !== null) reachableContentKeys.add(thumbnail.thumbnailContentKey.toLowerCase());
+    }
+    for (const reference of snapshot.references) {
+      if (reference.contentKey !== null) reachableContentKeys.add(reference.contentKey);
+      if (reference.previewContentKey !== null) reachableContentKeys.add(reference.previewContentKey);
+    }
+    const reachableBlobs = snapshot.blobs.filter((blob) => reachableContentKeys.has(blob.contentKey));
     const graphPlan = planGraphRecovery(snapshot.graphs, losses);
     destination = await DocumentStore.create(stagedDestination, {
       appVersion: "4.0.0",
@@ -443,7 +503,7 @@ export async function repairDocument(
     }
 
     const recoveredContent = new Set<string>();
-    for (const blob of snapshot.blobs) {
+    for (const blob of reachableBlobs) {
       const stagedPath = path.join(stagingDirectory, `${blob.contentKey}.blob`);
       try {
         await materializeValidatedBlob(source, blob.contentKey, blob.byteLength, stagedPath);
@@ -468,7 +528,7 @@ export async function repairDocument(
       }
     }
 
-    for (const artifact of snapshot.artifacts) {
+    for (const artifact of repairedArtifacts) {
       if (!recoveredContent.has(artifact.contentKey)) {
         losses.push({
           type: "artifact",
@@ -488,8 +548,18 @@ export async function repairDocument(
         });
         continue;
       }
+      let repairedArtifact = artifact;
+      const thumbnail = readArtifactThumbnailMetadata(artifact.metadata);
+      if (thumbnail !== null && !recoveredContent.has(thumbnail.thumbnailContentKey.toLowerCase())) {
+        repairedArtifact = withoutThumbnailMetadata(artifact);
+        losses.push({
+          type: "artifact",
+          entityId: artifact.id,
+          reason: `Thumbnail blob ${thumbnail.thumbnailContentKey} was not recoverable; thumbnail metadata was removed.`
+        });
+      }
       try {
-        await destination.transaction(({ artifacts }) => artifacts.attach(artifact));
+        await destination.transaction(({ artifacts }) => artifacts.attach(repairedArtifact));
         recovered.artifacts += 1;
       } catch (error) {
         losses.push({

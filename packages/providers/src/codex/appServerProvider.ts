@@ -156,7 +156,46 @@ class AppServerGenerationProvider implements GenerationProvider {
   constructor(private readonly route: CodexProviderRoute) {}
 
   diagnose(): ProviderDiagnostic {
-    return this.route.diagnostic({ ...this.descriptor, capabilities: [...this.descriptor.capabilities], availability: "unavailable", messages: [] }, true);
+    const diagnostic = this.route.diagnostic({
+      ...this.descriptor,
+      capabilities: [...this.descriptor.capabilities],
+      availability: "unavailable",
+      messages: []
+    }, true);
+    const availability = diagnostic.availability;
+    const maxParallelism = this.route.runtime.health().transport === "app-server" ? 2 : 1;
+    const profile = (
+      profileId: "image-default" | "image-edit",
+      operation: "image.generate" | "image.edit",
+      inputChannels: readonly ("text" | "image" | "mask" | "data")[]
+    ) => ({
+      providerId: this.descriptor.id,
+      profileId,
+      providerName: this.descriptor.name,
+      route: this.descriptor.route,
+      operation,
+      inputChannels,
+      outputChannels: ["image"] as const,
+      availability,
+      status: availability === "available" ? "ready" as const : "unavailable" as const,
+      capabilitySource: "codex-cli" as const,
+      requiresExplicitSelection: false,
+      noHiddenFallback: true,
+      maxParallelism,
+      model: this.route.runtime.health().defaultModelId ?? this.descriptor.model,
+      messages: [
+        availability === "available"
+          ? `Codex permits at most ${maxParallelism} simultaneous image request${maxParallelism === 1 ? "" : "s"} across the application.`
+          : diagnostic.messages[0] ?? "Codex image generation is unavailable."
+      ]
+    });
+    return {
+      ...diagnostic,
+      profiles: [
+        profile("image-default", "image.generate", ["text", "image", "data"]),
+        profile("image-edit", "image.edit", ["text", "image", "mask", "data"])
+      ]
+    };
   }
 
   async generate(
@@ -182,9 +221,12 @@ class AppServerGenerationProvider implements GenerationProvider {
       model: input.model,
       reasoningEffort: input.reasoningEffort,
       timeoutMs: input.timeoutMs,
+      onEvent: () => context?.reportPhase?.("first-event"),
       signal: context?.signal
     });
+    context?.reportPhase?.("generation-complete");
     const output = await generationResult(result, this.descriptor, input, context, imageCapability);
+    context?.reportPhase?.("provider-validation-complete");
     await context?.complete(output);
     return output;
   }
@@ -209,9 +251,12 @@ class AppServerGenerationProvider implements GenerationProvider {
       model: input.model,
       reasoningEffort: input.reasoningEffort,
       timeoutMs: input.timeoutMs,
+      onEvent: () => context?.reportPhase?.("first-event"),
       signal: context?.signal
     });
+    context?.reportPhase?.("generation-complete");
     const output = await generationResult(result, this.descriptor, input, context, imageCapability);
+    context?.reportPhase?.("provider-validation-complete");
     await context?.complete(output);
     return output;
   }

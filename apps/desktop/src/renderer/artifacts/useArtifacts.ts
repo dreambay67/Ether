@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Artifact, PayloadChannel } from "@ether/schema";
+import { markPerformance, measurePerformance } from "../performance/marks";
 
 export type ArtifactFilters = {
   text: string;
@@ -41,6 +42,7 @@ export function useArtifacts(documentId: string, filters: ArtifactFilters) {
   const requestGeneration = useRef(0);
 
   const request = useCallback(async (cursor: string | null, append: boolean) => {
+    markPerformance("artifact-search:start");
     const generation = append ? requestGeneration.current : ++requestGeneration.current;
     if (append) setLoadingMore(true);
     else setLoading(true);
@@ -54,6 +56,8 @@ export function useArtifacts(documentId: string, filters: ArtifactFilters) {
         payload: { ...filters, cursor, limit: pageSize }
       });
       if (response.name !== "artifact.search") throw new Error("Ether returned an unexpected artifact search response.");
+      markPerformance("artifact-search:first-result");
+      measurePerformance("artifact-search:first-result", "artifact-search:start", "artifact-search:first-result");
       if (generation !== requestGeneration.current) return;
       setArtifacts((current) => append
         ? [...current, ...response.payload.artifacts.filter((artifact) => !current.some((candidate) => candidate.id === artifact.id))]

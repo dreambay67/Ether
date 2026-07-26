@@ -1,5 +1,5 @@
 import "@xyflow/react/dist/style.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink, Workflow } from "lucide-react";
 import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, RecipeManifest } from "@ether/schema";
 
@@ -10,7 +10,14 @@ import type {
   ReferenceAction
 } from "../shared/ipc/contracts";
 import { ProjectHeader } from "./project/ProjectHeader";
+import { ProviderStatusPanel } from "./project/ProviderStatusPanel";
+import {
+  defaultInterfacePreferences,
+  normalizeInterfacePreferences,
+  SettingsPanel
+} from "./project/SettingsPanel";
 import { StartScreen } from "./project/StartScreen";
+import { useDesktopSettings } from "./project/useDesktopSettings";
 import { useProjectHealth } from "./project/useProjectHealth";
 import { useProjectSession } from "./project/useProjectSession";
 import { EtherShell } from "./shell/EtherShell";
@@ -18,9 +25,13 @@ import { EtherCanvas, type EtherCanvasHandle } from "./canvas/EtherCanvas";
 import { InspectorPanel } from "./canvas/InspectorPanel";
 import type { InspectorContext } from "./canvas/inspector/types";
 import { ReferenceDesk } from "./references/ReferenceDesk";
-import { BatchMatrix } from "./batches/BatchMatrix";
-import { JobCenter } from "./jobs/JobCenter";
-import { TemplateGallery, type RecipeSetup, type RecipeSetupRequest } from "./canvas/library/TemplateGallery";
+import type { RecipeSetup, RecipeSetupRequest } from "./canvas/library/TemplateGallery";
+import { markPerformance, measurePerformance } from "./performance/marks";
+import { notifyRendererInteractive } from "./runtime/interactive";
+
+const BatchMatrix = lazy(async () => ({ default: (await import("./batches/BatchMatrix")).BatchMatrix }));
+const JobCenter = lazy(async () => ({ default: (await import("./jobs/JobCenter")).JobCenter }));
+const TemplateGallery = lazy(async () => ({ default: (await import("./canvas/library/TemplateGallery")).TemplateGallery }));
 
 export function App() {
   const { state, document } = useProjectSession();
@@ -32,12 +43,26 @@ export function App() {
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [recipes, setRecipes] = useState<readonly RecipeManifest[]>([]);
   const [recipeCatalogError, setRecipeCatalogError] = useState<string | null>(null);
+  const [providerHealthOpen, setProviderHealthOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [interfacePreferences, setInterfacePreferences] = useDesktopSettings(
+    "ether.desktop.interface.v1",
+    defaultInterfacePreferences,
+    normalizeInterfacePreferences
+  );
   const canvasRef = useRef<EtherCanvasHandle>(null);
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
   const applicationAvailable = typeof window.ether.application?.onEvent === "function";
 
+  useEffect(() => {
+    globalThis.document.documentElement.dataset.density = interfacePreferences.density;
+    globalThis.document.documentElement.dataset.motion = interfacePreferences.motion;
+  }, [interfacePreferences]);
+
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
+    markPerformance("document-open:start");
+    markPerformance("graph-hydration:start");
     const result = await window.ether.graph.snapshot(active.documentId);
     setGraph(result.graph);
     setReferences(await window.ether.references.list(active.documentId));
@@ -45,9 +70,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (document === null) return;
+    if (graph === null) return;
+    markPerformance("document-open:interactive");
+    measurePerformance("document-open:interactive", "document-open:start", "document-open:interactive");
+    markPerformance("cold-start:interactive");
+    measurePerformance("cold-start:interactive", "cold-start:start", "cold-start:interactive");
+  }, [graph]);
+
+  useEffect(() => {
+    if (document === null) {
+      notifyRendererInteractive();
+      return;
+    }
     void loadGraph(document).catch((error) => {
       setMessage(error instanceof Error ? error.message : "The graph needs attention.");
+      notifyRendererInteractive();
     });
   }, [document, loadGraph]);
 
@@ -208,6 +245,8 @@ export function App() {
           onCompact={() => void compact(document.documentId)}
           onMakePortable={() => void makePortable(document.documentId)}
           onToggleArtifacts={toggleArtifacts}
+          onProviderHealth={() => setProviderHealthOpen(true)}
+          onSettings={() => setSettingsOpen(true)}
         />
       )}
       tools={(
@@ -230,21 +269,21 @@ export function App() {
             <Workflow size={16} aria-hidden="true" />Recipes
           </button>
           {recipesOpen ? applicationAvailable ? recipeCatalogError === null ? (
-            <TemplateGallery
+            <Suspense fallback={<p className="recipe-gallery-error">Loading Recipe Gallery…</p>}><TemplateGallery
               recipes={recipes}
               readOnly={document.mode === "read-only"}
               onLoadSetup={loadRecipeSetup}
               onPreviewRecipe={previewRecipe}
               onInstantiateRecipe={instantiateRecipe}
-            />
+            /></Suspense>
           ) : <p className="recipe-gallery-error" role="alert">Blocked: {recipeCatalogError}</p> : <p className="recipe-gallery-error" role="alert">Recipe Gallery needs the application service.</p> : null}
         </aside>
       )}
       canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
       inspector={<InspectorPanel context={inspectorContext} />}
       referenceDesk={applicationAvailable && graph ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graph ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
-      batchMatrix={applicationAvailable && graph ? <BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graph ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
-      jobCenter={applicationAvailable ? <JobCenter documentId={document.documentId} onStatus={setMessage} /> : <p>Job Center is unavailable in this compatibility session.</p>}
+      batchMatrix={applicationAvailable && graph ? <Suspense fallback={<p>Loading batch plan…</p>}><BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /></Suspense> : <p>{graph ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
+      jobCenter={applicationAvailable ? <Suspense fallback={<p>Loading Job Center…</p>}><JobCenter documentId={document.documentId} onStatus={setMessage} /></Suspense> : <p>Job Center is unavailable in this compatibility session.</p>}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
           <span>{state.error ?? (message || (state.saveState === "saved" ? "All changes are saved" : "Saving changes"))}</span>
@@ -252,6 +291,18 @@ export function App() {
         </footer>
       )}
     >
+      <ProviderStatusPanel
+        documentId={document.documentId}
+        open={providerHealthOpen}
+        onClose={() => setProviderHealthOpen(false)}
+      />
+      <SettingsPanel
+        documentId={document.documentId}
+        open={settingsOpen}
+        preferences={interfacePreferences}
+        onPreferences={setInterfacePreferences}
+        onClose={() => setSettingsOpen(false)}
+      />
       {actionableMissing.length > 0 ? (
         <section className="missing-reference-strip" aria-label="Missing references">
           {actionableMissing.map((reference) => (

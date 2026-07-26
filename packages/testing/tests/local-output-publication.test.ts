@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -260,6 +261,95 @@ describe("typed local output publication", () => {
     expect(ApplicationCommandSchema.safeParse({ kind: "command", id: "oversize", correlationId: "oversize", documentId: app.boundaryStore().documentId, name: "editWorkspace.commit", payload: { graphId: "root", nodeId: "edit", kind: "mask", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: 16 * 1024 * 1024 + 1, content: { encoding: "base64", data: "AAAA" }, geometry: { width: 2, height: 2, strokes: [] } } }).success).toBe(false);
     await expect(app.commitEditWorkspace({ commandId: "bad-base64", graphId: "root", nodeId: "edit", kind: "mask", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: 2, content: { encoding: "base64", data: "%%%=" }, geometry: { width: 2, height: 2, strokes: [] } })).rejects.toMatchObject({ code: "LOCAL_OUTPUT_BASE64_INVALID" });
     await expect(app.commitEditWorkspace({ commandId: "unsupported", graphId: "root", nodeId: "edit", kind: "mask", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: 4, content: { encoding: "utf8", data: "<svg" }, geometry: { width: 2, height: 2, strokes: [] }, editState: { sourceArtifactId: "source-artifact", recipeId: "freeform", frame: { mode: "source", x: 0, y: 0, width: 2, height: 2 }, maskGeometry: { width: 2, height: 2, strokes: [] }, capability: { providerId: "edit-provider", profileId: "edit-profile", mode: "unsupported", detail: "No edit route." } } })).rejects.toMatchObject({ code: "EDIT_CAPABILITY_UNSUPPORTED" });
+
+    const ingressCommandId = "ingress-thumbnail-write-failure";
+    const ingressArtifactId = `local-artifact-${createHash("sha256")
+      .update([app.boundaryStore().documentId, ingressCommandId].join("\0"))
+      .digest("hex")
+      .slice(0, 32)}`;
+    const ingressRoot = path.join(root, "local-output-ingress");
+    const originalIngressPath = path.join(ingressRoot, `${ingressArtifactId}.incoming`);
+    const thumbnailIngressPath = path.join(
+      ingressRoot,
+      `${ingressArtifactId}.thumbnail.webp.incoming`
+    );
+    await mkdir(ingressRoot, { recursive: true });
+    await writeFile(thumbnailIngressPath, "conflicting thumbnail ingress");
+    const ingressDrawing = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><circle cx="1" cy="1" r="1"/></svg>'
+    );
+    await expect(app.commitEditWorkspace({
+      commandId: ingressCommandId,
+      graphId: "root",
+      nodeId: "drawing",
+      kind: "drawing",
+      channel: "image",
+      mediaType: "image/svg+xml",
+      width: 2,
+      height: 2,
+      byteLength: ingressDrawing.byteLength,
+      content: { encoding: "utf8", data: ingressDrawing.toString("utf8") },
+      drawing: { kind: "canvas.drawing", width: 2, height: 2, background: "#ffffff", strokes: [] }
+    })).rejects.toMatchObject({ code: "LOCAL_OUTPUT_INGRESS_CONFLICT" });
+    await expect(readFile(originalIngressPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(thumbnailIngressPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const commandId = "orphan-cleanup";
+    const documentId = app.boundaryStore().documentId;
+    const outputVersionId = `local-output-${createHash("sha256")
+      .update([documentId, commandId].join("\0"))
+      .digest("hex")
+      .slice(0, 32)}`;
+    const head = await app.boundaryStore().read(({ revisions }) => revisions.head());
+    await app.boundaryStore().transaction(({ outputs }) => outputs.insert({
+      id: outputVersionId,
+      nodeId: "drawing",
+      graphId: "root",
+      graphRevisionId: head.graphRevisions.root!,
+      inputPayloadIds: [],
+      selectedOutputVersionIds: [],
+      compiledContextHash: "intentional-output-id-collision",
+      producer: { kind: "local", executor: "drawing" },
+      outputPayloadIds: ["collision-payload"],
+      parentOutputVersionId: null,
+      approval: { state: "unreviewed" },
+      runId: null,
+      stepId: null,
+      workItemId: null,
+      attemptId: null,
+      timing: { startedAt: at, completedAt: at },
+      failure: null,
+      createdAt: at
+    }, [{
+      id: "collision-payload",
+      channel: "image",
+      role: "general",
+      content: { kind: "text", value: "collision" },
+      source: { nodeId: "drawing", outputVersionId, lineageKey: "collision" },
+      metadata: {}
+    }]));
+    const blobsBeforeFailure = await app.boundaryStore().read(({ blobs }) =>
+      blobs.list().map((blob) => blob.contentKey)
+    );
+    const validDrawing = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2"/></svg>'
+    );
+    await expect(app.commitEditWorkspace({
+      commandId,
+      graphId: "root",
+      nodeId: "drawing",
+      kind: "drawing",
+      channel: "image",
+      mediaType: "image/svg+xml",
+      width: 2,
+      height: 2,
+      byteLength: validDrawing.byteLength,
+      content: { encoding: "utf8", data: validDrawing.toString("utf8") },
+      drawing: { kind: "canvas.drawing", width: 2, height: 2, background: "#ffffff", strokes: [] }
+    })).rejects.toThrow();
+    await expect(app.boundaryStore().read(({ blobs }) =>
+      blobs.list().map((blob) => blob.contentKey)
+    )).resolves.toEqual(blobsBeforeFailure);
     await app.closeDocument();
   });
 });

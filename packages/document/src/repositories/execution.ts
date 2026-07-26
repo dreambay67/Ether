@@ -25,8 +25,14 @@ import { createHash } from "node:crypto";
 
 import { ArtifactRepository } from "./artifacts.js";
 import { BlobRepository } from "./blobs.js";
-import type { RepositoryTransactionContext } from "./graphs.js";
+import {
+  cacheJobCorrelation,
+  cachedJobCorrelation,
+  type RepositoryTransactionContext
+} from "./graphs.js";
 import { OutputRepository } from "./outputs.js";
+
+const COMMAND_CORRELATION_KEY = "__etherCorrelationId";
 
 type JobRow = {
   job_id: string;
@@ -145,6 +151,22 @@ export type ExecutionTimelineEvent = {
   workItemId: string | null;
 };
 
+export type ExecutionCorrelationRecord = {
+  commandId: string;
+  correlationId: string;
+  jobId: string;
+  planId: string;
+  workItems: Array<{
+    attempts: Array<{
+      artifactIds: string[];
+      attemptId: string;
+      outputVersionIds: string[];
+      providerRunId: string | null;
+    }>;
+    workItemId: string;
+  }>;
+};
+
 export type ExecutionJobSummary = {
   attempts: number;
   job: ExecutionJob;
@@ -194,14 +216,21 @@ export class ExecutionRepository {
     commandId: string,
     commandName: string,
     result: Record<string, unknown>,
-    events: readonly PendingApplicationEvent[] = []
+    events: readonly PendingApplicationEvent[] = [],
+    correlationId: string = commandId
   ): Record<string, unknown> {
     const existing = this.getCommandResult(commandId, commandName);
     if (existing !== undefined) return existing;
     const occurredAt = this.context.now();
-    this.saveCommandReceipt(commandId, commandName, result);
+    this.saveCommandReceipt(commandId, commandName, result, correlationId);
     for (const event of events) {
-      this.recordOutbox(event.name, commandId, event.payload, event.occurredAt ?? occurredAt);
+      this.recordOutbox(
+        event.name,
+        correlationId,
+        event.payload,
+        event.occurredAt ?? occurredAt,
+        true
+      );
     }
     return result;
   }
@@ -295,7 +324,8 @@ export class ExecutionRepository {
   grantRunPermit(
     planId: string,
     contentHash: string,
-    commandId: string
+    commandId: string,
+    correlationId: string = commandId
   ): { id: string; planId: string; contentHash: string } {
     const existing = this.getCommandResult(commandId, "permission.grantRun");
     if (existing !== undefined) {
@@ -320,12 +350,13 @@ export class ExecutionRepository {
     this.completeCommand(commandId, "permission.grantRun", permit, [{
       name: "permission.changed",
       payload: { permitId: id, permission: "run", state: "granted" }
-    }]);
+    }], correlationId);
     return permit;
   }
 
   startJob(input: {
     commandId: string;
+    correlationId?: string;
     planId: string;
     contentHash: string;
     runPermitId: string;
@@ -376,7 +407,13 @@ export class ExecutionRepository {
       .get(plan.id) as { job_id: string } | undefined;
     if (existing !== undefined) {
       const job = this.requireJob(existing.job_id);
-      this.completeCommand(input.commandId, "run.start", { job });
+      this.completeCommand(
+        input.commandId,
+        "run.start",
+        { job },
+        [],
+        input.correlationId ?? input.commandId
+      );
       return job;
     }
     const now = this.context.now();
@@ -456,6 +493,8 @@ export class ExecutionRepository {
       throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Plan is no longer previewed.");
     }
     const job = this.requireJob(jobId);
+    const correlationId = input.correlationId ?? input.commandId;
+    cacheJobCorrelation(this.context.executionIdentity, jobId, correlationId);
     this.completeCommand(input.commandId, "run.start", { job }, [
       { name: "plan.stateChanged", payload: { planId: plan.id, state: "started" } },
       { name: "job.stateChanged", payload: { jobId, state: "queued" } },
@@ -469,7 +508,26 @@ export class ExecutionRepository {
           payload: { jobId, workItemId, attemptId, state: "queued" }
         }
       ])
-    ]);
+    ], correlationId);
+    for (const { workItemId, attemptId } of queued) {
+      this.recordTimeline({
+        jobId,
+        workItemId,
+        attemptId,
+        eventName: "execution.correlation",
+        state: "correlated",
+        payload: {
+          commandId: input.commandId,
+          correlationId,
+          planId: plan.id,
+          jobId,
+          workItemId,
+          attemptId
+        },
+        occurredAt: now,
+        correlationId
+      });
+    }
     return job;
   }
 
@@ -833,6 +891,8 @@ export class ExecutionRepository {
       bytes: Uint8Array;
       fileName: string;
       mediaType: string;
+      thumbnailBytes?: Uint8Array;
+      thumbnailMediaType?: string;
     }>;
     providerId: string;
     modelId: string;
@@ -888,6 +948,7 @@ export class ExecutionRepository {
     }
     const now = input.identifiers.acceptedAt;
     const capability = ProviderCapabilitySchema.parse(input.capabilitySnapshot);
+    const correlationId = this.correlationForJob(input.claim.job.id);
     const capabilitySnapshotId = input.identifiers.capabilitySnapshotId;
     const providerRunId = input.identifiers.providerRunId;
     this.context.database
@@ -924,7 +985,7 @@ export class ExecutionRepository {
         input.modelId,
         JSON.stringify(input.request),
         JSON.stringify(input.response),
-        JSON.stringify(input.metadata),
+        JSON.stringify({ ...input.metadata, correlationId }),
         input.claim.attempt.startedAt,
         now
       );
@@ -947,6 +1008,40 @@ export class ExecutionRepository {
         blobs.finalize(output.importId, contentKey);
       } else if (ownership !== "ready") {
         throw new ExecutionRepositoryError("BLOB_IMPORT_BUSY", "An incomplete duplicate blob import exists.");
+      }
+      let thumbnail:
+        | { byteLength: number; contentKey: string; mediaType: string }
+        | undefined;
+      if (output.thumbnailBytes !== undefined || output.thumbnailMediaType !== undefined) {
+        if (output.thumbnailBytes === undefined || output.thumbnailMediaType === undefined) {
+          throw new ExecutionRepositoryError(
+            "THUMBNAIL_METADATA_INCOMPLETE",
+            "Provider thumbnail bytes and media type must be accepted together."
+          );
+        }
+        const thumbnailContentKey = createHash("sha256").update(output.thumbnailBytes).digest("hex");
+        const thumbnailImportId = `${output.importId}-thumbnail`;
+        const thumbnailOwnership = blobs.beginImport({
+          importId: thumbnailImportId,
+          contentKey: thumbnailContentKey,
+          byteLength: output.thumbnailBytes.byteLength,
+          mediaType: output.thumbnailMediaType,
+          sourceName: `${output.fileName}.thumbnail`
+        });
+        if (thumbnailOwnership === "owner") {
+          blobs.writeInline(thumbnailImportId, thumbnailContentKey, output.thumbnailBytes);
+          blobs.finalize(thumbnailImportId, thumbnailContentKey);
+        } else if (thumbnailOwnership !== "ready") {
+          throw new ExecutionRepositoryError(
+            "BLOB_IMPORT_BUSY",
+            "An incomplete duplicate thumbnail import exists."
+          );
+        }
+        thumbnail = {
+          byteLength: output.thumbnailBytes.byteLength,
+          contentKey: thumbnailContentKey,
+          mediaType: output.thumbnailMediaType
+        };
       }
       const outputVersion = NodeOutputVersionSchema.parse({
         id: output.outputVersionId,
@@ -984,7 +1079,7 @@ export class ExecutionRepository {
           outputVersionId: output.outputVersionId,
           lineageKey: `${input.claim.plan.graphId}:${step.nodeId}:${input.claim.workItem.id}:${acceptedArtifacts.length}`
         },
-        metadata: { mediaType: output.mediaType, providerRunId }
+        metadata: { mediaType: output.mediaType, providerRunId, correlationId }
       });
       outputs.insert(outputVersion, [payload]);
       const artifact = ArtifactSchema.parse({
@@ -995,7 +1090,15 @@ export class ExecutionRepository {
         byteLength: output.bytes.byteLength,
         source: { outputVersionId: output.outputVersionId, payloadId: output.payloadId },
         createdAt: now,
-        metadata: output.artifactMetadata
+        metadata: {
+          ...output.artifactMetadata,
+          correlationId,
+          ...(thumbnail === undefined ? {} : {
+            thumbnailByteLength: thumbnail.byteLength,
+            thumbnailContentKey: thumbnail.contentKey,
+            thumbnailMediaType: thumbnail.mediaType
+          })
+        }
       });
       artifactsRepository.attach(artifact);
       this.recordArtifactLineage(artifactsRepository, artifact, outputVersion);
@@ -1584,6 +1687,83 @@ export class ExecutionRepository {
     }));
   }
 
+  getExecutionCorrelation(jobId: string): ExecutionCorrelationRecord {
+    const job = this.context.database
+      .prepare(
+        `SELECT j.plan_id, j.start_command_id, r.result_json
+         FROM execution_jobs j
+         LEFT JOIN command_receipts r ON r.command_id = j.start_command_id
+         WHERE j.job_id = ?`
+      )
+      .get(jobId) as {
+        plan_id: string;
+        result_json: string | null;
+        start_command_id: string;
+      } | undefined;
+    if (job === undefined) {
+      throw new ExecutionRepositoryError("JOB_NOT_FOUND", `Unknown job ${jobId}.`);
+    }
+    const receipt = job.result_json === null
+      ? {}
+      : JSON.parse(job.result_json) as Record<string, unknown>;
+    const correlationId = typeof receipt[COMMAND_CORRELATION_KEY] === "string"
+      ? receipt[COMMAND_CORRELATION_KEY]
+      : job.start_command_id;
+    cacheJobCorrelation(this.context.executionIdentity, jobId, correlationId);
+    const attemptRows = this.context.database
+      .prepare(
+        `SELECT w.work_item_id, a.attempt_id, a.provider_run_id, a.output_version_ids_json
+         FROM work_items w
+         LEFT JOIN attempts a ON a.work_item_id = w.work_item_id
+         WHERE w.job_id = ?
+         ORDER BY w.item_index, a.attempt_number`
+      )
+      .all(jobId) as unknown as Array<{
+        attempt_id: string | null;
+        output_version_ids_json: string | null;
+        provider_run_id: string | null;
+        work_item_id: string;
+      }>;
+    const artifactRows = this.context.database
+      .prepare(
+        `SELECT o.attempt_id, a.artifact_id
+         FROM artifacts a
+         JOIN node_output_versions o ON o.output_version_id = a.source_output_version_id
+         JOIN work_items w ON w.work_item_id = o.work_item_id
+         WHERE w.job_id = ? AND o.attempt_id IS NOT NULL
+         ORDER BY a.artifact_id`
+      )
+      .all(jobId) as unknown as Array<{ artifact_id: string; attempt_id: string }>;
+    const artifactsByAttempt = new Map<string, string[]>();
+    for (const row of artifactRows) {
+      const artifactIds = artifactsByAttempt.get(row.attempt_id) ?? [];
+      artifactIds.push(row.artifact_id);
+      artifactsByAttempt.set(row.attempt_id, artifactIds);
+    }
+    const workItems: ExecutionCorrelationRecord["workItems"] = [];
+    for (const row of attemptRows) {
+      let work = workItems.at(-1);
+      if (work?.workItemId !== row.work_item_id) {
+        work = { attempts: [], workItemId: row.work_item_id };
+        workItems.push(work);
+      }
+      if (row.attempt_id === null || row.output_version_ids_json === null) continue;
+      work.attempts.push({
+        artifactIds: artifactsByAttempt.get(row.attempt_id) ?? [],
+        attemptId: row.attempt_id,
+        outputVersionIds: JSON.parse(row.output_version_ids_json) as string[],
+        providerRunId: row.provider_run_id
+      });
+    }
+    return {
+      commandId: job.start_command_id,
+      correlationId,
+      jobId,
+      planId: job.plan_id,
+      workItems
+    };
+  }
+
   snapshot(jobId: string): ExecutionRepositorySnapshot {
     return {
       job: this.requireJob(jobId),
@@ -1672,6 +1852,7 @@ export class ExecutionRepository {
     outputVersions: NodeOutputVersion[];
     providerRunId: string | null;
   }): CompletionAcceptance {
+    const correlationId = this.correlationForJob(input.claim.job.id);
     const attemptAccepted = this.context.database
       .prepare(
         `UPDATE attempts SET status = 'accepted', provider_run_id = ?,
@@ -1704,40 +1885,45 @@ export class ExecutionRepository {
       eventName: "completion.accepted",
       state: "accepted",
       payload: {
+        correlationId,
+        planId: input.claim.plan.id,
+        jobId: input.claim.job.id,
+        providerRunId: input.providerRunId,
         artifactIds: input.artifacts.map((artifact) => artifact.id),
         outputVersionIds: input.outputVersions.map((output) => output.id),
         effects: input.effects
       },
-      occurredAt: input.acceptedAt
+      occurredAt: input.acceptedAt,
+      correlationId
     });
-    this.recordOutbox("attempt.stateChanged", input.claim.attempt.id, {
+    this.recordOutbox("attempt.stateChanged", correlationId, {
       jobId: input.claim.job.id,
       workItemId: input.claim.workItem.id,
       attemptId: input.claim.attempt.id,
       state: "accepted"
-    }, input.acceptedAt);
-    this.recordOutbox("workItem.stateChanged", input.claim.attempt.id, {
+    }, input.acceptedAt, true);
+    this.recordOutbox("workItem.stateChanged", correlationId, {
       jobId: input.claim.job.id,
       workItemId: input.claim.workItem.id,
       state: "accepted"
-    }, input.acceptedAt);
+    }, input.acceptedAt, true);
     for (const artifact of input.artifacts) {
       const source = input.outputVersions.find((version) => version.id === artifact.source.outputVersionId);
-      this.recordOutbox("artifact.accepted", input.claim.attempt.id, {
+      this.recordOutbox("artifact.accepted", correlationId, {
         artifactId: artifact.id,
         outputVersionId: source?.id ?? artifact.source.outputVersionId
-      }, input.acceptedAt);
+      }, input.acceptedAt, true);
     }
     const job = this.requireJob(input.claim.job.id);
-    this.recordOutbox("job.stateChanged", input.claim.attempt.id, {
+    this.recordOutbox("job.stateChanged", correlationId, {
       jobId: input.claim.job.id,
       state: job.status
-    }, input.acceptedAt);
+    }, input.acceptedAt, true);
     if (job.status === "completed") {
-      this.recordOutbox("plan.stateChanged", input.claim.attempt.id, {
+      this.recordOutbox("plan.stateChanged", correlationId, {
         planId: input.claim.plan.id,
         state: "completed"
-      }, input.acceptedAt);
+      }, input.acceptedAt, true);
     }
     return {
       artifacts: input.artifacts,
@@ -1800,12 +1986,10 @@ export class ExecutionRepository {
     const row = this.context.database
       .prepare("SELECT command_name, result_json FROM command_receipts WHERE command_id = ?")
       .get(commandId) as { command_name: string; result_json: string } | undefined;
-    return row === undefined
-      ? undefined
-      : {
-          commandName: row.command_name,
-          result: JSON.parse(row.result_json) as Record<string, unknown>
-        };
+    if (row === undefined) return undefined;
+    const result = JSON.parse(row.result_json) as Record<string, unknown>;
+    delete result[COMMAND_CORRELATION_KEY];
+    return { commandName: row.command_name, result };
   }
 
   private recordTimeline(input: {
@@ -1816,6 +2000,7 @@ export class ExecutionRepository {
     state: string;
     payload: Record<string, unknown>;
     occurredAt: string;
+    correlationId?: string;
   }): void {
     this.context.database
       .prepare(
@@ -1830,7 +2015,10 @@ export class ExecutionRepository {
         input.attemptId,
         input.eventName,
         input.state,
-        JSON.stringify(input.payload),
+        JSON.stringify({
+          ...input.payload,
+          correlationId: input.correlationId ?? this.correlationForJob(input.jobId)
+        }),
         input.occurredAt
       );
   }
@@ -1839,12 +2027,16 @@ export class ExecutionRepository {
     eventName: ApplicationEventName,
     correlationId: string,
     payload: Record<string, unknown>,
-    occurredAt: string
+    occurredAt: string,
+    correlationResolved = false
   ): void {
+    const resolvedCorrelationId = correlationResolved
+      ? correlationId
+      : this.resolveOutboxCorrelation(correlationId, payload);
     const event = ApplicationEventSchema.parse({
       kind: "event",
       id: this.context.createId("event"),
-      correlationId,
+      correlationId: resolvedCorrelationId,
       name: eventName,
       documentId: this.documentId(),
       occurredAt,
@@ -1866,22 +2058,95 @@ export class ExecutionRepository {
   }
 
   private documentId(): string {
+    if (this.context.executionIdentity.documentId !== undefined) {
+      return this.context.executionIdentity.documentId;
+    }
     const row = this.context.database
       .prepare("SELECT document_id FROM document WHERE singleton = 1")
       .get() as { document_id: string } | undefined;
     if (row === undefined) {
       throw new ExecutionRepositoryError("DOCUMENT_INVALID", "The document identity row is missing.");
     }
+    this.context.executionIdentity.documentId = row.document_id;
     return row.document_id;
   }
 
-  private saveCommandReceipt(commandId: string, commandName: string, result: Record<string, unknown>): void {
+  private saveCommandReceipt(
+    commandId: string,
+    commandName: string,
+    result: Record<string, unknown>,
+    correlationId: string
+  ): void {
     this.context.database
       .prepare(
         `INSERT INTO command_receipts (command_id, command_name, result_json, created_at)
          VALUES (?, ?, ?, ?)`
       )
-      .run(commandId, commandName, JSON.stringify(result), this.context.now());
+      .run(
+        commandId,
+        commandName,
+        JSON.stringify({ ...result, [COMMAND_CORRELATION_KEY]: correlationId }),
+        this.context.now()
+      );
+  }
+
+  private commandCorrelation(commandId: string): string {
+    const row = this.context.database
+      .prepare("SELECT result_json FROM command_receipts WHERE command_id = ?")
+      .get(commandId) as { result_json: string } | undefined;
+    if (row === undefined) return commandId;
+    const result = JSON.parse(row.result_json) as Record<string, unknown>;
+    return typeof result[COMMAND_CORRELATION_KEY] === "string"
+      ? result[COMMAND_CORRELATION_KEY]
+      : commandId;
+  }
+
+  private correlationForJob(jobId: string): string {
+    const cached = cachedJobCorrelation(this.context.executionIdentity, jobId);
+    if (cached !== undefined) return cached;
+    const row = this.context.database
+      .prepare(
+        `SELECT j.start_command_id, r.result_json
+         FROM execution_jobs j
+         LEFT JOIN command_receipts r ON r.command_id = j.start_command_id
+         WHERE j.job_id = ?`
+      )
+      .get(jobId) as { result_json: string | null; start_command_id: string } | undefined;
+    if (row === undefined) return jobId;
+    const result = row.result_json === null
+      ? {}
+      : JSON.parse(row.result_json) as Record<string, unknown>;
+    const correlationId = typeof result[COMMAND_CORRELATION_KEY] === "string"
+      ? result[COMMAND_CORRELATION_KEY]
+      : row.start_command_id;
+    cacheJobCorrelation(this.context.executionIdentity, jobId, correlationId);
+    return correlationId;
+  }
+
+  private resolveOutboxCorrelation(
+    candidate: string,
+    payload: Record<string, unknown>
+  ): string {
+    if (typeof payload.jobId === "string") return this.correlationForJob(payload.jobId);
+    if (typeof payload.planId === "string") {
+      const row = this.context.database
+        .prepare("SELECT job_id FROM execution_jobs WHERE plan_id = ?")
+        .get(payload.planId) as { job_id: string } | undefined;
+      if (row !== undefined) return this.correlationForJob(row.job_id);
+    }
+    const attempt = this.context.database
+      .prepare(
+        `SELECT w.job_id FROM attempts a
+         JOIN work_items w ON w.work_item_id = a.work_item_id
+         WHERE a.attempt_id = ?`
+      )
+      .get(candidate) as { job_id: string } | undefined;
+    if (attempt !== undefined) return this.correlationForJob(attempt.job_id);
+    const work = this.context.database
+      .prepare("SELECT job_id FROM work_items WHERE work_item_id = ?")
+      .get(candidate) as { job_id: string } | undefined;
+    if (work !== undefined) return this.correlationForJob(work.job_id);
+    return this.commandCorrelation(candidate);
   }
 
   private recomputeJob(jobId: string, now: string): void {

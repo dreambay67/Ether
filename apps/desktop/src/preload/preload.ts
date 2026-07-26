@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { DesktopIpcChannel, NormalizedResult } from "../shared/ipc/contracts";
 import { desktopIpcChannels } from "../shared/ipc/channels";
 import { createEtherBridge } from "./filePathBridge";
+import { installRendererNetworkContainment } from "./rendererNetworkContainment";
 
 const bridge = createEtherBridge({
   invoke: (channel: DesktopIpcChannel, request: unknown) =>
@@ -30,6 +31,7 @@ const bridge = createEtherBridge({
   }
 });
 
+contextBridge.executeInMainWorld({ func: installRendererNetworkContainment });
 contextBridge.exposeInMainWorld("ether", bridge);
 
 function grantDroppedFile(

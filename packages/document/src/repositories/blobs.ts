@@ -125,9 +125,10 @@ export class BlobRepository {
            WHERE content_key = ? OR preview_content_key = ?
          )
          AND NOT EXISTS (
-           SELECT 1 FROM artifacts WHERE content_key = ?
+           SELECT 1 FROM artifacts
+           WHERE content_key = ? OR json_extract(metadata_json, '$.thumbnailContentKey') = ?
          )`
-    ).run(contentKey, contentKey, contentKey, contentKey);
+    ).run(contentKey, contentKey, contentKey, contentKey, contentKey);
     return result.changes === 1;
   }
 

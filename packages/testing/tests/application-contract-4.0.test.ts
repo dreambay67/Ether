@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -145,10 +145,21 @@ describe("Ether 4.0 application boundary", () => {
     const liveOutputPath = path.join(root, "live-output");
     await writeFile(referencePath, Buffer.from("reference bytes"));
     await mkdir(liveOutputPath);
+    let interruptExportAfterMain = false;
     const app = new EtherApplication({
       appDataRoot: root,
       appVersion: "4.0.0-test",
       provider: new FakeImageProvider(),
+      exportCheckpoint: (stage, destination) => {
+        if (
+          interruptExportAfterMain &&
+          stage === "after-output" &&
+          !destination.endsWith(".json")
+        ) {
+          interruptExportAfterMain = false;
+          throw new Error("injected crash after durable main publication");
+        }
+      },
       pathGrantResolver: {
         resolve: ({ pathGrantId }) => pathGrantId === "reference-grant"
           ? { kind: "file", path: referencePath, mediaType: "text/plain" }
@@ -288,6 +299,46 @@ describe("Ether 4.0 application boundary", () => {
     expect(duplicateTag).toMatchObject({ kind: "response", name: "review.tag", payload: firstTag.kind === "response" ? firstTag.payload : {} });
     const detail = await app.boundaryStore().read(({ artifacts: repository }) => repository.detail(artifact.id));
     expect(detail).toMatchObject({ tags: ["launch", "select"], ratings: [expect.objectContaining({ score: 5 })] });
+
+    await app.grantPathPermit("export-permit", "export-grant", "export");
+    interruptExportAfterMain = true;
+    const exportInput = {
+      artifactIds: [artifact.id],
+      collisionPolicy: "error" as const,
+      commandId: "durable-bundle-export",
+      namingTemplate: "durable-bundle",
+      pathGrantId: "export-grant",
+      includeLineageReport: true,
+      includeMetadataSidecar: true
+    };
+    await expect(app.exportArtifacts(exportInput)).rejects.toThrow(
+      "injected crash after durable main publication"
+    );
+    const interruptedExport = await app.boundaryStore().read(({ exports }) => exports.list()[0]!);
+    expect(interruptedExport.status).toBe("staged");
+    const mainExportPath = path.join(liveOutputPath, interruptedExport.relativePath);
+    expect((await readFile(mainExportPath)).byteLength).toBe(artifact.byteLength);
+    expect(await readdir(liveOutputPath)).toEqual([path.basename(mainExportPath)]);
+    expect(await readdir(path.join(root, "export-materializations"))).toHaveLength(1);
+
+    const retried = await app.retryExport("retry-durable-bundle", interruptedExport.id);
+    expect(retried[0]?.status).toBe("committed");
+    const metadataPath = `${mainExportPath}.metadata.json`;
+    const lineagePath = `${mainExportPath}.lineage.json`;
+    expect(JSON.parse(await readFile(metadataPath, "utf8"))).toMatchObject({
+      artifact: { id: artifact.id }
+    });
+    expect(JSON.parse(await readFile(lineagePath, "utf8"))).toMatchObject({
+      artifactId: artifact.id
+    });
+    expect(await readdir(path.join(root, "export-materializations"))).toEqual([]);
+
+    await unlink(metadataPath);
+    const duplicateBundle = await app.exportArtifacts(exportInput);
+    expect(duplicateBundle[0]?.status).toBe("committed");
+    expect(JSON.parse(await readFile(metadataPath, "utf8"))).toMatchObject({
+      artifact: { id: artifact.id }
+    });
 
     await app.execute({ kind: "command", id: "live-permit", correlationId: "c-live-permit", documentId: initial.documentId, name: "permission.grantPath", payload: { pathGrantId: "live-grant", purpose: "live-output" } });
     const enabled = await app.execute({ kind: "command", id: "live-enable", correlationId: "c-live-enable", documentId: initial.documentId, name: "liveOutput.enable", payload: { pathGrantId: "live-grant", namingPolicy: "artifact", collisionPolicy: "rename", transferPolicy: "copy" } });

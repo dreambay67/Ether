@@ -1,0 +1,53 @@
+appId: com.dreambay.ether
+productName: Ether
+copyright: "Copyright \u00A9 2026 DreamBay"
+
+directories:
+  output: ../../release/windows
+  buildResources: ../../build/installer
+
+# The package is intentionally self-contained: only compiled desktop/runtime files,
+# explicit Ether package dist trees, and their production dependency closure are staged.
+asar: true
+electronVersion: 43.1.1
+asarUnpack:
+  - node_modules/sharp/**/*
+  - node_modules/@img/**/*
+npmRebuild: false
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - "!node_modules/**/*"
+  - from: .release-runtime
+    to: node_modules
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: ../../build/installer/ether.ico
+  artifactName: Ether-${version}-Setup.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  guid: ad6cd9b2-3723-5b60-a3d0-3938212aac8e
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Ether
+  installerIcon: ../../build/installer/ether.ico
+  uninstallerIcon: ../../build/installer/ether.ico
+  artifactName: Ether-${version}-Setup.${ext}
+
+fileAssociations:
+  - ext: ether
+    name: DreamBay.Ether.Document
+    description: Ether 4.0 Document
+    icon: ../../build/installer/ether.ico

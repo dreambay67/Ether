@@ -4,6 +4,7 @@ import { testSuites } from "./testSuites.js";
 
 const targetedSuiteNames = [
   "integration",
+  "destructive-chaos",
   "contracts",
   "conformance:codex",
   "conformance:antigravity"
@@ -16,9 +17,18 @@ function isTargetedSuiteName(value: string): value is TargetedSuiteName {
 }
 
 const requestedSuite = process.env.ETHER_TEST_SUITE ?? "integration";
-const include = isTargetedSuiteName(requestedSuite)
-  ? testSuites[requestedSuite]
-  : testSuites.integration;
+if (!isTargetedSuiteName(requestedSuite)) {
+  throw new Error(`Unknown Ether integration suite: ${requestedSuite}.`);
+}
+if (
+  requestedSuite === "destructive-chaos" &&
+  process.env.ETHER_RUN_DESTRUCTIVE_CHAOS !== "1"
+) {
+  throw new Error(
+    "Destructive recovery chaos is opt-in. Set ETHER_RUN_DESTRUCTIVE_CHAOS=1 and select the destructive-chaos suite."
+  );
+}
+const include = testSuites[requestedSuite];
 
 export default defineConfig({
   test: {

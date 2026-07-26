@@ -11,6 +11,17 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // These are stable workspace boundaries, not a raised warning limit.
+          if (id.includes("@xyflow/react") || id.includes("/renderer/canvas/")) return "canvas";
+          if (id.includes("lucide-react")) return "icons";
+          if (id.includes("/packages/schema/") || id.includes("/packages/graph-kernel/")) return "ether-graph";
+          return undefined;
+        }
+      }
+    }
   }
 });

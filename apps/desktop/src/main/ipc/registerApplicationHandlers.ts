@@ -14,11 +14,13 @@ export function registerApplicationHandlers(options: {
   mainWindow: BrowserWindow;
   rendererUrl: string;
   service: DesktopApplicationService;
+  onRendererInteractive?: () => void;
 }): () => void {
   const { ipcMain, mainWindow, rendererUrl, service } = options;
   const commandChannel = desktopIpcChannels.application.command;
   const queryChannel = desktopIpcChannels.application.query;
   const chooseReferenceChannel = desktopIpcChannels.references.chooseAndLink;
+  const rendererInteractiveChannel = desktopIpcChannels.runtime.rendererInteractive;
 
   ipcMain.handle(commandChannel, async (event, input) => {
     const contract = desktopIpcContracts[commandChannel];
@@ -56,6 +58,18 @@ export function registerApplicationHandlers(options: {
     }
   });
 
+  ipcMain.handle(rendererInteractiveChannel, async (event, input) => {
+    const contract = desktopIpcContracts[rendererInteractiveChannel];
+    try {
+      assertSender(event, mainWindow, rendererUrl);
+      contract.request.parse(input);
+      options.onRendererInteractive?.();
+      return contract.response.parse({ ok: true, value: null });
+    } catch (error) {
+      return contract.response.parse({ ok: false, error: normalizeDesktopError(error) });
+    }
+  });
+
   const disposeEvents = service.subscribeApplication((event) => {
     if (!mainWindow.isDestroyed()) {
       const contract = desktopIpcContracts[desktopIpcChannels.application.event];
@@ -67,6 +81,7 @@ export function registerApplicationHandlers(options: {
     ipcMain.removeHandler(commandChannel);
     ipcMain.removeHandler(queryChannel);
     ipcMain.removeHandler(chooseReferenceChannel);
+    ipcMain.removeHandler(rendererInteractiveChannel);
     disposeEvents();
   };
 }

@@ -325,7 +325,7 @@ describe("desktop IPC contract", () => {
     expect(applicationListener).toBeUndefined();
   });
 
-  it("surfaces read-only provider health without exposing runtime process control", () => {
+  it("surfaces provider health and an explicit billing guard without exposing runtime process control", () => {
     const parsed = desktopIpcContracts[desktopIpcChannels.runtime.providerHealth].response.parse({
       ok: true,
       value: {
@@ -347,13 +347,26 @@ describe("desktop IPC contract", () => {
       }
     });
     expect(parsed.ok).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.runtime.providerPolicy].response.safeParse({
+      ok: true,
+      value: { antigravityCreditOveragesConfirmed: false }
+    }).success).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.runtime.setProviderPolicy].request.safeParse({
+      antigravityCreditOveragesConfirmed: true
+    }).success).toBe(true);
 
     const bridge = createEtherBridge({
       invoke: async () => ({ ok: true, value: undefined }),
       subscribe: () => () => undefined,
       openDroppedDocument: async () => ({ ok: true, value: undefined })
     });
-    expect(Object.keys(bridge.runtime).sort()).toEqual(["providerHealth", "versions"]);
+    expect(Object.keys(bridge.runtime).sort()).toEqual([
+      "providerHealth",
+      "providerPolicy",
+      "rendererInteractive",
+      "setProviderPolicy",
+      "versions"
+    ]);
     expect(JSON.stringify(Object.keys(bridge.runtime))).not.toMatch(/spawn|start|stop|interrupt|process/i);
   });
 

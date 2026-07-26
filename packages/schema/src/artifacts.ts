@@ -12,16 +12,75 @@ export const ArtifactSourceSchema = z
   .strict();
 export type ArtifactSource = z.infer<typeof ArtifactSourceSchema>;
 
+export const ArtifactThumbnailMetadataSchema = z
+  .object({
+    thumbnailByteLength: z.number().int().positive(),
+    thumbnailContentKey: ContentKeySchema.transform((value) => value.toLowerCase()),
+    thumbnailMediaType: z.string().regex(/^image\/[a-z0-9.+-]+$/iu)
+  })
+  .strict();
+export type ArtifactThumbnailMetadata = z.infer<typeof ArtifactThumbnailMetadataSchema>;
+
+const thumbnailMetadataKeys = [
+  "thumbnailByteLength",
+  "thumbnailContentKey",
+  "thumbnailMediaType"
+] as const;
+
+export function readArtifactThumbnailMetadata(
+  metadata: Record<string, unknown>
+): ArtifactThumbnailMetadata | null {
+  if (!thumbnailMetadataKeys.some((key) => Object.prototype.hasOwnProperty.call(metadata, key))) {
+    return null;
+  }
+  const result = ArtifactThumbnailMetadataSchema.safeParse({
+    thumbnailByteLength: metadata.thumbnailByteLength,
+    thumbnailContentKey: metadata.thumbnailContentKey,
+    thumbnailMediaType: metadata.thumbnailMediaType
+  });
+  return result.success ? result.data : null;
+}
+
+export const ArtifactMetadataSchema = JsonObjectSchema.superRefine((metadata, context) => {
+  const present = thumbnailMetadataKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(metadata, key)
+  );
+  if (present.length === 0) return;
+  const result = ArtifactThumbnailMetadataSchema.safeParse({
+    thumbnailByteLength: metadata.thumbnailByteLength,
+    thumbnailContentKey: metadata.thumbnailContentKey,
+    thumbnailMediaType: metadata.thumbnailMediaType
+  });
+  if (result.success) return;
+  context.addIssue({
+    code: "custom",
+    message: "Artifact thumbnail content key, byte length, and image media type must be valid and recorded together.",
+    path: ["thumbnailContentKey"]
+  });
+});
+
+const artifactShape = {
+  id: z.string().min(1),
+  contentKey: ContentKeySchema,
+  channel: PayloadChannelSchema,
+  mediaType: z.string().min(1),
+  byteLength: z.number().int().nonnegative(),
+  source: ArtifactSourceSchema,
+  createdAt: TimestampSchema
+} as const;
+
+/** Lenient metadata reader reserved for logical repair of pre-validation rows. */
+export const ArtifactRepairSchema = z
+  .object({
+    ...artifactShape,
+    metadata: JsonObjectSchema
+  })
+  .strict();
+
 export const ArtifactSchema = z
   .object({
-    id: z.string().min(1),
-    contentKey: ContentKeySchema,
-    channel: PayloadChannelSchema,
-    mediaType: z.string().min(1),
-    byteLength: z.number().int().nonnegative(),
-    source: ArtifactSourceSchema,
-    createdAt: TimestampSchema,
-    metadata: JsonObjectSchema
+    ...artifactShape,
+    metadata: ArtifactMetadataSchema
   })
   .strict();
 export type Artifact = z.infer<typeof ArtifactSchema>;
@@ -104,9 +163,22 @@ export const ProviderCompletionRecoverySchema = z
           stagedPath: z.string().min(1),
           fileName: z.string().min(1),
           mediaType: z.string().min(1),
+          thumbnailStagedPath: z.string().min(1).optional(),
+          thumbnailMediaType: z.string().regex(/^image\/[a-z0-9.+-]+$/iu).optional(),
           artifactMetadata: z.record(z.unknown())
         })
         .strict()
+        .superRefine((output, context) => {
+          if (
+            (output.thumbnailStagedPath === undefined) !==
+            (output.thumbnailMediaType === undefined)
+          ) {
+            context.addIssue({
+              code: "custom",
+              message: "Provider thumbnail staging path and media type must be recorded together."
+            });
+          }
+        })
     )
   })
   .strict();

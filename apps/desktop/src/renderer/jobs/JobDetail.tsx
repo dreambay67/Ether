@@ -32,7 +32,7 @@ export function JobDetail({ documentId, job, onChanged, onStatus }: { documentId
   }), [documentId, job.id, load, onStatus]);
   const failedIds = useMemo(() => workItems.filter((item) => item.status === "failed").map((item) => item.id), [workItems]);
 
-  const command = async (name: "job.cancel" | "job.retry" | "job.resume", payload: { jobId: string; workItemIds?: string[] }) => {
+  const command = async (name: "job.cancel" | "job.retry", payload: { jobId: string; workItemIds?: string[] }) => {
     try {
       await window.ether.application.command({ kind: "command", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId, name, payload } as Parameters<typeof window.ether.application.command>[0]);
       onStatus(`${name.replace("job.", "Job ")} requested.`);
@@ -48,7 +48,6 @@ export function JobDetail({ documentId, job, onChanged, onStatus }: { documentId
       <div className="job-actions">
         <button type="button" disabled={job.status !== "running" && job.status !== "queued"} onClick={() => void command("job.cancel", { jobId: job.id })}>Cancel</button>
         <button type="button" disabled={failedIds.length === 0} onClick={() => void command("job.retry", { jobId: job.id, workItemIds: failedIds })}>Retry failed ({failedIds.length})</button>
-        <button type="button" disabled={job.status !== "cancelled" && job.status !== "needs-attention"} onClick={() => void command("job.resume", { jobId: job.id })}>Resume</button>
       </div>
       <div className="job-metrics"><span>{workItems.length} items</span><span>{workItems.filter((item) => item.status === "accepted").length} accepted</span><span>{attempts.length} attempts</span><span>{job.effectiveParallelism ?? plan?.effectiveParallelism ?? 1} active max</span></div>
       <details><summary>Immutable plan</summary><p>{plan ? `${plan.estimatedCalls} calls · ${plan.workItems.length} planned items · ${plan.contentHash.slice(0, 20)}…` : "Loading plan…"}</p>{plan?.warnings.map((warning) => <p key={`${warning.code}:${warning.nodeId ?? "graph"}`} className={warning.blocking ? "job-warning is-blocking" : "job-warning"}>{warning.message}</p>)}</details>

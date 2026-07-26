@@ -11,6 +11,7 @@ import {
   ProviderHealthResultSchema
 } from "@ether/schema";
 import { z } from "zod";
+import { redactSensitiveText } from "../redaction.js";
 
 import { desktopIpcChannels } from "./channels.js";
 
@@ -217,11 +218,29 @@ export const desktopIpcContracts = {
   },
   [desktopIpcChannels.runtime.versions]: {
     request: empty,
-    response: resultSchema(z.object({ electron: z.string(), node: z.string() }).strict())
+    response: resultSchema(z.object({ app: z.string().regex(/^\d+\.\d+\.\d+$/), electron: z.string(), node: z.string() }).strict())
   },
   [desktopIpcChannels.runtime.providerHealth]: {
     request: empty,
     response: resultSchema(ProviderHealthResultSchema)
+  },
+  [desktopIpcChannels.runtime.providerPolicy]: {
+    request: empty,
+    response: resultSchema(z.object({
+      antigravityCreditOveragesConfirmed: z.boolean()
+    }).strict())
+  },
+  [desktopIpcChannels.runtime.setProviderPolicy]: {
+    request: z.object({
+      antigravityCreditOveragesConfirmed: z.boolean()
+    }).strict(),
+    response: resultSchema(z.object({
+      antigravityCreditOveragesConfirmed: z.boolean()
+    }).strict())
+  },
+  [desktopIpcChannels.runtime.rendererInteractive]: {
+    request: empty,
+    response: resultSchema(z.null())
   }
 } as const;
 
@@ -294,13 +313,19 @@ export function normalizeDesktopError(error: unknown): DesktopError {
     retryable?: unknown;
     userAction?: unknown;
   } | null;
-  const code = typeof candidate?.code === "string" ? candidate.code : "UNEXPECTED_ERROR";
+  const code = error instanceof z.ZodError
+    ? "INVALID_IPC_PAYLOAD"
+    : typeof candidate?.code === "string"
+      ? candidate.code
+      : "UNEXPECTED_ERROR";
   const inferredCategory = code.includes("REFERENCE") ? "reference"
     : code.includes("GRAPH") || code.includes("REVISION") ? "graph"
       : code.includes("IPC") || code.includes("SCOPE") ? "security"
         : code.includes("INVALID") || code.includes("DESTINATION") ? "validation"
           : "document";
-  const category = isDesktopErrorCategory(candidate?.category)
+  const category = error instanceof z.ZodError
+    ? "validation"
+    : isDesktopErrorCategory(candidate?.category)
     ? candidate.category
     : inferredCategory;
   const rawMessage = error instanceof Error ? error.message : "Ether could not complete the request.";
@@ -333,10 +358,10 @@ function isDesktopErrorCategory(value: unknown): value is DesktopError["category
 }
 
 function sanitizeDesktopMessage(message: string): string {
-  return message
-    .replace(/file:\/\/[^\s"']+/giu, "the selected file")
-    .replace(/\\\\[^\\\s"']+\\[^\r\n"']+/gu, "the selected file")
-    .replace(/\b[A-Za-z]:[\\/][^\r\n"']+/gu, "the selected file")
-    .replace(/(^|[\s("'=])\/\/[^/\s"']+\/[^\s"']+/gu, "$1the selected file")
-    .replace(/(^|[\s("'=:])\/(?:[^/\s"']+\/)+[^\s"']+/gu, "$1the selected file");
+  return redactSensitiveText(message, {
+    email: "the redacted value",
+    localPath: "the selected file",
+    networkPath: "the selected file",
+    secret: "[REDACTED]"
+  }, true);
 }

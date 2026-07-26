@@ -3,6 +3,7 @@ import type { EtherNode } from "@ether/schema";
 import { getNodeDefinition } from "@ether/graph-kernel";
 import { documentCommand } from "./applicationRequests";
 import { Help } from "./NodeSetup";
+import { markPerformance, measurePerformance } from "../../performance/marks";
 
 type Bridge = { command(command: unknown): Promise<{ payload?: { plan?: { id: string; estimatedCalls: number } } }> };
 const appBridge = () => (window.ether as unknown as { application?: Bridge }).application;
@@ -28,7 +29,10 @@ export function RunControls({ node, graphId, documentId, disabled, report }: { n
     try {
       const bridge = appBridge();
       if (!bridge) throw new Error("The typed application bridge is unavailable.");
+      markPerformance("plan-compilation:start");
       const response = await bridge.command(documentCommand("run.preview", documentId, { graphId, scope: { kind: "node", nodeId: node.id } }));
+      markPerformance("plan-compilation:complete");
+      measurePerformance("plan-compilation", "plan-compilation:start", "plan-compilation:complete");
       const plan = response.payload?.plan;
       report(plan ? `Output plan is ready: ${plan.estimatedCalls} provider call${plan.estimatedCalls === 1 ? "" : "s"}.` : "The output plan is ready for Run workspace confirmation.");
     } catch (error) { report(error instanceof Error ? error.message : "Output planning needs attention."); }

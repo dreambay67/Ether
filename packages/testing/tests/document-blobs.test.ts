@@ -600,6 +600,64 @@ describe("Ether embedded blobs and linked references", () => {
     });
   });
 
+  it("rejects thumbnail metadata that does not identify an exact ready blob", async () => {
+    const store = await createStore(filePath, appDataRoot);
+    stores.push(store);
+    await createProvenance(store, "output-thumbnail", "payload-thumbnail");
+    const sourcePath = path.join(root, "thumbnail-original.png");
+    const thumbnailPath = path.join(root, "thumbnail-preview.png");
+    const sourceBytes = pngBytes(2_048, 0x35);
+    const thumbnailBytes = pngBytes(512, 0x36);
+    writeFileSync(sourcePath, sourceBytes);
+    writeFileSync(thumbnailPath, thumbnailBytes);
+    const original = await api().importBlob(
+      store,
+      { sourcePath, mediaType: "image/png" },
+      { appDataRoot }
+    );
+    const thumbnail = await api().importBlob(
+      store,
+      { sourcePath: thumbnailPath, mediaType: "image/png" },
+      { appDataRoot }
+    );
+    const base = {
+      channel: "image",
+      contentKey: original.contentKey,
+      mediaType: original.mediaType,
+      byteLength: original.byteLength,
+      source: { outputVersionId: "output-thumbnail", payloadId: "payload-thumbnail" },
+      createdAt: "2026-07-17T08:01:00.000Z"
+    } as const;
+
+    await expect(store.transaction(({ artifacts }) => artifacts.attach({
+      ...base,
+      id: "artifact-thumbnail-missing",
+      metadata: {
+        thumbnailByteLength: thumbnail.byteLength,
+        thumbnailContentKey: "f".repeat(64),
+        thumbnailMediaType: thumbnail.mediaType
+      }
+    }))).rejects.toMatchObject({ code: "ARTIFACT_THUMBNAIL_BLOB_MISMATCH" });
+    await expect(store.transaction(({ artifacts }) => artifacts.attach({
+      ...base,
+      id: "artifact-thumbnail-length-mismatch",
+      metadata: {
+        thumbnailByteLength: thumbnail.byteLength + 1,
+        thumbnailContentKey: thumbnail.contentKey,
+        thumbnailMediaType: thumbnail.mediaType
+      }
+    }))).rejects.toMatchObject({ code: "ARTIFACT_THUMBNAIL_BLOB_MISMATCH" });
+    await expect(store.transaction(({ artifacts }) => artifacts.attach({
+      ...base,
+      id: "artifact-thumbnail-media-mismatch",
+      metadata: {
+        thumbnailByteLength: thumbnail.byteLength,
+        thumbnailContentKey: thumbnail.contentKey,
+        thumbnailMediaType: "image/webp"
+      }
+    }))).rejects.toMatchObject({ code: "ARTIFACT_THUMBNAIL_BLOB_MISMATCH" });
+  });
+
   it("rejects missing, cross-output, and channel-mismatched artifact provenance", async () => {
     const store = await createStore(filePath, appDataRoot);
     stores.push(store);

@@ -18,8 +18,7 @@ describe("desktop Vite packaging config", () => {
     const outputDirectory = await mkdtemp(path.join(os.tmpdir(), "ether-desktop-vite-"));
 
     try {
-      await expect(
-        build({
+      const result = await build({
           configFile: path.join(repositoryRoot, "apps/desktop/vite.config.ts"),
           root: path.join(repositoryRoot, "apps/desktop"),
           logLevel: "error",
@@ -27,8 +26,14 @@ describe("desktop Vite packaging config", () => {
             outDir: outputDirectory,
             emptyOutDir: true
           }
-        })
-      ).resolves.toBeDefined();
+        });
+      expect(result).toBeDefined();
+      const outputs = (Array.isArray(result) ? result : [result]).flatMap((item) => "output" in item ? item.output : []);
+      const chunks = outputs.filter((item): item is Extract<typeof item, { type: "chunk" }> => item.type === "chunk");
+      const entry = chunks.find((chunk) => chunk.isEntry);
+      expect(entry?.dynamicImports.length).toBeGreaterThanOrEqual(4);
+      expect(chunks.some((chunk) => /ArtifactBrowser/.test(chunk.name) && chunk.isDynamicEntry)).toBe(true);
+      expect(chunks.some((chunk) => /BatchMatrix|JobCenter|TemplateGallery/.test(chunk.name) && chunk.isDynamicEntry)).toBe(true);
     } finally {
       await rm(outputDirectory, { recursive: true, force: true });
     }

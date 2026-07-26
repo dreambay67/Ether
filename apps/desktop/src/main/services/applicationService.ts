@@ -6,7 +6,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync
@@ -14,7 +13,10 @@ import {
 import { lstat, mkdir, opendir, realpath } from "node:fs/promises";
 import path from "node:path";
 
-import { EtherApplication } from "@ether/application";
+import {
+  EtherApplication,
+  type ApplicationDiagnosticRecord
+} from "@ether/application";
 import type {
   ReferenceGrantAuthority,
   ReferenceGrantFingerprintRequest,
@@ -52,6 +54,15 @@ import type {
   DocumentDescriptor,
   PortableResult
 } from "../../shared/ipc/contracts.js";
+import {
+  capturePathGrantTarget,
+  canonicalGrantDestinationPath as secureCanonicalGrantDestinationPath,
+  canonicalGrantPath as secureCanonicalGrantPath,
+  pathGrantKey,
+  pathGrantTargetIsCurrent,
+  type PathGrantTargetIdentity,
+  tryCanonicalGrantPath as secureTryCanonicalGrantPath
+} from "../security/pathGrants.js";
 
 export interface NativeDialogPort {
   openDocument(): Promise<string | null>;
@@ -241,6 +252,7 @@ interface GrantBinding {
   documentId: string;
   documentPath: string;
   grantId: string;
+  identity: PathGrantTargetIdentity;
   operation: DesktopGrantOperation;
   path: string;
   fingerprint?: string;
@@ -299,52 +311,56 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   grant(documentId: string, operation: DesktopGrantOperation, filePath: string): string {
     const documentPath = this.activeDocuments.get(documentId) ?? this.memoryDocumentPath(documentId);
     const grantId = randomUUID();
+    const target = capturePathGrantTarget(filePath);
     const next = new Map(this.grants);
-    next.set(grantKey(grantId, documentId), {
+    next.set(pathGrantKey(grantId, documentId), {
       documentId,
       documentPath,
       grantId,
+      identity: target.identity,
       operation,
-      path: canonicalGrantPath(filePath)
+      path: target.path
     });
     this.commit(next);
     return grantId;
   }
 
   authorizePath(request: ReferenceGrantPathRequest): boolean {
-    const key = grantKey(request.grantId, request.documentId);
+    const key = pathGrantKey(request.grantId, request.documentId);
     if (this.pendingRevocations.has(key)) return false;
     const grant = this.grants.get(key);
     return grant !== undefined &&
       grant.documentPath === this.activeDocuments.get(request.documentId) &&
       grant.operation === request.operation &&
-      grant.path === tryCanonicalGrantPath(request.path);
+      grant.path === tryCanonicalGrantPath(request.path) &&
+      pathGrantTargetIsCurrent(grant.path, grant.identity);
   }
 
   validateFingerprint(request: ReferenceGrantFingerprintRequest): boolean {
-    const key = grantKey(request.grantId, request.documentId);
+    const key = pathGrantKey(request.grantId, request.documentId);
     if (this.pendingRevocations.has(key)) return false;
     const grant = this.grants.get(key);
     if (
       grant === undefined ||
       grant.documentPath !== this.activeDocuments.get(request.documentId) ||
       grant.operation !== request.operation ||
-      grant.path !== tryCanonicalGrantPath(request.path)
+      grant.path !== tryCanonicalGrantPath(request.path) ||
+      !pathGrantTargetIsCurrent(grant.path, grant.identity)
     ) return false;
     const fingerprint = `${request.fingerprint.byteLength}:${request.fingerprint.sampleSha256}`;
     if (grant.fingerprint !== undefined && grant.fingerprint !== fingerprint) return false;
     if (grant.fingerprint === fingerprint) return true;
     const next = new Map(this.grants);
-    next.set(grantKey(request.grantId, request.documentId), { ...grant, fingerprint });
+    next.set(pathGrantKey(request.grantId, request.documentId), { ...grant, fingerprint });
     this.commit(next);
     return true;
   }
 
   allowResolve(grantId: string, documentId: string): void {
-    const grant = this.grants.get(grantKey(grantId, documentId));
+    const grant = this.grants.get(pathGrantKey(grantId, documentId));
     if (grant !== undefined) {
       const next = new Map(this.grants);
-      next.set(grantKey(grantId, documentId), { ...grant, operation: "resolve" });
+      next.set(pathGrantKey(grantId, documentId), { ...grant, operation: "resolve" });
       this.commit(next);
     }
   }
@@ -355,12 +371,13 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     pathGrantId: string;
     purpose: "live-output" | "export" | "reference";
   }): { displayName: string; kind: "directory" | "file"; path: string } {
-    const key = grantKey(input.pathGrantId, input.documentId);
+    const key = pathGrantKey(input.pathGrantId, input.documentId);
     const grant = this.grants.get(key);
     if (
       grant === undefined ||
       this.pendingRevocations.has(key) ||
       grant.documentPath !== this.activeDocuments.get(input.documentId) ||
+      !pathGrantTargetIsCurrent(grant.path, grant.identity) ||
       (input.purpose === "reference"
         ? grant.operation !== "link" && grant.operation !== "relink"
         : grant.operation !== input.purpose)
@@ -375,12 +392,13 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     pathGrantId: string;
     operation: "link" | "open-document";
   }): { displayName: string; path: string } {
-    const key = grantKey(input.pathGrantId, input.documentId);
+    const key = pathGrantKey(input.pathGrantId, input.documentId);
     const grant = this.grants.get(key);
     if (
       grant === undefined ||
       this.pendingRevocations.has(key) ||
       grant.documentPath !== this.activeDocuments.get(input.documentId) ||
+      !pathGrantTargetIsCurrent(grant.path, grant.identity) ||
       grant.operation !== input.operation
     ) {
       throw codedError("PATH_PERMISSION_REQUIRED", "The dropped file is no longer authorized for this document.");
@@ -389,7 +407,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }
 
   prepareRevocation(grantId: string, documentId: string): void {
-    const key = grantKey(grantId, documentId);
+    const key = pathGrantKey(grantId, documentId);
     if (!this.grants.has(key) || this.pendingRevocations.has(key)) return;
     const next = new Map(this.pendingRevocations);
     next.set(key, { documentId, grantId, version: 1 });
@@ -398,7 +416,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }
 
   cancelRevocation(grantId: string, documentId: string): "pending" | "revoked" {
-    const key = grantKey(grantId, documentId);
+    const key = pathGrantKey(grantId, documentId);
     if (!this.pendingRevocations.has(key)) return "revoked";
     const next = new Map(this.pendingRevocations);
     next.delete(key);
@@ -412,7 +430,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
   }
 
   revoke(grantId: string, documentId: string): "pending" | "revoked" {
-    const key = grantKey(grantId, documentId);
+    const key = pathGrantKey(grantId, documentId);
     if (!this.pendingRevocations.has(key)) this.prepareRevocation(grantId, documentId);
     if (!this.pendingRevocations.has(key)) return "revoked";
     const nextGrants = new Map(this.grants);
@@ -475,17 +493,17 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     const bindings = [...this.grants.values()].filter((grant) =>
       grant.documentId === input.sourceDocumentId &&
       grant.documentPath === sourcePath &&
-      !this.pendingRevocations.has(grantKey(grant.grantId, grant.documentId))
+      !this.pendingRevocations.has(pathGrantKey(grant.grantId, grant.documentId))
     );
     const next = new Map(this.grants);
     for (const binding of bindings) {
-      next.set(grantKey(binding.grantId, input.destinationDocumentId), {
+      next.set(pathGrantKey(binding.grantId, input.destinationDocumentId), {
         ...binding,
         documentId: input.destinationDocumentId,
         documentPath: destinationPath
       });
       if (!input.retainSource) {
-        next.delete(grantKey(binding.grantId, input.sourceDocumentId));
+        next.delete(pathGrantKey(binding.grantId, input.sourceDocumentId));
       }
     }
     if (bindings.length > 0) this.commit(next);
@@ -578,7 +596,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     if (!Array.isArray(parsed)) return;
     for (const candidate of parsed) {
       if (!isGrantBinding(candidate)) continue;
-      this.grants.set(grantKey(candidate.grantId, candidate.documentId), candidate);
+      this.grants.set(pathGrantKey(candidate.grantId, candidate.documentId), candidate);
     }
   }
 
@@ -610,7 +628,7 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
     for (const candidate of parsed) {
       if (!isPendingGrantRevocation(candidate)) continue;
       this.pendingRevocations.set(
-        grantKey(candidate.grantId, candidate.documentId),
+        pathGrantKey(candidate.grantId, candidate.documentId),
         candidate
       );
     }
@@ -628,14 +646,14 @@ export class DesktopPathGrantAuthority implements ReferenceGrantAuthority {
       if (
         binding.documentId !== input.sourceDocumentId ||
         binding.documentPath !== input.sourceDocumentPath ||
-        this.pendingRevocations.has(grantKey(binding.grantId, binding.documentId))
+        this.pendingRevocations.has(pathGrantKey(binding.grantId, binding.documentId))
       ) continue;
-      next.set(grantKey(binding.grantId, input.destinationDocumentId), {
+      next.set(pathGrantKey(binding.grantId, input.destinationDocumentId), {
         ...binding,
         documentId: input.destinationDocumentId,
         documentPath: input.destinationDocumentPath
       });
-      if (!input.retainSource) next.delete(grantKey(binding.grantId, input.sourceDocumentId));
+      if (!input.retainSource) next.delete(pathGrantKey(binding.grantId, input.sourceDocumentId));
     }
     this.commit(next);
   }
@@ -743,6 +761,8 @@ export interface DesktopApplicationServiceOptions {
   dialogs: NativeDialogPort;
   provider: GenerationProvider;
   executionProviders?: ConstructorParameters<typeof EtherApplication>[0]["executionProviders"];
+  providerResolver?: ConstructorParameters<typeof EtherApplication>[0]["providerResolver"];
+  providerCapabilities?: ConstructorParameters<typeof EtherApplication>[0]["providerCapabilities"];
   providerLifecycle?: {
     clearDocument(documentId: string): void;
   };
@@ -764,6 +784,9 @@ export interface DesktopApplicationServiceOptions {
     stage: "before-grant" | "after-grant"
   ) => Promise<void> | void;
   mutationOperationCheckpoint?: (operation: "graph" | "reference" | "portable") => Promise<void> | void;
+  diagnosticSink?: {
+    log(record: ApplicationDiagnosticRecord): void;
+  };
 }
 
 export class DesktopApplicationService {
@@ -1585,6 +1608,15 @@ export class DesktopApplicationService {
     return this.requireApplication().queryArtifactDescriptor(artifactId);
   }
 
+  async artifactAssetDescriptor(
+    documentId: string,
+    artifactId: string,
+    variant: "original" | "thumbnail"
+  ) {
+    this.assertScope(documentId);
+    return this.requireApplication().queryArtifactAssetDescriptor(artifactId, variant);
+  }
+
   async readArtifactRange(
     documentId: string,
     artifactId: string,
@@ -1603,6 +1635,22 @@ export class DesktopApplicationService {
   ) {
     this.assertScope(documentId);
     return this.requireApplication().streamArtifactRange(artifactId, start, endExclusive);
+  }
+
+  streamArtifactAssetRange(
+    documentId: string,
+    artifactId: string,
+    variant: "original" | "thumbnail",
+    start: number,
+    endExclusive: number
+  ) {
+    this.assertScope(documentId);
+    return this.requireApplication().streamArtifactAssetRange(
+      artifactId,
+      variant,
+      start,
+      endExclusive
+    );
   }
 
   snapshot(): DocumentDescriptor {
@@ -1670,7 +1718,10 @@ export class DesktopApplicationService {
       appDataRoot: this.options.appDataRoot,
       appVersion: this.options.appVersion,
       provider: this.options.provider,
+      onDiagnostic: (record) => this.options.diagnosticSink?.log(record),
       executionProviders: this.options.executionProviders,
+      providerResolver: this.options.providerResolver,
+      providerCapabilities: this.options.providerCapabilities,
       dispatchMode: this.options.dispatchMode,
       pathGrantResolver: {
         resolve: (input) => this.pathGrants.resolveApplicationPathGrant(input)
@@ -1840,36 +1891,22 @@ function codedError(code: string, message: string): Error & { code: string } {
 }
 
 function canonicalGrantPath(filePath: string): string {
-  const canonical = realpathSync.native(filePath);
-  return process.platform === "win32" ? canonical.toLocaleLowerCase() : canonical;
+  return secureCanonicalGrantPath(filePath);
 }
 
 function canonicalGrantDestinationPath(filePath: string): string {
-  try {
-    return canonicalGrantPath(filePath);
-  } catch {
-    const canonicalParent = realpathSync.native(path.dirname(path.resolve(filePath)));
-    const destination = path.join(canonicalParent, path.basename(filePath));
-    return process.platform === "win32" ? destination.toLocaleLowerCase() : destination;
-  }
+  return secureCanonicalGrantDestinationPath(filePath);
 }
 
 function tryCanonicalGrantPath(filePath: string): string | null {
-  try {
-    return canonicalGrantPath(filePath);
-  } catch {
-    return null;
-  }
-}
-
-function grantKey(grantId: string, documentId: string): string {
-  return `${grantId}\0${documentId}`;
+  return secureTryCanonicalGrantPath(filePath);
 }
 
 function isGrantBinding(value: unknown): value is {
   documentId: string;
   documentPath: string;
   grantId: string;
+  identity: PathGrantTargetIdentity;
   operation: DesktopGrantOperation;
   path: string;
   fingerprint?: string;
@@ -1879,9 +1916,19 @@ function isGrantBinding(value: unknown): value is {
   return typeof binding.documentId === "string" &&
     typeof binding.documentPath === "string" &&
     typeof binding.grantId === "string" &&
+    isPathGrantTargetIdentity(binding.identity) &&
     ["link", "relink", "resolve", "export", "live-output", "open-document"].includes(String(binding.operation)) &&
     typeof binding.path === "string" &&
     (binding.fingerprint === undefined || typeof binding.fingerprint === "string");
+}
+
+function isPathGrantTargetIdentity(value: unknown): value is PathGrantTargetIdentity {
+  if (value === null || typeof value !== "object") return false;
+  const identity = value as Record<string, unknown>;
+  return typeof identity.birthtimeNs === "string" &&
+    typeof identity.dev === "string" &&
+    typeof identity.ino === "string" &&
+    (identity.kind === "directory" || identity.kind === "file");
 }
 
 function isPendingGrantRebind(value: unknown): value is PendingGrantRebind {

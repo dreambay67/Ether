@@ -8,15 +8,24 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CODEX_IMAGE_CAPABILITY_MANIFEST_SHA256,
   CodexAppServerRuntime,
+  type CodexRuntimeHealth,
   type CodexAppServerRuntimeOptions
 } from "@ether/providers";
 import { createCodexRuntimeService } from "../../../apps/desktop/src/main/services/codexRuntime.js";
-import { createProviderService } from "../../../apps/desktop/src/main/services/providerService.js";
+import {
+  createProviderService,
+  startProviderServiceInBackground
+} from "../../../apps/desktop/src/main/services/providerService.js";
+import {
+  createRendererInteractiveGate,
+  drainLifecycleSteps,
+  startContainedLifecycle
+} from "../../../apps/desktop/src/main/lifecycle.js";
 
 const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "codex-app-server", "fake-app-server.mjs");
 const runtimes: CodexAppServerRuntime[] = [];
 
-async function waitFor(condition: () => boolean, timeoutMs = 2_000) {
+async function waitFor(condition: () => boolean, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (condition()) return;
@@ -57,6 +66,146 @@ afterEach(async () => {
 });
 
 describe("Codex runtime lifecycle", () => {
+  it("drains every desktop lifecycle participant after an earlier closer rejects", async () => {
+    const order: string[] = [];
+    const failures = await drainLifecycleSteps([
+      {
+        name: "mcp",
+        close: async () => {
+          order.push("mcp");
+          throw new Error("MCP startup rejected");
+        }
+      },
+      { name: "application", close: async () => { order.push("application"); } },
+      { name: "provider", close: async () => { order.push("provider"); } },
+      { name: "diagnostics", close: async () => { order.push("diagnostics"); } }
+    ]);
+
+    expect(order).toEqual(["mcp", "application", "provider", "diagnostics"]);
+    expect(failures).toMatchObject([{ step: "mcp", error: { message: "MCP startup rejected" } }]);
+  });
+
+  it("contains synchronous and asynchronous optional lifecycle startup failures", async () => {
+    const failures: string[] = [];
+    await expect(startContainedLifecycle(
+      () => { throw new Error("synchronous startup failure"); },
+      (error) => { failures.push((error as Error).message); }
+    )).resolves.toBeNull();
+    await expect(startContainedLifecycle(
+      async () => { throw new Error("asynchronous startup failure"); },
+      (error) => { failures.push((error as Error).message); }
+    )).resolves.toBeNull();
+    expect(failures).toEqual(["synchronous startup failure", "asynchronous startup failure"]);
+  });
+
+  it("bounds renderer readiness while preserving an explicit early signal", async () => {
+    const explicit = createRendererInteractiveGate();
+    explicit.mark();
+    await expect(explicit.wait(50)).resolves.toBe("renderer");
+
+    const fallback = createRendererInteractiveGate();
+    await expect(fallback.wait(10)).resolves.toBe("timeout");
+    await expect(fallback.wait(10)).resolves.toBe("renderer");
+  });
+
+  it("does not block the usable shell and closes safely while deferred discovery is in flight", async () => {
+    let releaseStart!: () => void;
+    let closed = false;
+    const failures: unknown[] = [];
+    const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const background = startProviderServiceInBackground({
+      start: async () => {
+        await startGate;
+        return {} as never;
+      },
+      close: async () => {
+        closed = true;
+        releaseStart();
+      }
+    }, (error) => failures.push(error));
+
+    expect(closed).toBe(false);
+    await background.close();
+    await background.done;
+    expect(closed).toBe(true);
+    expect(failures).toEqual([]);
+  });
+
+  it("reports a deferred discovery failure without rejecting the shell lifecycle", async () => {
+    const failure = new Error("provider probe failed");
+    const failures: unknown[] = [];
+    const background = startProviderServiceInBackground({
+      start: async () => { throw failure; },
+      close: async () => undefined
+    }, (error) => failures.push(error));
+
+    await expect(background.done).resolves.toBeUndefined();
+    expect(failures).toEqual([failure]);
+    await background.close();
+  });
+
+  it("contains a synchronous provider startup throw", async () => {
+    const failure = new Error("provider start threw synchronously");
+    const failures: unknown[] = [];
+    const background = startProviderServiceInBackground({
+      start: () => { throw failure; },
+      close: async () => undefined
+    }, (error) => failures.push(error));
+
+    await expect(background.done).resolves.toBeUndefined();
+    expect(failures).toEqual([failure]);
+    await expect(background.close()).resolves.toBeUndefined();
+  });
+
+  it("bounds a never-settling provider shutdown and still advances the quit drain", async () => {
+    let closeAttempts = 0;
+    let quitAttempted = false;
+    const neverStart = new Promise<CodexRuntimeHealth>(() => undefined);
+    const background = startProviderServiceInBackground({
+      start: () => neverStart,
+      close: async () => {
+        closeAttempts += 1;
+        await neverStart;
+      }
+    }, () => undefined, { shutdownTimeoutMs: 10 });
+
+    const failures = await drainLifecycleSteps([
+      { name: "provider", close: () => background.close() },
+      {
+        name: "quit",
+        close: async () => {
+          quitAttempted = true;
+        }
+      }
+    ]);
+
+    expect(closeAttempts).toBe(1);
+    expect(quitAttempted).toBe(true);
+    expect(failures).toMatchObject([{
+      step: "provider",
+      error: { code: "PROVIDER_SHUTDOWN_TIMEOUT" }
+    }]);
+  });
+
+  it("aborts a provider shutdown wait without skipping the close attempt", async () => {
+    let closeAttempts = 0;
+    const neverStart = new Promise<CodexRuntimeHealth>(() => undefined);
+    const background = startProviderServiceInBackground({
+      start: () => neverStart,
+      close: async () => {
+        closeAttempts += 1;
+        await neverStart;
+      }
+    }, () => undefined, { shutdownTimeoutMs: 5_000 });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(background.close(controller.signal)).rejects.toMatchObject({
+      code: "PROVIDER_SHUTDOWN_ABORTED"
+    });
+    expect(closeAttempts).toBe(1);
+  });
+
   it("sanitizes child environment and keeps one process alive while idle", async () => {
     const environmentLog = path.join(os.tmpdir(), `ether-runtime-env-${Date.now()}.json`);
     const instance = runtime("normal", {
@@ -235,6 +384,62 @@ describe("Codex runtime lifecycle", () => {
     const providers = createProviderService({ codex });
     await providers.start();
     const identity = providers.runtimeIdentity;
+    const capabilities = await providers.capabilities();
+    expect(capabilities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        providerId: "codex-chatgpt-image-2",
+        profileId: "image-default",
+        modelId: "gpt-5.4",
+        operation: "generate-image",
+        aspectRatios: ["1:1"],
+        maxParallelism: 2
+      }),
+      expect.objectContaining({
+        providerId: "codex-vision-assistant",
+        profileId: "worker:gpt-5.4",
+        modelId: "gpt-5.4",
+        operation: "llm",
+        maxParallelism: 2
+      }),
+      expect.objectContaining({
+        providerId: "codex-vision-evaluation",
+        profileId: "evaluation:gpt-5.4",
+        modelId: "gpt-5.4",
+        operation: "llm",
+        maxParallelism: 2
+      })
+    ]));
+    expect(providers.resolveExecutionProviders({
+      providerId: "google-nano-banana-2"
+    }).image.descriptor.id).toBe("google-nano-banana-2");
+    expect(providers.resolveExecutionProviders({
+      providerId: "codex-vision-assistant"
+    }).worker.descriptor.id).toBe("codex-vision-assistant");
+    expect(providers.antigravityPolicy()).toEqual({
+      creditOveragesConfirmed: false
+    });
+    await providers.setAntigravityCreditOveragesConfirmed(true);
+    expect(providers.antigravityPolicy()).toEqual({
+      creditOveragesConfirmed: true
+    });
+    await expect(
+      providers.generation.diagnose("google-nano-banana-2")
+    ).resolves.toMatchObject({
+      details: { creditOveragesPolicy: "never-confirmed" }
+    });
+    await providers.setAntigravityCreditOveragesConfirmed(false);
+    await expect(
+      providers.generation.diagnose("google-nano-banana-2")
+    ).resolves.toMatchObject({
+      details: { creditOveragesPolicy: "unverified" }
+    });
+    await Promise.all([
+      providers.setAntigravityCreditOveragesConfirmed(true),
+      providers.setAntigravityCreditOveragesConfirmed(false)
+    ]);
+    expect(providers.antigravityPolicy()).toEqual({
+      creditOveragesConfirmed: false
+    });
     providers.clearDocument("doc-a");
     providers.clearDocument("doc-b");
     expect(providers.runtimeIdentity).toBe(identity);

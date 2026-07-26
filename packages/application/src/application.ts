@@ -1,5 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile
+} from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 
@@ -40,6 +51,7 @@ import {
   ApplicationQuerySchema,
   ExecutionJobSchema,
   ExecutionPlanSchema,
+  readArtifactThumbnailMetadata,
   type ApplicationCommand,
   type ApplicationCommandResponse,
   type ApplicationErrorMessage,
@@ -70,6 +82,10 @@ import type { DocumentSnapshot } from "./queries/documentQueries.js";
 import { deepFreezeSnapshot } from "./snapshots.js";
 import { executeApplicationCommand, executeApplicationQuery } from "./dispatch.js";
 import {
+  publishAtomicExportBundle,
+  stableExportPublicationId
+} from "./atomicExportPublisher.js";
+import {
   ApplicationPermitStore,
   type ApplicationPermit,
   type ApplicationPermitInspection,
@@ -86,6 +102,15 @@ export class ApplicationServiceError extends Error {
     this.name = "ApplicationServiceError";
     this.code = code;
   }
+}
+
+export interface ApplicationDiagnosticRecord {
+  causeId?: string;
+  correlationId: string;
+  details?: Record<string, unknown>;
+  event: string;
+  level: "info" | "warning" | "error";
+  message: string;
 }
 
 export class EtherApplication implements EtherApplicationService {
@@ -109,7 +134,9 @@ export class EtherApplication implements EtherApplicationService {
       provider: GenerationProvider;
       executionProviders?: ExecutionProviderFacets;
       providerResolver?: ExecutionProviderResolver;
-      providerCapabilities?: ProviderCapability[];
+      providerCapabilities?:
+        | ProviderCapability[]
+        | (() => Promise<readonly ProviderCapability[]>);
       pathGrantResolver?: PathGrantResolver;
       liveOutputFileSystem?: LiveOutputFileSystem;
       dispatchMode?: "automatic" | "manual";
@@ -117,6 +144,11 @@ export class EtherApplication implements EtherApplicationService {
       executionCheckpoint?: (name: string) => void;
       portableCheckpoint?: (stage: "prepared", referenceId: string) => void;
       portableImportCheckpoint?: (stage: string, referenceId: string) => void;
+      exportCheckpoint?: (
+        stage: "before-open" | "after-output",
+        destination: string
+      ) => void | Promise<void>;
+      onDiagnostic?: (record: ApplicationDiagnosticRecord) => void;
     }
   ) {}
 
@@ -125,8 +157,23 @@ export class EtherApplication implements EtherApplicationService {
     try {
       const response = await executeApplicationCommand(this, ApplicationCommandSchema.parse(command));
       if (command.name !== "document.close") await this.drainEvents();
+      this.emitDiagnostic({
+        correlationId: command.correlationId,
+        details: { commandId: command.id, commandName: command.name },
+        event: "application.command.completed",
+        level: "info",
+        message: `Application command ${command.name} completed.`
+      });
       return response;
     } catch (error) {
+      this.emitDiagnostic({
+        causeId: command.correlationId,
+        correlationId: command.correlationId,
+        details: { commandId: command.id, commandName: command.name },
+        event: "application.command.failed",
+        level: "error",
+        message: error instanceof Error ? error.message : "Application command failed."
+      });
       return this.toBoundaryError(command.id, command.correlationId, error);
     }
   }
@@ -154,8 +201,9 @@ export class EtherApplication implements EtherApplicationService {
   }
 
   /** @internal Recipe previews combine configured profiles with provider diagnosis. */
-  boundaryConfiguredProviderCapabilities(): readonly ProviderCapability[] {
-    return this.options.providerCapabilities ?? [];
+  async boundaryConfiguredProviderCapabilities(): Promise<readonly ProviderCapability[]> {
+    const configured = this.options.providerCapabilities;
+    return typeof configured === "function" ? configured() : configured ?? [];
   }
 
   /** @internal Recipe setup checks optional text and evaluation execution facets. */
@@ -208,6 +256,34 @@ export class EtherApplication implements EtherApplicationService {
 
   requirePathGrant(pathGrantId: string, purpose: PathGrantPurpose): ResolvedPathGrant {
     return this.permits.requirePath(pathGrantId, purpose);
+  }
+
+  private async revalidatePathGrant(
+    pathGrantId: string,
+    purpose: PathGrantPurpose
+  ): Promise<ResolvedPathGrant> {
+    const cached = this.requirePathGrant(pathGrantId, purpose);
+    if (this.options.pathGrantResolver === undefined) {
+      throw new ApplicationServiceError(
+        "EXTERNAL_CAPABILITY_UNAVAILABLE",
+        "No desktop path-grant resolver is attached."
+      );
+    }
+    const current = await this.options.pathGrantResolver.resolve({
+      documentId: this.requireStore().documentId,
+      pathGrantId,
+      purpose
+    });
+    if (
+      current.kind !== cached.kind ||
+      !samePath(current.path, cached.path)
+    ) {
+      throw new ApplicationServiceError(
+        "PATH_GRANT_CHANGED",
+        "The granted path changed after it was authorized."
+      );
+    }
+    return { ...current, path: path.resolve(current.path) };
   }
 
   async inspectRecovery(): Promise<Omit<typeof this.recoveryReport, "dismissed">> {
@@ -417,6 +493,7 @@ export class EtherApplication implements EtherApplicationService {
         category: categoryForError(mapped.code),
         message: mapped.message,
         retryable: retryableError(mapped.code),
+        causeId: correlationId,
         ...(mapped.code === "EXTERNAL_CAPABILITY_UNAVAILABLE"
           ? { userAction: "Configure the requested desktop integration, then retry." }
           : {})
@@ -474,20 +551,41 @@ export class EtherApplication implements EtherApplicationService {
     this.store = store;
     this.attachScheduler();
     if (store.mode.kind === "writable") {
-      const jobIds = await store.transaction(({ execution }) => {
+      const recoveryCandidates = await store.transaction(({ execution }) => {
         execution.quarantineForeignDocumentPlans();
-        return execution.recoverProcessLost().filter((jobId) => {
-          const job = execution.getJob(jobId);
-          const plan = job === undefined ? undefined : execution.getPlan(job.planId);
-          return plan !== undefined && plan.steps.every(
-            (step) => step.provider.providerId === this.options.provider.descriptor.id
-          );
-        });
+        return execution.recoverProcessLost();
       });
+      const jobIds = recoveryCandidates.length === 0
+        ? []
+        : await this.recoverableJobs(store, recoveryCandidates);
       await this.drainEvents();
       if (this.options.dispatchMode !== "manual") jobIds.forEach((jobId) => void this.scheduler!.run(jobId));
     }
     return this.queryDocument();
+  }
+
+  private async recoverableJobs(
+    store: DocumentStore,
+    candidateJobIds: readonly string[]
+  ): Promise<string[]> {
+    const recoverableProviderIds = new Set([
+      this.options.provider.descriptor.id,
+      ...(await this.boundaryConfiguredProviderCapabilities()).map((capability) => capability.providerId)
+    ]);
+    return store.read(({ execution }) => candidateJobIds.filter((jobId) => {
+      const job = execution.getJob(jobId);
+      const plan = job === undefined ? undefined : execution.getPlan(job.planId);
+      return plan !== undefined &&
+        plan.steps.every((step) =>
+          step.providerBinding === null ||
+          step.providerBinding === undefined ||
+          recoverableProviderIds.has(step.providerBinding.providerId)
+        ) &&
+        plan.workItems.every((workItem) =>
+          workItem.providerBindingOverride === undefined ||
+          recoverableProviderIds.has(workItem.providerBindingOverride.providerId)
+        );
+    }));
   }
 
   async saveDocument(input: { commandId: string }): Promise<void> {
@@ -713,6 +811,7 @@ export class EtherApplication implements EtherApplicationService {
 
   async previewRun(input: {
     commandId: string;
+    correlationId?: string;
     graphId: string;
     scope: ExecutionScope;
   }): Promise<ExecutionPlan> {
@@ -736,8 +835,9 @@ export class EtherApplication implements EtherApplicationService {
     const capabilities = await planningCapabilities(
       snapshot.graph,
       this.options.provider,
-      this.options.providerCapabilities
+      await this.boundaryConfiguredProviderCapabilities()
     );
+    const planCompilationStartedAt = performance.now();
     const plan = compilePlan({
       id: `plan-${randomUUID()}`,
       documentId: store.documentId,
@@ -751,6 +851,12 @@ export class EtherApplication implements EtherApplicationService {
       payloads: snapshot.payloads,
       createdAt: new Date().toISOString()
     });
+    recordBoundedPerformanceMeasure(
+      "plan-compilation",
+      planCompilationStartedAt,
+      performance.now(),
+      { commandId: input.commandId, graphId: input.graphId }
+    );
     if (plan.steps.length === 0) {
       throw new ApplicationServiceError("NO_RUNNABLE_SCOPE", "The selected execution scope has no runnable steps.");
     }
@@ -761,7 +867,7 @@ export class EtherApplication implements EtherApplicationService {
       execution.completeCommand(input.commandId, "run.preview", { plan }, [{
         name: "plan.stateChanged",
         payload: { planId: plan.id, state: "previewed" }
-      }]);
+      }], input.correlationId ?? input.commandId);
       return plan;
     });
     await this.drainEvents();
@@ -770,12 +876,18 @@ export class EtherApplication implements EtherApplicationService {
 
   async grantRunPermit(input: {
     commandId: string;
+    correlationId?: string;
     planId: string;
     contentHash: string;
   }): Promise<{ id: string; planId: string; contentHash: string }> {
     try {
       const permit = await this.requireWritableStore().transaction(({ execution }) =>
-        execution.grantRunPermit(input.planId, input.contentHash, input.commandId)
+        execution.grantRunPermit(
+          input.planId,
+          input.contentHash,
+          input.commandId,
+          input.correlationId ?? input.commandId
+        )
       );
       this.permits.registerRun(input.commandId, permit.id, input.planId, input.contentHash);
       await this.drainEvents();
@@ -787,6 +899,7 @@ export class EtherApplication implements EtherApplicationService {
 
   async startRun(input: {
     commandId: string;
+    correlationId?: string;
     planId: string;
     contentHash: string;
     runPermitId: string;
@@ -1085,6 +1198,40 @@ export class EtherApplication implements EtherApplicationService {
     return deepFreezeSnapshot(artifact);
   }
 
+  async queryArtifactAssetDescriptor(
+    artifactId: string,
+    variant: "original" | "thumbnail"
+  ): Promise<{ byteLength: number; contentKey: string; mediaType: string }> {
+    const store = this.requireStore();
+    const artifact = await this.queryArtifactDescriptor(artifactId);
+    if (variant === "original") {
+      return deepFreezeSnapshot({
+        byteLength: artifact.byteLength,
+        contentKey: artifact.contentKey,
+        mediaType: artifact.mediaType
+      });
+    }
+    const candidate = thumbnailDescriptor(artifact);
+    if (candidate === null) {
+      throw new ApplicationServiceError(
+        "ARTIFACT_THUMBNAIL_UNAVAILABLE",
+        `Artifact ${artifactId} has no embedded thumbnail.`
+      );
+    }
+    const stored = await store.read(({ blobs }) => blobs.get(candidate.contentKey));
+    if (
+      stored === undefined ||
+      stored.byteLength !== candidate.byteLength ||
+      stored.mediaType !== candidate.mediaType
+    ) {
+      throw new ApplicationServiceError(
+        "ARTIFACT_THUMBNAIL_INVALID",
+        `Artifact ${artifactId} has invalid embedded thumbnail metadata.`
+      );
+    }
+    return deepFreezeSnapshot(candidate);
+  }
+
   async readArtifactRange(artifactId: string, start: number, endExclusive: number): Promise<Buffer> {
     const store = this.requireStore();
     const artifact = await this.queryArtifactDescriptor(artifactId);
@@ -1099,6 +1246,17 @@ export class EtherApplication implements EtherApplicationService {
     const store = this.requireStore();
     const artifact = await this.queryArtifactDescriptor(artifactId);
     yield* streamBlobRange(store, artifact.contentKey, start, endExclusive);
+  }
+
+  async *streamArtifactAssetRange(
+    artifactId: string,
+    variant: "original" | "thumbnail",
+    start: number,
+    endExclusive: number
+  ): AsyncGenerator<Buffer, void, void> {
+    const store = this.requireStore();
+    const descriptor = await this.queryArtifactAssetDescriptor(artifactId, variant);
+    yield* streamBlobRange(store, descriptor.contentKey, start, endExclusive);
   }
 
   async queryGraph(graphId: string): Promise<EtherGraph> {
@@ -1126,7 +1284,11 @@ export class EtherApplication implements EtherApplicationService {
         inputs: []
       };
     }
-    const capabilities = await planningCapabilities(snapshot.graph, this.options.provider, this.options.providerCapabilities);
+    const capabilities = await planningCapabilities(
+      snapshot.graph,
+      this.options.provider,
+      await this.boundaryConfiguredProviderCapabilities()
+    );
     const plan = compilePlan({
       id: `preview-${randomUUID()}`,
       documentId: store.documentId,
@@ -1220,9 +1382,12 @@ export class EtherApplication implements EtherApplicationService {
   }): Promise<ExportRecord[]> {
     const store = this.requireWritableStore();
     const duplicate = await store.read(({ execution }) => execution.getCommandResult(input.commandId, "artifact.export"));
-    if (duplicate !== undefined) return duplicate.records as ExportRecord[];
-    const root = this.requirePathGrant(input.pathGrantId, "export").path;
-    await requireDirectory(root);
+    if (duplicate !== undefined) {
+      const records = duplicate.records as ExportRecord[];
+      for (const record of records) await this.materializeExport(record);
+      return store.read(({ exports }) => records.map((record) => exports.get(record.id)!));
+    }
+    await this.revalidatePathGrant(input.pathGrantId, "export");
     const exportDetails = await Promise.all(input.artifactIds.map((artifactId) => store.read(({ artifacts }) => artifacts.detail(artifactId))));
     const records = await store.transaction(({ artifacts, exports }) => input.artifactIds.map((artifactId, index) => {
       const artifact = artifacts.get(artifactId);
@@ -1251,7 +1416,7 @@ export class EtherApplication implements EtherApplicationService {
         }
       });
     }));
-    for (const record of records) await this.materializeExport(record, root);
+    for (const record of records) await this.materializeExport(record);
     const completed = await store.transaction(({ execution, exports }) => {
       const current = records.map((record) => exports.get(record.id)!);
       execution.completeCommand(input.commandId, "artifact.export", { records: current }, current.map((record) => ({
@@ -1270,9 +1435,12 @@ export class EtherApplication implements EtherApplicationService {
     const record = await store.read(({ exports }) => exports.get(exportId));
     if (record === undefined) throw new ApplicationServiceError("EXPORT_NOT_FOUND", `Unknown export ${exportId}.`);
     if (record.pathGrantId === null) throw new ApplicationServiceError("PATH_PERMISSION_REQUIRED", "The export has no path grant.");
-    const root = this.requirePathGrant(record.pathGrantId, "export").path;
+    await this.revalidatePathGrant(record.pathGrantId, "export");
     await store.transaction(({ exports }) => { if (record.status !== "committed") exports.setStatus(record.id, "planned", null); });
-    await this.materializeExport({ ...record, status: record.status === "committed" ? "committed" : "planned" }, root);
+    await this.materializeExport({
+      ...record,
+      status: record.status === "committed" ? "committed" : "planned"
+    });
     return store.transaction(({ execution, exports }) => {
       const current = exports.get(record.id)!;
       execution.completeCommand(commandId, "export.retry", { records: [current] }, [{
@@ -1314,8 +1482,15 @@ export class EtherApplication implements EtherApplicationService {
     return result;
   }
 
-  private async materializeExport(record: ExportRecord, root: string): Promise<void> {
-    if (record.status === "committed" || record.status === "skipped") return;
+  private async materializeExport(record: ExportRecord): Promise<void> {
+    if (record.status === "skipped") return;
+    const requestedSidecars = record.options?.includeMetadataSidecar === true ||
+      record.options?.includeLineageReport === true;
+    if (record.status === "committed" && !requestedSidecars) return;
+    if (record.pathGrantId === null) {
+      throw new ApplicationServiceError("PATH_PERMISSION_REQUIRED", "The export has no path grant.");
+    }
+    const root = (await this.revalidatePathGrant(record.pathGrantId, "export")).path;
     const artifact = await this.queryArtifactDescriptor(record.artifactId!);
     if (artifact.contentKey !== record.contentKey) {
       throw new ApplicationServiceError("EXPORT_SOURCE_CHANGED", "The export record no longer matches its immutable artifact source.");
@@ -1323,12 +1498,19 @@ export class EtherApplication implements EtherApplicationService {
     const sourceBytes = await this.readArtifactBytes(artifact.id);
     const format = exportFormat(record.options?.format);
     const bytes = await transcodeArtifactForExport(sourceBytes, artifact.mediaType, format);
-    const exportedContentKey = createHash("sha256").update(bytes).digest("hex");
+    const detail = requestedSidecars
+      ? await this.requireStore().read(({ artifacts }) => artifacts.detail(artifact.id))
+      : undefined;
+    if (requestedSidecars && detail === undefined) {
+      throw new ApplicationServiceError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifact.id}.`);
+    }
+
     let relativePath = record.relativePath;
-    let destination = containedPath(root, relativePath);
+    let outputs = exportBundleOutputs(relativePath, bytes, detail, record);
+    await prepareExportBundleParents(root, outputs);
     const policy = String(record.options?.collisionPolicy ?? "error");
-    const occupied = await fileHash(destination);
-    if (occupied !== null && occupied !== exportedContentKey) {
+    let collisions = await inspectExportBundle(root, outputs);
+    if (collisions.some((entry) => entry === "different")) {
       if (policy === "skip") {
         await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "skipped"); });
         return;
@@ -1337,37 +1519,77 @@ export class EtherApplication implements EtherApplicationService {
         await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "failed"); });
         throw new ApplicationServiceError("EXPORT_COLLISION", `Export destination already exists: ${relativePath}`);
       }
-      ({ relativePath, destination } = await availableExportPath(root, relativePath));
+      ({ relativePath, outputs, collisions } = await availableExportBundlePath(
+        root,
+        relativePath,
+        bytes,
+        detail,
+        record
+      ));
       await this.requireWritableStore().transaction(({ exports }) => { exports.setRelativePath(record.id, relativePath); });
     }
-    if (occupied === exportedContentKey) {
-      await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "committed"); });
-      return;
+
+    const bundle = await prepareDurableExportBundle(
+      this.options.appDataRoot,
+      this.requireStore().documentId,
+      record.id,
+      root,
+      outputs,
+      collisions
+    );
+    if (record.status !== "committed") {
+      await this.requireWritableStore().transaction(({ exports }) => {
+        exports.setStatus(record.id, "staged", null);
+      });
     }
-    const temporary = `${destination}.${record.id}.ether-export.tmp`;
-    await mkdir(path.dirname(destination), { recursive: true });
-    await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "staged", null); });
-    await writeFile(temporary, bytes, { flag: "w" });
-    await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "written", null); });
-    await rename(temporary, destination);
-    if (await fileHash(destination) !== exportedContentKey) {
-      await this.requireWritableStore().transaction(({ exports }) => { exports.setStatus(record.id, "failed"); });
-      throw new ApplicationServiceError("EXPORT_VERIFY_FAILED", `Export verification failed: ${relativePath}`);
-    }
-    await this.requireWritableStore().transaction(({ exports }) => {
-      exports.setStatus(record.id, "verified", null);
-      exports.setStatus(record.id, "committed");
-    });
-    if (record.options?.includeMetadataSidecar === true || record.options?.includeLineageReport === true) {
-      const detail = await this.requireStore().read(({ artifacts }) => artifacts.detail(artifact.id));
-      if (detail !== undefined) {
-        if (record.options.includeMetadataSidecar === true) {
-          await writeFile(`${destination}.metadata.json`, JSON.stringify({ artifact: detail.artifact, tags: detail.tags, ratings: detail.ratings, evaluation: detail.evaluation }, null, 2));
+    try {
+      const publicationOutputs = [];
+      for (const [index, output] of outputs.entries()) {
+        const currentGrant = await this.revalidatePathGrant(record.pathGrantId, "export");
+        if (!samePath(currentGrant.path, root)) {
+          throw new ApplicationServiceError(
+            "PATH_GRANT_CHANGED",
+            "The export root changed before bundle publication."
+          );
         }
-        if (record.options.includeLineageReport === true) {
-          await writeFile(`${destination}.lineage.json`, JSON.stringify({ artifactId: artifact.id, lineage: detail.lineage }, null, 2));
-        }
+        const destination = containedPath(root, output.relativePath);
+        await this.options.exportCheckpoint?.("before-open", destination);
+        publicationOutputs.push({
+          destination,
+          expectedByteLength: output.bytes.byteLength,
+          expectedHash: output.hash,
+          publicationId: stableExportPublicationId(record.id, output.relativePath),
+          sourcePath: bundle.sourcePaths[index]!
+        });
       }
+      await publishAtomicExportBundle({
+        onOutputPublished: async (output, index) => {
+          await markDurableExportOutputSatisfied(bundle, index);
+          await this.options.exportCheckpoint?.("after-output", output.destination);
+        },
+        outputs: publicationOutputs,
+        root
+      });
+      const verified = await inspectExportBundle(root, outputs);
+      if (verified.some((entry) => entry !== "matching")) {
+        throw new ApplicationServiceError(
+          "EXPORT_VERIFY_FAILED",
+          "The complete export bundle could not be verified."
+        );
+      }
+      await this.requireWritableStore().transaction(({ exports }) => {
+        exports.setStatus(record.id, "written", null);
+        exports.setStatus(record.id, "verified", null);
+        exports.setStatus(record.id, "committed");
+      });
+      await rm(bundle.root, { recursive: true, force: true });
+    } catch (error) {
+      if ((error as { code?: unknown }).code === "EXPORT_COLLISION") {
+        await this.requireWritableStore().transaction(({ exports }) => {
+          exports.setStatus(record.id, "failed", null);
+        });
+      }
+      throw error;
     }
   }
 
@@ -1391,12 +1613,30 @@ export class EtherApplication implements EtherApplicationService {
       if (store.mode.kind !== "writable") return;
       const events = await store.read(({ execution }) => execution.listPendingEvents());
       for (const event of events) {
+        this.emitDiagnostic({
+          correlationId: event.correlationId,
+          details: {
+            applicationEventId: event.id,
+            applicationEventName: event.name
+          },
+          event: `application.event.${event.name}`,
+          level: "info",
+          message: `Application event ${event.name} was published.`
+        });
         if (!this.events.publish(event)) return;
         await store.transaction(({ execution }) => execution.markEventDelivered(event.id));
       }
     };
     this.eventDrain = this.eventDrain.then(drain, drain);
     return this.eventDrain;
+  }
+
+  private emitDiagnostic(record: ApplicationDiagnosticRecord): void {
+    try {
+      this.options.onDiagnostic?.(record);
+    } catch {
+      // Diagnostics are observational and cannot alter application behavior.
+    }
   }
 
   private requireStore(): DocumentStore {
@@ -1605,40 +1845,83 @@ export class EtherApplication implements EtherApplicationService {
     const temporaryRoot = path.join(this.options.appDataRoot, "local-output-ingress");
     await mkdir(temporaryRoot, { recursive: true });
     const temporaryPath = path.join(temporaryRoot, `${artifactId}.incoming`);
-    await writeFile(temporaryPath, bytes, { flag: "wx" }).catch(async (error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
-      const existing = await readFile(temporaryPath);
-      if (!existing.equals(bytes)) throw new ApplicationServiceError("LOCAL_OUTPUT_INGRESS_CONFLICT", "A conflicting local output ingress file already exists.");
-    });
+    const thumbnailBytes = await createEmbeddedThumbnail(bytes);
+    const thumbnailTemporaryPath = path.join(temporaryRoot, `${artifactId}.thumbnail.webp.incoming`);
     try {
-      const blob = await importBlob(store, { sourcePath: temporaryPath, mediaType: input.mediaType }, { appDataRoot: this.options.appDataRoot });
-      const artifact: Artifact = {
-        id: artifactId,
-        contentKey: blob.contentKey,
-        channel: input.channel,
-        mediaType: input.mediaType,
-        byteLength: bytes.byteLength,
-        source: { outputVersionId, payloadId },
-        createdAt: at,
-        metadata: provenance
-      };
-      return await store.transaction(({ artifacts, execution, outputs }) => {
-        const raced = execution.getCommandResult(input.commandId, "editWorkspace.commit");
-        if (raced !== undefined) return raced as { outputVersion: NodeOutputVersion; artifact: Artifact };
-        outputs.insert(outputVersion, [payload]);
-        artifacts.attach(artifact);
-        if (sourceArtifact !== undefined) artifacts.addLineage({
-          artifactId, parentArtifactId: sourceArtifact.id, relation: "edited-from",
-          sourceOutputVersionId: outputVersionId,
-          metadata: { role: "general", editCapabilityMode: input.editState?.capability.mode ?? "unknown" }
-        });
-        return execution.completeCommand(input.commandId, "editWorkspace.commit", { outputVersion, artifact }, [
-          { name: "output.created", payload: { outputVersionId, parentOutputVersionId: null } },
-          { name: "artifact.changed", payload: { artifactId, change: "created" } }
-        ]) as { outputVersion: NodeOutputVersion; artifact: Artifact };
+      await writeFile(temporaryPath, bytes, { flag: "wx" }).catch(async (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+        const existing = await readFile(temporaryPath);
+        if (!existing.equals(bytes)) throw new ApplicationServiceError("LOCAL_OUTPUT_INGRESS_CONFLICT", "A conflicting local output ingress file already exists.");
       });
+      await writeFile(thumbnailTemporaryPath, thumbnailBytes, { flag: "wx" }).catch(async (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+        const existing = await readFile(thumbnailTemporaryPath);
+        if (!existing.equals(thumbnailBytes)) {
+          throw new ApplicationServiceError(
+            "LOCAL_OUTPUT_INGRESS_CONFLICT",
+            "A conflicting local output thumbnail ingress file already exists."
+          );
+        }
+      });
+      const importedContentKeys: string[] = [];
+      try {
+        const blob = await importBlob(
+          store,
+          { sourcePath: temporaryPath, mediaType: input.mediaType },
+          { appDataRoot: this.options.appDataRoot }
+        );
+        importedContentKeys.push(blob.contentKey);
+        const thumbnailBlob = await importBlob(
+          store,
+          { sourcePath: thumbnailTemporaryPath, mediaType: "image/webp" },
+          { appDataRoot: this.options.appDataRoot }
+        );
+        importedContentKeys.push(thumbnailBlob.contentKey);
+        const artifact: Artifact = {
+          id: artifactId,
+          contentKey: blob.contentKey,
+          channel: input.channel,
+          mediaType: input.mediaType,
+          byteLength: bytes.byteLength,
+          source: { outputVersionId, payloadId },
+          createdAt: at,
+          metadata: {
+            ...provenance,
+            thumbnailByteLength: thumbnailBlob.byteLength,
+            thumbnailContentKey: thumbnailBlob.contentKey,
+            thumbnailMediaType: thumbnailBlob.mediaType
+          }
+        };
+        return await store.transaction(({ artifacts, execution, outputs }) => {
+          const raced = execution.getCommandResult(input.commandId, "editWorkspace.commit");
+          if (raced !== undefined) return raced as { outputVersion: NodeOutputVersion; artifact: Artifact };
+          outputs.insert(outputVersion, [payload]);
+          artifacts.attach(artifact);
+          if (sourceArtifact !== undefined) artifacts.addLineage({
+            artifactId, parentArtifactId: sourceArtifact.id, relation: "edited-from",
+            sourceOutputVersionId: outputVersionId,
+            metadata: { role: "general", editCapabilityMode: input.editState?.capability.mode ?? "unknown" }
+          });
+          return execution.completeCommand(input.commandId, "editWorkspace.commit", { outputVersion, artifact }, [
+            { name: "output.created", payload: { outputVersionId, parentOutputVersionId: null } },
+            { name: "artifact.changed", payload: { artifactId, change: "created" } }
+          ]) as { outputVersion: NodeOutputVersion; artifact: Artifact };
+        });
+      } catch (error) {
+        try {
+          await store.reclaimUnreferencedReadyBlobs(importedContentKeys);
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Local output publication failed and its unreferenced imported blobs could not be reclaimed.",
+            { cause: cleanupError }
+          );
+        }
+        throw error;
+      }
     } finally {
       await unlink(temporaryPath).catch(() => undefined);
+      await unlink(thumbnailTemporaryPath).catch(() => undefined);
     }
   }
 
@@ -1733,7 +2016,7 @@ async function planningCapabilities(
     provenance: "static-constraint",
     limitations: ["Local execution capability; no external provider call."]
   };
-  const all = uniqueCapabilities([...configured, ...discovered, local].map((capability) => {
+  const all = uniqueCapabilities([...discovered, ...configured, local].map((capability) => {
     const runtimeCap = runtimeParallelism.get(`${capability.providerId}\u0000${capability.profileId}`);
     if (runtimeCap === undefined) return capability;
     return {
@@ -1886,13 +2169,383 @@ export async function transcodeArtifactForExport(
   }
 }
 
+async function createEmbeddedThumbnail(source: Uint8Array): Promise<Buffer> {
+  try {
+    return await sharp(source, { failOn: "error" })
+      .rotate()
+      .resize({ width: 320, height: 320, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 76, effort: 4 })
+      .toBuffer();
+  } catch (error) {
+    throw new ApplicationServiceError(
+      "ARTIFACT_THUMBNAIL_CREATE_FAILED",
+      "The image could not produce a safe embedded thumbnail.",
+      { cause: error }
+    );
+  }
+}
+
+function thumbnailDescriptor(
+  artifact: Artifact
+): { byteLength: number; contentKey: string; mediaType: string } | null {
+  const thumbnail = readArtifactThumbnailMetadata(artifact.metadata);
+  if (thumbnail === null) return null;
+  return {
+    byteLength: thumbnail.thumbnailByteLength,
+    contentKey: thumbnail.thumbnailContentKey.toLowerCase(),
+    mediaType: thumbnail.thumbnailMediaType
+  };
+}
+
 function stableApplicationId(prefix: string, ...parts: string[]): string {
   return `${prefix}-${createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32)}`;
 }
 
-async function requireDirectory(directoryPath: string): Promise<void> {
-  const info = await stat(directoryPath);
-  if (!info.isDirectory()) throw new ApplicationServiceError("PATH_GRANT_KIND_MISMATCH", "The path grant does not resolve to a directory.");
+function samePath(left: string, right: string): boolean {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return process.platform === "win32"
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
+}
+
+interface ExportBundleArtifactDetail {
+  artifact: unknown;
+  evaluation: unknown;
+  lineage: unknown;
+  ratings: unknown;
+  tags: unknown;
+}
+
+interface ExportBundleOutput {
+  bytes: Buffer;
+  hash: string;
+  kind: "lineage" | "main" | "metadata";
+  relativePath: string;
+}
+
+type ExportBundleCollision = "different" | "matching" | "missing";
+
+interface DurableExportBundleManifest {
+  documentId: string;
+  exportId: string;
+  outputs: Array<{
+    byteLength: number;
+    hash: string;
+    kind: ExportBundleOutput["kind"];
+    relativePath: string;
+    sourceName: string;
+    status: "pending" | "satisfied";
+  }>;
+  root: string;
+  version: 1;
+}
+
+interface PreparedDurableExportBundle {
+  manifest: DurableExportBundleManifest;
+  manifestPath: string;
+  root: string;
+  sourcePaths: string[];
+}
+
+function exportBundleOutputs(
+  relativePath: string,
+  mainBytes: Uint8Array,
+  detail: ExportBundleArtifactDetail | undefined,
+  record: ExportRecord
+): ExportBundleOutput[] {
+  const outputs: Array<{ bytes: Buffer; kind: ExportBundleOutput["kind"]; relativePath: string }> = [{
+    bytes: Buffer.from(mainBytes),
+    kind: "main",
+    relativePath
+  }];
+  if (record.options?.includeMetadataSidecar === true && detail !== undefined) {
+    outputs.push({
+      bytes: Buffer.from(JSON.stringify({
+        artifact: detail.artifact,
+        tags: detail.tags,
+        ratings: detail.ratings,
+        evaluation: detail.evaluation
+      }, null, 2), "utf8"),
+      kind: "metadata",
+      relativePath: `${relativePath}.metadata.json`
+    });
+  }
+  if (record.options?.includeLineageReport === true && detail !== undefined) {
+    outputs.push({
+      bytes: Buffer.from(JSON.stringify({
+        artifactId: record.artifactId,
+        lineage: detail.lineage
+      }, null, 2), "utf8"),
+      kind: "lineage",
+      relativePath: `${relativePath}.lineage.json`
+    });
+  }
+  return outputs.map((output) => ({
+    ...output,
+    hash: createHash("sha256").update(output.bytes).digest("hex")
+  }));
+}
+
+async function prepareExportBundleParents(
+  root: string,
+  outputs: readonly ExportBundleOutput[]
+): Promise<void> {
+  for (const output of outputs) {
+    await prepareExportDestinationParent(root, containedPath(root, output.relativePath));
+  }
+}
+
+async function inspectExportBundle(
+  root: string,
+  outputs: readonly ExportBundleOutput[]
+): Promise<ExportBundleCollision[]> {
+  return Promise.all(outputs.map(async (output) => {
+    const occupied = await authorizedExportFileHash(root, containedPath(root, output.relativePath));
+    if (occupied === null) return "missing";
+    return occupied === output.hash ? "matching" : "different";
+  }));
+}
+
+async function availableExportBundlePath(
+  root: string,
+  relativePath: string,
+  mainBytes: Uint8Array,
+  detail: ExportBundleArtifactDetail | undefined,
+  record: ExportRecord
+): Promise<{
+  collisions: ExportBundleCollision[];
+  outputs: ExportBundleOutput[];
+  relativePath: string;
+}> {
+  const extension = path.extname(relativePath);
+  const stem = relativePath.slice(0, relativePath.length - extension.length);
+  for (let index = 2; index <= 10_000; index += 1) {
+    const candidate = `${stem}-${index}${extension}`;
+    const outputs = exportBundleOutputs(candidate, mainBytes, detail, record);
+    await prepareExportBundleParents(root, outputs);
+    const collisions = await inspectExportBundle(root, outputs);
+    if (collisions.every((entry) => entry !== "different")) {
+      return { collisions, outputs, relativePath: candidate };
+    }
+  }
+  throw new ApplicationServiceError(
+    "EXPORT_COLLISION_EXHAUSTED",
+    `No collision-free export bundle name is available for ${relativePath}.`
+  );
+}
+
+async function writeDurableExportFile(filePath: string, bytes: Uint8Array): Promise<void> {
+  const expectedHash = createHash("sha256").update(bytes).digest("hex");
+  if (await authorizedOwnedFileMatches(filePath, expectedHash, bytes.byteLength)) return;
+  await unlink(filePath).catch((error: { code?: unknown }) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+  const temporary = `${filePath}.${randomUUID()}.incoming`;
+  const descriptor = await open(temporary, "wx", 0o600);
+  try {
+    await descriptor.writeFile(bytes);
+    await descriptor.sync();
+  } finally {
+    await descriptor.close();
+  }
+  await rename(temporary, filePath);
+}
+
+async function authorizedOwnedFileMatches(
+  filePath: string,
+  expectedHash: string,
+  expectedByteLength: number
+): Promise<boolean> {
+  try {
+    const info = await lstat(filePath);
+    if (!info.isFile() || info.isSymbolicLink() || info.size !== expectedByteLength) return false;
+    return createHash("sha256").update(await readFile(filePath)).digest("hex") === expectedHash;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function writeDurableExportManifest(
+  manifestPath: string,
+  manifest: DurableExportBundleManifest
+): Promise<void> {
+  const temporary = `${manifestPath}.${randomUUID()}.next`;
+  const descriptor = await open(temporary, "wx", 0o600);
+  try {
+    await descriptor.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await descriptor.sync();
+  } finally {
+    await descriptor.close();
+  }
+  await rename(temporary, manifestPath);
+}
+
+async function prepareDurableExportBundle(
+  appDataRoot: string,
+  documentId: string,
+  exportId: string,
+  root: string,
+  outputs: readonly ExportBundleOutput[],
+  collisions: readonly ExportBundleCollision[]
+): Promise<PreparedDurableExportBundle> {
+  const materializationId = stableExportPublicationId(documentId, exportId);
+  const ownedRoot = path.resolve(appDataRoot, "export-materializations");
+  const bundleRoot = path.resolve(ownedRoot, materializationId);
+  const relative = path.relative(ownedRoot, bundleRoot);
+  if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new ApplicationServiceError("EXPORT_MANIFEST_INVALID", "The durable export bundle escaped app data.");
+  }
+  await mkdir(bundleRoot, { recursive: true });
+  const sourcePaths: string[] = [];
+  const manifest: DurableExportBundleManifest = {
+    documentId,
+    exportId,
+    outputs: outputs.map((output, index) => {
+      const sourceName = `output-${index}-${output.kind}.bin`;
+      sourcePaths.push(path.join(bundleRoot, sourceName));
+      return {
+        byteLength: output.bytes.byteLength,
+        hash: output.hash,
+        kind: output.kind,
+        relativePath: output.relativePath,
+        sourceName,
+        status: collisions[index] === "matching" ? "satisfied" : "pending"
+      };
+    }),
+    root: path.resolve(root),
+    version: 1
+  };
+  for (const [index, output] of outputs.entries()) {
+    await writeDurableExportFile(sourcePaths[index]!, output.bytes);
+  }
+  const manifestPath = path.join(bundleRoot, "manifest.json");
+  await writeDurableExportManifest(manifestPath, manifest);
+  return { manifest, manifestPath, root: bundleRoot, sourcePaths };
+}
+
+async function markDurableExportOutputSatisfied(
+  bundle: PreparedDurableExportBundle,
+  index: number
+): Promise<void> {
+  bundle.manifest.outputs[index]!.status = "satisfied";
+  await writeDurableExportManifest(bundle.manifestPath, bundle.manifest);
+}
+
+export async function prepareExportDestinationParent(
+  root: string,
+  destination: string
+): Promise<void> {
+  await captureExportParentChain(root, destination, true);
+}
+
+interface ExportPathIdentity {
+  birthtimeNs: string;
+  canonicalPath: string;
+  dev: string;
+  ino: string;
+}
+
+function exportPathIdentity(
+  canonicalPath: string,
+  info: { birthtimeNs: bigint; dev: bigint; ino: bigint }
+): ExportPathIdentity {
+  return {
+    birthtimeNs: info.birthtimeNs.toString(),
+    canonicalPath: process.platform === "win32" ? canonicalPath.toLowerCase() : canonicalPath,
+    dev: info.dev.toString(),
+    ino: info.ino.toString()
+  };
+}
+
+function sameExportPathIdentity(left: ExportPathIdentity, right: ExportPathIdentity): boolean {
+  return left.birthtimeNs === right.birthtimeNs &&
+    left.canonicalPath === right.canonicalPath &&
+    left.dev === right.dev &&
+    left.ino === right.ino;
+}
+
+function sameExportParentChain(
+  left: readonly ExportPathIdentity[],
+  right: readonly ExportPathIdentity[]
+): boolean {
+  return left.length === right.length &&
+    left.every((identity, index) => sameExportPathIdentity(identity, right[index]!));
+}
+
+async function captureExportParentChain(
+  root: string,
+  destination: string,
+  createMissing: boolean
+): Promise<ExportPathIdentity[]> {
+  const resolvedRoot = path.resolve(root);
+  const resolvedDestination = path.resolve(destination);
+  const relativeDestination = path.relative(resolvedRoot, resolvedDestination);
+  if (
+    relativeDestination.length === 0 ||
+    relativeDestination === ".." ||
+    relativeDestination.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeDestination)
+  ) {
+    throw new ApplicationServiceError("PATH_ESCAPE", "The export destination escaped its granted root.");
+  }
+  const parent = path.dirname(resolvedDestination);
+  const relativeParent = path.relative(resolvedRoot, parent);
+  const identities: ExportPathIdentity[] = [];
+  let current = resolvedRoot;
+  const parents = [resolvedRoot, ...relativeParent.split(path.sep).filter(Boolean).map((segment) => {
+    current = path.join(current, segment);
+    return current;
+  })];
+  for (const [index, directory] of parents.entries()) {
+    if (createMissing && index > 0) {
+      try {
+        await mkdir(directory);
+      } catch (error) {
+        if ((error as { code?: unknown }).code !== "EEXIST") throw error;
+      }
+    }
+    const before = await lstat(directory, { bigint: true });
+    if (!before.isDirectory() || before.isSymbolicLink()) {
+      throw new ApplicationServiceError(
+        index === 0 ? "PATH_GRANT_KIND_MISMATCH" : "PATH_ESCAPE",
+        index === 0
+          ? "The export grant root must remain a real directory."
+          : "Export destination parents cannot contain symbolic links or junctions."
+      );
+    }
+    const canonical = await realpath(directory);
+    const canonicalRoot = identities[0]?.canonicalPath ?? (
+      process.platform === "win32" ? resolvedRoot.toLowerCase() : resolvedRoot
+    );
+    const normalizedCanonical = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+    const relative = path.relative(canonicalRoot, normalizedCanonical);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new ApplicationServiceError(
+        "PATH_ESCAPE",
+        "The export destination parent escaped its granted root."
+      );
+    }
+    if (index === 0 && !samePath(canonical, resolvedRoot)) {
+      throw new ApplicationServiceError(
+        "PATH_ESCAPE",
+        "The export root cannot be a symbolic link or junction."
+      );
+    }
+    const after = await lstat(directory, { bigint: true });
+    const beforeIdentity = exportPathIdentity(normalizedCanonical, before);
+    const afterIdentity = exportPathIdentity(normalizedCanonical, after);
+    if (
+      !after.isDirectory() ||
+      after.isSymbolicLink() ||
+      !sameExportPathIdentity(beforeIdentity, afterIdentity)
+    ) {
+      throw new ApplicationServiceError("PATH_GRANT_CHANGED", "An export destination parent changed during validation.");
+    }
+    identities.push(afterIdentity);
+  }
+  return identities;
 }
 
 function containedPath(root: string, relativePath: string): string {
@@ -1904,30 +2557,44 @@ function containedPath(root: string, relativePath: string): string {
   return candidate;
 }
 
-async function fileHash(filePath: string): Promise<string | null> {
+async function authorizedExportFileHash(root: string, filePath: string): Promise<string | null> {
+  const beforeOpen = await captureExportParentChain(root, filePath, true);
+  let descriptor: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const info = await stat(filePath);
-    if (!info.isFile()) return "occupied";
-    return createHash("sha256").update(await readFile(filePath)).digest("hex");
+    descriptor = await open(filePath, "r");
+    const opened = await descriptor.stat({ bigint: true });
+    const current = await lstat(filePath, { bigint: true });
+    if (!opened.isFile() || !current.isFile() || current.isSymbolicLink()) return "occupied";
+    const openedIdentity = exportPathIdentity(path.resolve(filePath), opened);
+    const currentIdentity = exportPathIdentity(path.resolve(filePath), current);
+    if (
+      openedIdentity.birthtimeNs !== currentIdentity.birthtimeNs ||
+      openedIdentity.dev !== currentIdentity.dev ||
+      openedIdentity.ino !== currentIdentity.ino
+    ) {
+      throw new ApplicationServiceError("PATH_GRANT_CHANGED", "The export collision target changed while it was opened.");
+    }
+    const afterOpen = await captureExportParentChain(root, filePath, false);
+    if (!sameExportParentChain(beforeOpen, afterOpen)) {
+      throw new ApplicationServiceError("PATH_GRANT_CHANGED", "An export destination parent changed during collision inspection.");
+    }
+    const bytes = await descriptor.readFile();
+    const afterRead = await captureExportParentChain(root, filePath, false);
+    if (!sameExportParentChain(beforeOpen, afterRead)) {
+      throw new ApplicationServiceError("PATH_GRANT_CHANGED", "An export destination parent changed during collision inspection.");
+    }
+    return createHash("sha256").update(bytes).digest("hex");
   } catch (error) {
     const code = typeof error === "object" && error !== null && "code" in error
       ? String((error as { code?: unknown }).code)
       : "";
     if (code === "ENOENT") return null;
     throw error;
+  } finally {
+    await descriptor?.close();
   }
 }
 
-async function availableExportPath(root: string, relativePath: string): Promise<{ destination: string; relativePath: string }> {
-  const extension = path.extname(relativePath);
-  const stem = relativePath.slice(0, relativePath.length - extension.length);
-  for (let index = 2; index <= 10_000; index += 1) {
-    const candidate = `${stem}-${index}${extension}`;
-    const destination = containedPath(root, candidate);
-    if (await fileHash(destination) === null) return { destination, relativePath: candidate };
-  }
-  throw new ApplicationServiceError("EXPORT_COLLISION_EXHAUSTED", `No collision-free export name is available for ${relativePath}.`);
-}
 
 function isExpectedReferenceUnavailable(error: unknown): boolean {
   const code = typeof error === "object" && error !== null && "code" in error
@@ -1956,6 +2623,20 @@ function mapError(error: unknown): ApplicationServiceError {
     return new ApplicationServiceError(code, error instanceof Error ? error.message : code, { cause: error as unknown as Error });
   }
   return new ApplicationServiceError("APPLICATION_COMMAND_FAILED", error instanceof Error ? error.message : String(error), { cause: error });
+}
+
+const MAX_RETAINED_PERFORMANCE_MEASURES = 1_024;
+
+function recordBoundedPerformanceMeasure(
+  name: string,
+  start: number,
+  end: number,
+  detail?: Record<string, string>
+): void {
+  performance.measure(name, { start, end, detail });
+  if (performance.getEntriesByName(name, "measure").length <= MAX_RETAINED_PERFORMANCE_MEASURES) return;
+  performance.clearMeasures(name);
+  performance.measure(name, { start, end, detail });
 }
 
 function categoryForError(code: string): "document" | "graph" | "provider" | "execution" | "reference" | "security" | "validation" {

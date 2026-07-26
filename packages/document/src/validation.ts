@@ -18,10 +18,11 @@ import { DatabaseSync } from "node:sqlite";
 import type { DocumentHeader } from "@ether/schema";
 
 import {
-  ETHER_PROVISIONAL_PAGE_SIZE,
+  ETHER_PAGE_SIZE,
   ETHER_REQUIRED_FEATURE_PREFIX,
   ETHER_SUPPORTED_REQUIRED_FEATURES
 } from "./format.js";
+import { hardenEtherSqliteConnection } from "./sqliteSecurity.js";
 
 const SQLITE_HEADER_MAGIC = Buffer.from("SQLite format 3\0", "binary");
 const SQLITE_HEADER_SIZE = 100;
@@ -189,7 +190,7 @@ function assertPragmas(pragmas: EtherDocumentPragmas): void {
     autoVacuum: 2,
     foreignKeys: 1,
     journalMode: "delete",
-    pageSize: ETHER_PROVISIONAL_PAGE_SIZE,
+    pageSize: ETHER_PAGE_SIZE,
     synchronous: 2,
     userVersion: ETHER_SCHEMA_VERSION
   };
@@ -462,6 +463,7 @@ function getExpectedSchemaObjects(): SchemaObject[] {
     enableForeignKeyConstraints: true
   });
   try {
+    hardenEtherSqliteConnection(database);
     database.exec(ETHER_SCHEMA_SQL);
     expectedSchemaObjects = readSchemaObjects(database);
     return expectedSchemaObjects;
@@ -647,6 +649,7 @@ export function inspectEtherDocument(filePath: string): EtherDocumentInspection 
       enableForeignKeyConstraints: true,
       readOnly: true
     });
+    hardenEtherSqliteConnection(database);
     assertEtherFileIdentity(absolutePath, identity);
     const inspection = validateEtherDocumentConnection(database, absolutePath);
     assertEtherFileIdentity(absolutePath, identity);

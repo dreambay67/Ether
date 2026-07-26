@@ -37,6 +37,8 @@ export interface ImportBlobResult extends BlobRecord {
   deduplicated: boolean;
 }
 
+export const MAX_EMBEDDED_BLOB_BYTES = 512 * 1024 * 1024;
+
 interface StagedChunk {
   byteLength: number;
   index: number;
@@ -54,6 +56,14 @@ interface StagedBlob {
   journalEntry: RecoveryJournalEntry;
   mediaType: string;
   sourceName: string;
+}
+
+const executableExtensions = new Set([".bat", ".cmd", ".com", ".dll", ".exe", ".js", ".msi", ".ps1", ".scr", ".vbs"]);
+
+function hasExecutableSignature(bytes: Uint8Array): boolean {
+  return (bytes[0] === 0x4d && bytes[1] === 0x5a) ||
+    (bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46) ||
+    (bytes[0] === 0x23 && bytes[1] === 0x21);
 }
 
 export class BlobImportError extends Error {
@@ -76,9 +86,18 @@ async function stageBlob(
   options: ImportBlobOptions
 ): Promise<StagedBlob> {
   const sourcePath = path.resolve(input.sourcePath);
+  if (executableExtensions.has(path.extname(sourcePath).toLowerCase())) {
+    throw new BlobImportError("EXECUTABLE_CONTENT", "Executable files cannot be embedded in Ether documents.");
+  }
   const sourceBefore = await stat(sourcePath, { bigint: true });
   if (!sourceBefore.isFile()) {
     throw new BlobImportError("INVALID_SOURCE", "Blob source must be a regular file.");
+  }
+  if (sourceBefore.size > BigInt(MAX_EMBEDDED_BLOB_BYTES)) {
+    throw new BlobImportError(
+      "BLOB_TOO_LARGE",
+      `Embedded artifacts are limited to ${MAX_EMBEDDED_BLOB_BYTES} bytes. Use a linked reference for larger media.`
+    );
   }
   const roots = resolveRecoveryRoots(options.appDataRoot);
   const importId = `blob-import-${randomUUID()}`;
@@ -138,7 +157,10 @@ async function stageBlob(
   ) {
     throw new BlobImportError("SOURCE_CHANGED", "Blob source changed while it was being staged.");
   }
-  if (firstBytes === undefined || !mediaSignatureMatches(firstBytes, input.mediaType)) {
+  if (firstBytes === undefined || hasExecutableSignature(firstBytes)) {
+    throw new BlobImportError("EXECUTABLE_CONTENT", "Executable content cannot be embedded in Ether documents.");
+  }
+  if (!mediaSignatureMatches(firstBytes, input.mediaType)) {
     throw new BlobImportError(
       "MIME_MISMATCH",
       `Declared media type ${input.mediaType} does not match the file signature.`
@@ -215,6 +237,7 @@ export async function importBlob(
   input: ImportBlobInput,
   options: ImportBlobOptions = {}
 ): Promise<ImportBlobResult> {
+  const importStartedAt = performance.now();
   const staged = await stageBlob(store, input, options);
   options.checkpoint?.("staged");
   const artifact = artifactFor(input, staged);
@@ -253,6 +276,7 @@ export async function importBlob(
     }
     updateJournal(staged, "committed", options.appDataRoot);
     cleanupStaging(staged, options.appDataRoot);
+    completeImportMeasure(importStartedAt);
     return { ...ready, deduplicated: true };
   }
 
@@ -305,5 +329,20 @@ export async function importBlob(
     throw error;
   }
   cleanupStaging(staged, options.appDataRoot);
+  completeImportMeasure(importStartedAt);
   return { ...ready, deduplicated: false };
+}
+
+function completeImportMeasure(startedAt: number): void {
+  const completedAt = performance.now();
+  recordBoundedPerformanceMeasure("artifact-import", startedAt, completedAt);
+}
+
+const MAX_RETAINED_PERFORMANCE_MEASURES = 1_024;
+
+function recordBoundedPerformanceMeasure(name: string, start: number, end: number): void {
+  performance.measure(name, { start, end });
+  if (performance.getEntriesByName(name, "measure").length <= MAX_RETAINED_PERFORMANCE_MEASURES) return;
+  performance.clearMeasures(name);
+  performance.measure(name, { start, end });
 }

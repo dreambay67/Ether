@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -21,8 +22,7 @@ import { registerDocumentHandlers } from "./ipc/registerDocumentHandlers.js";
 import { registerGraphHandlers } from "./ipc/registerGraphHandlers.js";
 import { registerApplicationHandlers } from "./ipc/registerApplicationHandlers.js";
 import {
-  createEtherAssetProtocolHandler,
-  registerEtherAssetScheme
+  createEtherAssetProtocolHandler
 } from "./protocol/etherAssetProtocol.js";
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl.js";
 import { createDesktopSettingsStore } from "./settingsStore.js";
@@ -35,13 +35,27 @@ import {
   type NativeDialogPort
 } from "./services/applicationService.js";
 import { createCodexRuntimeService } from "./services/codexRuntime.js";
-import { createProviderService, type ProviderService } from "./services/providerService.js";
+import {
+  createProviderService,
+  startProviderServiceInBackground,
+  type BackgroundProviderStartup,
+  type ProviderService
+} from "./services/providerService.js";
 import { createDesktopMcpBridgeHost } from "./services/mcpApplicationBridge.js";
-import { createMainWindowOptions } from "./windowOptions.js";
-
-registerEtherAssetScheme(protocol);
+import { installRestrictedNavigationPolicy } from "./security/navigationPolicy.js";
+import {
+  LocalDiagnosticLogger,
+  type DesktopDiagnosticSink
+} from "./diagnostics/localDiagnostics.js";
+import {
+  createRendererInteractiveGate,
+  drainLifecycleSteps,
+  startContainedLifecycle
+} from "./lifecycle.js";
+import { createMainWindowOptions, showMainWindowMaximized } from "./windowOptions.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_RENDERER_INTERACTIVE_TIMEOUT_MS = 10_000;
 
 export interface DesktopStartOptions {
   dialogs?: NativeDialogPort;
@@ -53,6 +67,8 @@ export interface DesktopStartOptions {
   serviceFactory?: (options: DesktopApplicationServiceOptions) => DesktopApplicationService;
   providerService?: ProviderService;
   mcpBridgeFactory?: false | ((host: EtherMcpBridgeHost) => Promise<EtherMcpApplicationBridge>);
+  diagnosticLogger?: DesktopDiagnosticSink;
+  rendererInteractiveTimeoutMs?: number;
 }
 
 export async function startEtherDesktop(options: DesktopStartOptions = {}): Promise<{
@@ -70,19 +86,52 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
 
   await app.whenReady();
   app.setAppUserModelId("com.dreambay.ether");
+  const appVersion = app.getVersion();
+  const appDataRoot = path.join(app.getPath("userData"), "4.0");
+  const diagnosticLogger = options.diagnosticLogger ?? new LocalDiagnosticLogger({
+    appDataRoot,
+    appVersion
+  });
+  const logDiagnostic = (record: Parameters<DesktopDiagnosticSink["log"]>[0]) => {
+    try {
+      diagnosticLogger.log(record);
+    } catch {
+      // Diagnostics must never hide the user-facing failure they are recording.
+    }
+  };
+  const flushDiagnosticsAfterCrash = () => {
+    try {
+      diagnosticLogger.flushSync?.();
+    } catch {
+      // The original crash remains authoritative when local diagnostics cannot flush.
+    }
+  };
+  process.on("uncaughtExceptionMonitor", flushDiagnosticsAfterCrash);
 
   const preloadPath = path.join(moduleDirectory, "..", "preload", "preload.cjs");
   const mainWindow = new BrowserWindow(createMainWindowOptions(preloadPath));
+  mainWindow.once("ready-to-show", () => {
+    showMainWindowMaximized(mainWindow);
+  });
+  const rendererInteractive = createRendererInteractiveGate();
+  const markRendererInteractive = () => rendererInteractive.mark();
   const rendererUrl = options.rendererUrl ?? resolveRendererUrl();
   const dialogs = options.dialogs ?? createNativeDialogPort(() => mainWindow);
+  const settings = createDesktopSettingsStore(() => path.join(app.getPath("userData"), "settings.json"));
+  const initialSettings = await settings.load();
   const providerService = options.simulationMode === true
     ? null
-    : options.providerService ?? createProviderService({ codex: createCodexRuntimeService() });
-  await providerService?.start();
+    : options.providerService ?? createProviderService({
+        codex: createCodexRuntimeService(),
+        antigravityCreditOveragesConfirmed:
+          initialSettings.providerPolicy.antigravityCreditOveragesConfirmed
+      });
+  let providerStartup: BackgroundProviderStartup | null = null;
   const serviceOptions: DesktopApplicationServiceOptions = {
-    appDataRoot: path.join(app.getPath("userData"), "4.0"),
-    appVersion: "4.0.0",
+    appDataRoot,
+    appVersion,
     dialogs,
+    diagnosticSink: diagnosticLogger,
     provider: options.simulationMode === true
       ? new FakeImageProvider()
       : providerService?.codex.generation ?? new UnavailableImageProvider({
@@ -98,6 +147,10 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
       worker: providerService.codex.assistant,
       evaluation: providerService.codex.evaluation
     } } : {}),
+    ...(providerService ? {
+      providerCapabilities: providerService.capabilities,
+      providerResolver: ({ binding }) => providerService.resolveExecutionProviders(binding)
+    } : {}),
     ...(providerService ? { providerLifecycle: providerService } : {}),
     ...(options.locationCapability !== undefined
       ? { locationCapability: options.locationCapability }
@@ -107,10 +160,10 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     ...(options.autosaveOperation === undefined ? {} : { autosaveOperation: options.autosaveOperation })
   };
   const service = options.serviceFactory?.(serviceOptions) ?? new DesktopApplicationService(serviceOptions);
-  const mcpBridge = options.mcpBridgeFactory === false
-    ? null
-    : await (options.mcpBridgeFactory ?? startEtherMcpApplicationBridge)(createDesktopMcpBridgeHost(service));
-  const settings = createDesktopSettingsStore(() => path.join(app.getPath("userData"), "settings.json"));
+  let mcpBridge: EtherMcpApplicationBridge | null = null;
+  let mcpBridgeStartup: Promise<EtherMcpApplicationBridge | null> | null = null;
+  let rendererLoaded = false;
+  let rememberAfterRendererLoad = false;
 
   const rememberCurrentDocument = async () => {
     const documentPath = service.activePath();
@@ -126,19 +179,56 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   };
   const reportFailure = async (error: unknown) => {
     const message = error instanceof Error ? error.message : "Ether could not complete the command.";
+    const candidate = error as { causeId?: unknown; correlationId?: unknown } | null;
+    const correlationId = typeof candidate?.correlationId === "string"
+      ? candidate.correlationId
+      : randomUUID();
+    logDiagnostic({
+      ...(typeof candidate?.causeId === "string" ? { causeId: candidate.causeId } : {}),
+      correlationId,
+      event: "desktop.command.failed",
+      level: "error",
+      message
+    });
     await dialog.showMessageBox(mainWindow, { type: "error", title: "Ether", message });
+  };
+  const rememberWhenRendererLoaded = () => {
+    if (!rendererLoaded) {
+      rememberAfterRendererLoad = true;
+      return;
+    }
+    void rememberCurrentDocument().catch(reportFailure);
+  };
+  const closeMcpBridge = async () => {
+    const bridge = mcpBridge ?? (mcpBridgeStartup === null ? null : await mcpBridgeStartup);
+    await bridge?.close();
   };
   let lifecycleDrainedForQuit = false;
   let quitDrain: Promise<void> | null = null;
   const requestQuitDrain = () => {
     if (quitDrain !== null) return;
-    quitDrain = (mcpBridge?.close() ?? Promise.resolve()).then(() => service.close()).then(() => providerService?.close()).then(() => {
+    markRendererInteractive();
+    quitDrain = (async () => {
+      await drainLifecycleSteps([
+        { name: "mcp", close: closeMcpBridge },
+        { name: "application", close: () => service.close() },
+        {
+          name: "provider",
+          close: () => providerStartup?.close() ?? providerService?.close() ?? Promise.resolve()
+        },
+        { name: "diagnostics", close: () => diagnosticLogger.flush?.() ?? Promise.resolve() }
+      ], ({ error, step }) => {
+        logDiagnostic({
+          correlationId: randomUUID(),
+          details: { step },
+          event: "desktop.lifecycle.drain-failed",
+          level: "error",
+          message: error instanceof Error ? error.message : `Desktop ${step} lifecycle drain failed.`
+        });
+      });
       lifecycleDrainedForQuit = true;
       app.quit();
-    }, async (error) => {
-      quitDrain = null;
-      await reportFailure(error);
-    });
+    })();
   };
   mainWindow.on("close", (event) => {
     if (lifecycleDrainedForQuit) return;
@@ -164,7 +254,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     },
     open: async (documentPath) => {
       await service.openPath(documentPath);
-      await rememberCurrentDocument();
+      rememberWhenRendererLoaded();
     }
   });
   const openController = new OpenDocumentController(coordinator, () => dialogs.openDocument());
@@ -176,13 +266,39 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     await openController.request("drop", documentPath);
     return service.snapshot();
   };
+  let initialDocumentStartup: Promise<unknown> | null = null;
+  let providerPolicyUpdate: Promise<void> = Promise.resolve();
 
   const disposeDocumentHandlers = registerDocumentHandlers({
+    appVersion,
     ipcMain,
     mainWindow,
     rendererUrl,
     service,
     providerService,
+    getProviderPolicy: () => ({
+      antigravityCreditOveragesConfirmed:
+        providerService?.antigravityPolicy().creditOveragesConfirmed ?? false
+    }),
+    setProviderPolicy: providerService === null
+      ? undefined
+      : (confirmed) => {
+          const update = providerPolicyUpdate.then(async () => {
+            try {
+              await providerService.setAntigravityCreditOveragesConfirmed(confirmed);
+              await settings.setAntigravityCreditOveragesConfirmed(confirmed);
+            } catch (error) {
+              await providerService.setAntigravityCreditOveragesConfirmed(false).catch(() => undefined);
+              throw error;
+            }
+            return {
+              antigravityCreditOveragesConfirmed: confirmed
+            };
+          });
+          providerPolicyUpdate = update.then(() => undefined, () => undefined);
+          return update;
+        },
+    bootstrapDocument: () => initialDocumentStartup ?? service.bootstrap(),
     openDocument,
     openPath
   });
@@ -196,14 +312,15 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     ipcMain,
     mainWindow,
     rendererUrl,
-    service
+    service,
+    onRendererInteractive: markRendererInteractive
   });
 
   protocol.handle(
     "ether-asset",
     createEtherAssetProtocolHandler({
       authorize: async (documentId, artifactId, variant) => {
-        if (variant !== "original") return null;
+        if (variant !== "original" && variant !== "thumbnail") return null;
         let active;
         try {
           active = service.snapshot();
@@ -212,7 +329,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
         }
         if (active.documentId !== documentId) return null;
         try {
-          const artifact = await service.artifactDescriptor(documentId, artifactId);
+          const artifact = await service.artifactAssetDescriptor(documentId, artifactId, variant);
           return {
             byteLength: artifact.byteLength,
             contentHash: artifact.contentKey,
@@ -222,8 +339,18 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
           return null;
         }
       },
-      streamRange: (documentId, artifactId, _variant, start, endExclusive) =>
-        service.streamArtifactRange(documentId, artifactId, start, endExclusive)
+      streamRange: (documentId, artifactId, variant, start, endExclusive) => {
+        if (variant !== "original" && variant !== "thumbnail") {
+          throw new Error("Unsupported artifact asset variant.");
+        }
+        return service.streamArtifactAssetRange(
+          documentId,
+          artifactId,
+          variant,
+          start,
+          endExclusive
+        );
+      }
     })
   );
 
@@ -281,17 +408,38 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     () => run(approveMcpEdit),
     () => run(approveMcpRun)
   );
-  installWindowSecurity(mainWindow, rendererUrl);
-  app.setJumpList([{ type: "recent" }]);
-
+  installRestrictedNavigationPolicy(mainWindow.webContents, rendererUrl);
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    markRendererInteractive();
+    logDiagnostic({
+      correlationId: randomUUID(),
+      details: { reason: details.reason, exitCode: details.exitCode },
+      event: "desktop.renderer.gone",
+      level: "error",
+      message: "The Ether renderer process exited unexpectedly."
+    });
+  });
+  logDiagnostic({
+    correlationId: randomUUID(),
+    event: "desktop.lifecycle.ready",
+    level: "info",
+    message: "Ether desktop security and application services are ready."
+  });
   const disposeRecentSubscription = service.subscribe((event) => {
     if (event.snapshot?.named === true) {
       const activePath = service.activePath();
       if (activePath !== null) coordinator.markOpen(activePath);
-      void rememberCurrentDocument().catch(reportFailure);
     } else if (event.snapshot !== undefined) {
       coordinator.clear();
     }
+  });
+  mainWindow.on("closed", () => {
+    process.off("uncaughtExceptionMonitor", flushDiagnosticsAfterCrash);
+    disposeApplicationHandlers();
+    disposeGraphHandlers();
+    disposeDocumentHandlers();
+    disposeApplicationMenu();
+    disposeRecentSubscription();
   });
 
   app.on("second-instance", (_event, argv) => {
@@ -308,21 +456,65 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   });
 
   const initialDocument = findEtherArgument(options.initialArgv ?? process.argv.slice(1));
-  if (initialDocument !== null) await openController.request("argv", initialDocument);
-  else await service.bootstrap();
+  initialDocumentStartup = initialDocument !== null
+    ? openController.request("argv", initialDocument)
+    : service.bootstrap();
+  const rendererStartup = mainWindow.loadURL(rendererUrl);
+  await Promise.all([initialDocumentStartup, rendererStartup]);
+  initialDocumentStartup = null;
   if (quitDrain !== null) {
     await quitDrain;
     return { mainWindow, service, providerService, mcpBridge };
   }
 
-  await mainWindow.loadURL(rendererUrl);
-  mainWindow.on("closed", () => {
-    disposeApplicationHandlers();
-    disposeGraphHandlers();
-    disposeDocumentHandlers();
-    disposeApplicationMenu();
-    disposeRecentSubscription();
-  });
+  const readiness = await rendererInteractive.wait(
+    options.rendererInteractiveTimeoutMs ?? DEFAULT_RENDERER_INTERACTIVE_TIMEOUT_MS
+  );
+  if (readiness === "timeout") {
+    logDiagnostic({
+      correlationId: randomUUID(),
+      details: { timeoutMs: options.rendererInteractiveTimeoutMs ?? DEFAULT_RENDERER_INTERACTIVE_TIMEOUT_MS },
+      event: "desktop.renderer.interactive-timeout",
+      level: "warning",
+      message: "The renderer did not confirm interactivity before the bounded startup fallback."
+    });
+  }
+  if (quitDrain !== null) {
+    await quitDrain;
+    return { mainWindow, service, providerService, mcpBridge };
+  }
+  rendererLoaded = true;
+  app.setJumpList([{ type: "recent" }]);
+  if (rememberAfterRendererLoad) {
+    rememberWhenRendererLoaded();
+  }
+  if (options.mcpBridgeFactory !== false) {
+    const startMcpBridge = options.mcpBridgeFactory ?? startEtherMcpApplicationBridge;
+    mcpBridgeStartup = startContainedLifecycle(
+      () => startMcpBridge(createDesktopMcpBridgeHost(service)),
+      (error) => {
+        logDiagnostic({
+          correlationId: randomUUID(),
+          event: "mcp.lifecycle.start-failed",
+          level: "error",
+          message: error instanceof Error ? error.message : "The Ether MCP bridge failed to start."
+        });
+      }
+    ).then((bridge) => {
+      mcpBridge = bridge;
+      return bridge;
+    });
+  }
+  if (providerService !== null) {
+    providerStartup = startProviderServiceInBackground(providerService, (error) => {
+      logDiagnostic({
+        correlationId: randomUUID(),
+        event: "provider.lifecycle.start-failed",
+        level: "error",
+        message: error instanceof Error ? error.message : "Provider lifecycle failed to start."
+      });
+    });
+  }
   return { mainWindow, service, providerService, mcpBridge };
 }
 
@@ -465,16 +657,6 @@ function installApplicationMenu(
     // The initial document event enables commands after bootstrap.
   }
   return unsubscribe;
-}
-
-function installWindowSecurity(mainWindow: BrowserWindow, rendererUrl: string): void {
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  mainWindow.webContents.on("will-navigate", (event, targetUrl) => {
-    if (targetUrl !== rendererUrl) event.preventDefault();
-  });
-  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false);
-  });
 }
 
 function findEtherArgument(argv: string[]): string | null {

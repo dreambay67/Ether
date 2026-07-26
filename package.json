@@ -1,6 +1,6 @@
 {
   "name": "ether",
-  "version": "0.0.0",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "test": "pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/codex-plugin validate && pnpm run test:unit && pnpm run test:integration && pnpm --filter @ether/testing test:contracts && pnpm run test:smoke",
     "test:unit": "pnpm --filter @ether/testing test:unit",
     "test:integration": "pnpm --filter @ether/testing test:integration",
+    "test:destructive-chaos": "pnpm --filter @ether/testing test:destructive-chaos",
     "test:packaged": "pnpm --filter @ether/testing test:packaged",
     "test:performance": "pnpm --filter @ether/testing test:performance",
     "test:conformance:codex": "pnpm --filter @ether/testing test:conformance:codex",
@@ -19,11 +20,16 @@
     "desktop:dev": "pnpm --filter @ether/desktop dev",
     "desktop:build": "pnpm --filter @ether/desktop build",
     "desktop:package:win": "pnpm desktop:build && node scripts/package-windows.mjs",
+    "release:package:audit": "cross-env ETHER_REQUIRE_RELEASE_AUDIT=1 pnpm --dir packages/testing exec vitest run --config vitest.integration.config.ts tests/windows-package.test.ts",
+    "manual:capture": "node docs/manual/capture-release.mjs",
+    "manual:build": "node docs/manual/build-pdf.mjs",
+    "manual:verify": "python docs/manual/verify-manual.py",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@electron/asar": "3.2.18",
     "@playwright/test": "^1.53.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.8",
@@ -32,6 +38,7 @@
     "concurrently": "^9.2.0",
     "cross-env": "^7.0.3",
     "electron": "^43.1.1",
+    "electron-builder": "26.0.12",
     "esbuild": "^0.25.5",
     "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",

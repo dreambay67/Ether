@@ -1,6 +1,7 @@
 export * from "./plan/compilePlan.js";
 export * from "./plan/batchExpansion.js";
 export * from "./plan/hashPlan.js";
+export * from "./plan/providerConcurrency.js";
 export * from "./plan/scopeResolution.js";
 export * from "./scheduler/scheduler.js";
 export * from "./scheduler/persistence.js";

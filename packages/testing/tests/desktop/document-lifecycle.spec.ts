@@ -2500,6 +2500,7 @@ describe("document IPC lifecycle", () => {
     const mainFrame = { url: "http://127.0.0.1:5173/" };
     const webContents = { id: 7, mainFrame, send: vi.fn() };
     const dispose = registerDocumentHandlers({
+      appVersion: "4.0.0",
       ipcMain: {
         handle: (channel: string, handler: (event: unknown, input: unknown) => Promise<unknown>) => {
           handlers.set(channel, handler);

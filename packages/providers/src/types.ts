@@ -404,11 +404,22 @@ export type ProviderProcessResult = {
   exitCode: number;
 };
 
+export type ProviderExecutionPhase =
+  | "first-event"
+  | "generation-complete"
+  | "provider-validation-complete";
+
 export type ProviderExecutionContext<TResult = ProviderGenerationResult> = {
   signal: AbortSignal;
   providerAttemptId: string;
   attemptOrdinal: number;
   stagingDirectory: string;
+  /**
+   * Reports real provider lifecycle boundaries while the invocation is active.
+   * Providers that do not expose an event stream may omit first-event; the
+   * scheduler still records generation, validation/staging, and import.
+   */
+  reportPhase?: (phase: ProviderExecutionPhase) => void;
   complete: (result: TResult) => Promise<void>;
 };
 

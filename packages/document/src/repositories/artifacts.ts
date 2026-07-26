@@ -1,6 +1,8 @@
 import {
   ArtifactDetailSchema,
+  ArtifactRepairSchema,
   ArtifactSchema,
+  readArtifactThumbnailMetadata,
   type Artifact,
   type ArtifactDetail,
   type ArtifactLineage,
@@ -115,6 +117,39 @@ export class ArtifactRepository {
       createdAt: row.created_at,
       metadata: JSON.parse(row.metadata_json) as unknown
     });
+  }
+
+  getForRepair(id: string): Artifact | undefined {
+    const row = this.context.database
+      .prepare(
+        `SELECT artifact_id, content_key, channel, media_type, byte_length,
+                source_output_version_id, source_payload_id, created_at, metadata_json
+         FROM artifacts WHERE artifact_id = ?`
+      )
+      .get(id) as ArtifactRow | undefined;
+    if (row === undefined) return undefined;
+    return ArtifactRepairSchema.parse({
+      id: row.artifact_id,
+      contentKey: row.content_key,
+      channel: row.channel,
+      mediaType: row.media_type,
+      byteLength: row.byte_length,
+      source: {
+        outputVersionId: row.source_output_version_id,
+        payloadId: row.source_payload_id
+      },
+      createdAt: row.created_at,
+      metadata: JSON.parse(row.metadata_json) as unknown
+    });
+  }
+
+  listForRepair(): Artifact[] {
+    const rows = this.context.database
+      .prepare("SELECT artifact_id FROM artifacts ORDER BY artifact_id")
+      .all() as unknown as Array<{ artifact_id: string }>;
+    return rows
+      .map(({ artifact_id }) => this.getForRepair(artifact_id))
+      .filter((value): value is Artifact => value !== undefined);
   }
 
   list(): Artifact[] {
@@ -422,6 +457,25 @@ export class ArtifactRepository {
         "ARTIFACT_BLOB_MISMATCH",
         "Artifact content identity, length, and media type must match a ready blob."
       );
+    }
+    const thumbnail = readArtifactThumbnailMetadata(artifact.metadata);
+    if (thumbnail !== null) {
+      const thumbnailBlob = this.context.database
+        .prepare("SELECT byte_length, media_type FROM blobs WHERE content_key = ? AND status = 'ready'")
+        .get(thumbnail.thumbnailContentKey) as {
+          byte_length: number;
+          media_type: string;
+        } | undefined;
+      if (
+        thumbnailBlob === undefined ||
+        thumbnailBlob.byte_length !== thumbnail.thumbnailByteLength ||
+        thumbnailBlob.media_type !== thumbnail.thumbnailMediaType
+      ) {
+        throw new BlobRepositoryError(
+          "ARTIFACT_THUMBNAIL_BLOB_MISMATCH",
+          "Artifact thumbnail identity, length, and media type must match a ready blob."
+        );
+      }
     }
     this.validateProvenance(artifact);
     const title = typeof artifact.metadata.title === "string" ? artifact.metadata.title : artifact.id;

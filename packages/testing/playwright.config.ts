@@ -10,6 +10,7 @@ export default defineConfig({
   testMatch: testSuites.smoke.map((target) => target.replace(/^tests\//, "")),
   outputDir: "../../test-results",
   timeout: 30_000,
+  workers: 1,
   use: {
     baseURL,
     trace: "on-first-retry"

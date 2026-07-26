@@ -367,6 +367,25 @@ describe("durable application execution", () => {
     await ready.application.closeDocument();
   });
 
+  it("does not discover providers when an ordinary document has no recovery work", async () => {
+    const ready = await createReadyApplication({ dispatchMode: "manual" });
+    await ready.application.closeDocument();
+    let capabilityQueries = 0;
+    const reopened = new EtherApplication({
+      appDataRoot: ready.appDataRoot,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      providerCapabilities: async () => {
+        capabilityQueries += 1;
+        return [];
+      }
+    });
+
+    await reopened.openDocument({ path: ready.documentPath, access: "require-write" });
+    expect(capabilityQueries).toBe(0);
+    await reopened.closeDocument();
+  });
+
   it("recovers process-lost running work after close and reopen", async () => {
     const ready = await createReadyApplication({ provider: new FakeImageProvider({ delayMs: 200 }) });
     const started = await ready.application.startRun({

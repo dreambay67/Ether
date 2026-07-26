@@ -22,6 +22,8 @@
     "@ether/document": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
     "@ether/providers": "workspace:*",
-    "@ether/schema": "workspace:*"
+    "@ether/schema": "workspace:*",
+    "@img/sharp-win32-x64": "0.35.3",
+    "sharp": "^0.35.3"
   }
 }

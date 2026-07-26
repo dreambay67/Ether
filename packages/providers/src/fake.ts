@@ -82,6 +82,7 @@ export class FakeImageProvider implements GenerationProvider {
       artifacts,
       metadata: { deterministic: true, width, height, outputCount }
     };
+    context?.reportPhase?.("generation-complete");
     await context?.complete(result);
     return result;
   }
@@ -106,12 +107,14 @@ export class FakeImageProvider implements GenerationProvider {
         localTool: fakeLocalToolForOperation(input.operation)
       }
     );
+    context?.reportPhase?.("generation-complete");
     await context?.complete(result);
     return result;
   }
 
   private async beforeOutput(context?: ProviderExecutionContext): Promise<void> {
     if (context?.signal.aborted === true) throw abortError();
+    context?.reportPhase?.("first-event");
     if ((this.options.failAttempts ?? []).includes(context?.attemptOrdinal ?? 1)) {
       throw new FakeProviderError(
         "FAKE_RETRYABLE_FAILURE",

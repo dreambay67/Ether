@@ -1,7 +1,8 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { File, Grip, Image as ImageIcon } from "lucide-react";
 import type { Artifact } from "@ether/schema";
 import { embeddedArtifactSource } from "./embeddedArtifactSource";
+import { markPerformance, measurePerformance } from "../performance/marks";
 
 const columns = 5;
 const rowHeight = 188;
@@ -54,8 +55,40 @@ export function ArtifactGrid({ documentId, artifacts, selectedIds, onToggle, onO
 }
 
 export function ArtifactPreview({ documentId, artifact }: { documentId: string; artifact: Artifact }) {
-  if (artifact.mediaType.startsWith("image/")) return <img className="artifact-embedded-preview" src={embeddedArtifactSource(documentId, artifact.id)} alt="" draggable={false} />;
+  if (artifact.mediaType.startsWith("image/") && hasThumbnail(artifact)) {
+    return <ArtifactImagePreview documentId={documentId} artifact={artifact} />;
+  }
   return <div className="artifact-media-honest">{artifact.channel === "image" ? <ImageIcon size={22} /> : <File size={22} />}<span>{artifact.mediaType}</span><small>Embedded preview unavailable</small></div>;
+}
+
+function ArtifactImagePreview({ documentId, artifact }: { documentId: string; artifact: Artifact }) {
+  const decoded = useRef(false);
+  useEffect(() => {
+    decoded.current = false;
+    markPerformance("thumbnail-decode:start");
+  }, [artifact.id]);
+  return <img
+    className="artifact-embedded-preview"
+    src={embeddedArtifactSource(documentId, artifact.id, "thumbnail")}
+    alt=""
+    draggable={false}
+    onLoad={() => {
+      if (decoded.current) return;
+      decoded.current = true;
+      markPerformance("thumbnail-decode:complete");
+      measurePerformance("thumbnail-decode", "thumbnail-decode:start", "thumbnail-decode:complete");
+    }}
+  />;
+}
+
+function hasThumbnail(artifact: Artifact): boolean {
+  return typeof artifact.metadata.thumbnailContentKey === "string" &&
+    /^[a-f0-9]{64}$/iu.test(artifact.metadata.thumbnailContentKey) &&
+    typeof artifact.metadata.thumbnailByteLength === "number" &&
+    Number.isSafeInteger(artifact.metadata.thumbnailByteLength) &&
+    artifact.metadata.thumbnailByteLength > 0 &&
+    typeof artifact.metadata.thumbnailMediaType === "string" &&
+    artifact.metadata.thumbnailMediaType.startsWith("image/");
 }
 
 export function artifactTitle(artifact: Artifact) {

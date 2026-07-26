@@ -26,6 +26,7 @@ import {
   PayloadEnvelopeSchema,
   PreparedGraphCommitSchema,
   ProviderCapabilitySchema,
+  ProviderCompletionRecoverySchema,
   RecipeManifestSchema,
   ReferenceSetConfigSchema,
   applicationCommandNames,
@@ -257,6 +258,7 @@ const validTransaction = {
 const providerCapability = {
   providerId: "codex",
   profileId: "image-default",
+  modelId: "codex-image-model",
   operation: "generate-image",
   inputChannels: ["text", "image"],
   outputChannels: ["image"],
@@ -907,6 +909,21 @@ describe("Ether 4.0 schema", () => {
     expect(ArtifactSchema.safeParse({ ...artifact, filePath: "C:/legacy/output.png" }).success).toBe(
       false
     );
+    const thumbnail = {
+      thumbnailByteLength: 512,
+      thumbnailContentKey: "b".repeat(64),
+      thumbnailMediaType: "image/webp"
+    };
+    expect(ArtifactSchema.safeParse({ ...artifact, metadata: { ...artifact.metadata, ...thumbnail } }).success)
+      .toBe(true);
+    expect(ArtifactSchema.safeParse({
+      ...artifact,
+      metadata: { ...artifact.metadata, thumbnailContentKey: thumbnail.thumbnailContentKey }
+    }).success).toBe(false);
+    expect(ArtifactSchema.safeParse({
+      ...artifact,
+      metadata: { ...thumbnail, thumbnailMediaType: "text/html" }
+    }).success).toBe(false);
 
     const collection = {
       id: "collection-primary",
@@ -982,6 +999,44 @@ describe("Ether 4.0 schema", () => {
         providerCapabilitySnapshots: [{ ...providerCapability, inputChannels: ["file"] }]
       }).success
     ).toBe(false);
+  });
+
+  it("requires provider recovery thumbnail fields to remain an atomic pair", () => {
+    const completion = {
+      attemptId: "attempt-1",
+      providerAttemptId: "provider-attempt-1",
+      expectedOutputCount: 1,
+      providerRunId: "provider-run-1",
+      capabilitySnapshotId: "capability-1",
+      acceptedAt: "2026-07-17T08:01:00.000Z",
+      providerId: "fake",
+      modelId: "fake-v1",
+      capabilitySnapshot: {},
+      request: {},
+      response: null,
+      metadata: null,
+      outputs: [{
+        ordinal: 0,
+        artifactId: "artifact-1",
+        outputVersionId: "output-1",
+        payloadId: "payload-1",
+        importId: "import-1",
+        stagedPath: "C:/staging/output.png",
+        fileName: "output.png",
+        mediaType: "image/png",
+        thumbnailStagedPath: "C:/staging/output.thumbnail.webp",
+        artifactMetadata: {}
+      }]
+    };
+    expect(ProviderCompletionRecoverySchema.safeParse(completion).success).toBe(false);
+    expect(ProviderCompletionRecoverySchema.safeParse({
+      ...completion,
+      outputs: [{ ...completion.outputs[0], thumbnailMediaType: "image/webp" }]
+    }).success).toBe(true);
+    expect(ProviderCompletionRecoverySchema.safeParse({
+      ...completion,
+      outputs: [{ ...completion.outputs[0], thumbnailMediaType: "text/html" }]
+    }).success).toBe(false);
   });
 
   it("freezes Task 14 typed reference, plan, and application envelopes", () => {

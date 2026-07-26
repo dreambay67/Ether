@@ -26,6 +26,7 @@ export type CodexTurnRunnerRequest = {
   outputSchema?: JsonObject;
   model?: string;
   reasoningEffort?: string;
+  onEvent?: (event: import("./protocol.js").CodexAppServerEvent) => void;
   signal?: AbortSignal;
   interruptCompletionTimeoutMs?: number;
   timeoutMs?: number;
@@ -40,9 +41,9 @@ export type CodexTurnProvenance = {
   threadId: string;
   turnId: string;
   timing: {
-    queuedMs: number;
-    threadAndDispatchMs: number;
-    turnMs: number;
+    queueMs: number;
+    dispatchToFirstEventMs: number;
+    generationMs: number;
     totalMs: number;
   };
 };
@@ -74,25 +75,29 @@ export class CodexAppServerTurnRunner {
     if (request.signal?.aborted) throw abortError("Codex turn was cancelled before dispatch.");
     const startedAt = Date.now();
     const inputs = buildInputs(request.prompt, request.images ?? []);
-    let queuedAt = startedAt;
     return this.sessions.withThread(
       { documentId: request.documentId, memoryScopeKey: request.memoryScopeKey },
       { cwd: request.cwd, model: request.model, reasoningEffort: request.reasoningEffort },
       async (threadId) => {
         const dispatchAt = Date.now();
         const current = this.getClientGeneration();
-        queuedAt = dispatchAt;
+        let firstEventAt: number | null = null;
         const result = await current.client.runTurn({
           threadId,
           input: inputs,
           outputSchema: request.outputSchema,
           effort: request.reasoningEffort,
           model: request.model,
+          onEvent: (event) => {
+            firstEventAt ??= event.receivedAt;
+            request.onEvent?.(event);
+          },
           signal: request.signal,
           interruptCompletionTimeoutMs: request.interruptCompletionTimeoutMs,
           timeoutMs: request.timeoutMs
         });
         const completedAt = Date.now();
+        const observedFirstEventAt = firstEventAt ?? completedAt;
         const structuredOutput = request.outputSchema ? parseStructuredOutput(result.text) : undefined;
         return {
           ...result,
@@ -106,9 +111,9 @@ export class CodexAppServerTurnRunner {
             threadId,
             turnId: result.turnId,
             timing: {
-              queuedMs: Math.max(0, queuedAt - startedAt),
-              threadAndDispatchMs: Math.max(0, dispatchAt - startedAt),
-              turnMs: Math.max(0, completedAt - dispatchAt),
+              queueMs: Math.max(0, dispatchAt - startedAt),
+              dispatchToFirstEventMs: Math.max(0, observedFirstEventAt - dispatchAt),
+              generationMs: Math.max(0, completedAt - observedFirstEventAt),
               totalMs: Math.max(0, completedAt - startedAt)
             }
           }

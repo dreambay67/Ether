@@ -174,7 +174,20 @@ export async function reconcileStaging(
         }
         const recoveredOutputs = completion.outputs.map((output) => {
           assertDestructiveRecoveryPath(output.stagedPath, entry.stagedPath, roots.appDataRoot);
-          return { ...output, bytes: readFileSync(output.stagedPath) };
+          if (output.thumbnailStagedPath !== undefined) {
+            assertDestructiveRecoveryPath(output.thumbnailStagedPath, entry.stagedPath, roots.appDataRoot);
+            if (output.thumbnailMediaType === undefined) {
+              throw new Error("Provider thumbnail recovery metadata is incomplete.");
+            }
+          }
+          return {
+            ...output,
+            bytes: readFileSync(output.stagedPath),
+            ...(output.thumbnailStagedPath === undefined ? {} : {
+              thumbnailBytes: readFileSync(output.thumbnailStagedPath),
+              thumbnailMediaType: output.thumbnailMediaType!
+            })
+          };
         });
         await store[DOCUMENT_STORE_INTERNAL]("write", ({ execution }) => {
           execution.stageProviderCompletion(completion);

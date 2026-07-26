@@ -21,7 +21,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import type { DocumentHeader } from "@ether/schema";
 
-import { ETHER_PROVISIONAL_PAGE_SIZE } from "./format.js";
+import { ETHER_PAGE_SIZE } from "./format.js";
 import {
   ETHER_SCHEMA_SQL,
   EtherDocumentError,
@@ -35,6 +35,7 @@ import {
   type EtherDocumentPragmas,
   type EtherFileIdentity
 } from "./validation.js";
+import { hardenEtherSqliteConnection } from "./sqliteSecurity.js";
 
 const TEST_HOOKS_SYMBOL = Symbol.for("@ether/document/boundary-test-hooks");
 
@@ -101,7 +102,7 @@ function expectedPragmas(): EtherDocumentPragmas {
     autoVacuum: 2,
     foreignKeys: 1,
     journalMode: "delete",
-    pageSize: ETHER_PROVISIONAL_PAGE_SIZE,
+    pageSize: ETHER_PAGE_SIZE,
     synchronous: 2,
     userVersion: ETHER_SCHEMA_VERSION
   };
@@ -122,7 +123,7 @@ function verifyWritablePragmas(database: DatabaseSync): void {
 
 function configureNewDatabase(database: DatabaseSync): void {
   database.exec(`
-    PRAGMA page_size = ${ETHER_PROVISIONAL_PAGE_SIZE};
+    PRAGMA page_size = ${ETHER_PAGE_SIZE};
     PRAGMA auto_vacuum = INCREMENTAL;
     PRAGMA application_id = ${ETHER_SQLITE_APPLICATION_ID};
     PRAGMA user_version = ${ETHER_SCHEMA_VERSION};
@@ -312,6 +313,7 @@ export function openEtherDocumentConnection(
   try {
     database.open();
     opened = true;
+    hardenEtherSqliteConnection(database);
     database.exec("PRAGMA busy_timeout = 0");
     const location = database.location();
     if (location === null || canonicalPath(location) !== canonicalPath(absolutePath)) {
@@ -500,6 +502,7 @@ function withValidatedWritableDatabase<T>(
     try {
       database.open();
       opened = true;
+      hardenEtherSqliteConnection(database);
     } catch (error) {
       if (statSync(absolutePath, { throwIfNoEntry: false }) === undefined) {
         throw new EtherDocumentError(
@@ -588,6 +591,7 @@ export function createInitializedEtherDocument(
     });
     testHooks().beforeTemporaryDatabaseOpen?.(temporaryPath);
     database.open();
+    hardenEtherSqliteConnection(database);
     const temporaryLocation = database.location();
     if (
       temporaryLocation === null ||

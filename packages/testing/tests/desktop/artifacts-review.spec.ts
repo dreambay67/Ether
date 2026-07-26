@@ -100,6 +100,12 @@ async function openReviewFixture(page: Page) {
   await page.route("ether-asset://**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: png }));
   await page.addInitScript(() => {
     const artifacts = Array.from({ length: 10_000 }, (_, index) => ({ id: `artifact-${String(index).padStart(5, "0")}`, contentKey: `sha256-${String(index).padStart(5, "0")}`, channel: index % 3 === 0 ? "image" : "text", mediaType: index < 12 ? "image/png" : "text/plain", byteLength: 2048 + index, source: { outputVersionId: `output-${String(index).padStart(5, "0")}`, payloadId: `payload-${String(index).padStart(5, "0")}` }, createdAt: "2026-07-22T12:00:00.000Z", metadata: { title: `Artifact ${String(index).padStart(5, "0")}`, quality: index % 5 } }));
+    for (const artifact of artifacts.slice(0, 12)) {
+      const metadata = artifact.metadata as Record<string, unknown>;
+      metadata.thumbnailContentKey = "a".repeat(64);
+      metadata.thumbnailByteLength = 4_096;
+      metadata.thumbnailMediaType = "image/png";
+    }
     const collections = [{ id: "collection-approved", title: "Approved selects", description: "Final choices", primary: true, createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z" }, { id: "collection-campaign", title: "Campaign set", description: "Campaign delivery", primary: false, createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z" }];
     const memberships: Record<string, Array<{ collectionId: string; artifactId: string; role: string; position: number; createdAt: string }>> = { "collection-approved": [], "collection-campaign": [] };
     const state: Record<string, unknown> = { lastCollectionIds: [], membershipCount: 0, compareCompleted: false, evaluationStarted: false, dragCount: 0, exported: false };

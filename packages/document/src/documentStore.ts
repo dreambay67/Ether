@@ -54,6 +54,7 @@ import {
   type ReplacementRecoveryJournal
 } from "./recovery.js";
 import { reconcileStaging } from "./recovery/reconcileStaging.js";
+import { withEtherVacuumCapability } from "./sqliteSecurity.js";
 import { createRepositoryContext, GraphRepository } from "./repositories/graphs.js";
 import { ArtifactRepository } from "./repositories/artifacts.js";
 import { BlobRepository } from "./repositories/blobs.js";
@@ -106,6 +107,7 @@ export interface ReadDocumentRepositories {
   execution: Pick<
     ExecutionRepository,
     | "getCommandResult"
+    | "getExecutionCorrelation"
     | "getJob"
     | "getLineage"
     | "getPlan"
@@ -142,6 +144,7 @@ type WriteExecutionRepository = Pick<
   | "discardProviderCompletion"
   | "failAttempt"
   | "getCommandResult"
+  | "getExecutionCorrelation"
   | "getJob"
   | "getLineage"
   | "getPlan"
@@ -792,7 +795,10 @@ export class DocumentStore {
         sourceDocumentId: this.currentDocumentId,
         stagingPath: temporaryPath
       });
-      this.database.prepare("VACUUM INTO ?").run(temporaryPath);
+      withEtherVacuumCapability(
+        this.database,
+        () => this.database.prepare("VACUUM INTO ?").run(temporaryPath)
+      );
       temporaryIdentity = readEtherFileIdentity(temporaryPath);
       this.runtime.onCompactStage?.("vacuum");
 
@@ -1002,6 +1008,8 @@ export class DocumentStore {
         },
         execution: {
           getCommandResult: (id, name) => invoke(() => repositories.execution.getCommandResult(id, name)),
+          getExecutionCorrelation: (id) =>
+            invoke(() => repositories.execution.getExecutionCorrelation(id)),
           getJob: (id) => invoke(() => repositories.execution.getJob(id)),
           getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
           getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
@@ -1109,20 +1117,22 @@ export class DocumentStore {
         acceptProviderOutput: (input) => invoke(() => repositories.execution.acceptProviderOutput(input)),
         cancelJob: (id, commandId) => invoke(() => repositories.execution.cancelJob(id, commandId)),
         claimNext: (id, token) => invoke(() => repositories.execution.claimNext(id, token)),
-        completeCommand: (id, name, result, events) =>
-          invoke(() => repositories.execution.completeCommand(id, name, result, events)),
+        completeCommand: (id, name, result, events, correlationId) =>
+          invoke(() => repositories.execution.completeCommand(id, name, result, events, correlationId)),
         discardProviderCompletion: (id) =>
           invoke(() => repositories.execution.discardProviderCompletion(id)),
         failAttempt: (id, code, message, retryable) =>
           invoke(() => repositories.execution.failAttempt(id, code, message, retryable)),
         getCommandResult: (id, name) => invoke(() => repositories.execution.getCommandResult(id, name)),
+        getExecutionCorrelation: (id) =>
+          invoke(() => repositories.execution.getExecutionCorrelation(id)),
         getJob: (id) => invoke(() => repositories.execution.getJob(id)),
         getLineage: (id) => invoke(() => repositories.execution.getLineage(id)),
         getPlan: (id) => invoke(() => repositories.execution.getPlan(id)),
         getJobSummary: (id) => invoke(() => repositories.execution.getJobSummary(id)),
         getProviderCompletion: (id) => invoke(() => repositories.execution.getProviderCompletion(id)),
-        grantRunPermit: (id, hash, commandId) =>
-          invoke(() => repositories.execution.grantRunPermit(id, hash, commandId)),
+        grantRunPermit: (id, hash, commandId, correlationId) =>
+          invoke(() => repositories.execution.grantRunPermit(id, hash, commandId, correlationId)),
         listAttempts: (id) => invoke(() => repositories.execution.listAttempts(id)),
         listJobs: () => invoke(() => repositories.execution.listJobs()),
         listPendingEvents: () => invoke(() => repositories.execution.listPendingEvents()),

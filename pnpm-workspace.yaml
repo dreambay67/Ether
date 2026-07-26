@@ -2,9 +2,14 @@ packages:
   - "apps/*"
   - "packages/*"
 
+# electron-builder's pinned @electron/rebuild dependency uses Electron's audited node-gyp fork.
+# Keep this exception explicit so frozen Windows release installs are reproducible.
+blockExoticSubdeps: false
 onlyBuiltDependencies:
   - electron
   - esbuild
 allowBuilds:
   electron: true
+  # electron-builder selects NSIS directly; its legacy Squirrel helper is never executed.
+  electron-winstaller: false
   esbuild: true

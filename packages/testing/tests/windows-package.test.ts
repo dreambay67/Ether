@@ -1,196 +1,383 @@
-import { execFileSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createPackageWithOptions, listPackage } from "@electron/asar";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { describe, expect, it } from "vitest";
+
 import {
-  packageApplicationRuntime,
-  packageWindowsApp,
-  requiredPackageInputs
+  assertGeneratedBuilderConfig,
+  assertPackagedInventoryMatches,
+  assertReleaseArtifacts,
+  assertReleaseInputs,
+  assertReleaseTextPrivate,
+  cleanupReleaseStaging,
+  createCalibratedReleaseInventory,
+  createStagedInventory,
+  installerFileName,
+  inventoryAsarFiles,
+  inventoryAsarPayload,
+  inventoryUnpackedFiles,
+  prepareProductionRuntime,
+  prepareReleaseProject,
+  readReleaseMetadata,
+  releaseAuditFileName,
+  releaseDirectory,
+  releasePathViolation,
+  releaseRootArtifactViolation,
+  reviewedBuilderConfigFileName
 } from "../../../scripts/package-windows.mjs";
 
 const repoRoot = path.resolve(__dirname, "../../..");
-const workspacePackages = ["application", "document", "execution", "graph-kernel", "mcp-server", "providers", "recipes", "schema"];
 
-async function createFile(filePath: string, content = "") {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, content, "utf8");
-}
-
-async function createFakePackageRoot() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "ether-package-"));
-  await createFile(path.join(root, "node_modules/electron/dist/electron.exe"), "fake exe");
-  await createFile(path.join(root, "node_modules/electron/dist/LICENSE"), "license");
-  await createFile(path.join(root, "apps/desktop/dist/index.html"), "<main>Ether</main>");
-  await createFile(path.join(root, "apps/desktop/dist-electron/main/bootstrap.js"), "import './main.js';");
-  await createFile(path.join(root, "apps/desktop/dist-electron/main/main.js"), "export const main = true;");
-  await createFile(path.join(root, "apps/desktop/dist-electron/preload/preload.cjs"), "module.exports = {};");
-
-  for (const packageDirectory of workspacePackages) {
-    const manifest = await readFile(path.join(repoRoot, `packages/${packageDirectory}/package.json`), "utf8");
-    await createFile(path.join(root, `packages/${packageDirectory}/package.json`), manifest);
-    await createFile(
-      path.join(root, `packages/${packageDirectory}/dist/index.js`),
-      `export const packagedName = ${JSON.stringify(packageDirectory)};\n`
-    );
-  }
-  await createFile(
-    path.join(root, "packages/mcp-server/dist/index.js"),
-    [
-      'import { sdkMarker } from "@modelcontextprotocol/sdk/server/mcp.js";',
-      'export const packagedName = "mcp-server";',
-      'if (process.argv.includes("--stdio-probe")) {',
-      '  process.stdin.setEncoding("utf8");',
-      '  process.stdin.once("data", (input) => process.stdout.write(`${sdkMarker}:${input.trim()}\\n`));',
-      '}'
-    ].join("\n")
-  );
-  await createFile(path.join(root, "packages/document/dist/schema/40000.sql"), "-- packaged schema");
-  await createFile(
-    path.join(root, "packages/providers/protocol/codex-0.144.2/manifest.json"),
-    JSON.stringify({ version: "0.144.2", manifestSha256: "fixture" })
-  );
-
-  const zodStore = path.join(root, "store/zod");
-  await createFile(path.join(zodStore, "package.json"), JSON.stringify({ name: "zod", type: "module" }));
-  const zodLink = path.join(root, "packages/schema/node_modules/zod");
-  await mkdir(path.dirname(zodLink), { recursive: true });
-  await symlink(zodStore, zodLink, process.platform === "win32" ? "junction" : "dir");
-
-  const sdkStore = path.join(root, "store/modelcontextprotocol-sdk");
-  await createFile(path.join(sdkStore, "package.json"), JSON.stringify({
-    name: "@modelcontextprotocol/sdk",
-    version: "1.29.0",
-    type: "module",
-    exports: { "./server/mcp.js": "./dist/server/mcp.js" },
-    dependencies: { "mcp-sdk-leaf": "1.0.0" }
-  }));
-  await createFile(
-    path.join(sdkStore, "dist/server/mcp.js"),
-    'import { marker } from "mcp-sdk-leaf"; export const sdkMarker = `official-sdk:${marker}`;\n'
-  );
-  await createFile(
-    path.join(sdkStore, "node_modules/mcp-sdk-leaf/package.json"),
-    JSON.stringify({ name: "mcp-sdk-leaf", version: "1.0.0", type: "module", exports: "./index.js" })
-  );
-  await createFile(
-    path.join(sdkStore, "node_modules/mcp-sdk-leaf/index.js"),
-    'export const marker = "transitive";\n'
-  );
-  const sdkLink = path.join(root, "packages/mcp-server/node_modules/@modelcontextprotocol/sdk");
-  await mkdir(path.dirname(sdkLink), { recursive: true });
-  await symlink(sdkStore, sdkLink, process.platform === "win32" ? "junction" : "dir");
-  return root;
-}
-
-describe("Windows desktop package", () => {
-  it("exposes the desktop build, package, and packaged-test commands", async () => {
-    const rootPackage = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
-    const testingPackage = JSON.parse(await readFile(path.join(repoRoot, "packages/testing/package.json"), "utf8"));
-    expect(rootPackage.scripts).toMatchObject({
-      "desktop:build": "pnpm --filter @ether/desktop build",
-      "desktop:package:win": "pnpm desktop:build && node scripts/package-windows.mjs",
-      "test:packaged": "pnpm --filter @ether/testing test:packaged"
-    });
-    expect(testingPackage.scripts["test:packaged"]).toBe(
-      "playwright test --config playwright.packaged.config.ts"
-    );
+describe("Windows installer release contract", () => {
+  it("aligns root, desktop, workspace, and document metadata at 4.0.0", async () => {
+    const metadata = await readReleaseMetadata(repoRoot);
+    expect(metadata.rootPackage.version).toBe("4.0.0");
+    expect(metadata.desktopPackage).toMatchObject({ version: "4.0.0", main: "dist-electron/main/bootstrap.js" });
+    const workspaceVersions = await Promise.all([
+      "application", "brand", "codex-plugin", "document", "execution", "graph-kernel", "intelligence", "mcp-server", "providers", "recipes", "schema", "testing"
+    ].map(async (directory) => JSON.parse(await readFile(path.join(repoRoot, "packages", directory, "package.json"), "utf8")).version));
+    expect(workspaceVersions).toEqual(Array(workspaceVersions.length).fill("4.0.0"));
+    const [mainSource, handlerSource, settingsSource, providerStatusSource] = await Promise.all([
+      readFile(path.join(repoRoot, "apps/desktop/src/main/main.ts"), "utf8"),
+      readFile(path.join(repoRoot, "apps/desktop/src/main/ipc/registerDocumentHandlers.ts"), "utf8"),
+      readFile(path.join(repoRoot, "apps/desktop/src/renderer/project/SettingsPanel.tsx"), "utf8"),
+      readFile(path.join(repoRoot, "apps/desktop/src/renderer/project/ProviderStatusPanel.tsx"), "utf8")
+    ]);
+    expect(mainSource).toContain("const appVersion = app.getVersion()");
+    expect(mainSource).toMatch(/new LocalDiagnosticLogger\(\{\s*appDataRoot,\s*appVersion\s*\}\)/u);
+    expect(mainSource).toMatch(/const serviceOptions:[\s\S]*?appDataRoot,\s*appVersion,/u);
+    expect(handlerSource).toMatch(/runtime\.versions[\s\S]*?app: appVersion/u);
+    expect(settingsSource).toContain('data-testid="about-ether"');
+    expect(providerStatusSource).toContain('query("provider.health")');
+    expect(providerStatusSource).toContain('query("provider.capabilities")');
+    expect(providerStatusSource).not.toContain('query(documentId, "provider.');
   });
 
-  it("requires the Electron 43 ESM entry and complete 4.0 runtime graph", async () => {
-    const root = await createFakePackageRoot();
-    try {
-      expect(requiredPackageInputs(root).map((entry) => path.relative(root, entry.path))).toEqual([
-        "node_modules\\electron\\dist\\electron.exe",
-        "apps\\desktop\\dist\\index.html",
-        "apps\\desktop\\dist-electron\\main\\bootstrap.js",
-        "apps\\desktop\\dist-electron\\main\\main.js",
-        "packages\\application\\dist\\index.js",
-        "packages\\document\\dist\\index.js",
-        "packages\\execution\\dist\\index.js",
-        "packages\\graph-kernel\\dist\\index.js",
-        "packages\\mcp-server\\dist\\index.js",
-        "packages\\providers\\dist\\index.js",
-        "packages\\recipes\\dist\\index.js",
-        "packages\\schema\\dist\\index.js",
-        "packages\\providers\\protocol\\codex-0.144.2\\manifest.json",
-        "packages\\schema\\node_modules\\zod\\package.json",
-        "packages\\mcp-server\\node_modules\\@modelcontextprotocol\\sdk\\package.json"
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("creates an unpacked package with dereferenced 4.0 dependencies and schema", async () => {
-    const root = await createFakePackageRoot();
-    try {
-      const result = await packageWindowsApp({
-        rootDir: root,
-        outputDir: path.join(root, "release/ether-windows-unpacked")
-      });
-      const appRoot = path.join(result.outputDir, "resources", "app");
-      await expect(readFile(path.join(result.outputDir, "Ether.exe"), "utf8")).resolves.toBe("fake exe");
-      await expect(readFile(path.join(appRoot, "package.json"), "utf8")).resolves.toContain(
-        '"main": "dist-electron/main/bootstrap.js"'
-      );
-      for (const packageDirectory of workspacePackages) {
-        await expect(
-          readFile(path.join(appRoot, `node_modules/@ether/${packageDirectory}/dist/index.js`), "utf8")
-        ).resolves.toContain("packagedName");
+  it("keeps the manual main-process inspector outside production scripts, config, bootstrap, and packaging", async () => {
+    const productionPaths = [
+      "package.json",
+      "apps/desktop/package.json",
+      "apps/desktop/electron-builder.yml",
+      "apps/desktop/src/main/bootstrap.ts",
+      "apps/desktop/src/main/main.ts",
+      "scripts/package-windows.mjs"
+    ];
+    const forbiddenCaptureMarkers = [
+      "--inspect=",
+      "--remote-debugging-port=",
+      "captureMenuActions",
+      "invokeCaptureMenuAction",
+      "fixedMenuInvocationExpression",
+      "Debugger listening on",
+      'method: "Runtime.evaluate"'
+    ];
+    for (const relativePath of productionPaths) {
+      const source = await readFile(path.join(repoRoot, relativePath), "utf8");
+      for (const marker of forbiddenCaptureMarkers) {
+        expect(source, `${relativePath} must not contain capture-only marker ${marker}`).not.toContain(marker);
       }
-      await expect(
-        readFile(path.join(appRoot, "node_modules/@ether/document/dist/schema/40000.sql"), "utf8")
-      ).resolves.toContain("packaged schema");
-      await expect(
-        readFile(
-          path.join(appRoot, "node_modules/@ether/providers/protocol/codex-0.144.2/manifest.json"),
-          "utf8"
-        )
-      ).resolves.toContain('"version":"0.144.2"');
-      expect((await lstat(path.join(appRoot, "node_modules/zod"))).isSymbolicLink()).toBe(false);
-      expect((await lstat(path.join(appRoot, "node_modules/@modelcontextprotocol/sdk"))).isSymbolicLink()).toBe(false);
-      expect((await lstat(
-        path.join(appRoot, "node_modules/mcp-sdk-leaf")
-      )).isSymbolicLink()).toBe(false);
-      expect(execFileSync(process.execPath, [
-        "--input-type=module",
-        "--eval",
-        "import('@ether/application').then((value) => console.log(value.packagedName))"
-      ], { cwd: appRoot, encoding: "utf8" }).trim()).toBe("application");
-      expect(execFileSync(process.execPath, [
-        path.join(appRoot, "node_modules/@ether/mcp-server/dist/index.js"),
-        "--stdio-probe"
-      ], { cwd: appRoot, encoding: "utf8", input: "ping\n" }).trim()).toBe(
-        "official-sdk:transitive:ping"
+    }
+  });
+
+  it("fails closed on private release paths and assigned credential material", () => {
+    for (const rejected of [
+      "src/main.ts", "tests/runtime.test.js", "examples/demo.js", "docs/readme.txt", "bundle.js.map",
+      "user.ether", "cache.sqlite3", "cache.db-wal", "diagnostics.log", "certificate.pem", "private.key",
+      "module.cts", "module.mts", "component.jsx", ".env.production", "credentials.json"
+    ]) {
+      expect(releasePathViolation(rejected), rejected).not.toBeNull();
+    }
+    for (const allowed of [
+      "dist/main.js", "dist/index.html", "package.json", "LICENSE", "protocol/manifest.json",
+      "dist-electron/main/security/pathGrants.js", "lib/sharp-win32-x64-0.35.3.node", "lib/libvips-42.dll"
+    ]) {
+      expect(releasePathViolation(allowed), allowed).toBeNull();
+    }
+    for (const secret of [
+      `-----BEGIN PRIVATE KEY-----\n${"a".repeat(64)}\n${"b".repeat(64)}\n-----END PRIVATE KEY-----`,
+      `OPENAI_API_KEY="${`sk-${"a".repeat(32)}`}"`,
+      `GITHUB_TOKEN="${`ghp_${"b".repeat(36)}`}"`,
+      `SLACK_BOT_TOKEN="${`xoxb-${"c".repeat(32)}`}"`,
+      `AWS_ACCESS_KEY_ID=${`AKIA${"D".repeat(16)}`}`,
+      `authorization: "Bearer ${"e".repeat(32)}"`
+    ]) {
+      expect(() => assertReleaseTextPrivate(secret, "synthetic-test", repoRoot)).toThrow(/credential|token|key|bearer/i);
+    }
+    for (const allowedRootArtifact of [
+      "win-unpacked",
+      "Ether-4.0.0-Setup.exe",
+      "Ether-4.0.0-Setup.exe.blockmap",
+      "electron-builder.generated.yml",
+      "release-audit.json"
+    ]) {
+      expect(releaseRootArtifactViolation(allowedRootArtifact), allowedRootArtifact).toBeNull();
+    }
+    for (const rejectedRootArtifact of [
+      "builder-debug.yml",
+      "builder-effective-config.yaml",
+      "latest.yml",
+      "notes.txt"
+    ]) {
+      expect(releaseRootArtifactViolation(rejectedRootArtifact), rejectedRootArtifact).not.toBeNull();
+    }
+    for (const privatePath of [
+      `${repoRoot}\\node_modules\\electron\\dist`,
+      "C:\\Users\\release-user\\AppData\\Local\\Temp\\electron-builder\\messages.yml",
+      "/home/release-user/Documents/Ether/release.yml"
+    ]) {
+      expect(() => assertReleaseTextPrivate(privatePath, "synthetic-side-artifact", repoRoot))
+        .toThrow(/workspace|user-profile|personal user path/i);
+    }
+    expect(() => assertReleaseTextPrivate(
+      "const header = `Authorization: Bearer ${token}`; const prefix = 'sk-'; const pemHeader = '-----BEGIN PRIVATE KEY-----';",
+      "safe-sdk-source",
+      repoRoot
+    )).not.toThrow();
+  });
+
+  it("derives the Windows icon reproducibly from reviewed Ether and DreamBay assets", async () => {
+    await assertReleaseInputs(repoRoot);
+    const [ether, dreambay, icon] = await Promise.all([
+      readFile(path.join(repoRoot, "packages/brand/src/assets/Ether_logo.png")),
+      readFile(path.join(repoRoot, "packages/brand/src/assets/DB_logo.png")),
+      readFile(path.join(repoRoot, "build/installer/ether.ico"))
+    ]);
+    expect(await readFile(path.join(repoRoot, "build/installer/ether.png"))).toEqual(ether);
+    expect(await readFile(path.join(repoRoot, "build/installer/dreambay.png"))).toEqual(dreambay);
+    expect(icon.subarray(0, 4)).toEqual(Buffer.from([0, 0, 1, 0]));
+    expect(icon.subarray(22, 30)).toEqual(Buffer.from("89504e470d0a1a0a", "hex"));
+    expect(createHash("sha256").update(icon).digest("hex")).toHaveLength(64);
+  });
+
+  it("calibrates builder omissions and rewrites, excludes its own inventory, and rehashes both ASAR stores", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-asar-inventory-"));
+    try {
+      const source = path.join(root, "source");
+      const project = path.join(root, "builder-output");
+      const archive = path.join(root, "app.asar");
+      const calibrationArchive = archive;
+      await mkdir(path.join(source, ".github"), { recursive: true });
+      await mkdir(path.join(source, "dist"), { recursive: true });
+      await mkdir(path.join(project, "dist"), { recursive: true });
+      await writeFile(
+        path.join(source, "package.json"),
+        '{"name":"inventory-fixture","version":"4.0.0","scripts":{"test":"vitest"},"keywords":["source-only"]}\n',
+        "utf8"
       );
+      await writeFile(path.join(source, ".github", "FUNDING.yml"), "github: source-only\n", "utf8");
+      await writeFile(path.join(source, "dist", "main.js"), "export const value = 'reviewed';\n", "utf8");
+      await writeFile(path.join(source, "runtime.node"), Buffer.from("reviewed-native-runtime"));
+      const reviewedSource = await createStagedInventory(source);
+
+      // Model electron-builder's real behavior: metadata is omitted and
+      // package.json is rewritten before the ASAR is created.
+      await writeFile(path.join(project, "package.json"), '{"name":"inventory-fixture","version":"4.0.0"}\n', "utf8");
+      await writeFile(path.join(project, "dist", "main.js"), "export const value = 'reviewed';\n", "utf8");
+      await writeFile(path.join(project, "runtime.node"), Buffer.from("reviewed-native-runtime"));
+      await writeFile(path.join(project, "release-inventory.json"), "{}\n", "utf8");
+      await createPackageWithOptions(project, calibrationArchive, { unpack: "**/*.node" });
+      const calibratedPayload = inventoryAsarPayload(calibrationArchive);
+      const calibratedUnpacked = await inventoryUnpackedFiles(calibrationArchive);
+      const manifest = createCalibratedReleaseInventory({
+        archiveEntries: calibratedPayload.entries,
+        sourceInventory: reviewedSource,
+        unpackedEntries: calibratedUnpacked
+      });
+      expect(reviewedSource.entries.map((entry) => entry.path)).toContain(".github/FUNDING.yml");
+      expect(calibratedPayload.entries.map((entry) => entry.path)).not.toContain(".github/FUNDING.yml");
+      expect(reviewedSource.entries.find((entry) => entry.path === "package.json")?.sha256)
+        .not.toBe(calibratedPayload.entries.find((entry) => entry.path === "package.json")?.sha256);
+
+      await rm(calibrationArchive, { force: true });
+      await rm(`${calibrationArchive}.unpacked`, { recursive: true, force: true });
+      await writeFile(
+        path.join(project, "release-inventory.json"),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        "utf8"
+      );
+      await createPackageWithOptions(project, archive, { unpack: "**/*.node" });
+      const actualPayload = inventoryAsarPayload(archive);
+      const actualUnpacked = await inventoryUnpackedFiles(archive);
+      expect(listPackage(archive, { isPack: false }).map((entry) => entry.replace(/^[/\\]+/u, "")))
+        .toContain("release-inventory.json");
+      expect(actualPayload.entries.map((entry) => entry.path)).not.toContain("release-inventory.json");
+      expect(manifest.entries.map((entry: { path: string }) => entry.path)).not.toContain("release-inventory.json");
+      expect(assertPackagedInventoryMatches(manifest, actualPayload.entries, {
+        actualUnpackedEntries: actualUnpacked,
+        actualUnpackedPaths: actualPayload.unpackedPaths,
+        expectedCalibratedInventory: manifest,
+        expectedSourceInventory: reviewedSource
+      })).toMatchObject({
+        hash: manifest.hash,
+        entries: manifest.entries,
+        sourceHash: reviewedSource.hash,
+        unpackedHash: manifest.unpackedHash
+      });
+
+      await writeFile(`${archive}.unpacked${path.sep}runtime.node`, Buffer.from("tampered-native-runtime"));
+      const tamperedPayload = inventoryAsarPayload(archive);
+      const tamperedUnpacked = await inventoryUnpackedFiles(archive);
+      expect(() => assertPackagedInventoryMatches(manifest, inventoryAsarFiles(archive), {
+        actualUnpackedEntries: tamperedUnpacked,
+        actualUnpackedPaths: tamperedPayload.unpackedPaths,
+        expectedSourceInventory: reviewedSource
+      })).toThrow(/actual unpacked entry bytes/i);
+      await writeFile(`${archive}.unpacked${path.sep}runtime.node`, Buffer.from("reviewed-native-runtime"));
+      await writeFile(`${archive}.unpacked${path.sep}extra.node`, Buffer.from("unreferenced-native-runtime"));
+      const extraPayload = inventoryAsarPayload(archive);
+      const extraUnpacked = await inventoryUnpackedFiles(archive);
+      expect(() => assertPackagedInventoryMatches(manifest, inventoryAsarFiles(archive), {
+        actualUnpackedEntries: extraUnpacked,
+        actualUnpackedPaths: extraPayload.unpackedPaths,
+        expectedSourceInventory: reviewedSource
+      })).toThrow(/headers differ from the physical unpacked file set/i);
+      await rm(`${archive}.unpacked${path.sep}extra.node`, { force: true });
+
+      await writeFile(path.join(project, "dist", "main.js"), "export const value = 'tampered';\n", "utf8");
+      const staleArchive = path.join(root, "stale.asar");
+      await createPackageWithOptions(project, staleArchive, { unpack: "**/*.node" });
+      const stalePayload = inventoryAsarPayload(staleArchive);
+      const staleUnpacked = await inventoryUnpackedFiles(staleArchive);
+      expect(() => assertPackagedInventoryMatches(manifest, stalePayload.entries, {
+        actualUnpackedEntries: staleUnpacked,
+        actualUnpackedPaths: stalePayload.unpackedPaths,
+        expectedSourceInventory: reviewedSource
+      }))
+        .toThrow(/actual ASAR entry bytes/i);
+
+      await writeFile(path.join(source, "dist", "main.js"), "export const value = 'new-source';\n", "utf8");
+      const staleSource = await createStagedInventory(source);
+      expect(() => assertPackagedInventoryMatches(manifest, actualPayload.entries, {
+        actualUnpackedEntries: actualUnpacked,
+        actualUnpackedPaths: actualPayload.unpackedPaths,
+        expectedSourceInventory: staleSource
+      })).toThrow(/current audited staging inventory/i);
+      expect(() => assertPackagedInventoryMatches(
+        { ...manifest, hash: "0".repeat(64), repeatHash: "0".repeat(64) },
+        actualPayload.entries,
+        { actualUnpackedEntries: actualUnpacked, actualUnpackedPaths: actualPayload.unpackedPaths }
+      ))
+        .toThrow(/digest does not match/i);
+      expect(() => assertPackagedInventoryMatches(
+        manifest,
+        [...actualPayload.entries, { path: "release-inventory.json", bytes: 2, sha256: createHash("sha256").update("{}").digest("hex") }],
+        { actualUnpackedEntries: actualUnpacked, actualUnpackedPaths: actualPayload.unpackedPaths }
+      )).toThrow(/exclude its recursive inventory file/i);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("launches the actual packaged MCP server over stdio with the official SDK closure", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "ether-mcp-package-runtime-"));
-    const appRoot = path.join(root, "app");
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [path.join(appRoot, "node_modules/@ether/mcp-server/dist/index.js")],
-      cwd: appRoot,
-      env: getDefaultEnvironment(),
-      stderr: "pipe"
-    });
-    const client = new Client({ name: "ether-packaged-runtime-test", version: "4.0.0" });
-    try {
-      await packageApplicationRuntime(repoRoot, appRoot);
-      await client.connect(transport);
-      await expect(client.listTools()).resolves.toMatchObject({
-        tools: expect.arrayContaining([expect.objectContaining({ name: "ether.document.inspect" })])
-      });
-    } finally {
-      await client.close().catch(() => undefined);
-      await rm(root, { recursive: true, force: true });
+  it("audits a built release only when explicitly required so ordinary integration stays artifact-independent", async () => {
+    const installer = path.join(releaseDirectory, installerFileName);
+    const present = await stat(installer).then(() => true, () => false);
+    const auditRequired = process.env.ETHER_REQUIRE_RELEASE_AUDIT === "1";
+    if (!present && auditRequired) {
+      throw new Error("Release audit requires a real Ether-4.0.0-Setup.exe. Run pnpm desktop:package:win first.");
     }
-  }, 30_000);
+    if (!auditRequired) return;
+    await assertReleaseArtifacts(releaseDirectory);
+    const audit = JSON.parse(await readFile(path.join(releaseDirectory, releaseAuditFileName), "utf8"));
+    expect(audit).toMatchObject({
+      version: "4.0.0",
+      stagedInventoryHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      stagedRepeatHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      archivePathHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+    expect(audit.stagedInventoryHash).toBe(audit.stagedRepeatHash);
+    const generatedConfig = await readFile(path.join(releaseDirectory, reviewedBuilderConfigFileName), "utf8");
+    expect(generatedConfig).toContain("appId: com.dreambay.ether");
+    expect(generatedConfig).toContain("asar: true");
+    expect(generatedConfig).toContain("oneClick: false");
+    expect(generatedConfig).toContain("createDesktopShortcut: true");
+    expect(generatedConfig).toContain("createStartMenuShortcut: true");
+    expect(generatedConfig).toContain("shortcutName: Ether");
+    expect(generatedConfig).toContain("guid: ad6cd9b2-3723-5b60-a3d0-3938212aac8e");
+    expect(generatedConfig).toContain("DreamBay.Ether.Document");
+    expect(generatedConfig.replaceAll("\\", "/").toLocaleLowerCase())
+      .not.toContain(repoRoot.replaceAll("\\", "/").toLocaleLowerCase());
+  }, 120_000);
+
+  it("stages a sorted physical SDK/runtime closure and launches its MCP server", async () => {
+    try {
+      await prepareProductionRuntime(repoRoot);
+      const releaseProject = await prepareReleaseProject(repoRoot);
+      const runtimeRoot = path.join(releaseProject, "node_modules");
+      const builder = await assertGeneratedBuilderConfig(releaseProject, repoRoot);
+      expect(builder.sha256).toMatch(/^[a-f0-9]{64}$/);
+      const generatedConfig = await readFile(path.join(releaseProject, "electron-builder.yml"), "utf8");
+      expect(generatedConfig).not.toMatch(/[a-z]:[\\/]/i);
+      expect(generatedConfig).toContain("output: ../../../release/windows");
+      const inventory = await createStagedInventory(releaseProject);
+      expect(inventory.entries.length).toBeGreaterThan(100);
+      expect(inventory.entries.some((entry) => entry.path === "electron-builder.yml")).toBe(false);
+      expect(inventory.entries.some((entry) => entry.path.startsWith("docs/manual/"))).toBe(false);
+      expect(inventory.entries.map((entry) => entry.path))
+        .toContain("node_modules/@ether/application/dist/atomicExportPublisher.js");
+      expect(inventory.entries.map((entry) => entry.path)).toEqual(
+        [...inventory.entries.map((entry) => entry.path)].sort((left, right) => left.localeCompare(right))
+      );
+      for (const relativePath of [
+        "../dist-electron/main/diagnostics/localDiagnostics.js",
+        "../dist-electron/main/protocol/etherAssetProtocol.js",
+        "../dist-electron/main/security/navigationPolicy.js",
+        "../dist-electron/main/security/pathGrants.js",
+        "@ether/application/dist/index.js", "@ether/document/dist/schema/40000.sql",
+        "@ether/document/dist/sqliteSecurity.js",
+        "@ether/providers/protocol/codex-0.144.2/manifest.json", "@modelcontextprotocol/sdk/package.json", "zod/package.json",
+        "zod-to-json-schema/package.json", "ajv/package.json", "express/package.json", "hono/package.json",
+        "@img/sharp-win32-x64/lib/sharp-win32-x64-0.35.3.node", "@img/sharp-win32-x64/lib/libvips-42.dll"
+      ]) {
+        const absolutePath = path.join(runtimeRoot, relativePath);
+        expect((await stat(absolutePath)).isFile()).toBe(true);
+        expect((await lstat(absolutePath)).isSymbolicLink()).toBe(false);
+      }
+      const [packagedBootstrap, packagedMain, packagedApplicationService] = await Promise.all([
+        readFile(path.join(releaseProject, "dist-electron/main/bootstrap.js"), "utf8"),
+        readFile(path.join(releaseProject, "dist-electron/main/main.js"), "utf8"),
+        readFile(path.join(releaseProject, "dist-electron/main/services/applicationService.js"), "utf8")
+      ]);
+      expect(packagedBootstrap).toContain("./protocol/etherAssetProtocol.js");
+      expect(packagedBootstrap).toContain("./security/navigationPolicy.js");
+      expect(packagedBootstrap).toContain("installChromiumNetworkContainment(app.commandLine)");
+      expect(packagedBootstrap).toContain('import("./main.js")');
+      expect(packagedMain).toContain("./diagnostics/localDiagnostics.js");
+      expect(packagedMain).toContain("./security/navigationPolicy.js");
+      expect(packagedApplicationService).toContain("../security/pathGrants.js");
+      for (const packagedSource of [packagedBootstrap, packagedMain, packagedApplicationService]) {
+        for (const marker of [
+          "--inspect=",
+          "--remote-debugging-port=",
+          "captureMenuActions",
+          "invokeCaptureMenuAction",
+          "fixedMenuInvocationExpression",
+          "Debugger listening on",
+          'method: "Runtime.evaluate"'
+        ]) {
+          expect(packagedSource).not.toContain(marker);
+        }
+      }
+      const client = new Client({ name: "ether-packaged-runtime-test", version: "4.0.0" });
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(runtimeRoot, "@ether/mcp-server/dist/index.js")],
+        cwd: releaseProject
+      });
+      try {
+        await client.connect(transport);
+        await expect(client.listTools()).resolves.toMatchObject({
+          tools: expect.arrayContaining([expect.objectContaining({ name: "ether.document.inspect" })])
+        });
+      } finally {
+        await client.close().catch(() => undefined);
+      }
+    } finally {
+      await cleanupReleaseStaging(repoRoot);
+    }
+  }, 60_000);
 });

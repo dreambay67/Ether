@@ -4,6 +4,17 @@ export {
   type CreateEtherDocumentOptions
 } from "./database.js";
 export * from "./format.js";
+export * from "./formatContract.js";
+export { migrate4x, type Ether4xMigrationResult } from "./migrations/migrate4x.js";
+export {
+  benchmarkPageSizes,
+  decideProductionPageSize,
+  ETHER_PAGE_SIZE_CANDIDATES,
+  ETHER_PAGE_SIZE_STABILITY_TOLERANCE,
+  type EtherPageSize,
+  type PageSizeBenchmarkResult,
+  type PageSizeProductionDecision
+} from "./benchmark/pageSizeBenchmark.js";
 export {
   DocumentStore,
   DocumentStoreError,
@@ -34,6 +45,7 @@ export {
 export {
   BlobImportError,
   importBlob,
+  MAX_EMBEDDED_BLOB_BYTES,
   mediaSignatureMatches,
   type ImportBlobInput,
   type ImportBlobOptions,
@@ -135,3 +147,10 @@ export {
   reconcileReplacementRecovery,
   type ReplacementRecoveryInspection
 } from "./recovery.js";
+export {
+  ETHER_SQLITE_SECURITY_UNAVAILABLE,
+  hardenEtherSqliteConnection,
+  inspectEtherSqliteSecurityCapabilities,
+  withEtherVacuumCapability,
+  type EtherSqliteSecurityCapabilities
+} from "./sqliteSecurity.js";

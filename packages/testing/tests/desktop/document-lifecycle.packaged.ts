@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ import { FakeImageProvider } from "@ether/providers";
 import { DesktopApplicationService } from "../../../../apps/desktop/src/main/services/applicationService.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-const executablePath = path.join(root, "release", "ether-windows-unpacked", "Ether.exe");
+const executablePath = path.join(root, "release", "windows", "win-unpacked", "Ether.exe");
 const execFileAsync = promisify(execFile);
 
 test.skip(process.platform !== "win32", "The packaged Ether lifecycle is Windows-only.");
@@ -21,13 +21,14 @@ test("real Ether.exe opens, saves, and renders a portable document on Node 24", 
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ether-packaged-lifecycle-"));
   const appData = path.join(tempRoot, "AppData", "Roaming");
   const localAppData = path.join(tempRoot, "AppData", "Local");
+  const userDataDirectory = path.join(localAppData, "Ether-Test-Profile");
   const documentPath = path.join(tempRoot, "Packaged Kampa\u0148 \u03a9.ether");
-  const debugPort = 49_000 + Math.floor(Math.random() * 1_000);
   let browser: Browser | null = null;
   const existingProcessIds = await packagedProcessIds();
 
   await mkdir(appData, { recursive: true });
   await mkdir(localAppData, { recursive: true });
+  await mkdir(userDataDirectory, { recursive: true });
   await createPortableFixture(tempRoot, documentPath);
 
   const environment: NodeJS.ProcessEnv = { ...process.env, APPDATA: appData, LOCALAPPDATA: localAppData };
@@ -36,11 +37,16 @@ test("real Ether.exe opens, saves, and renders a portable document on Node 24", 
   try {
     const appProcess = spawn(
       executablePath,
-      [`--remote-debugging-port=${debugPort}`, "--disable-gpu", documentPath],
+      [
+        "--remote-debugging-port=0",
+        `--user-data-dir=${userDataDirectory}`,
+        "--disable-gpu",
+        documentPath
+      ],
       { env: environment, stdio: "pipe", windowsHide: true }
     );
     const processOutput = captureProcessOutput(appProcess);
-    browser = await connectToPackagedApp(debugPort, appProcess, processOutput);
+    browser = await connectToPackagedApp(userDataDirectory, appProcess, processOutput);
     const context = browser.contexts()[0];
     const page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 30_000 });
     await page.waitForLoadState("domcontentloaded");
@@ -54,9 +60,15 @@ test("real Ether.exe opens, saves, and renders a portable document on Node 24", 
     await expect(page.getByRole("button", { name: "Simulation output", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Artifacts", exact: true }).click();
-    const image = page.getByTestId("embedded-artifact").locator("img");
-    await expect(image).toHaveJSProperty("naturalWidth", 64);
-    await expect(image).toHaveAttribute("src", /^ether-asset:\/\//);
+    await expect(page.getByRole("region", { name: "Reference Desk" })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: "Review", exact: true }).click();
+    // The Phase 4 Artifact Observatory replaces the legacy inline artifact
+    // panel, while preserving the same document-scoped ether-asset delivery.
+    await expect(page.getByTestId("artifact-observatory")).toBeVisible({ timeout: 30_000 });
+    const image = page.locator(".artifact-embedded-preview");
+    await expect(image).toHaveCount(1, { timeout: 30_000 });
+    await expect(image).toHaveJSProperty("naturalWidth", 64, { timeout: 30_000 });
+    await expect(image).toHaveAttribute("src", /^ether-asset:\/\/.*\/thumbnail$/);
 
     await page.keyboard.press("Control+s");
     await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 10_000 });
@@ -66,7 +78,10 @@ test("real Ether.exe opens, saves, and renders a portable document on Node 24", 
   } finally {
     await browser?.close();
     await stopPackagedProcesses(existingProcessIds);
-    await rm(tempRoot, { recursive: true, force: true });
+    // Electron may release SQLite's document handle a few scheduling turns
+    // after its visible window closes. Keep cleanup scoped to this disposable
+    // profile, but tolerate Windows' short-lived EBUSY state.
+    await rm(tempRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
   }
 });
 
@@ -91,11 +106,11 @@ async function createPortableFixture(tempRoot: string, documentPath: string) {
 }
 
 async function connectToPackagedApp(
-  port: number,
+  userDataDirectory: string,
   appProcess: ChildProcessWithoutNullStreams,
   processOutput: () => string
 ) {
-  const endpoint = `http://127.0.0.1:${port}`;
+  const activePortPath = path.join(userDataDirectory, "DevToolsActivePort");
   const startedAt = Date.now();
   let lastError: unknown = null;
   while (Date.now() - startedAt < 30_000) {
@@ -103,6 +118,12 @@ async function connectToPackagedApp(
       throw new Error(`Ether.exe launcher failed (${appProcess.exitCode}): ${processOutput()}`);
     }
     try {
+      const [portLine] = (await readFile(activePortPath, "utf8")).split(/\r?\n/u);
+      const port = Number(portLine);
+      if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+        throw new Error(`Invalid DevToolsActivePort value ${String(portLine)}.`);
+      }
+      const endpoint = `http://127.0.0.1:${port}`;
       return await chromium.connectOverCDP(endpoint);
     } catch (error) {
       lastError = error;

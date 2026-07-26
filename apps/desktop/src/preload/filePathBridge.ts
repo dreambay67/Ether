@@ -114,8 +114,18 @@ export function createEtherBridge(transport: BridgeTransport) {
         transport.subscribe(desktopIpcChannels.application.event, (event) => listener(event as ApplicationEvent))
     },
     runtime: {
-      versions: () => unwrap<{ electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {})),
-      providerHealth: () => unwrap<ProviderHealthResult>(transport.invoke(desktopIpcChannels.runtime.providerHealth, {}))
+      versions: () => unwrap<{ app: string; electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {})),
+      providerHealth: () => unwrap<ProviderHealthResult>(transport.invoke(desktopIpcChannels.runtime.providerHealth, {})),
+      providerPolicy: () => unwrap<{ antigravityCreditOveragesConfirmed: boolean }>(
+        transport.invoke(desktopIpcChannels.runtime.providerPolicy, {})
+      ),
+      setProviderPolicy: (antigravityCreditOveragesConfirmed: boolean) =>
+        unwrap<{ antigravityCreditOveragesConfirmed: boolean }>(
+          transport.invoke(desktopIpcChannels.runtime.setProviderPolicy, {
+            antigravityCreditOveragesConfirmed
+          })
+        ),
+      rendererInteractive: () => unwrap<null>(transport.invoke(desktopIpcChannels.runtime.rendererInteractive, {}))
     }
   };
 }

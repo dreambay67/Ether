@@ -6,7 +6,13 @@ import {
   ETHER_SQLITE_APPLICATION_ID
 } from "@ether/schema";
 
-export const ETHER_PROVISIONAL_PAGE_SIZE = 16_384 as const;
+/**
+ * Production SQLite page size selected by the Phase 5 representative workload
+ * benchmark (4/8/16/32 KiB).  This is part of the on-disk 4.0 contract.
+ */
+export const ETHER_PAGE_SIZE = 16_384 as const;
+/** @deprecated Kept as an internal source compatibility alias for 4.0. */
+export const ETHER_PROVISIONAL_PAGE_SIZE = ETHER_PAGE_SIZE;
 export const ETHER_REQUIRED_FEATURE_PREFIX = "required." as const;
 export const ETHER_SUPPORTED_REQUIRED_FEATURES = [] as const;
 
@@ -75,16 +81,16 @@ export const ETHER_SCHEMA_TABLES = [
   "workspace_views"
 ] as const;
 
-// The page size and schema are development candidates until Phase 5 benchmark and format freeze.
+// Ether 4.0's on-disk identity. Any later 4.x change must use migrate4x.
 export const ETHER_DOCUMENT_FORMAT = Object.freeze({
   extension: ETHER_FILE_EXTENSION,
-  formatFrozen: false,
+  formatFrozen: true,
   formatMarker: ETHER_FORMAT_MARKER,
   formatVersion: ETHER_FORMAT_VERSION,
   freezePhase: 5,
-  pageSize: ETHER_PROVISIONAL_PAGE_SIZE,
-  pageSizeProvisional: true,
-  schemaProvisional: true,
+  pageSize: ETHER_PAGE_SIZE,
+  pageSizeProvisional: false,
+  schemaProvisional: false,
   schemaVersion: ETHER_SCHEMA_VERSION,
   sqliteApplicationId: ETHER_SQLITE_APPLICATION_ID
 });

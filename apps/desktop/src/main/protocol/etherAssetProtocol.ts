@@ -15,6 +15,22 @@ export interface EtherAssetSource {
   ): AsyncIterable<Uint8Array>;
 }
 
+export const MAX_ETHER_ASSET_BYTES = 512 * 1024 * 1024;
+export const MAX_ETHER_ASSET_RANGE_BYTES = 64 * 1024 * 1024;
+
+const safeMediaTypes = new Set([
+  "image/avif", "image/bmp", "image/gif", "image/jpeg", "image/png", "image/tiff", "image/webp",
+  "audio/mpeg", "audio/ogg", "audio/wav", "audio/wave",
+  "video/mp4", "video/ogg", "video/webm", "application/pdf"
+]);
+
+function isSafeDescriptor(descriptor: EtherAssetDescriptor): boolean {
+  return Number.isSafeInteger(descriptor.byteLength) && descriptor.byteLength > 0 &&
+    descriptor.byteLength <= MAX_ETHER_ASSET_BYTES &&
+    safeMediaTypes.has(descriptor.mediaType.toLowerCase()) &&
+    /^[a-zA-Z0-9_-]{1,128}$/.test(descriptor.contentHash);
+}
+
 export interface EtherProtocolRegistrar {
   registerSchemesAsPrivileged(schemes: Array<{
     scheme: string;
@@ -100,7 +116,7 @@ export function createEtherAssetProtocolHandler(source: EtherAssetSource) {
     const variant = parseIdentifier(rawParts[1]!);
     if (artifactId === null || variant === null) return new Response(null, { status: 400 });
     const descriptor = await source.authorize(documentId, artifactId, variant);
-    if (descriptor === null) return new Response(null, { status: 404 });
+    if (descriptor === null || !isSafeDescriptor(descriptor)) return new Response(null, { status: 404 });
 
     const etag = `"${descriptor.contentHash}"`;
     const commonHeaders = {
@@ -124,8 +140,15 @@ export function createEtherAssetProtocolHandler(source: EtherAssetSource) {
         return new Response(null, { status: 416, headers });
       }
       range = parsed;
+      if (range.endExclusive - range.start > MAX_ETHER_ASSET_RANGE_BYTES) {
+        headers.set("Content-Range", `bytes */${descriptor.byteLength}`);
+        return new Response(null, { status: 416, headers });
+      }
       status = 206;
       headers.set("Content-Range", `bytes ${range.start}-${range.endExclusive - 1}/${descriptor.byteLength}`);
+    }
+    if (range.endExclusive - range.start > MAX_ETHER_ASSET_RANGE_BYTES) {
+      return new Response(null, { status: 416, headers });
     }
     headers.set("Content-Length", String(range.endExclusive - range.start));
     const body = request.method === "HEAD"

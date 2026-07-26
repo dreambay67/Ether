@@ -9,21 +9,40 @@ export type RecentDocument = {
   canonicalPath: string;
 };
 
-export type DesktopSettings = { recentDocuments: RecentDocument[] };
-export const defaultDesktopSettings: DesktopSettings = { recentDocuments: [] };
+export type DesktopSettings = {
+  recentDocuments: RecentDocument[];
+  providerPolicy: {
+    antigravityCreditOveragesConfirmed: boolean;
+  };
+};
+export const defaultDesktopSettings: DesktopSettings = {
+  recentDocuments: [],
+  providerPolicy: {
+    antigravityCreditOveragesConfirmed: false
+  }
+};
 
 export function createDesktopSettingsStore(settingsPathProvider: () => string) {
   const settingsPath = () => settingsPathProvider();
+  const antigravityDisabledMarkerPath = () => `${settingsPath()}.antigravity-disabled`;
   let pendingUpdate: Promise<void> = Promise.resolve();
 
   const loadFromDisk = async (): Promise<DesktopSettings> => {
+    let settings: DesktopSettings;
     try {
-      return sanitizeSettings(JSON.parse(await readFile(settingsPath(), "utf8")) as unknown);
+      settings = sanitizeSettings(JSON.parse(await readFile(settingsPath(), "utf8")) as unknown);
     } catch (error) {
-      if (isFileMissing(error)) return { recentDocuments: [] };
-      await quarantineCorruptedSettings(settingsPath()).catch(() => undefined);
-      return { recentDocuments: [] };
+      if (isFileMissing(error)) {
+        settings = structuredClone(defaultDesktopSettings);
+      } else {
+        await quarantineCorruptedSettings(settingsPath()).catch(() => undefined);
+        settings = structuredClone(defaultDesktopSettings);
+      }
     }
+    if (await disableMarkerExists(antigravityDisabledMarkerPath())) {
+      settings.providerPolicy.antigravityCreditOveragesConfirmed = false;
+    }
+    return settings;
   };
 
   const saveToDisk = async (settings: DesktopSettings): Promise<DesktopSettings> => {
@@ -64,8 +83,31 @@ export function createDesktopSettingsStore(settingsPathProvider: () => string) {
             ...current.recentDocuments.filter(
               (candidate) => candidate.canonicalPath.toLocaleLowerCase() !== identityKey
             )
-          ].slice(0, 12)
+          ].slice(0, 12),
+          providerPolicy: current.providerPolicy
         });
+      });
+    },
+    async setAntigravityCreditOveragesConfirmed(confirmed: boolean): Promise<DesktopSettings> {
+      return update(async () => {
+        const marker = antigravityDisabledMarkerPath();
+        if (!confirmed) {
+          await mkdir(path.dirname(marker), { recursive: true });
+          await writeFile(marker, "disabled\n", "utf8");
+        }
+        const current = await loadFromDisk();
+        const saved = await saveToDisk({
+          ...current,
+          providerPolicy: {
+            antigravityCreditOveragesConfirmed: confirmed
+          }
+        });
+        if (confirmed) {
+          await rm(marker, { force: true });
+        } else {
+          await rm(marker, { force: true }).catch(() => undefined);
+        }
+        return saved;
       });
     }
   };
@@ -91,7 +133,16 @@ function sanitizeSettings(value: unknown): DesktopSettings {
       canonicalPath
     });
   }
-  return { recentDocuments: recentDocuments.slice(0, 12) };
+  const providerPolicy = isRecord(value) && isRecord(value.providerPolicy)
+    ? value.providerPolicy
+    : {};
+  return {
+    recentDocuments: recentDocuments.slice(0, 12),
+    providerPolicy: {
+      antigravityCreditOveragesConfirmed:
+        providerPolicy.antigravityCreditOveragesConfirmed === true
+    }
+  };
 }
 
 function stringValue(value: unknown) {
@@ -104,6 +155,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isFileMissing(error: unknown) {
   return error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT";
+}
+
+async function disableMarkerExists(filePath: string) {
+  try {
+    await readFile(filePath, "utf8");
+    return true;
+  } catch (error) {
+    return !isFileMissing(error);
+  }
 }
 
 async function quarantineCorruptedSettings(filePath: string) {

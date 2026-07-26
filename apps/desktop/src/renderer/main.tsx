@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import "@ether/brand/brand.css";
 import "./styles.css";
 import { App } from "./App";
+import { markPerformance } from "./performance/marks";
+
+markPerformance("cold-start:start");
 
 const rootElement = document.getElementById("root");
 

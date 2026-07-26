@@ -10,13 +10,55 @@ export interface RepositoryTransactionContext {
   database: DatabaseSync;
   createId(prefix: string): string;
   now(): string;
+  executionIdentity: {
+    correlationByJob: Map<string, string>;
+    documentId?: string;
+  };
 }
 
+export const MAX_CACHED_JOB_CORRELATIONS = 256;
+
+export function cachedJobCorrelation(
+  identity: RepositoryTransactionContext["executionIdentity"],
+  jobId: string
+): string | undefined {
+  const correlationId = identity.correlationByJob.get(jobId);
+  if (correlationId === undefined) return undefined;
+  identity.correlationByJob.delete(jobId);
+  identity.correlationByJob.set(jobId, correlationId);
+  return correlationId;
+}
+
+export function cacheJobCorrelation(
+  identity: RepositoryTransactionContext["executionIdentity"],
+  jobId: string,
+  correlationId: string
+): void {
+  identity.correlationByJob.delete(jobId);
+  identity.correlationByJob.set(jobId, correlationId);
+  while (identity.correlationByJob.size > MAX_CACHED_JOB_CORRELATIONS) {
+    const leastRecentlyUsed = identity.correlationByJob.keys().next().value as string | undefined;
+    if (leastRecentlyUsed === undefined) break;
+    identity.correlationByJob.delete(leastRecentlyUsed);
+  }
+}
+
+const repositoryIdentityByConnection = new WeakMap<
+  DatabaseSync,
+  RepositoryTransactionContext["executionIdentity"]
+>();
+
 export function createRepositoryContext(database: DatabaseSync): RepositoryTransactionContext {
+  let executionIdentity = repositoryIdentityByConnection.get(database);
+  if (executionIdentity === undefined) {
+    executionIdentity = { correlationByJob: new Map() };
+    repositoryIdentityByConnection.set(database, executionIdentity);
+  }
   return {
     database,
     createId: (prefix) => `${prefix}-${randomUUID()}`,
-    now: () => new Date().toISOString()
+    now: () => new Date().toISOString(),
+    executionIdentity
   };
 }
 

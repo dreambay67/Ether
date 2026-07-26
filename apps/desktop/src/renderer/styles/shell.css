@@ -81,3 +81,19 @@
 .task-fifteen-shell .resizable-pane-runs.is-collapsed { width: 100% !important; height: 32px !important; }
 .task-fifteen-shell .resizable-pane-artifacts { width: 100% !important; height: auto; min-height: 0; border-right: 0; border-bottom: 1px solid var(--ether-shell-border); }
 .task-fifteen-shell .resizable-pane-artifacts.is-collapsed { width: 100% !important; height: 32px !important; }
+
+@media (min-width: 1600px) {
+  .task-fifteen-shell .project-header.task-nine-header {
+    grid-template-columns: minmax(320px, 1fr) auto minmax(520px, auto);
+    padding-inline: 18px;
+  }
+
+  .task-fifteen-shell .project-header-brand h1 {
+    max-width: 40vw;
+  }
+
+  .task-fifteen-shell .workspace-switcher,
+  .task-fifteen-shell .workspace-context {
+    padding-inline: 18px;
+  }
+}

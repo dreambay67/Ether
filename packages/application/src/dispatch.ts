@@ -99,7 +99,13 @@ async function commandOnce(
     const existing = repositories.execution.getCommandResult(command.id, command.name);
     if (existing !== undefined) return responseFromSaved(existing, payloadKey);
     const result = run(repositories as never);
-    repositories.execution.completeCommand(command.id, command.name, { [payloadKey]: result }, events as never);
+    repositories.execution.completeCommand(
+      command.id,
+      command.name,
+      { [payloadKey]: result },
+      events as never,
+      command.correlationId
+    );
     return result;
   });
 }
@@ -202,22 +208,25 @@ async function recipeCapabilities(app: EtherApplication): Promise<ProviderCapabi
     // Recipe blockers should name the missing capability even when provider
     // diagnosis itself is unavailable.
   }
+  const configured = [...await app.boundaryConfiguredProviderCapabilities()];
   const execution = app.boundaryExecutionProviderAvailability();
   const intelligence: ProviderCapability[] = [
-    ...(execution.worker ? [{
+    ...(execution.worker && !configured.some((capability) => capability.operation === "llm") ? [{
       providerId: "ether-intelligence", profileId: "worker", operation: "llm" as const,
       inputChannels: ["text", "image", "data"] as ProviderCapability["inputChannels"], outputChannels: ["text"] as ProviderCapability["outputChannels"],
       aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4,
       supportsCancellation: true, supportsSeed: false, provenance: "static-constraint" as const, limitations: []
     }] : []),
-    ...(execution.evaluation ? [{
+    ...(execution.evaluation && !configured.some((capability) =>
+      capability.operation === "llm" && capability.outputChannels.includes("data")
+    ) ? [{
       providerId: "ether-intelligence", profileId: "evaluation", operation: "llm" as const,
       inputChannels: ["text", "image", "data"] as ProviderCapability["inputChannels"], outputChannels: ["data"] as ProviderCapability["outputChannels"],
       aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4,
       supportsCancellation: true, supportsSeed: false, provenance: "static-constraint" as const, limitations: []
     }] : [])
   ];
-  const combined = [...app.boundaryConfiguredProviderCapabilities(), ...discovered, ...intelligence];
+  const combined = [...configured, ...discovered, ...intelligence];
   return combined.filter((capability, index) => combined.findIndex((candidate) =>
     candidate.providerId === capability.providerId
     && candidate.profileId === capability.profileId
@@ -279,9 +288,21 @@ export async function executeApplicationCommand(
       return commandResponse(command, { valid: issues.length === 0, issues });
     }
     case "run.preview":
-      return commandResponse(command, { plan: await app.previewRun({ commandId: command.id, ...command.payload }) });
+      return commandResponse(command, {
+        plan: await app.previewRun({
+          commandId: command.id,
+          correlationId: command.correlationId,
+          ...command.payload
+        })
+      });
     case "run.start":
-      return commandResponse(command, { job: await app.startRun({ commandId: command.id, ...command.payload }) });
+      return commandResponse(command, {
+        job: await app.startRun({
+          commandId: command.id,
+          correlationId: command.correlationId,
+          ...command.payload
+        })
+      });
     case "run.cancel":
     case "job.cancel":
       await app.cancelRun({ commandId: command.id, jobId: command.payload.jobId });
@@ -295,7 +316,11 @@ export async function executeApplicationCommand(
       await app.resumeRun({ commandId: command.id, jobId: command.payload.jobId });
       return commandResponse(command, acknowledgement());
     case "permission.grantRun": {
-      const permit = await app.grantRunPermit({ commandId: command.id, ...command.payload });
+      const permit = await app.grantRunPermit({
+        commandId: command.id,
+        correlationId: command.correlationId,
+        ...command.payload
+      });
       return commandResponse(command, { permitId: permit.id, permission: "run", expiresAt: null });
     }
     case "permission.grantEdit": {

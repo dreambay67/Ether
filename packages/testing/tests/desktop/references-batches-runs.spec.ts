@@ -1,15 +1,36 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
 
-test("manages 100 references, an exact batch matrix, and 500 durable jobs without polling", async ({ page }) => {
+type BatchAllocationSnapshot = {
+  targetNodeId: string;
+  count: number;
+  providerId: string;
+  profileId: string;
+  modelId: string;
+};
+type BatchConfigSnapshot = {
+  allocations?: BatchAllocationSnapshot[];
+  parallelism?: number;
+};
+type BatchUpdateCommand = {
+  name: string;
+  payload: { transaction?: { operations?: Array<{ node?: { config?: BatchConfigSnapshot } }> } };
+};
+
+test("manages 100 references, batch allocation and concurrency controls, and 500 durable jobs without polling", async ({ page }) => {
   await page.addInitScript(() => {
     const now = "2026-07-23T01:00:00.000Z";
     let graph = {
       id: "workflow-graph", title: "Campaign workflow", kind: "root", createdAt: now, updatedAt: now,
       nodes: [
         { id: "refs", definitionId: "reference.set", title: "Campaign sources", position: { x: 80, y: 80 }, size: { width: 250, height: 150 }, config: { kind: "reference.set", members: [], enabledChannels: ["image"], ordering: "manual" }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
-        { id: "batch", definitionId: "flow.batch", title: "Markets × treatments", position: { x: 400, y: 80 }, size: { width: 250, height: 150 }, config: { kind: "flow.batch", dimensions: [{ id: "market", name: "Market", values: ["EU", "US"] }, { id: "treatment", name: "Treatment", values: ["A", "B", "C"] }, { id: "variant", name: "Variant", values: Array.from({ length: 2_000 }, (_, index) => `v${index}`) }], exclusions: [{ values: { market: "US", treatment: "C", variant: "v1999" } }], parallelism: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
-      ], edges: [], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
+        { id: "batch", definitionId: "flow.batch", title: "Markets × treatments", position: { x: 400, y: 80 }, size: { width: 250, height: 150 }, config: { kind: "flow.batch", dimensions: [{ id: "market", name: "Market", values: ["EU", "US"] }, { id: "treatment", name: "Treatment", values: ["A", "B", "C"] }, { id: "variant", name: "Variant", values: Array.from({ length: 2_000 }, (_, index) => `v${index}`) }], exclusions: [{ values: { market: "US", treatment: "C", variant: "v1999" } }], parallelism: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "worker", definitionId: "prompt.worker", title: "Prompt Worker", position: { x: 720, y: 80 }, size: { width: 250, height: 150 }, config: { kind: "prompt.worker", behavior: "rewrite", instruction: "Make the campaign direction precise.", profile: "balanced", providerId: "codex-vision-assistant", profileId: "worker:gpt-5.4", model: "gpt-5.4", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8_000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "image", definitionId: "generation.image", title: "Image Generator", position: { x: 1_040, y: 80 }, size: { width: 250, height: 150 }, config: { kind: "generation.image", providerId: "google-nano-banana-2", profileId: "google-nano-banana-2", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
+      ], edges: [
+        { id: "batch-to-worker", from: { kind: "node", nodeId: "batch", channel: "data" }, to: { kind: "node", nodeId: "worker", channel: "data" }, role: "general", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true },
+        { id: "worker-to-image", from: { kind: "node", nodeId: "worker", channel: "text" }, to: { kind: "node", nodeId: "image", channel: "text" }, role: "general", order: 1, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true }
+      ], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
     };
     let references = Array.from({ length: 100 }, (_, index) => ({
       id: `reference-${index}`, displayName: `Reference ${String(index + 1).padStart(3, "0")}.png`, mediaType: "image/png",
@@ -24,6 +45,14 @@ test("manages 100 references, an exact batch matrix, and 500 durable jobs withou
       createdAt: now, startedAt: index === 2 ? null : now, completedAt: index === 1 ? null : now,
       cancellationRequestedAt: index === 2 ? now : null
     }));
+    const capabilities = [
+      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5.4", modelId: "gpt-5.4", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 2, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
+      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 2, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
+      { providerId: "google-nano-banana-2", profileId: "google-nano-banana-2", modelId: "Nano Banana 2", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
+      { providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
+      { providerId: "wide-image-only", profileId: "wide-image-only", modelId: "Wide Image", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["16:9"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
+      { providerId: "small-image-only", profileId: "small-image-only", modelId: "Small Image", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "small-square", width: 512, height: 512, label: "512 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] }
+    ];
     const commands: Array<{ name: string; payload: Record<string, unknown> }> = [];
     const pickers: Array<{ storage: string }> = [];
     const dropped: Array<{ name: string; storage: string }> = [];
@@ -52,10 +81,12 @@ test("manages 100 references, an exact batch matrix, and 500 durable jobs withou
           if (command.name === "graph.applyTransaction") {
             const transaction = command.payload.transaction as { operations: Array<{ node: typeof graph.nodes[number] }> };
             const updated = transaction.operations[0]?.node; if (updated) graph = { ...graph, nodes: graph.nodes.map((node) => node.id === updated.id ? updated : node) };
+            if (updated?.id === "batch") await new Promise((resolve) => setTimeout(resolve, 40));
           }
           return { kind: "response", name: command.name, payload: command.name === "graph.applyTransaction" ? { documentRevisionId: "revision-2", graphRevisions: [{ graphId: graph.id, revisionId: "graph-revision-2" }] } : { acknowledged: true } };
         },
         query: async (query: { name: string; payload: Record<string, unknown> }) => {
+          if (query.name === "provider.capabilities") return { kind: "response", name: "provider.capabilities", payload: { capabilities } };
           if (query.name === "reference.list") return { kind: "response", name: "reference.list", payload: { references } };
           if (query.name === "job.list") return { kind: "response", name: "job.list", payload: { jobs: jobs.slice(0, Number(query.payload.limit ?? 500)) } };
           if (query.name === "plan.summary") return { kind: "response", name: "plan.summary", payload: { plan: { id: query.payload.planId, graphId: graph.id, estimatedCalls: 1, effectiveParallelism: 2, contentHash: "sha256:v1:" + "b".repeat(64), workItems: [], warnings: [], steps: [] } } };
@@ -70,6 +101,10 @@ test("manages 100 references, an exact batch matrix, and 500 durable jobs withou
   });
 
   await page.goto("/");
+  const latestBatchConfig = () => page.evaluate(() => {
+    const commands = (window as typeof window & { __workflowState: { commands: BatchUpdateCommand[] } }).__workflowState.commands;
+    return commands.filter((command) => command.name === "graph.applyTransaction").at(-1)?.payload.transaction?.operations?.[0]?.node?.config ?? null;
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.getByRole("heading", { name: "Reference Desk" })).toBeVisible();
   await expect(page.locator(".reference-row").first()).toBeVisible();
@@ -119,13 +154,65 @@ test("manages 100 references, an exact batch matrix, and 500 durable jobs withou
 
   await page.getByTestId("workspace-switcher").getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Batch Matrix" })).toBeVisible();
+  const batchMatrix = page.locator(".batch-matrix");
+  const fullBatch = batchMatrix.locator('[aria-labelledby="full-batch-heading"]');
+  const allocation = batchMatrix.locator('[aria-labelledby="allocation-heading"]');
+  const concurrency = batchMatrix.locator('[aria-labelledby="concurrency-heading"]');
+  await expect(fullBatch.getByRole("heading", { name: "Full batch" })).toBeVisible();
+  await expect(fullBatch).toContainText("Dimensions create the complete work list");
+  await expect(allocation.getByRole("heading", { name: "Provider and model allocation" })).toBeVisible();
+  await expect(allocation).toContainText("profile and model identity come from current capability evidence");
+  await expect(concurrency.getByRole("heading", { name: "Concurrent run" })).toBeVisible();
+  await expect(concurrency).toContainText("Total concurrency is separate from batch size");
   await expect(page.getByText("10000 work items")).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("capped at 10,000");
   await expect(page.getByText("Showing the first 500 of 18,000 combinations.", { exact: false })).toBeVisible();
   await expect(page.locator(".batch-cells button")).toHaveCount(500);
-  await expect(page.getByText("effective 2 after provider limits", { exact: false })).toBeVisible();
+  await expect(page.getByText("effective 2 after the global and provider limits", { exact: false })).toBeVisible();
+  const previewsBeforePolicyRefresh = await page.evaluate(() =>
+    (window as typeof window & { __workflowState: { commands: BatchUpdateCommand[] } }).__workflowState.commands
+      .filter((command) => command.name === "run.preview").length
+  );
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("ether:provider-policy-changed")));
+  await expect.poll(() => page.evaluate(() =>
+    (window as typeof window & { __workflowState: { commands: BatchUpdateCommand[] } }).__workflowState.commands
+      .filter((command) => command.name === "run.preview").length
+  )).toBeGreaterThan(previewsBeforePolicyRefresh);
+  const workerTarget = allocation.locator(".batch-target").filter({ hasText: "Prompt Worker" });
+  const imageTarget = allocation.locator(".batch-target").filter({ hasText: "Image Generator" });
+  await expect(workerTarget).toContainText("Prompt Worker");
+  await expect(imageTarget).toContainText("Image Generator");
+  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Codex up to 2 at once");
+  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Antigravity up to 1 at once");
+  await workerTarget.getByRole("button", { name: "Add lane" }).click();
+  await expect(batchMatrix.getByRole("status")).toContainText("Saving batch changes");
+  const workerProvider = workerTarget.getByRole("combobox", { name: "Prompt Worker provider and model route" });
+  const workerItems = workerTarget.getByRole("spinbutton", { name: "Prompt Worker allocated items" });
+  await expect(workerItems).toHaveValue("10000");
+  await expect(workerTarget.getByRole("textbox", { name: "Prompt Worker model" })).toHaveCount(0);
+  await workerProvider.selectOption("codex-vision-assistant\u0000worker:gpt-5.6");
+  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "worker")).toMatchObject({ targetNodeId: "worker", providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6" });
+  await expect(page.locator(".document-status")).toContainText("Batch allocation saved.");
+  await workerItems.fill("37");
+  await workerItems.press("Tab");
+  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "worker")).toMatchObject({ targetNodeId: "worker", count: 37, providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6" });
+  await imageTarget.getByRole("button", { name: "Add lane" }).click();
+  const imageProvider = imageTarget.getByRole("combobox", { name: "Image Generator provider and model route" });
+  const imageItems = imageTarget.getByRole("spinbutton", { name: "Image Generator allocated items" });
+  await expect(imageItems).toHaveValue("10000");
+  await expect(imageTarget.getByRole("textbox", { name: "Image Generator model" })).toHaveCount(0);
+  await expect(imageProvider).toContainText("Antigravity · Nano Banana Pro");
+  await expect(imageProvider).not.toContainText("wide-image-only");
+  await expect(imageProvider).not.toContainText("small-image-only");
+  await imageProvider.selectOption("google-nano-banana-pro\u0000google-nano-banana-pro");
+  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "image")).toMatchObject({ targetNodeId: "image", providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro" });
+  await expect(page.locator(".document-status")).toContainText("Batch allocation saved.");
+  await imageItems.fill("73");
+  await imageItems.press("Tab");
+  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "image")).toMatchObject({ targetNodeId: "image", count: 73, providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro" });
   await expect(page.getByRole("combobox", { name: "Batch execution policy" })).toHaveValue("1");
   await page.getByRole("combobox", { name: "Batch execution policy" }).selectOption("4");
+  await expect.poll(async () => (await latestBatchConfig())?.parallelism).toBe(4);
   await page.locator(".batch-cells button:not(.is-excluded)").first().click();
   const batchCommands = await page.evaluate(() => (window as typeof window & { __workflowState: { commands: Array<{ name: string; payload: Record<string, unknown> }> } }).__workflowState.commands);
   const batchUpdate = batchCommands.filter((command) => command.name === "graph.applyTransaction").at(-1);
@@ -147,10 +234,11 @@ test("manages 100 references, an exact batch matrix, and 500 durable jobs withou
   await expect(page.locator(".job-list button").filter({ hasText: "job-001" })).toContainText("failed");
   await expect(page.getByRole("button", { name: "Attention required, 2 jobs" })).toBeVisible();
   await page.locator(".job-list button").filter({ hasText: "job-002" }).click();
-  await page.getByRole("button", { name: "Resume" }).click();
+  await expect(page.getByRole("article", { name: "Job job-002 detail" })).toContainText("cancelled");
+  await expect(page.getByRole("button", { name: "Resume" })).toHaveCount(0);
   const jobCommands = await page.evaluate(() => (window as typeof window & { __workflowState: { commands: Array<{ name: string; payload: Record<string, unknown> }> } }).__workflowState.commands);
   expect(jobCommands.find((command) => command.name === "job.retry")?.payload).toEqual({ jobId: "job-000", workItemIds: ["failed-a", "failed-b"] });
-  expect(jobCommands.map((command) => command.name)).toEqual(expect.arrayContaining(["job.cancel", "job.resume"]));
+  expect(jobCommands.map((command) => command.name)).toEqual(expect.arrayContaining(["job.cancel"]));
 
   await page.reload();
   await page.getByTestId("workspace-switcher").getByRole("button", { name: "Run", exact: true }).click();

@@ -62,6 +62,7 @@ type TurnState = {
   threadId: string;
   turnId: string;
   startedAt: number;
+  onEvent?: (event: CodexAppServerEvent) => void;
   signal?: AbortSignal;
   abortListener?: () => void;
   interruptCompletionTimeoutMs: number;
@@ -110,6 +111,7 @@ export type RunTurnOptions = {
   outputSchema?: JsonObject;
   effort?: string;
   model?: string;
+  onEvent?: (event: CodexAppServerEvent) => void;
   signal?: AbortSignal;
   interruptCompletionTimeoutMs?: number;
   timeoutMs?: number;
@@ -342,6 +344,7 @@ export class CodexAppServerClient {
         threadId: options.threadId,
         turnId,
         startedAt: operationStartedAt,
+        onEvent: options.onEvent,
         signal: options.signal,
         interruptCompletionTimeoutMs: positiveInteger(options.interruptCompletionTimeoutMs, 5_000),
         completionReason: null,
@@ -500,6 +503,7 @@ export class CodexAppServerClient {
 
   private applyTurnEvent(state: TurnState, event: CodexAppServerEvent) {
     if (state.settled) return;
+    state.onEvent?.(event);
     state.eventBytes = retainByteBounded(state.events, event, this.maxEvents, state.eventBytes, this.maxEventBytes, () => { state.truncated.events = true; });
     const params = event.params;
     if (event.method === "item/agentMessage/delta") {

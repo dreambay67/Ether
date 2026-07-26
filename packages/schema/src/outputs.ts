@@ -63,6 +63,7 @@ export const ProviderCapabilitySchema = z
   .object({
     providerId: z.string().min(1),
     profileId: z.string().min(1),
+    modelId: z.string().min(1).optional(),
     operation: ProviderOperationSchema,
     inputChannels: z.array(PayloadChannelSchema),
     outputChannels: z.array(PayloadChannelSchema),

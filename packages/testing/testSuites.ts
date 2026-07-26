@@ -10,6 +10,7 @@ export const testSuites = {
     "tests/document-operation-replay.test.ts",
     "tests/graph-kernel.test.ts",
     "tests/intelligence-context.test.ts",
+    "tests/manual-4.0.test.ts",
     "tests/connection-matrix-4.0.test.ts",
     "tests/no-legacy-4.0.test.ts",
     "tests/plugin-4.0.test.ts",
@@ -26,6 +27,9 @@ export const testSuites = {
     "tests/document-graph-repository.test.ts",
     "tests/document-locking.test.ts",
     "tests/document-recovery.test.ts",
+    "tests/security-boundaries.test.ts",
+    "tests/error-observability.test.ts",
+    "tests/network-egress.test.ts",
     "tests/desktop/document-lifecycle.spec.ts",
     "tests/codex-app-server-client.test.ts",
     "tests/codex-app-server-provider.test.ts",
@@ -45,8 +49,10 @@ export const testSuites = {
     "tests/live-output.test.ts",
     "tests/mcp-4.0.test.ts",
     "tests/durable-repositories.test.ts",
-    "tests/windows-package.test.ts"
+    "tests/windows-package.test.ts",
+    "tests/document-compatibility-4x.test.ts"
   ],
+  "destructive-chaos": ["tests/document-chaos.integration.ts"],
   contracts: [
     "tests/api-provider-infrastructure.test.ts",
     "tests/asset-ipc-validation.test.ts",
@@ -54,7 +60,19 @@ export const testSuites = {
     "tests/provider-contract.test.ts",
     "tests/workspace-command-surface.test.ts"
   ],
-  performance: [],
+  performance: [
+    "tests/performance/document-open.performance.ts",
+    "tests/performance/canvas.performance.ts",
+    "tests/performance/artifact-search.performance.ts",
+    "tests/performance/artifact-asset.performance.ts",
+    "tests/performance/large-sparse-asset.performance.ts",
+    "tests/performance/provider-dispatch.performance.ts",
+    "tests/document-page-size.performance.ts"
+  ],
+  performanceBrowser: [
+    "tests/performance/canvas.browser.performance.spec.ts",
+    "tests/performance/desktop.production.performance.spec.ts"
+  ],
   "conformance:codex": [
     "tests/codex.conformance.test.ts",
     "tests/conformance/codex-live.conformance.ts"
@@ -63,6 +81,7 @@ export const testSuites = {
   smoke: [
     "tests/smoke.spec.ts",
     "tests/desktop/shell-layout.spec.ts",
+    "tests/desktop/release-status.spec.ts",
     "tests/desktop/canvas.spec.ts",
     "tests/desktop/recipe-gallery.spec.ts",
     "tests/desktop/inspectors.spec.ts",
@@ -71,5 +90,5 @@ export const testSuites = {
     "tests/desktop/drawing-edit.spec.ts"
   ],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
-  packaged: ["tests/desktop/document-lifecycle.packaged.ts"]
+  packaged: ["tests/desktop/document-lifecycle.packaged.ts", "tests/packaged-electron.packaged.ts"]
 } as const;

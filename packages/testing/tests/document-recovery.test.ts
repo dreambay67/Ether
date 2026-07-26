@@ -91,6 +91,17 @@ function api(): RecoveryApi {
   return documentPackage as unknown as RecoveryApi;
 }
 
+const activeRepairs = new Set<Promise<unknown>>();
+
+function repairDocument(
+  ...args: Parameters<RecoveryApi["repairDocument"]>
+): ReturnType<RecoveryApi["repairDocument"]> {
+  const operation = api().repairDocument(...args);
+  activeRepairs.add(operation);
+  void operation.finally(() => activeRepairs.delete(operation)).catch(() => undefined);
+  return operation;
+}
+
 function graph(): EtherGraph {
   const now = "2026-07-17T08:00:00.000Z";
   return {
@@ -204,6 +215,7 @@ describe("Ether AppData recovery and logical repair", () => {
   });
 
   afterEach(async () => {
+    await Promise.allSettled([...activeRepairs]);
     await Promise.all(stores.splice(0).map((store) => store.close()));
     rmSync(root, { recursive: true, force: true });
   });
@@ -503,7 +515,7 @@ describe("Ether AppData recovery and logical repair", () => {
       const destinationPath = path.join(root, `Interrupted-${checkpoint}.ether`);
 
       await expect(
-        api().repairDocument(sourcePath, destinationPath, {
+        repairDocument(sourcePath, destinationPath, {
           appDataRoot,
           checkpoint: (name) => {
             if (name === checkpoint) throw new Error(`stop repair at ${checkpoint}`);
@@ -539,7 +551,7 @@ describe("Ether AppData recovery and logical repair", () => {
     const destinationPath = path.join(root, "Redirected-repair.ether");
 
     await expect(
-      api().repairDocument(sourcePath, destinationPath, {
+      repairDocument(sourcePath, destinationPath, {
         appDataRoot,
         environment: environment(appDataRoot)
       })
@@ -555,7 +567,7 @@ describe("Ether AppData recovery and logical repair", () => {
     const destinationPath = path.join(root, "Published-before-cleanup.ether");
 
     await expect(
-      api().repairDocument(sourcePath, destinationPath, {
+      repairDocument(sourcePath, destinationPath, {
         appDataRoot,
         checkpoint: (name) => {
           if (name === "committed") throw new Error("stop after repair publication");
@@ -592,7 +604,7 @@ describe("Ether AppData recovery and logical repair", () => {
     const destinationPath = path.join(root, "Substituted-repair.ether");
 
     await expect(
-      api().repairDocument(sourcePath, destinationPath, {
+      repairDocument(sourcePath, destinationPath, {
         appDataRoot,
         checkpoint: (name) => {
           if (name === "destination-created") throw new Error("stop before repair publication");
@@ -647,7 +659,7 @@ describe("Ether AppData recovery and logical repair", () => {
     const destinationPath = path.join(root, "Missing-repair.ether");
 
     await expect(
-      api().repairDocument(sourcePath, destinationPath, {
+      repairDocument(sourcePath, destinationPath, {
         appDataRoot,
         checkpoint: (name) => {
           if (name === "destination-created") throw new Error("stop with missing destination");
@@ -715,14 +727,14 @@ describe("Ether AppData recovery and logical repair", () => {
     database.close();
 
     const strictDestination = path.join(root, "Strict-corrupt-lanes.ether");
-    await expect(api().repairDocument(sourcePath, strictDestination, {
+    await expect(repairDocument(sourcePath, strictDestination, {
       appDataRoot,
       environment: environment(appDataRoot)
     })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
     expect(existsSync(strictDestination)).toBe(false);
 
     const destinationPath = path.join(root, "Repaired-corrupt-lanes.ether");
-    const report = await api().repairDocument(sourcePath, destinationPath, {
+    const report = await repairDocument(sourcePath, destinationPath, {
       appDataRoot,
       allowLossy: true,
       environment: environment(appDataRoot)
@@ -847,14 +859,14 @@ describe("Ether AppData recovery and logical repair", () => {
     }
 
     const strictDestination = path.join(root, "Strict-boundary-losses.ether");
-    await expect(api().repairDocument(sourcePath, strictDestination, {
+    await expect(repairDocument(sourcePath, strictDestination, {
       appDataRoot,
       environment: environment(appDataRoot)
     })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
     expect(existsSync(strictDestination)).toBe(false);
 
     const destinationPath = path.join(root, "Repaired-boundary-losses.ether");
-    const report = await api().repairDocument(sourcePath, destinationPath, {
+    const report = await repairDocument(sourcePath, destinationPath, {
       appDataRoot,
       allowLossy: true,
       environment: environment(appDataRoot)
@@ -1032,14 +1044,14 @@ describe("Ether AppData recovery and logical repair", () => {
     expect(damagedBeforeRepair).not.toBe(sourceBefore);
 
     const refusedPath = path.join(root, "Refused-lossy.ether");
-    await expect(api().repairDocument(sourcePath, refusedPath, {
+    await expect(repairDocument(sourcePath, refusedPath, {
       appDataRoot,
       environment: environment(appDataRoot)
     })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
     expect(existsSync(refusedPath)).toBe(false);
 
     const destinationPath = path.join(root, "Repaired.ether");
-    const report = await api().repairDocument(sourcePath, destinationPath, {
+    const report = await repairDocument(sourcePath, destinationPath, {
       appDataRoot,
       allowLossy: true,
       environment: environment(appDataRoot)
@@ -1071,7 +1083,82 @@ describe("Ether AppData recovery and logical repair", () => {
     const repairedGraphs = await repaired.read(({ graphs }) => graphs.list());
     expect(repairedGraphs).toEqual([deepGraph, internalGraph, rootWithModule]);
     expect(validateFullGraphState(repairedGraphs)).toEqual([]);
-  });
+  }, 30_000);
+
+  it("repairs invalid thumbnail metadata and excludes unreferenced ready blobs", async () => {
+    const store = await createStore(sourcePath, appDataRoot);
+    stores.push(store);
+    await createProvenance(store, "output-thumbnail-repair", "payload-thumbnail-repair");
+    const originalPath = path.join(root, "thumbnail-original.png");
+    const thumbnailPath = path.join(root, "thumbnail-preview.png");
+    const orphanPath = path.join(root, "unreferenced-ready.png");
+    writeFileSync(originalPath, pngBytes(4_096, 0x31));
+    writeFileSync(thumbnailPath, pngBytes(1_024, 0x41));
+    writeFileSync(orphanPath, pngBytes(2_048, 0x51));
+    const thumbnail = await api().importBlob(
+      store,
+      { sourcePath: thumbnailPath, mediaType: "image/png" },
+      { appDataRoot }
+    );
+    await api().importBlob(
+      store,
+      { sourcePath: orphanPath, mediaType: "image/png" },
+      { appDataRoot }
+    );
+    await api().importBlob(store, {
+      sourcePath: originalPath,
+      mediaType: "image/png",
+      artifact: {
+        id: "artifact-thumbnail-repair",
+        channel: "image",
+        mediaType: "image/png",
+        source: {
+          outputVersionId: "output-thumbnail-repair",
+          payloadId: "payload-thumbnail-repair"
+        },
+        createdAt: "2026-07-17T08:01:00.000Z",
+        metadata: {
+          thumbnailByteLength: pngBytes(1_024, 0x41).byteLength,
+          thumbnailContentKey: thumbnail.contentKey,
+          thumbnailMediaType: "image/png"
+        }
+      }
+    }, { appDataRoot });
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+
+    const damaged = new DatabaseSync(sourcePath);
+    damaged.prepare(
+      "UPDATE artifacts SET metadata_json = json_set(metadata_json, '$.thumbnailByteLength', ?) WHERE artifact_id = ?"
+    ).run(999_999, "artifact-thumbnail-repair");
+    expect(damaged.prepare("SELECT count(*) AS count FROM blobs WHERE status = 'ready'").get())
+      .toEqual({ count: 3 });
+    damaged.close();
+
+    const destinationPath = path.join(root, "Repaired-thumbnails.ether");
+    const report = await repairDocument(sourcePath, destinationPath, {
+      appDataRoot,
+      allowLossy: true,
+      environment: environment(appDataRoot)
+    });
+    expect(report.recovered).toMatchObject({ artifacts: 1, blobs: 1 });
+    expect(report.losses).toContainEqual({
+      type: "artifact",
+      entityId: "artifact-thumbnail-repair",
+      reason: "Invalid or mismatched embedded thumbnail metadata was removed during repair."
+    });
+
+    const repaired = new DatabaseSync(destinationPath, { readOnly: true });
+    expect(repaired.prepare("SELECT count(*) AS count FROM blobs WHERE status = 'ready'").get())
+      .toEqual({ count: 1 });
+    const metadata = JSON.parse((repaired.prepare(
+      "SELECT metadata_json FROM artifacts WHERE artifact_id = ?"
+    ).get("artifact-thumbnail-repair") as { metadata_json: string }).metadata_json) as Record<string, unknown>;
+    expect(metadata).not.toHaveProperty("thumbnailByteLength");
+    expect(metadata).not.toHaveProperty("thumbnailContentKey");
+    expect(metadata).not.toHaveProperty("thumbnailMediaType");
+    repaired.close();
+  }, 15_000);
 
   it("repairs through corrupt derived FTS state and rebuilds it from authoritative rows", async () => {
     const store = await createStore(sourcePath, appDataRoot);
@@ -1088,7 +1175,7 @@ describe("Ether AppData recovery and logical repair", () => {
     })).rejects.toMatchObject({ code: "FTS_INDEX_MISMATCH" });
 
     const destinationPath = path.join(root, "Rebuilt-fts.ether");
-    await expect(api().repairDocument(sourcePath, destinationPath, {
+    await expect(repairDocument(sourcePath, destinationPath, {
       appDataRoot,
       environment: environment(appDataRoot)
     })).resolves.toMatchObject({ losses: [] });
