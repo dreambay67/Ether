@@ -13,7 +13,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "pretest:destructive-chaos": "pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/intelligence build",
     "test:destructive-chaos": "cross-env ETHER_TEST_SUITE=destructive-chaos vitest run --config vitest.integration.config.ts",
-    "pretest:performance": "pnpm --filter @ether/schema build && pnpm --filter @ether/document build && pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build",
+    "pretest:performance": "node ../../node_modules/electron/install.js && pnpm --filter @ether/schema build && pnpm --filter @ether/document build && pnpm --filter @ether/providers build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build",
     "test:performance": "vitest run --config vitest.performance.config.ts && playwright test --config playwright.performance.config.ts",
     "pretest:contracts": "pnpm --filter @ether/providers build",
     "test:contracts": "cross-env ETHER_TEST_SUITE=contracts vitest run --config vitest.integration.config.ts",
