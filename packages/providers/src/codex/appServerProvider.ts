@@ -163,7 +163,7 @@ class AppServerGenerationProvider implements GenerationProvider {
       messages: []
     }, true);
     const availability = diagnostic.availability;
-    const maxParallelism = this.route.runtime.health().transport === "app-server" ? 2 : 1;
+    const maxParallelism = 4;
     const profile = (
       profileId: "image-default" | "image-edit",
       operation: "image.generate" | "image.edit",
@@ -185,7 +185,7 @@ class AppServerGenerationProvider implements GenerationProvider {
       model: this.route.runtime.health().defaultModelId ?? this.descriptor.model,
       messages: [
         availability === "available"
-          ? `Codex permits at most ${maxParallelism} simultaneous image request${maxParallelism === 1 ? "" : "s"} across the application.`
+          ? `Codex permits at most ${maxParallelism} simultaneous image requests across the application, including the explicit exec fallback.`
           : diagnostic.messages[0] ?? "Codex image generation is unavailable."
       ]
     });

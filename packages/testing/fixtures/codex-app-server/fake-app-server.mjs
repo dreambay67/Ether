@@ -8,6 +8,7 @@ const newline = mode === "crlf-split" ? "\r\n" : "\n";
 let input = "";
 let threadOrdinal = 0;
 let turnOrdinal = 0;
+const concurrencyTurns = [];
 
 process.stderr.write("fake app server diagnostic noise\n");
 if (environmentLog) {
@@ -179,6 +180,16 @@ function handle(message) {
       }
     }
     send({ id: message.id, result: { turn: turn(id) } });
+    if (mode === "concurrency-4") {
+      const text = message.params?.input?.find((entry) => entry.type === "text")?.text ?? "fixture response";
+      concurrencyTurns.push({ threadId: message.params.threadId, turnId: id, text });
+      if (concurrencyTurns.length === 4) {
+        for (const pending of concurrencyTurns.splice(0)) {
+          setTimeout(() => emitCompleted(pending.threadId, pending.turnId, pending.text), 0);
+        }
+      }
+      return;
+    }
     if (mode === "die-active") return setTimeout(() => process.exit(33), 5);
     if (mode === "turn-error") {
       send({ method: "error", params: { threadId: message.params.threadId, turnId: id, willRetry: false, error: { message: "invalid input at C:\\Users\\fixture\\prompt.txt with sk-fixture-secret", codexErrorInfo: "badRequest", additionalDetails: "field: prompt" } } });

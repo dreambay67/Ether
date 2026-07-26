@@ -41,15 +41,15 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
     let jobs = Array.from({ length: 500 }, (_, index) => ({
       id: `job-${String(index).padStart(3, "0")}`, planId: `plan-${index}`, planContentHash: `hash-${index}`,
       status: index === 0 ? "failed" : index === 1 ? "running" : index === 2 ? "cancelled" : "completed",
-      requestedParallelism: index === 1 ? 4 : 1, effectiveParallelism: index === 1 ? 2 : 1,
+      requestedParallelism: index === 1 ? 4 : 1, effectiveParallelism: index === 1 ? 4 : 1,
       createdAt: now, startedAt: index === 2 ? null : now, completedAt: index === 1 ? null : now,
       cancellationRequestedAt: index === 2 ? now : null
     }));
     const capabilities = [
-      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5.4", modelId: "gpt-5.4", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 2, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
-      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 2, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
-      { providerId: "google-nano-banana-2", profileId: "google-nano-banana-2", modelId: "Nano Banana 2", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
-      { providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
+      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5.4", modelId: "gpt-5.4", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 4, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
+      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 4, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
+      { providerId: "google-nano-banana-2", profileId: "google-nano-banana-2", modelId: "Nano Banana 2", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 4, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
+      { providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 4, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
       { providerId: "wide-image-only", profileId: "wide-image-only", modelId: "Wide Image", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["16:9"], resolutions: [{ id: "square", width: 1024, height: 1024, label: "1024 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] },
       { providerId: "small-image-only", profileId: "small-image-only", modelId: "Small Image", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1"], resolutions: [{ id: "small-square", width: 512, height: 512, label: "512 square" }], maxReferences: 16, maxOutputsPerCall: 1, maxParallelism: 1, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: [] }
     ];
@@ -77,7 +77,10 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
         onEvent: (listener: (event: Record<string, unknown>) => void) => { eventListeners.push(listener); return () => { const index = eventListeners.indexOf(listener); if (index >= 0) eventListeners.splice(index, 1); }; },
         command: async (command: { name: string; payload: Record<string, unknown> }) => {
           commands.push(command);
-          if (command.name === "run.preview") return { kind: "response", name: "run.preview", payload: { plan: { id: "preview", estimatedCalls: 10_000, requestedParallelism: 4, effectiveParallelism: 2, batchSummary: { dimensions: 3, exclusions: 1, workItemCount: 10_000 }, warnings: [{ code: "BATCH_EXPANSION_CAPPED", message: "Expansion is capped at 10,000 executable work items.", blocking: false }], workItems: [] } } };
+          if (command.name === "run.preview") {
+            const requestedParallelism = Number(graph.nodes.find((node) => node.id === "batch")?.config.parallelism ?? 1);
+            return { kind: "response", name: "run.preview", payload: { plan: { id: "preview", estimatedCalls: 10_000, requestedParallelism, effectiveParallelism: Math.min(requestedParallelism, 8), batchSummary: { dimensions: 3, exclusions: 1, workItemCount: 10_000 }, warnings: [{ code: "BATCH_EXPANSION_CAPPED", message: "Expansion is capped at 10,000 executable work items.", blocking: false }], workItems: [] } } };
+          }
           if (command.name === "graph.applyTransaction") {
             const transaction = command.payload.transaction as { operations: Array<{ node: typeof graph.nodes[number] }> };
             const updated = transaction.operations[0]?.node; if (updated) graph = { ...graph, nodes: graph.nodes.map((node) => node.id === updated.id ? updated : node) };
@@ -89,7 +92,7 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
           if (query.name === "provider.capabilities") return { kind: "response", name: "provider.capabilities", payload: { capabilities } };
           if (query.name === "reference.list") return { kind: "response", name: "reference.list", payload: { references } };
           if (query.name === "job.list") return { kind: "response", name: "job.list", payload: { jobs: jobs.slice(0, Number(query.payload.limit ?? 500)) } };
-          if (query.name === "plan.summary") return { kind: "response", name: "plan.summary", payload: { plan: { id: query.payload.planId, graphId: graph.id, estimatedCalls: 1, effectiveParallelism: 2, contentHash: "sha256:v1:" + "b".repeat(64), workItems: [], warnings: [], steps: [] } } };
+          if (query.name === "plan.summary") return { kind: "response", name: "plan.summary", payload: { plan: { id: query.payload.planId, graphId: graph.id, estimatedCalls: 1, effectiveParallelism: 4, contentHash: "sha256:v1:" + "b".repeat(64), workItems: [], warnings: [], steps: [] } } };
           if (query.name === "job.workItems") return { kind: "response", name: "job.workItems", payload: { jobId: query.payload.jobId, workItems: query.payload.jobId === "job-000" ? [{ id: "failed-a", status: "failed" }, { id: "failed-b", status: "failed" }, { id: "accepted", status: "accepted" }] : [] } };
           if (query.name === "job.attempts") return { kind: "response", name: "job.attempts", payload: { jobId: query.payload.jobId, attempts: [] } };
           if (query.name === "job.timeline") return { kind: "response", name: "job.timeline", payload: { jobId: query.payload.jobId, entries: [{ id: "timeline-1", occurredAt: now, state: "failed", workItemId: "failed-a", attemptId: null }] } };
@@ -168,7 +171,7 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await expect(page.getByRole("alert")).toContainText("capped at 10,000");
   await expect(page.getByText("Showing the first 500 of 18,000 combinations.", { exact: false })).toBeVisible();
   await expect(page.locator(".batch-cells button")).toHaveCount(500);
-  await expect(page.getByText("effective 2 after the global and provider limits", { exact: false })).toBeVisible();
+  await expect(page.getByText("effective 1 after the global and provider limits", { exact: false })).toBeVisible();
   const previewsBeforePolicyRefresh = await page.evaluate(() =>
     (window as typeof window & { __workflowState: { commands: BatchUpdateCommand[] } }).__workflowState.commands
       .filter((command) => command.name === "run.preview").length
@@ -182,8 +185,9 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   const imageTarget = allocation.locator(".batch-target").filter({ hasText: "Image Generator" });
   await expect(workerTarget).toContainText("Prompt Worker");
   await expect(imageTarget).toContainText("Image Generator");
-  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Codex up to 2 at once");
-  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Antigravity up to 1 at once");
+  await expect(concurrency).toContainText("8 calls globally, shares 4 across Codex, shares 4 across Antigravity");
+  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Codex up to 4 at once");
+  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Antigravity up to 4 at once");
   await workerTarget.getByRole("button", { name: "Add lane" }).click();
   await expect(batchMatrix.getByRole("status")).toContainText("Saving batch changes");
   const workerProvider = workerTarget.getByRole("combobox", { name: "Prompt Worker provider and model route" });
@@ -193,9 +197,9 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await workerProvider.selectOption("codex-vision-assistant\u0000worker:gpt-5.6");
   await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "worker")).toMatchObject({ targetNodeId: "worker", providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6" });
   await expect(page.locator(".document-status")).toContainText("Batch allocation saved.");
-  await workerItems.fill("37");
+  await workerItems.fill("4");
   await workerItems.press("Tab");
-  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "worker")).toMatchObject({ targetNodeId: "worker", count: 37, providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6" });
+  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "worker")).toMatchObject({ targetNodeId: "worker", count: 4, providerId: "codex-vision-assistant", profileId: "worker:gpt-5.6", modelId: "gpt-5.6" });
   await imageTarget.getByRole("button", { name: "Add lane" }).click();
   const imageProvider = imageTarget.getByRole("combobox", { name: "Image Generator provider and model route" });
   const imageItems = imageTarget.getByRole("spinbutton", { name: "Image Generator allocated items" });
@@ -207,12 +211,13 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await imageProvider.selectOption("google-nano-banana-pro\u0000google-nano-banana-pro");
   await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "image")).toMatchObject({ targetNodeId: "image", providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro" });
   await expect(page.locator(".document-status")).toContainText("Batch allocation saved.");
-  await imageItems.fill("73");
+  await imageItems.fill("4");
   await imageItems.press("Tab");
-  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "image")).toMatchObject({ targetNodeId: "image", count: 73, providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro" });
+  await expect.poll(async () => (await latestBatchConfig())?.allocations?.find((lane) => lane.targetNodeId === "image")).toMatchObject({ targetNodeId: "image", count: 4, providerId: "google-nano-banana-pro", profileId: "google-nano-banana-pro", modelId: "Nano Banana Pro" });
   await expect(page.getByRole("combobox", { name: "Batch execution policy" })).toHaveValue("1");
-  await page.getByRole("combobox", { name: "Batch execution policy" }).selectOption("4");
-  await expect.poll(async () => (await latestBatchConfig())?.parallelism).toBe(4);
+  await page.getByRole("combobox", { name: "Batch execution policy" }).selectOption("8");
+  await expect.poll(async () => (await latestBatchConfig())?.parallelism).toBe(8);
+  await expect(page.getByText("effective 8 after the global and provider limits", { exact: false })).toBeVisible();
   await page.locator(".batch-cells button:not(.is-excluded)").first().click();
   const batchCommands = await page.evaluate(() => (window as typeof window & { __workflowState: { commands: Array<{ name: string; payload: Record<string, unknown> }> } }).__workflowState.commands);
   const batchUpdate = batchCommands.filter((command) => command.name === "graph.applyTransaction").at(-1);

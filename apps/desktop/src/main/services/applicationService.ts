@@ -15,6 +15,7 @@ import path from "node:path";
 
 import {
   EtherApplication,
+  ExecutionConcurrencyDomains,
   type ApplicationDiagnosticRecord
 } from "@ether/application";
 import type {
@@ -790,6 +791,7 @@ export interface DesktopApplicationServiceOptions {
 }
 
 export class DesktopApplicationService {
+  private readonly concurrencyDomains = new ExecutionConcurrencyDomains();
   private application: EtherApplication | null = null;
   private current: DocumentDescriptor | null = null;
   private currentPath: string | null = null;
@@ -1721,6 +1723,7 @@ export class DesktopApplicationService {
       onDiagnostic: (record) => this.options.diagnosticSink?.log(record),
       executionProviders: this.options.executionProviders,
       providerResolver: this.options.providerResolver,
+      concurrencyDomains: this.concurrencyDomains,
       providerCapabilities: this.options.providerCapabilities,
       dispatchMode: this.options.dispatchMode,
       pathGrantResolver: {

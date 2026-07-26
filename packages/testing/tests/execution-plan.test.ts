@@ -217,64 +217,143 @@ describe("Ether execution planner", () => {
       }).items.map((item) => item.id)
     );
     expect(compile().batchSummary).toEqual({ dimensions: 2, exclusions: 1, workItemCount: 3 });
-    expect(compile().effectiveParallelism).toBe(2);
+    expect(compile().effectiveParallelism).toBe(1);
   });
 
-  it("persists exact provider/model allocations and combines independent provider-family capacity", () => {
+  it("persists exact Prompt Worker and Image Generator allocations across the fixed 4/4 provider capacities", () => {
     const graph = representativeGraph();
-    const alternate: ProviderCapability = {
+    graph.edges = graph.edges.filter((edge) =>
+      edge.id !== "worker-batch" && edge.id !== "batch-generator"
+    );
+    graph.edges.push(
+      lane("batch-worker", "batch", "data", "worker", "data", "general", 3),
+      lane("worker-generator", "worker", "text", "generator", "text", "subject", 0)
+    );
+    const codexWorkerA: ProviderCapability = {
+      ...capability,
+      providerId: "codex-vision-assistant",
+      profileId: "worker:gpt-5.4",
+      modelId: "gpt-5.4",
+      operation: "llm",
+      outputChannels: ["text", "data"],
+      maxParallelism: 1
+    };
+    const codexWorkerB: ProviderCapability = {
+      ...codexWorkerA,
+      profileId: "worker:gpt-5.6",
+      modelId: "gpt-5.6"
+    };
+    const codexImage: ProviderCapability = {
+      ...capability,
+      providerId: "codex-chatgpt-image-2",
+      profileId: "image-default",
+      modelId: "chatgpt-image-2",
+      maxParallelism: 1
+    };
+    const antigravity: ProviderCapability = {
       ...capability,
       providerId: "google-nano-banana-2",
-      profileId: "nano-banana-pro",
-      modelId: "provider-reported-nano-banana",
+      profileId: "google-nano-banana-2",
+      modelId: "nano-banana-2",
       maxParallelism: 1
+    };
+    const worker = graph.nodes.find((candidate) => candidate.id === "worker")!;
+    if (worker.config.kind !== "prompt.worker") throw new Error("Expected the representative Worker node.");
+    worker.config = {
+      ...worker.config,
+      providerId: codexWorkerA.providerId,
+      profileId: codexWorkerA.profileId,
+      model: codexWorkerA.modelId!
+    };
+    const generatorNode = graph.nodes.find((candidate) => candidate.id === "generator")!;
+    if (generatorNode.config.kind !== "generation.image") throw new Error("Expected the representative Image Generator node.");
+    generatorNode.config = {
+      ...generatorNode.config,
+      providerId: codexImage.providerId,
+      profileId: codexImage.profileId
     };
     const batch = graph.nodes.find((candidate) => candidate.id === "batch")!;
     if (batch.config.kind !== "flow.batch") throw new Error("Expected the representative Batch node.");
     batch.config = {
       ...batch.config,
+      dimensions: [
+        { id: "model", name: "Model", values: ["draft", "final", "launch", "evergreen"] },
+        { id: "lighting", name: "Lighting", values: ["cool", "warm"] }
+      ],
+      exclusions: [],
+      parallelism: 8,
       allocations: [{
-        id: "codex-two",
-        targetNodeId: "generator",
-        count: 2,
-        providerId: capability.providerId,
-        profileId: capability.profileId,
-        modelId: "codex-image"
+        id: "worker-gpt-5.4",
+        targetNodeId: "worker",
+        count: 4,
+        providerId: codexWorkerA.providerId,
+        profileId: codexWorkerA.profileId,
+        modelId: codexWorkerA.modelId!
       }, {
-        id: "antigravity-one",
+        id: "worker-gpt-5.6",
+        targetNodeId: "worker",
+        count: 4,
+        providerId: codexWorkerB.providerId,
+        profileId: codexWorkerB.profileId,
+        modelId: codexWorkerB.modelId!
+      }, {
+        id: "image-codex",
         targetNodeId: "generator",
-        count: 1,
-        providerId: alternate.providerId,
-        profileId: alternate.profileId,
-        modelId: "provider-reported-nano-banana"
+        count: 4,
+        providerId: codexImage.providerId,
+        profileId: codexImage.profileId,
+        modelId: codexImage.modelId!
+      }, {
+        id: "image-antigravity",
+        targetNodeId: "generator",
+        count: 4,
+        providerId: antigravity.providerId,
+        profileId: antigravity.profileId,
+        modelId: antigravity.modelId!
       }]
     };
 
-    const first = compile(graph, { kind: "graph" }, [capability, alternate]);
-    const second = compile(graph, { kind: "graph" }, [capability, alternate]);
+    const capabilities = [codexWorkerA, codexWorkerB, codexImage, antigravity];
+    const first = compile(graph, { kind: "graph" }, capabilities);
+    const second = compile(graph, { kind: "graph" }, capabilities);
+    const workerStep = first.steps.find((step) => step.nodeId === "worker")!;
     const generator = first.steps.find((step) => step.nodeId === "generator")!;
+    const workerItems = workerStep.workItemIds.map((id) =>
+      first.workItems.find((workItem) => workItem.id === id)!
+    );
     const generatorItems = generator.workItemIds.map((id) =>
       first.workItems.find((workItem) => workItem.id === id)!
     );
 
-    expect(generatorItems.map((item) => item.providerBindingOverride)).toEqual([
-      expect.objectContaining({
-        providerId: capability.providerId,
-        profileId: capability.profileId,
-        modelId: "codex-image"
-      }),
-      expect.objectContaining({
-        providerId: capability.providerId,
-        profileId: capability.profileId,
-        modelId: "codex-image"
-      }),
-      expect.objectContaining({
-        providerId: alternate.providerId,
-        profileId: alternate.profileId,
-        modelId: "provider-reported-nano-banana"
-      })
-    ]);
-    expect(first.effectiveParallelism).toBe(3);
+    expect(workerItems.slice(0, 4).map((item) => item.providerBindingOverride)).toEqual(
+      Array.from({ length: 4 }, () => expect.objectContaining({
+        providerId: codexWorkerA.providerId,
+        profileId: codexWorkerA.profileId,
+        modelId: codexWorkerA.modelId
+      }))
+    );
+    expect(workerItems.slice(4).map((item) => item.providerBindingOverride)).toEqual(
+      Array.from({ length: 4 }, () => expect.objectContaining({
+        providerId: codexWorkerB.providerId,
+        profileId: codexWorkerB.profileId,
+        modelId: codexWorkerB.modelId
+      }))
+    );
+    expect(generatorItems.slice(0, 4).map((item) => item.providerBindingOverride)).toEqual(
+      Array.from({ length: 4 }, () => expect.objectContaining({
+        providerId: codexImage.providerId,
+        profileId: codexImage.profileId,
+        modelId: codexImage.modelId
+      }))
+    );
+    expect(generatorItems.slice(4).map((item) => item.providerBindingOverride)).toEqual(
+      Array.from({ length: 4 }, () => expect.objectContaining({
+        providerId: antigravity.providerId,
+        profileId: antigravity.profileId,
+        modelId: antigravity.modelId
+      }))
+    );
+    expect(first.effectiveParallelism).toBe(8);
     expect(first.contentHash).toBe(second.contentHash);
   });
 

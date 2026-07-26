@@ -141,6 +141,50 @@ const validPngBytes = Buffer.from(
 const pngSignatureBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 describe("Codex provider worker contracts", () => {
+  it("supports four simultaneous executable workers without an internal serial cap", async () => {
+    const projectPath = await createTempRoot();
+    let active = 0;
+    let maximumActive = 0;
+    let release!: () => void;
+    const allStarted = new Promise<void>((resolve) => { release = resolve; });
+    const provider = new CodexCliImageProvider({
+      codexCliPath: "C:\\Tools\\codex.exe",
+      fileExists: async () => true,
+      runner: async (call) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        if (active === 4) release();
+        await allStarted;
+        try {
+          const outputDir = await outputDirFromCall(call);
+          const imagePath = path.join(outputDir, "image.png");
+          await writeFile(imagePath, validPngBytes);
+          await writeFile(path.join(outputDir, "result.json"), JSON.stringify({
+            id: path.basename(outputDir),
+            status: "complete",
+            image_path: imagePath,
+            error: null,
+            caveats: ""
+          }), "utf8");
+          return { stdout: "", stderr: "", exitCode: 0 };
+        } finally {
+          active -= 1;
+        }
+      }
+    });
+
+    const results = await Promise.all(Array.from({ length: 4 }, (_, index) =>
+      provider.generate({ ...imageInput(projectPath), runId: `concurrent-${index}` })
+    ));
+    expect(maximumActive).toBe(4);
+    expect(results).toHaveLength(4);
+    const diagnostic = await provider.diagnose();
+    expect(diagnostic.profiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ profileId: "image-default", maxParallelism: 4 }),
+      expect.objectContaining({ profileId: "image-edit", maxParallelism: 4 })
+    ]));
+  });
+
   it("accepts a valid image worker request and result", async () => {
     const projectPath = await createTempRoot();
     const calls: ProviderProcessCall[] = [];

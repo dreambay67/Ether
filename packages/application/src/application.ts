@@ -40,6 +40,8 @@ import {
 import {
   compilePlan,
   DurableScheduler,
+  ExecutionConcurrencyDomains,
+  resolveScope,
   type ExecutionProviderFacets,
   type ExecutionProviderResolver
 } from "@ether/execution";
@@ -142,6 +144,7 @@ export class EtherApplication implements EtherApplicationService {
       dispatchMode?: "automatic" | "manual";
       documentEnvironment?: Omit<DocumentStoreEnvironment, "leaseRoot" | "recoveryRoot">;
       executionCheckpoint?: (name: string) => void;
+      concurrencyDomains?: ExecutionConcurrencyDomains;
       portableCheckpoint?: (stage: "prepared", referenceId: string) => void;
       portableImportCheckpoint?: (stage: string, referenceId: string) => void;
       exportCheckpoint?: (
@@ -204,14 +207,6 @@ export class EtherApplication implements EtherApplicationService {
   async boundaryConfiguredProviderCapabilities(): Promise<readonly ProviderCapability[]> {
     const configured = this.options.providerCapabilities;
     return typeof configured === "function" ? configured() : configured ?? [];
-  }
-
-  /** @internal Recipe setup checks optional text and evaluation execution facets. */
-  boundaryExecutionProviderAvailability(): { worker: boolean; evaluation: boolean } {
-    return {
-      worker: this.options.executionProviders?.worker !== undefined,
-      evaluation: this.options.executionProviders?.evaluation !== undefined
-    };
   }
 
   async grantEditPermit(commandId: string, expiresAt: string | null): Promise<ApplicationPermit> {
@@ -835,7 +830,8 @@ export class EtherApplication implements EtherApplicationService {
     const capabilities = await planningCapabilities(
       snapshot.graph,
       this.options.provider,
-      await this.boundaryConfiguredProviderCapabilities()
+      await this.boundaryConfiguredProviderCapabilities(),
+      input.scope
     );
     const planCompilationStartedAt = performance.now();
     const plan = compilePlan({
@@ -1287,7 +1283,8 @@ export class EtherApplication implements EtherApplicationService {
     const capabilities = await planningCapabilities(
       snapshot.graph,
       this.options.provider,
-      await this.boundaryConfiguredProviderCapabilities()
+      await this.boundaryConfiguredProviderCapabilities(),
+      { kind: "node", nodeId }
     );
     const plan = compilePlan({
       id: `preview-${randomUUID()}`,
@@ -1599,6 +1596,7 @@ export class EtherApplication implements EtherApplicationService {
       provider: this.options.provider,
       providers: this.options.executionProviders,
       providerResolver: this.options.providerResolver,
+      concurrencyDomains: this.options.concurrencyDomains,
       // The scheduler's durable-store protocol is intentionally narrower than
       // DocumentStore and is being evolved independently in Task 14.
       store: this.requireStore() as unknown as ConstructorParameters<typeof DurableScheduler>[0]["store"],
@@ -1964,7 +1962,8 @@ export class EtherApplication implements EtherApplicationService {
 async function planningCapabilities(
   graph: EtherGraph,
   provider: GenerationProvider,
-  configured: readonly ProviderCapability[] = []
+  configured: readonly ProviderCapability[] = [],
+  scope: ExecutionScope = { kind: "graph" }
 ): Promise<{ all: ProviderCapability[]; primary: ProviderCapability }> {
   const runtimeParallelism = new Map<string, number>();
   try {
@@ -2026,8 +2025,14 @@ async function planningCapabilities(
         : Math.min(capability.maxParallelism, runtimeCap)
     };
   }));
+  const scopedNodeIds = new Set(
+    scope.kind === "recipe"
+      ? graph.nodes.map((node) => node.id)
+      : resolveScope(graph, scope)
+  );
   const needsReasoning = graph.nodes.some((node) =>
-    node.config.kind === "prompt.worker" || node.config.kind === "review.evaluate"
+    scopedNodeIds.has(node.id) &&
+    (node.config.kind === "prompt.worker" || node.config.kind === "review.evaluate")
   );
   const reasoning = all.find((capability) => capability.operation === "llm" || capability.operation === "interpret");
   if (needsReasoning && (reasoning === undefined || reasoning.providerId === "ether-local")) {

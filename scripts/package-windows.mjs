@@ -1057,12 +1057,13 @@ function run(command, args, cwd) {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  packageWindowsApp().then(
-    (result) => console.log(`Ether 4.0.0 Windows installer created at ${result.installerPath}`),
-    (error) => {
-      console.error(error instanceof Error ? error.message : error);
-      process.exitCode = 1;
-    }
-  );
+const invokedPath = process.argv[1] === undefined ? undefined : path.resolve(process.argv[1]);
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  try {
+    const result = await packageWindowsApp();
+    console.log(`Ether 4.0.0 Windows installer created at ${result.installerPath}`);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  }
 }

@@ -218,7 +218,7 @@ function codexImageProfiles(
 ) {
   const status = availability === "available" ? "ready" as const : "unavailable" as const;
   const message = availability === "available"
-    ? "Codex image workers are serialized to one active request per profile."
+    ? "Codex image workers share four active requests across the application."
     : "Codex image worker is unavailable.";
   return [
     {
@@ -234,7 +234,7 @@ function codexImageProfiles(
       capabilitySource: "codex-cli" as const,
       requiresExplicitSelection: false,
       noHiddenFallback: true,
-      maxParallelism: 1,
+      maxParallelism: 4,
       model: descriptor.model,
       messages: [message]
     },
@@ -251,7 +251,7 @@ function codexImageProfiles(
       capabilitySource: "codex-cli" as const,
       requiresExplicitSelection: false,
       noHiddenFallback: true,
-      maxParallelism: 1,
+      maxParallelism: 4,
       model: descriptor.model,
       messages: [message]
     }

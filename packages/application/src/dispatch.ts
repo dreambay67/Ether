@@ -209,24 +209,10 @@ async function recipeCapabilities(app: EtherApplication): Promise<ProviderCapabi
     // diagnosis itself is unavailable.
   }
   const configured = [...await app.boundaryConfiguredProviderCapabilities()];
-  const execution = app.boundaryExecutionProviderAvailability();
-  const intelligence: ProviderCapability[] = [
-    ...(execution.worker && !configured.some((capability) => capability.operation === "llm") ? [{
-      providerId: "ether-intelligence", profileId: "worker", operation: "llm" as const,
-      inputChannels: ["text", "image", "data"] as ProviderCapability["inputChannels"], outputChannels: ["text"] as ProviderCapability["outputChannels"],
-      aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4,
-      supportsCancellation: true, supportsSeed: false, provenance: "static-constraint" as const, limitations: []
-    }] : []),
-    ...(execution.evaluation && !configured.some((capability) =>
-      capability.operation === "llm" && capability.outputChannels.includes("data")
-    ) ? [{
-      providerId: "ether-intelligence", profileId: "evaluation", operation: "llm" as const,
-      inputChannels: ["text", "image", "data"] as ProviderCapability["inputChannels"], outputChannels: ["data"] as ProviderCapability["outputChannels"],
-      aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4,
-      supportsCancellation: true, supportsSeed: false, provenance: "static-constraint" as const, limitations: []
-    }] : [])
-  ];
-  const combined = [...configured, ...discovered, ...intelligence];
+  // Provider facets can exist as unavailable lifecycle objects. Do not turn
+  // their mere presence into a synthetic executable route: only a discovered
+  // or explicitly configured capability may appear in planning and controls.
+  const combined = [...configured, ...discovered];
   return combined.filter((capability, index) => combined.findIndex((candidate) =>
     candidate.providerId === capability.providerId
     && candidate.profileId === capability.profileId

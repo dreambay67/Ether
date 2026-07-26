@@ -88,6 +88,61 @@ async function readyProvider(
 }
 
 describe("Antigravity image provider", () => {
+  it("supports four simultaneous executable calls with isolated attempt outputs", async () => {
+    const projectPath = await root();
+    const conformanceRoot = path.join(projectPath, "conformance");
+    await writeAntigravityConformance(conformanceRoot, {
+      schemaVersion: 1,
+      cli: { version: "1.1.4", sha256: "fixture-sha" },
+      createdAt: new Date().toISOString(),
+      profiles: [{ requestedProfile: "nano-banana-2", result: "pass" }]
+    });
+    let active = 0;
+    let maximumActive = 0;
+    let release!: () => void;
+    const allStarted = new Promise<void>((resolve) => { release = resolve; });
+    const provider = new AntigravityImageProvider("nano-banana-2", {
+      executablePath: "fake-agy",
+      env: { USERPROFILE: projectPath, PATH: process.env.PATH },
+      brainRoot: path.join(projectPath, "brain"),
+      conformanceRoot,
+      fileExists: async () => true,
+      sha256File: async () => "fixture-sha",
+      creditOveragesPolicy: "never-confirmed",
+      run: async (call) => {
+        if (call.args.includes("--version")) return { stdout: "1.1.4\n", stderr: "", exitCode: 0 };
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        if (active === 4) release();
+        await allStarted;
+        try {
+          await writeFile(path.join(call.cwd, `generated-${path.basename(call.cwd)}.png`), validPng);
+          return { stdout: "completed\n", stderr: "", exitCode: 0 };
+        } finally {
+          active -= 1;
+        }
+      }
+    });
+
+    const results = await Promise.all(Array.from({ length: 4 }, (_, index) =>
+      provider.generate(
+        { ...input(projectPath), runId: `concurrent-${index}` },
+        {
+          signal: new AbortController().signal,
+          providerAttemptId: `attempt-${index}`,
+          attemptOrdinal: 1,
+          stagingDirectory: path.join(projectPath, "staging"),
+          complete: async () => undefined
+        }
+      )
+    ));
+    expect(maximumActive).toBe(4);
+    expect(results).toHaveLength(4);
+    await expect(provider.diagnose()).resolves.toMatchObject({
+      profiles: [expect.objectContaining({ maxParallelism: 4 })]
+    });
+  });
+
   it("uses the official noninteractive command surface and imports only the newly discovered image", async () => {
     const { projectPath, brainRoot, provider, calls } = await readyProvider();
     await mkdir(brainRoot, { recursive: true });

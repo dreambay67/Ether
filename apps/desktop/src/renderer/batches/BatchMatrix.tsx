@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Gauge, Image, Rows3, Sparkles, Trash2 } from "lucide-react";
-import type {
-  BatchProviderAllocation,
-  EtherGraph,
-  ProviderCapability
+import {
+  SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM,
+  SAFE_CODEX_PROVIDER_PARALLELISM,
+  type BatchProviderAllocation,
+  type EtherGraph,
+  type ProviderCapability
 } from "@ether/schema";
 import {
   stableKey,
@@ -275,7 +277,7 @@ export function BatchMatrix({
       <section className="batch-control-section batch-concurrency" aria-labelledby="concurrency-heading">
         <div className="batch-section-heading">
           <div><span className="eyebrow">Throughput</span><h3 id="concurrency-heading">Concurrent run</h3></div>
-          <p>Total concurrency is separate from batch size and is always reduced by application and provider safety limits.</p>
+          <p>Total concurrency is separate from batch size. Ether permits 8 calls globally, shares 4 across Codex, shares 4 across Antigravity, and fails closed at 1 for an unknown provider.</p>
         </div>
         <label className="batch-policy">Total simultaneous work
           <select aria-label="Batch execution policy" value={String(config.parallelism)} disabled={isUpdating} onChange={(event) => void updateParallelism(Number(event.target.value))}>
@@ -414,7 +416,11 @@ function providerCaps(
         : capability.providerId.startsWith("google-nano-banana-")
           ? "antigravity"
           : capability.providerId;
-      const maximum = capability.maxParallelism ?? 1;
+      const maximum = family === "codex"
+        ? SAFE_CODEX_PROVIDER_PARALLELISM
+        : family === "antigravity"
+          ? SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM
+          : 1;
       const existing = selected.get(family);
       selected.set(family, {
         id: family,

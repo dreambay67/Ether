@@ -6,5 +6,6 @@ export * from "./execution.js";
 export * from "./graph.js";
 export * from "./nodes.js";
 export * from "./outputs.js";
+export * from "./providerConcurrency.js";
 export * from "./recipes.js";
 export * from "./temporaryReferences.js";

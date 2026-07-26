@@ -169,9 +169,9 @@ Job Center groups queued, active, completed, blocked, and failed jobs. Open a jo
 
 - **Full batch** lists dimensions, exclusions, exact work-item count, and estimated provider calls. Select a cell to exclude that item.
 - **Provider and model allocation** finds reachable Prompt Workers and Image Generators. For a batch with `M` work items, each lane assigns an exact `N` items to a verified provider, profile, and model. Ether keeps those ordinal assignments stable; unassigned items use the target node's current default.
-- **Concurrent run** controls simultaneous work independently from batch size. Sequential (`1`) remains the default. Ether caps total parallel calls at 8, Codex App Server calls at 2, Codex fallback calls at 1, Antigravity calls at 1, and providers without a known limit at 1.
+- **Concurrent run** controls simultaneous work independently from batch size. Sequential (`1`) remains the default. Ether uses one shared limit across the running application: 8 active calls globally, 4 Codex calls across App Server and explicit executable fallback work, and 4 Antigravity calls across verified profiles. A fifth Codex or Antigravity call and ninth global call wait. Unknown providers remain at 1. If a Codex or Antigravity route cannot support four active calls, Ether reports it unavailable instead of silently selecting a serial route.
 
-Ether adds each batch item's dimension names and values to the effective Prompt Worker or Image Generator prompt. Preview the plan to inspect requested and effective concurrency before you run it.
+Ether adds each batch item's dimension names and values to the effective Prompt Worker or Image Generator prompt. Exact allocation lanes retain their selected provider, profile, model, and count; Ether does not substitute another image provider. Preview the plan to inspect requested and effective concurrency before you run it. Independent batches share the same limits, and cancellation, retry, or recovery does not create extra capacity.
 
 ## Review, collections, and export
 

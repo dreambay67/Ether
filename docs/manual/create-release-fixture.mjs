@@ -147,7 +147,7 @@ const application = new EtherApplication({
     evaluation: {}
   },
   providerCapabilities: [{
-    providerId: "manual-release-codex",
+    providerId: "codex-manual-release",
     profileId: "manual-release-balanced",
     operation: "llm",
     inputChannels: ["text", "image", "mask", "data", "video", "audio"],
@@ -156,6 +156,7 @@ const application = new EtherApplication({
     resolutions: [],
     maxReferences: 16,
     maxOutputsPerCall: 1,
+    maxParallelism: 4,
     supportsCancellation: true,
     supportsSeed: false,
     provenance: "conformance-verified",

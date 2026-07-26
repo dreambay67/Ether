@@ -27,7 +27,7 @@ Antigravity routes also require a persisted confirmation under **Settings > Anti
 
 Batch Matrix now separates **Full batch**, **Provider and model allocation**, and **Concurrent run**. You can assign exact, stable item counts to verified provider/profile/model lanes for reachable Prompt Workers and Image Generators; unassigned items retain the node default. Ether injects each item's dimension values into its effective prompt.
 
-The scheduler caps total concurrent calls at 8. Codex allows 2 calls through App Server or 1 through fallback; Antigravity allows 1; a provider without a declared safe limit allows 1. Job Center offers Cancel for eligible work and Retry for failed work. Ether recovers interrupted queued work on reopen, and terminal jobs do not expose Resume.
+The scheduler uses one application-wide capacity domain across every job and batch: 8 active calls globally, 4 shared across Codex App Server and explicit executable fallback work, and 4 shared across verified Antigravity profiles. A fifth same-provider call and ninth global call wait; an unknown provider fails closed at 1. A Codex or Antigravity route that cannot meet its four-call contract is unavailable instead of becoming a hidden serial fallback. Job Center offers Cancel for eligible work and Retry for failed work. Ether recovers interrupted queued work on reopen, and terminal jobs do not expose Resume.
 
 ## Before installing
 

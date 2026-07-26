@@ -201,7 +201,7 @@ export function createProviderService(options: {
             resolutions: [],
             maxReferences: 32,
             maxOutputsPerCall: 4,
-            maxParallelism: health.transport === "app-server" ? 2 : 1,
+            maxParallelism: 4,
             supportsCancellation: true,
             supportsSeed: false,
             provenance: "runtime-discovered",
@@ -217,7 +217,7 @@ export function createProviderService(options: {
             resolutions: [],
             maxReferences: 32,
             maxOutputsPerCall: 4,
-            maxParallelism: health.transport === "app-server" ? 2 : 1,
+            maxParallelism: 4,
             supportsCancellation: true,
             supportsSeed: false,
             provenance: "runtime-discovered",
@@ -283,9 +283,13 @@ export function createProviderService(options: {
     } | null | undefined) => ({
       image: binding === null || binding === undefined
         ? options.codex.bundle.generation
-        : generation.get(binding.providerId) ?? options.codex.bundle.generation,
-      worker: options.codex.bundle.assistant,
-      evaluation: options.codex.bundle.evaluation
+        : generation.get(binding.providerId) ?? undefined,
+      worker: binding === null || binding === undefined
+        ? options.codex.bundle.assistant
+        : assistant.get(binding.providerId) ?? undefined,
+      evaluation: binding === null || binding === undefined
+        ? options.codex.bundle.evaluation
+        : evaluation.get(binding.providerId) ?? undefined
     }),
     providerHealth: (): ProviderHealthResult => providerHealth(options.codex.health()),
     subscribe: (listener: (health: CodexRuntimeHealth) => void) => options.codex.subscribe((health) => {

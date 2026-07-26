@@ -25,12 +25,8 @@ import { ExecutorRegistry } from "../executors/registry.js";
 import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets, ExecutionProviderResolver } from "../executors/types.js";
 import { ExecutorFailure } from "../executors/types.js";
 import { verifyPlanHash } from "../plan/hashPlan.js";
-import {
-  providerConcurrencyGroup,
-  providerParallelismLimit,
-  SAFE_GLOBAL_PARALLELISM
-} from "../plan/providerConcurrency.js";
 import { isCancellation } from "./cancellation.js";
+import { ExecutionConcurrencyDomains } from "./concurrencyDomains.js";
 import { documentStorePersistence, isSchedulerPersistence, type DocumentStoreLike, type SchedulerPersistence } from "./persistence.js";
 import { effectiveParallelism, isTerminalJob } from "./transitions.js";
 
@@ -44,6 +40,7 @@ export type DurableSchedulerOptions = {
   executors?: ExecutorRegistry;
   onEventsAvailable?: () => Promise<void>;
   checkpoint?: (name: string) => void;
+  concurrencyDomains?: ExecutionConcurrencyDomains;
 };
 
 export class DurableScheduler {
@@ -52,8 +49,7 @@ export class DurableScheduler {
   private readonly persistence: SchedulerPersistence;
   private readonly providers: ExecutionProviderFacets;
   private readonly executors: ExecutorRegistry;
-  private readonly globalGate = new ConcurrencyGate(SAFE_GLOBAL_PARALLELISM);
-  private readonly providerGates = new Map<string, ConcurrencyGate>();
+  private readonly concurrencyDomains: ExecutionConcurrencyDomains;
 
   constructor(private readonly options: DurableSchedulerOptions) {
     if (options.persistence !== undefined) {
@@ -65,6 +61,7 @@ export class DurableScheduler {
     }
     this.providers = { ...options.providers, image: options.providers?.image ?? options.provider };
     this.executors = options.executors ?? new ExecutorRegistry();
+    this.concurrencyDomains = options.concurrencyDomains ?? new ExecutionConcurrencyDomains();
   }
 
   run(jobId: string): Promise<void> {
@@ -223,28 +220,12 @@ export class DurableScheduler {
     signal: AbortSignal,
     operation: () => Promise<T>
   ): Promise<T> {
-    let releaseProvider: (() => void) | undefined;
-    let releaseGlobal: (() => void) | undefined;
+    let release: (() => void) | undefined;
     try {
-      if (binding !== null) {
-        const group = providerConcurrencyGroup(binding.providerId);
-        const limit = providerParallelismLimit(binding);
-        let gate = this.providerGates.get(group);
-        if (gate === undefined) {
-          gate = new ConcurrencyGate(limit);
-          this.providerGates.set(group, gate);
-        } else {
-          gate.tighten(limit);
-        }
-        // Reserve provider-family capacity before global capacity. A saturated
-        // provider must not occupy every global slot while unrelated providers wait.
-        releaseProvider = await gate.acquire(signal);
-      }
-      releaseGlobal = await this.globalGate.acquire(signal);
+      release = await this.concurrencyDomains.acquire(binding, signal);
       return await operation();
     } finally {
-      releaseGlobal?.();
-      releaseProvider?.();
+      release?.();
     }
   }
 
@@ -741,67 +722,6 @@ function effectiveStepForWorkItem(step: PlanStep, workItem: PlannedWorkItem): Pl
       batchItem
     }
   };
-}
-
-type ConcurrencyWaiter = {
-  resolve: (release: () => void) => void;
-  reject: (error: Error) => void;
-  signal: AbortSignal;
-  abort: () => void;
-};
-
-class ConcurrencyGate {
-  private active = 0;
-  private readonly waiters: ConcurrencyWaiter[] = [];
-
-  constructor(private limit: number) {}
-
-  tighten(limit: number): void {
-    this.limit = Math.min(this.limit, Math.max(1, Math.trunc(limit)));
-    this.drain();
-  }
-
-  acquire(signal: AbortSignal): Promise<() => void> {
-    if (signal.aborted) return Promise.reject(cancellationError());
-    return new Promise<() => void>((resolve, reject) => {
-      const waiter: ConcurrencyWaiter = {
-        resolve,
-        reject,
-        signal,
-        abort: () => {
-          const index = this.waiters.indexOf(waiter);
-          if (index >= 0) this.waiters.splice(index, 1);
-          reject(cancellationError());
-        }
-      };
-      signal.addEventListener("abort", waiter.abort, { once: true });
-      this.waiters.push(waiter);
-      this.drain();
-    });
-  }
-
-  private drain(): void {
-    while (this.active < this.limit && this.waiters.length > 0) {
-      const waiter = this.waiters.shift()!;
-      waiter.signal.removeEventListener("abort", waiter.abort);
-      if (waiter.signal.aborted) {
-        waiter.reject(cancellationError());
-        continue;
-      }
-      this.active += 1;
-      let released = false;
-      waiter.resolve(() => {
-        if (released) return;
-        released = true;
-        this.active -= 1;
-        this.drain();
-      });
-    }
-  }
-}
-
-function cancellationError(): Error {
-  return new DOMException("Scheduler capacity wait was cancelled.", "AbortError");
 }
 
 const MAX_RETAINED_PERFORMANCE_MEASURES = 1_024;

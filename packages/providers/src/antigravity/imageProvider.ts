@@ -272,10 +272,12 @@ function capabilityProfile(
     capabilitySource: "antigravity-cli" as const,
     requiresExplicitSelection: true,
     noHiddenFallback: true,
-    maxParallelism: 1,
+    maxParallelism: 4,
     model: evidence?.providerIdentity ?? undefined,
     unavailableReason: availability === "unavailable" ? redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.") : undefined,
-    messages: availability === "available" ? ["Real conformance passed."] : [redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.")],
+    messages: availability === "available"
+      ? ["Real conformance passed. Antigravity shares four active requests across the application."]
+      : [redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.")],
     mediaLimits: descriptor.id === "google-nano-banana-2-lite" ? { maxWidth: 1024, maxHeight: 1024, notes: ["Enabled only after verified 1K conformance."] } : undefined
   };
 }

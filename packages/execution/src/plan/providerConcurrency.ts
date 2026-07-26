@@ -1,7 +1,17 @@
-import type { ProviderBinding } from "@ether/schema";
+import {
+  SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM,
+  SAFE_CODEX_PROVIDER_PARALLELISM,
+  SAFE_GLOBAL_PARALLELISM,
+  SAFE_UNKNOWN_PROVIDER_PARALLELISM,
+  type ProviderBinding
+} from "@ether/schema";
 
-export const SAFE_GLOBAL_PARALLELISM = 8;
-export const SAFE_UNKNOWN_PROVIDER_PARALLELISM = 1;
+export {
+  SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM,
+  SAFE_CODEX_PROVIDER_PARALLELISM,
+  SAFE_GLOBAL_PARALLELISM,
+  SAFE_UNKNOWN_PROVIDER_PARALLELISM
+} from "@ether/schema";
 
 export function providerConcurrencyGroup(providerId: string): string {
   if (providerId.startsWith("codex-")) return "codex";
@@ -10,9 +20,10 @@ export function providerConcurrencyGroup(providerId: string): string {
 }
 
 export function providerParallelismLimit(binding: ProviderBinding): number {
-  const advertised = binding.capabilitySnapshot.maxParallelism
-    ?? SAFE_UNKNOWN_PROVIDER_PARALLELISM;
-  return Math.min(Math.max(Math.trunc(advertised), 1), SAFE_GLOBAL_PARALLELISM);
+  const group = providerConcurrencyGroup(binding.providerId);
+  if (group === "codex") return SAFE_CODEX_PROVIDER_PARALLELISM;
+  if (group === "antigravity") return SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM;
+  return SAFE_UNKNOWN_PROVIDER_PARALLELISM;
 }
 
 export function combinedProviderParallelismLimit(

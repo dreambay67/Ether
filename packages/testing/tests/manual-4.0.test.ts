@@ -22,16 +22,17 @@ describe("Ether 4.0 release documentation", () => {
       "Full batch",
       "Provider and model allocation",
       "Concurrent run",
-      "Codex App Server calls at 2",
-      "Codex fallback calls at 1",
-      "Antigravity calls at 1",
+      "8 active calls globally",
+      "4 Codex calls across App Server",
+      "4 Antigravity calls across verified profiles",
+      "fifth Codex or Antigravity call and ninth global call wait",
       "dimension names and values",
       "Antigravity safety",
       "AI Credit Overages",
       "Terminal jobs do not show a misleading Resume button"
     ]) expect(manual).toContain(phrase);
     expect(notes).toContain("terminal jobs do not expose Resume");
-    expect(troubleshooting).toContain("unknown providers at 1");
+    expect(troubleshooting).toContain("unknown providers remain at 1");
     expect(manual).not.toContain("**Resume** schedules unfinished work");
     expect(notes).not.toContain("retry/resume semantics");
   });

@@ -472,7 +472,8 @@ The matrix separates three decisions:
 
 - **Full batch** previews the Cartesian work count and permits explicit exclusions.
 - **Provider and model allocation** assigns exact, stable item counts to verified provider/profile/model lanes for reachable Prompt Workers and Image Generators. Unassigned items retain the node default.
-- **Concurrent run** controls throughput independently from batch size. Sequential is the default; total concurrency is capped at 8, Codex at 2 through App Server or 1 through fallback, Antigravity at 1, and unknown providers at 1.
+- **Concurrent run** controls throughput independently from batch size. Sequential is the default. One application-wide domain caps active provider work at 8, with 4 shared across every Codex route and 4 shared across every Antigravity route; a fifth same-family call and ninth global call wait. Unknown providers fail closed at 1. A Codex or Antigravity route that cannot support its four-call family contract is unavailable rather than exposed as a serial fallback.
+- The capacity domain is shared by every job, batch, and document scheduler owned by the running application. Opening another batch never creates a second allowance, and large batches claim work only through the bounded scheduler.
 
 Each work item carries its dimension names and values into the effective provider prompt. Excessive expansion is visibly capped rather than allowed to exhaust the application or system.
 
@@ -483,6 +484,7 @@ Each work item carries its dimension names and values into the effective provide
 - Retry may target failed items only.
 - Accepted provider outputs are hash-deduplicated.
 - A resumed batch never silently duplicates accepted artifacts.
+- Cancellation, retry, and interrupted-work recovery release or reacquire the same application-wide capacity permits without duplicating accepted output.
 - Job Center separates queued, active, done, and attention-required items.
 
 ---

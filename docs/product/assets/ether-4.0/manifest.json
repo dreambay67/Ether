@@ -4,26 +4,26 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "00b1438ba624a29cb8056862645ebf5a16d11bbb8bb021cd6af33b19257e6687"
+    "sha256": "75c0d7da6e0fac75c165f1d9ccd44c675826fc52e06ea2633ed1268e63c6121c"
   },
   "executable": {
     "fileName": "Ether.exe",
-    "sha256": "8c4448b2826ad274c557e1b0f82f8cbca31382add48359cec61c1e36a39cdba1"
+    "sha256": "94bfec24b938f5fd5960dcc8a152431242fe892368a61b4d17c01ace0b8b7c75"
   },
   "fixture": {
     "fileName": "Ether 4.0 Release Atlas.ether",
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "503c27970f1b2954400123e763418e2d3f4521af55d9e8e17a99d550bd7364b2"
+    "sha256": "a4c726b006c5bc8b82d76e2d5e623f5c8960f8d94e735d2ed480a9a8ea589a23"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-a1b128a9-9d76-4b6e-9c0f-ecf79c501727",
-    "contentHash": "sha256:v1:45baedcfc1142d61e59400828cfceec14d8180896a395f5ed40a322fbc77dd0b"
+    "planId": "plan-1b09139e-501b-417f-918a-ac3b3c2d4d6b",
+    "contentHash": "sha256:v1:10c0f84b6c52f9338ff72d060e7231f3d5647cbfe809e1c3549f455d0d564236"
   },
-  "capturedAt": "2026-07-26T21:38:51.901Z",
+  "capturedAt": "2026-07-26T23:32:38.984Z",
   "labels": [
     "start",
     "build",
@@ -73,25 +73,25 @@
       "label": "build",
       "width": 1600,
       "height": 1000,
-      "sha256": "f4cad3ca991d4e7650ee0cc0ffb920fadaa0fca9df75c94dc1b0f1679b6f43ce"
+      "sha256": "403ce3e49bd91a7b80e2b347c55573c8d3d7ec2f4290fefa19a548fac726619d"
     },
     {
       "label": "focus",
       "width": 1600,
       "height": 1000,
-      "sha256": "292a53d4e8b7ed317c48463bd2179b905ff43b2ce244d0848fe94b9ee1e31134"
+      "sha256": "8abc9f48be2b52675864f5e14b977e84bccca64c6f2d32a84eaa2c415710e199"
     },
     {
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "a5efb60dbe9ceac949ca9ecdaaa66932136fd7dc5505ea737869ae1a78e59a90"
+      "sha256": "fd732ac0aa3afaebda239db31d4c8a8255db9f62fa0c379ea1ecbdf1788f13c4"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "5845d9936bbed9db2f3471eedb2caebafd7f0f52ed01a6989db15f42482823c8"
+      "sha256": "725f43f4b0c9342742276c32c3279b90df24a9aa20c6b3b64875d0e2ed6c01cc"
     },
     {
       "label": "reference-desk",
@@ -102,20 +102,20 @@
     {
       "label": "batch-matrix",
       "width": 1584,
-      "height": 756,
-      "sha256": "b39e5b8231a7c11239b61061f641f3a2847077c78a01d05cd3da2ef17d16f73f"
+      "height": 727,
+      "sha256": "e232051bcdcc7cee19999527686fd63bce680417af1739d048927948920f4327"
     },
     {
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "e23c792d63ca1f5af67f4c1679ddac31af337ffdbf2d36ac567118b40e9e9798"
+      "sha256": "8a3614c6d724118f21cb988ea6e780c67afbee9f8ff55b97c9ae49004b3b025e"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "ae1437c8a244f416313cd6a0be82e8de3cd882c41912a40743f113258426825d"
+      "sha256": "cdae8e7fe489c0753120cfdf7f126807e1728c315e18efca506ea07f3a8a734c"
     },
     {
       "label": "recipes",
@@ -127,7 +127,7 @@
       "label": "channels-roles",
       "width": 1600,
       "height": 1000,
-      "sha256": "84a4fa463fd8809454ee9d6beb7d0ea0dec0178a96bc86211cefd163d2219985"
+      "sha256": "ba3e6da40baae4d0848300f2734412912c6b37eccb014c0368f49454b3068c74"
     },
     {
       "label": "inspector-catalog",
@@ -138,8 +138,8 @@
     {
       "label": "provider-health",
       "width": 980,
-      "height": 738,
-      "sha256": "04dad80e582430c5fc32eca42d0e1d30f8e22726986d899e7a7c8a5ddfade0d8"
+      "height": 706,
+      "sha256": "1467f9ca92bae718dc65e8b03a95b9fe9741c5045d1bb40545929dd6488db5f0"
     },
     {
       "label": "settings",
@@ -173,9 +173,9 @@
     },
     {
       "label": "plugin-run-permit",
-      "width": 527,
+      "width": 518,
       "height": 237,
-      "sha256": "86f985242b5c09d63c94f9512e8ca18e83a84e67c5880e5ca09d6fe57e7d7e88"
+      "sha256": "34cc891402744480adf6ce329f76e05f482cd83a6ccc22241775c9ad70997686"
     },
     {
       "label": "inspector-prompt-text",
@@ -199,13 +199,13 @@
       "label": "inspector-generation-image",
       "width": 400,
       "height": 620,
-      "sha256": "729af68dd7778105f7c853e84c03c331686a28d7136270c3a6207a22b1ee1b09"
+      "sha256": "49870a2bc14940ac00f03bb98a7eb7817c72ddf530b86008fe4bb67432aaaac4"
     },
     {
       "label": "inspector-edit-image",
       "width": 400,
       "height": 620,
-      "sha256": "8fa83f05dcd8c10b6a42b5b8c68796731fe607597ea88c27622ffbc31aacf373"
+      "sha256": "cdf6e02cca63008aa8c6b2be2da7ad9fa309ef8826e41ad1537ea1b76c70c550"
     },
     {
       "label": "inspector-edit-mask",

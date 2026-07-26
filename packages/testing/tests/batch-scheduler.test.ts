@@ -1,9 +1,11 @@
 import {
   DurableScheduler,
+  ExecutionConcurrencyDomains,
   ExecutorFailure,
   ExecutorRegistry,
   hashPlan,
   providerConcurrencyGroup,
+  providerParallelismLimit,
   type ExecutorClaim,
   type ExecutorResult,
   type SchedulerPersistence,
@@ -36,58 +38,88 @@ describe("DurableScheduler", () => {
     expect(fixture.acceptedIds).toHaveLength(500);
     expect(new Set(fixture.acceptedIds).size).toBe(500);
     expect(fixture.job.status).toBe("completed");
-    expect(fixture.maximumActive).toBe(1);
+    expect(fixture.maximumActive).toBe(8);
   });
 
-  it("runs real work concurrently up to the provider cap and gives each item a distinct effective prompt", async () => {
+  it("runs real work concurrently up to the four-call Codex family cap and gives each item a distinct effective prompt", async () => {
     const fixture = new ConcurrentJobsFixture();
-    const binding = providerBinding("codex-assistant", 2);
-    const job = fixture.addJob("overlap", 4, binding, 4);
+    const binding = providerBinding("codex-assistant", 1);
+    const job = fixture.addJob("overlap", 5, binding, 5);
     const executor = new ControlledExecutor();
     const scheduler = fixture.scheduler(executor);
 
     const run = scheduler.run(job.id);
-    await waitForExecutorActive(executor, 2, fixture);
+    await waitForExecutorActive(executor, 4, fixture);
 
-    expect(executor.maximumActive).toBe(2);
+    expect(executor.maximumActive).toBe(4);
     expect([...executor.prompts.values()].sort()).toEqual([
       "Base instruction\n\nBatch item:\n- variant: \"overlap-0\"",
-      "Base instruction\n\nBatch item:\n- variant: \"overlap-1\""
+      "Base instruction\n\nBatch item:\n- variant: \"overlap-1\"",
+      "Base instruction\n\nBatch item:\n- variant: \"overlap-2\"",
+      "Base instruction\n\nBatch item:\n- variant: \"overlap-3\""
     ]);
     expect([...executor.contexts.values()]).toEqual(expect.arrayContaining([
       expect.objectContaining({ batchItem: { variant: "overlap-0" } }),
-      expect.objectContaining({ batchItem: { variant: "overlap-1" } })
+      expect.objectContaining({ batchItem: { variant: "overlap-1" } }),
+      expect.objectContaining({ batchItem: { variant: "overlap-2" } }),
+      expect.objectContaining({ batchItem: { variant: "overlap-3" } })
     ]));
 
     executor.release();
     await run;
-    expect(executor.maximumActive).toBe(2);
+    expect(executor.maximumActive).toBe(4);
     expect((await fixture.getJob(job.id))?.status).toBe("completed");
   });
 
-  it("shares provider-family capacity across jobs and treats an unknown cap as one", async () => {
-    const fixture = new ConcurrentJobsFixture();
-    const codex = providerBinding("codex-assistant");
-    const antigravity = providerBinding("google-nano-banana-2", 2);
-    const jobs = [
-      fixture.addJob("codex-a", 2, codex, 2),
-      fixture.addJob("codex-b", 2, codex, 2),
-      fixture.addJob("antigravity-a", 2, antigravity, 2),
-      fixture.addJob("antigravity-b", 2, antigravity, 2)
+  it("shares one app-wide 4/4/8 domain across schedulers, queues provider fifths, and queues ninth global work", async () => {
+    const first = new ConcurrentJobsFixture();
+    const second = new ConcurrentJobsFixture();
+    const domains = new ExecutionConcurrencyDomains();
+    const codex = providerBinding("codex-assistant", 1);
+    const antigravity = providerBinding("google-nano-banana-2", 1);
+    const firstJobs = [
+      first.addJob("codex-batch-a", 3, codex, 8),
+      first.addJob("antigravity-batch-a", 3, antigravity, 8)
+    ];
+    const secondJobs = [
+      second.addJob("codex-batch-b", 2, codex, 8),
+      second.addJob("antigravity-batch-b", 2, antigravity, 8)
     ];
     const executor = new ControlledExecutor();
-    const scheduler = fixture.scheduler(executor);
+    const firstScheduler = first.scheduler(executor, undefined, domains);
+    const secondScheduler = second.scheduler(executor, undefined, domains);
 
-    const runs = jobs.map((job) => scheduler.run(job.id));
-    await executor.waitForActive(3);
+    const runs = [
+      ...firstJobs.map((job) => firstScheduler.run(job.id)),
+      ...secondJobs.map((job) => secondScheduler.run(job.id))
+    ];
+    await waitForExecutorActive(executor, 8, first);
 
-    expect(executor.activeByProvider.get("codex")).toBe(1);
-    expect(executor.activeByProvider.get("antigravity")).toBe(2);
-    expect(executor.maximumByProvider.get("codex")).toBe(1);
-    expect(executor.maximumByProvider.get("antigravity")).toBe(2);
+    expect(executor.activeByProvider.get("codex")).toBe(4);
+    expect(executor.activeByProvider.get("antigravity")).toBe(4);
+    expect(executor.maximumByProvider.get("codex")).toBe(4);
+    expect(executor.maximumByProvider.get("antigravity")).toBe(4);
+    expect(executor.maximumActive).toBe(8);
+    await Promise.all([
+      waitForClaimed(first, "codex-batch-a", 3),
+      waitForClaimed(second, "codex-batch-b", 2),
+      waitForClaimed(first, "antigravity-batch-a", 3),
+      waitForClaimed(second, "antigravity-batch-b", 2)
+    ]);
+    expect([...executor.prompts.keys()].filter((id) => id.startsWith("codex-batch-"))).toHaveLength(4);
+    expect([...executor.prompts.keys()].filter((id) => id.startsWith("antigravity-batch-"))).toHaveLength(4);
+
+    const ninth = second.addJob("global-ninth", 1, providerBinding("unverified-external", 99), 1);
+    const ninthRun = secondScheduler.run(ninth.id);
+    await waitForClaimed(second, ninth.id, 1);
+    expect(executor.prompts.has("global-ninth:step:work:0")).toBe(false);
 
     executor.release();
-    await Promise.all(runs);
+    await Promise.all([...runs, ninthRun]);
+  });
+
+  it("fails closed at one for unknown providers even when they advertise a larger cap", () => {
+    expect(providerParallelismLimit(providerBinding("unverified-external", 99))).toBe(1);
   });
 
   it("shares the global gate across simultaneous jobs", async () => {
@@ -110,7 +142,7 @@ describe("DurableScheduler", () => {
   it("uses a work-item provider override before the step binding", async () => {
     const fixture = new ConcurrentJobsFixture();
     const stepBinding = providerBinding("codex-assistant", 8);
-    const override = providerBinding("google-nano-banana-2");
+    const override = providerBinding("unverified-image");
     const job = fixture.addJob("override", 2, stepBinding, 2, override);
     const executor = new ControlledExecutor();
     const resolved: string[] = [];
@@ -121,28 +153,28 @@ describe("DurableScheduler", () => {
     await nextTurn();
 
     expect(executor.maximumActive).toBe(1);
-    expect(resolved).toEqual(["google-nano-banana-2"]);
+    expect(resolved).toEqual(["unverified-image"]);
     executor.release();
     await run;
-    expect(resolved).toEqual(["google-nano-banana-2", "google-nano-banana-2"]);
+    expect(resolved).toEqual(["unverified-image", "unverified-image"]);
   });
 
   it("cancels a claim waiting for provider-family capacity without disturbing the active sibling", async () => {
     const fixture = new ConcurrentJobsFixture();
-    const binding = providerBinding("codex-assistant");
-    const activeJob = fixture.addJob("cancel-active", 1, binding, 1);
+    const binding = providerBinding("codex-assistant", 4);
+    const activeJob = fixture.addJob("cancel-active", 4, binding, 4);
     const waitingJob = fixture.addJob("cancel-waiting", 1, binding, 1);
     const executor = new ControlledExecutor();
     const scheduler = fixture.scheduler(executor);
 
     const activeRun = scheduler.run(activeJob.id);
-    await executor.waitForActive(1);
+    await executor.waitForActive(4);
     const waitingRun = scheduler.run(waitingJob.id);
     await fixture.waitForState(waitingJob.id, "running");
 
     await scheduler.cancel(waitingJob.id, "cancel-waiting-command");
     await waitingRun;
-    expect(executor.active).toBe(1);
+    expect(executor.active).toBe(4);
     expect((await fixture.getJob(waitingJob.id))?.status).toBe("cancelled");
 
     executor.release();
@@ -151,8 +183,8 @@ describe("DurableScheduler", () => {
 
   it("retains scheduler ownership of in-flight siblings after one item fails", async () => {
     const fixture = new ConcurrentJobsFixture();
-    const job = fixture.addJob("failure", 3, providerBinding("codex-assistant", 2), 2);
-    const executor = new ControlledExecutor({ failOrdinal: 0, failAfterActive: 2 });
+    const job = fixture.addJob("failure", 5, providerBinding("codex-assistant", 4), 4);
+    const executor = new ControlledExecutor({ failOrdinal: 0, failAfterActive: 4 });
     const scheduler = fixture.scheduler(executor);
 
     const run = scheduler.run(job.id);
@@ -162,13 +194,13 @@ describe("DurableScheduler", () => {
     await nextTurn();
 
     expect(settled).toBe(false);
-    expect(executor.active).toBe(1);
+    expect(executor.active).toBe(3);
     expect(scheduler.run(job.id)).toBe(run);
-    expect(fixture.claimed(job.id)).toBe(2);
+    expect(fixture.claimed(job.id)).toBe(4);
 
     executor.release();
     await run;
-    expect(fixture.claimed(job.id)).toBe(2);
+    expect(fixture.claimed(job.id)).toBe(4);
     expect((await fixture.getJob(job.id))?.status).toBe("failed");
   });
 });
@@ -341,11 +373,16 @@ class ConcurrentJobsFixture implements SchedulerPersistence {
     return job;
   }
 
-  scheduler(executor: StepExecutor, onResolved?: (providerId: string) => void): DurableScheduler {
+  scheduler(
+    executor: StepExecutor,
+    onResolved?: (providerId: string) => void,
+    concurrencyDomains?: ExecutionConcurrencyDomains
+  ): DurableScheduler {
     return new DurableScheduler({
       appDataRoot: "C:\\EtherTest",
       persistence: this,
       executors: new ExecutorRegistry([executor]),
+      concurrencyDomains,
       providerResolver: ({ binding }) => {
         if (binding !== null && binding !== undefined) onResolved?.(binding.providerId);
         return {};
@@ -513,6 +550,14 @@ function waitForExecutorActive(
   ]);
 }
 
+async function waitForClaimed(fixture: ConcurrentJobsFixture, jobId: string, count: number): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (fixture.claimed(jobId) < count) {
+    if (Date.now() > deadline) throw new Error(`Job ${jobId} did not claim ${count} work items.`);
+    await nextTurn();
+  }
+}
+
 class RecoveryExecutor implements StepExecutor {
   readonly kinds = ["deterministic"] as const;
 
@@ -556,6 +601,7 @@ class RecoveryFixture implements SchedulerPersistence {
       resolutions: [{ id: "1k", width: 1024, height: 1024, label: "1K" }],
       maxReferences: 0,
       maxOutputsPerCall: 1,
+      maxParallelism: 8,
       supportsCancellation: true,
       supportsSeed: false,
       provenance: "static-constraint" as const,
@@ -610,8 +656,8 @@ class RecoveryFixture implements SchedulerPersistence {
       planId: this.plan.id,
       planContentHash: contentHash,
       status: "queued",
-      requestedParallelism: 1,
-      effectiveParallelism: 1,
+      requestedParallelism: 8,
+      effectiveParallelism: 8,
       createdAt,
       startedAt: null,
       completedAt: null,

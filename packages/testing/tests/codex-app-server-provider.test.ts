@@ -76,6 +76,27 @@ afterEach(async () => {
 });
 
 describe("Codex App Server session and turn providers", () => {
+  it("keeps four stateless Codex turns active on one application-owned App Server", async () => {
+    const appRuntime = runtime("concurrency-4");
+    const bundle = createCodexAppServerProviderBundle({ runtime: appRuntime });
+    const calls = Array.from({ length: 4 }, (_, index) =>
+      bundle.assistant.run({
+        ...assistantInput(),
+        runId: `concurrent-${index}`,
+        prompt: `concurrent-${index}`,
+        timeoutMs: 1_000
+      }, executionContext())
+    );
+
+    const results = await Promise.all(calls);
+    results.forEach((result, index) => expect(result.text).toContain(`concurrent-${index}`));
+    const diagnostic = await bundle.generation.diagnose();
+    expect(diagnostic.profiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ profileId: "image-default", maxParallelism: 4 })
+    ]));
+    await bundle.close();
+  });
+
   it("uses Task 11 graph-safe scope keys and serializes turns per key", async () => {
     const appServer = client();
     await appServer.initialize();

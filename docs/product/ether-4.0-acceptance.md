@@ -215,7 +215,11 @@ The implementation may introduce the missing script names, but the final release
 - [ ] Reference Desk supports multi-select, include/exclude, role override, and assignment to sets.
 - [ ] Batch Matrix previews dimensions and exact work-item count.
 - [ ] Sequential execution is default.
-- [ ] Parallel execution respects configured and provider caps.
+- [ ] Parallel execution uses one application-wide domain: 8 active calls globally, 4 shared across Codex, 4 shared across Antigravity, and 1 for an unknown provider.
+- [ ] Deterministic instrumentation reaches 4 Codex plus 4 Antigravity calls simultaneously; a fifth same-provider call and ninth global call queue across independent batches.
+- [ ] Prompt Worker and Image Generator exact provider/profile/model allocation lanes persist and execute under the same 4/4 family limits.
+- [ ] Cancellation, retry, and interrupted-work recovery remain repeat-safe at eight-way concurrency without duplicate accepted artifacts or leaked capacity.
+- [ ] Batch Matrix keeps Full batch, Provider and model allocation, and Concurrent run as separate legible control groups and reports the visible 4/4/8 limits honestly.
 - [ ] Excluding a matrix cell removes only that work item.
 - [ ] A 500-item fake-provider batch can stop, restart, retry failures, and finish without duplicate accepted artifacts.
 

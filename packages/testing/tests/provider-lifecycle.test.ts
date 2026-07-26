@@ -392,29 +392,32 @@ describe("Codex runtime lifecycle", () => {
         modelId: "gpt-5.4",
         operation: "generate-image",
         aspectRatios: ["1:1"],
-        maxParallelism: 2
+        maxParallelism: 4
       }),
       expect.objectContaining({
         providerId: "codex-vision-assistant",
         profileId: "worker:gpt-5.4",
         modelId: "gpt-5.4",
         operation: "llm",
-        maxParallelism: 2
+        maxParallelism: 4
       }),
       expect.objectContaining({
         providerId: "codex-vision-evaluation",
         profileId: "evaluation:gpt-5.4",
         modelId: "gpt-5.4",
         operation: "llm",
-        maxParallelism: 2
+        maxParallelism: 4
       })
     ]));
     expect(providers.resolveExecutionProviders({
       providerId: "google-nano-banana-2"
-    }).image.descriptor.id).toBe("google-nano-banana-2");
+    }).image?.descriptor.id).toBe("google-nano-banana-2");
     expect(providers.resolveExecutionProviders({
       providerId: "codex-vision-assistant"
-    }).worker.descriptor.id).toBe("codex-vision-assistant");
+    }).worker?.descriptor.id).toBe("codex-vision-assistant");
+    expect(providers.resolveExecutionProviders({
+      providerId: "unregistered-image-provider"
+    }).image).toBeUndefined();
     expect(providers.antigravityPolicy()).toEqual({
       creditOveragesConfirmed: false
     });

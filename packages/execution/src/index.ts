@@ -4,6 +4,7 @@ export * from "./plan/hashPlan.js";
 export * from "./plan/providerConcurrency.js";
 export * from "./plan/scopeResolution.js";
 export * from "./scheduler/scheduler.js";
+export * from "./scheduler/concurrencyDomains.js";
 export * from "./scheduler/persistence.js";
 export * from "./executors/registry.js";
 export * from "./executors/types.js";

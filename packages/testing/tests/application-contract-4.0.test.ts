@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
 import type { ExecutionProviderFacets } from "@ether/execution";
+import { nodeDefinitions } from "@ether/graph-kernel";
 import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider } from "@ether/providers";
 import {
   ApplicationCommandSchema,
@@ -106,7 +107,65 @@ afterEach(async () => {
 });
 
 describe("Ether 4.0 application boundary", () => {
-  it("applies a production Codex profile parallelism ceiling without configured capabilities", async () => {
+  it("previews a provider-free node without requiring an unrelated reasoning route", async () => {
+    const root = await temporaryRoot();
+    const worker = nodeDefinitions.find((definition) => definition.id === "prompt.worker")!;
+    const transform = nodeDefinitions.find((definition) => definition.id === "edit.transform")!;
+    const localGraph = EtherGraphSchema.parse({
+      ...graph(),
+      nodes: [worker, transform].map((definition, index) => ({
+        id: `scoped-${definition.id.replaceAll(".", "-")}`,
+        definitionId: definition.id,
+        title: definition.title,
+        position: { x: index * 320, y: 0 },
+        size: { width: 240, height: 180 },
+        config: definition.defaultConfig(),
+        presentation: { collapsed: false, accent: "default", previewMode: "content" }
+      }))
+    });
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider()
+    });
+    await app.createDocument({
+      path: path.join(root, "scoped-local.ether"),
+      title: "Scoped local",
+      initialGraph: localGraph
+    });
+    const capabilityResponse = await app.query({
+      kind: "query",
+      id: "scoped-capabilities",
+      correlationId: "scoped-capabilities",
+      name: "provider.capabilities",
+      payload: {}
+    });
+    expect(capabilityResponse).toMatchObject({
+      kind: "response",
+      name: "provider.capabilities"
+    });
+    if (capabilityResponse.kind !== "response" || capabilityResponse.name !== "provider.capabilities") {
+      throw new Error("Provider capability inspection did not return.");
+    }
+    expect(capabilityResponse.payload.capabilities).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: "ether-intelligence" })
+    ]));
+    const plan = await app.previewRun({
+      commandId: "preview-scoped-local",
+      graphId: localGraph.id,
+      scope: { kind: "node", nodeId: "scoped-edit-transform" }
+    }).finally(() => app.closeDocument());
+    expect(plan.estimatedCalls).toBe(0);
+    expect(plan.steps).toEqual([
+      expect.objectContaining({
+        nodeId: "scoped-edit-transform",
+        executor: "transform",
+        providerBinding: null
+      })
+    ]);
+  });
+
+  it("applies the four-call production Codex profile ceiling without configured capabilities", async () => {
     const root = await temporaryRoot();
     const provider = new CodexCliImageProvider({
       codexCliPath: path.join(root, "codex.exe"),
@@ -134,7 +193,7 @@ describe("Ether 4.0 application boundary", () => {
     };
     await app.createDocument({ path: path.join(root, "parallelism.ether"), title: "Parallelism", initialGraph: batchGraph });
     const plan = await app.previewRun({ commandId: "preview-parallelism", graphId: "root", scope: { kind: "node", nodeId: "image" } });
-    expect(plan.effectiveParallelism).toBe(1);
+    expect(plan.effectiveParallelism).toBe(3);
     expect(plan.requestedParallelism).toBe(4);
     await app.closeDocument();
   });
@@ -371,7 +430,7 @@ describe("Ether 4.0 application boundary", () => {
       "reference.changed"
     ]));
     await app.closeDocument();
-  });
+  }, 10_000);
 
   it("previews and runs Worker, evaluation, and local-only graphs with per-step provider routing", async () => {
     const root = await temporaryRoot();

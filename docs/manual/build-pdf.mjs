@@ -57,7 +57,7 @@ const captureTitles = {
   "run": "Run workspace",
   "review": "Review workspace",
   "reference-desk": "Reference Desk with an embedded reference",
-  "batch-matrix": "Batch Matrix with five-item allocation and concurrency controls",
+  "batch-matrix": "Batch Matrix with a five-item work set and separated concurrency controls",
   "job-center": "Job Center with durable run evidence",
   "artifact-observatory": "Artifact Observatory",
   "recipes": "Recipe Gallery",

@@ -684,7 +684,9 @@ The UI does not show a generic Run Node button on non-runnable nodes.
 ### 8.3 Scheduler
 
 - Sequential is default.
-- Batch size and concurrency are independent. Requested parallelism is capped at 8 application-wide, then by shared provider family: Codex App Server 2, Codex exec fallback 1, Antigravity 1, and unknown providers 1.
+- Batch size and concurrency are independent. `ExecutionConcurrencyDomains` is owned by the desktop application service and injected into every document scheduler. It enforces one application-wide global gate of 8, one Codex-family gate of 4 across App Server and explicit executable fallback work, one Antigravity-family gate of 4 across every verified profile, and a fail-closed gate of 1 for each unknown provider. Provider-family capacity is acquired before global capacity so a saturated family cannot reserve all global slots while waiting.
+- A fifth Codex or Antigravity call and a ninth global call remain claimed but undispatched until the shared permit is released. Scheduler detach, cancellation, failure, retry, and recovery release permits idempotently; no job or reopened document creates another capacity domain.
+- Usable Codex and Antigravity capability profiles report `maxParallelism: 4`. A route that cannot sustain four active calls is diagnosed unavailable and is not selected as a serial fallback. Exact provider/profile/model bindings never fall back to an unrelated registered provider.
 - Provider-family gates are shared across simultaneous jobs. A saturated provider cannot consume capacity reserved for an unrelated provider.
 - A planned work item may override its step provider/profile/model. Stable exact-count allocation lanes assign the first `N` remaining ordinals without changing the batch dimensions.
 - Each work item's dimension names and values are appended to the effective provider prompt and persisted in compiled context; parameters already present in the step configuration are not duplicated.
