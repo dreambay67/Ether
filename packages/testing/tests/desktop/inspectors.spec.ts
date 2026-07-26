@@ -149,8 +149,15 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByText("Diagnostics & provenance", { exact: true }).click();
   await expect(page.getByText("Node ID:", { exact: false })).toBeVisible();
 
+  const selectWorker = async () => {
+    await page.getByTestId("rf__node-worker").evaluate((node) => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await expect(page.getByTestId("node-inspector").getByRole("button", { name: "Compare" })).toHaveCount(2);
+  };
+
   await page.getByRole("button", { name: "Fit View" }).click();
-  await page.locator('[data-testid="rf__node-worker"] .ether-node-main p').click();
+  await selectWorker();
   await expect(page.getByText("Style to Image", { exact: true })).toBeVisible();
   const beforeWorker = await commandCount();
   await page.getByRole("textbox", { name: "Worker instruction" }).fill("Make the direction tactile and restrained");
@@ -161,10 +168,6 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByRole("button", { name: "Generate Output" }).click();
   await expect.poll(async () => (await commandNames()).includes("run.preview")).toBeTruthy();
 
-  const selectWorker = async () => {
-    await page.locator('[data-testid="rf__node-worker"] .ether-node-main p').click();
-    await expect(page.getByTestId("node-inspector").getByRole("button", { name: "Compare" })).toHaveCount(2);
-  };
   await page.getByRole("button", { name: "Approve" }).first().click();
   await selectWorker();
   await page.getByRole("button", { name: "Reject" }).first().click();
