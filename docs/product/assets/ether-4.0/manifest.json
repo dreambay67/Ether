@@ -1,0 +1,283 @@
+{
+  "version": "4.0.0",
+  "source": "installed-packaged-exe",
+  "sourceProfile": "disposable-scoped-profile",
+  "installer": {
+    "fileName": "Ether-4.0.0-Setup.exe",
+    "sha256": "00b1438ba624a29cb8056862645ebf5a16d11bbb8bb021cd6af33b19257e6687"
+  },
+  "executable": {
+    "fileName": "Ether.exe",
+    "sha256": "8c4448b2826ad274c557e1b0f82f8cbca31382add48359cec61c1e36a39cdba1"
+  },
+  "fixture": {
+    "fileName": "Ether 4.0 Release Atlas.ether",
+    "graphId": "manual-release-graph",
+    "nodeCount": 17,
+    "referenceCount": 1,
+    "sha256": "503c27970f1b2954400123e763418e2d3f4521af55d9e8e17a99d550bd7364b2"
+  },
+  "permitEvidence": {
+    "editPermit": "active",
+    "runPermit": "active-exact-plan",
+    "planId": "plan-a1b128a9-9d76-4b6e-9c0f-ecf79c501727",
+    "contentHash": "sha256:v1:45baedcfc1142d61e59400828cfceec14d8180896a395f5ed40a322fbc77dd0b"
+  },
+  "capturedAt": "2026-07-26T21:38:51.901Z",
+  "labels": [
+    "start",
+    "build",
+    "focus",
+    "run",
+    "review",
+    "reference-desk",
+    "batch-matrix",
+    "job-center",
+    "artifact-observatory",
+    "recipes",
+    "channels-roles",
+    "inspector-catalog",
+    "provider-health",
+    "settings",
+    "recovery",
+    "saving",
+    "export",
+    "plugin-edit-permit",
+    "plugin-run-permit",
+    "inspector-prompt-text",
+    "inspector-prompt-worker",
+    "inspector-reference-set",
+    "inspector-generation-image",
+    "inspector-edit-image",
+    "inspector-edit-mask",
+    "inspector-edit-transform",
+    "inspector-review-compare",
+    "inspector-review-evaluate",
+    "inspector-review-filter",
+    "inspector-flow-variables",
+    "inspector-flow-batch",
+    "inspector-flow-join",
+    "inspector-output-collection",
+    "inspector-output-export",
+    "inspector-canvas-note",
+    "inspector-canvas-drawing"
+  ],
+  "captures": [
+    {
+      "label": "start",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "05c1263e5622f88c33edd6e348bec63db0cb1e3076349272d302be972f7a0b20"
+    },
+    {
+      "label": "build",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "f4cad3ca991d4e7650ee0cc0ffb920fadaa0fca9df75c94dc1b0f1679b6f43ce"
+    },
+    {
+      "label": "focus",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "292a53d4e8b7ed317c48463bd2179b905ff43b2ce244d0848fe94b9ee1e31134"
+    },
+    {
+      "label": "run",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "a5efb60dbe9ceac949ca9ecdaaa66932136fd7dc5505ea737869ae1a78e59a90"
+    },
+    {
+      "label": "review",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "5845d9936bbed9db2f3471eedb2caebafd7f0f52ed01a6989db15f42482823c8"
+    },
+    {
+      "label": "reference-desk",
+      "width": 1600,
+      "height": 180,
+      "sha256": "1b4bd55077557ac34cb54b04df47fa98318bb1722e77aecb2e60247233561787"
+    },
+    {
+      "label": "batch-matrix",
+      "width": 1584,
+      "height": 756,
+      "sha256": "b39e5b8231a7c11239b61061f641f3a2847077c78a01d05cd3da2ef17d16f73f"
+    },
+    {
+      "label": "job-center",
+      "width": 1600,
+      "height": 184,
+      "sha256": "e23c792d63ca1f5af67f4c1679ddac31af337ffdbf2d36ac567118b40e9e9798"
+    },
+    {
+      "label": "artifact-observatory",
+      "width": 1265,
+      "height": 768,
+      "sha256": "ae1437c8a244f416313cd6a0be82e8de3cd882c41912a40743f113258426825d"
+    },
+    {
+      "label": "recipes",
+      "width": 303,
+      "height": 403,
+      "sha256": "fa7843d4aaeed00f9e522f5c9716cfcd4b1063137fa567229a52d651a0013583"
+    },
+    {
+      "label": "channels-roles",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "84a4fa463fd8809454ee9d6beb7d0ea0dec0178a96bc86211cefd163d2219985"
+    },
+    {
+      "label": "inspector-catalog",
+      "width": 880,
+      "height": 620,
+      "sha256": "9766b56b74f831975c398f69fa498719eb7c68c51e77db9fec6a497b6ac3192e"
+    },
+    {
+      "label": "provider-health",
+      "width": 980,
+      "height": 738,
+      "sha256": "04dad80e582430c5fc32eca42d0e1d30f8e22726986d899e7a7c8a5ddfade0d8"
+    },
+    {
+      "label": "settings",
+      "width": 980,
+      "height": 820,
+      "sha256": "3d05a61c6e50de21aa43bd825e8e3fb5e39d8746b44bac3ea5aac3cf5dc4d6c6"
+    },
+    {
+      "label": "recovery",
+      "width": 456,
+      "height": 221,
+      "sha256": "176b894f23bb4f696878f9c3b344a3b1af43ebcae3296f71dad469334e314006"
+    },
+    {
+      "label": "saving",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "81f1fa2e272e842dabda5fa0368de4d431a9f8b7ec7aa81f7d359a74d01d24a4"
+    },
+    {
+      "label": "export",
+      "width": 620,
+      "height": 592,
+      "sha256": "c9d5b42c8ef2c98bd045b84cb51a23fa8d954008b2e72c097f5c692b79a7e41a"
+    },
+    {
+      "label": "plugin-edit-permit",
+      "width": 556,
+      "height": 222,
+      "sha256": "a66bfd2092b5041b723dfd2924bc035d29c0d7386ee35b7c9e47de04ee0dee92"
+    },
+    {
+      "label": "plugin-run-permit",
+      "width": 527,
+      "height": 237,
+      "sha256": "86f985242b5c09d63c94f9512e8ca18e83a84e67c5880e5ca09d6fe57e7d7e88"
+    },
+    {
+      "label": "inspector-prompt-text",
+      "width": 400,
+      "height": 620,
+      "sha256": "4cb2143b6f40112d58e8cc4e184e02ffc1b06ee86fa7c163d498035317053451"
+    },
+    {
+      "label": "inspector-prompt-worker",
+      "width": 400,
+      "height": 620,
+      "sha256": "8b06cd410090b12470df55236e11775e1d5e9fb41361a9e04ad5aa5418cb4af5"
+    },
+    {
+      "label": "inspector-reference-set",
+      "width": 400,
+      "height": 620,
+      "sha256": "15de87f057a4fe885dec73116915bc9b032c37f0b00a041f29f2d3fb715dc8bc"
+    },
+    {
+      "label": "inspector-generation-image",
+      "width": 400,
+      "height": 620,
+      "sha256": "729af68dd7778105f7c853e84c03c331686a28d7136270c3a6207a22b1ee1b09"
+    },
+    {
+      "label": "inspector-edit-image",
+      "width": 400,
+      "height": 620,
+      "sha256": "8fa83f05dcd8c10b6a42b5b8c68796731fe607597ea88c27622ffbc31aacf373"
+    },
+    {
+      "label": "inspector-edit-mask",
+      "width": 400,
+      "height": 620,
+      "sha256": "a9d7bd4ae221731fb4a99960b5f11403eff2bfe8163da05604a0db099447d7b4"
+    },
+    {
+      "label": "inspector-edit-transform",
+      "width": 400,
+      "height": 620,
+      "sha256": "5215dea0f6d0d8e57f0bf88c0f59967e794bb58af8dd52d57906fe6a9f4b49c2"
+    },
+    {
+      "label": "inspector-review-compare",
+      "width": 400,
+      "height": 620,
+      "sha256": "b97712b0195a1800746d523663ef20a52c417ff1d97b4ec91590cb8d66cbc25d"
+    },
+    {
+      "label": "inspector-review-evaluate",
+      "width": 400,
+      "height": 620,
+      "sha256": "f0691d9d0058afb494968fc0dcb5e43a5cc7f22c20290086d3cc2656c7d64cfe"
+    },
+    {
+      "label": "inspector-review-filter",
+      "width": 400,
+      "height": 620,
+      "sha256": "7a803d3155b2c1421a5c4490cc4455a4385a29b17814db71ad0258f67e2fedc2"
+    },
+    {
+      "label": "inspector-flow-variables",
+      "width": 400,
+      "height": 620,
+      "sha256": "73b671ddce458ccf5f8c417edc01bab98f3b44da0312207868eeea930f933341"
+    },
+    {
+      "label": "inspector-flow-batch",
+      "width": 400,
+      "height": 620,
+      "sha256": "71be829e608152015b21ce70432f80290411a4f758eb9bc11625ed62e759a1fe"
+    },
+    {
+      "label": "inspector-flow-join",
+      "width": 400,
+      "height": 620,
+      "sha256": "12196cbdfc5e252b89120dddd8c2d492fd7fa468ca2a71a059b971812bfb1672"
+    },
+    {
+      "label": "inspector-output-collection",
+      "width": 400,
+      "height": 620,
+      "sha256": "52719813d679243758bb5ab9f2c3983eb4bb32300858589ad60a42c11b5986e9"
+    },
+    {
+      "label": "inspector-output-export",
+      "width": 400,
+      "height": 620,
+      "sha256": "eb7019c63bfd82ff3b680c996dfa7bd6f20a31086d16009ca8b2f475d748452f"
+    },
+    {
+      "label": "inspector-canvas-note",
+      "width": 400,
+      "height": 620,
+      "sha256": "70a6255bbb0e3e364b26a2178a8eb978286fbb22c0190f8fe2cd65c58dd10922"
+    },
+    {
+      "label": "inspector-canvas-drawing",
+      "width": 400,
+      "height": 620,
+      "sha256": "27820181057c654bc9dfcdabf5d541a6bf57902e49f4572cb815bf7a06d7d71d"
+    }
+  ]
+}

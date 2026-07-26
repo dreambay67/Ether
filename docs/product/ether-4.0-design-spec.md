@@ -468,7 +468,13 @@ Batch is explicit rather than inferred from duplicated nodes. Dimensions may inc
 - Repetition count
 - Variables
 
-The matrix previews the Cartesian work count, permits exclusions, warns about excessive expansion, and supports sequential execution by default with configurable parallelism.
+The matrix separates three decisions:
+
+- **Full batch** previews the Cartesian work count and permits explicit exclusions.
+- **Provider and model allocation** assigns exact, stable item counts to verified provider/profile/model lanes for reachable Prompt Workers and Image Generators. Unassigned items retain the node default.
+- **Concurrent run** controls throughput independently from batch size. Sequential is the default; total concurrency is capped at 8, Codex at 2 through App Server or 1 through fallback, Antigravity at 1, and unknown providers at 1.
+
+Each work item carries its dimension names and values into the effective provider prompt. Excessive expansion is visibly capped rather than allowed to exhaust the application or system.
 
 ### 11.4 Durable Jobs
 

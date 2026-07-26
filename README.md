@@ -11,3 +11,12 @@ The active specifications and implementation plan are:
 - `docs/product/ether-4.0-acceptance.md`
 - `docs/product/visual-system.md`
 - `docs/superpowers/plans/2026-07-16-ether-4.0-implementation-plan.md`
+
+Release documentation:
+
+- [Ether 4.0 User Manual (web)](docs/product/ether-4.0-user-manual.md)
+- [Ether 4.0 User Manual (PDF)](docs/product/ether-4.0-user-manual.pdf)
+- [Ether 4.0 Troubleshooting](docs/product/ether-4.0-troubleshooting.md)
+- [Ether 4.0 Release Notes](docs/product/ether-4.0-release-notes.md)
+
+The final manual PDF and screenshots are produced only from the installed Windows release candidate. See `docs/manual/README.md` for the repeatable capture, print, and verification sequence.

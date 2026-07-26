@@ -684,12 +684,16 @@ The UI does not show a generic Run Node button on non-runnable nodes.
 ### 8.3 Scheduler
 
 - Sequential is default.
-- Parallelism is user-selectable and capped by provider profile and global setting.
+- Batch size and concurrency are independent. Requested parallelism is capped at 8 application-wide, then by shared provider family: Codex App Server 2, Codex exec fallback 1, Antigravity 1, and unknown providers 1.
+- Provider-family gates are shared across simultaneous jobs. A saturated provider cannot consume capacity reserved for an unrelated provider.
+- A planned work item may override its step provider/profile/model. Stable exact-count allocation lanes assign the first `N` remaining ordinals without changing the batch dimensions.
+- Each work item's dimension names and values are appended to the effective provider prompt and persisted in compiled context; parameters already present in the step configuration are not duplicated.
 - Jobs and attempts persist before process dispatch.
 - Provider acceptance and artifact import occur transactionally.
 - Cancellation marks queued items cancelled and interrupts active providers when supported.
-- Resume schedules unfinished items only.
+- Process-loss recovery schedules unfinished queued items automatically when the document reopens.
 - Retry creates a new attempt under the same work item.
+- Terminal jobs expose no cosmetic Resume action. Failed items use explicit Retry and retain their immutable plan and provider allocation.
 
 ---
 
