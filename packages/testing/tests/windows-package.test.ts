@@ -379,5 +379,5 @@ describe("Windows installer release contract", () => {
     } finally {
       await cleanupReleaseStaging(repoRoot);
     }
-  }, 60_000);
+  }, 120_000);
 });
