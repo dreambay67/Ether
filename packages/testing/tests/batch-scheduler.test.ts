@@ -118,6 +118,60 @@ describe("DurableScheduler", () => {
     await Promise.all([...runs, ninthRun]);
   });
 
+  it("retries one failed item once while seven sibling calls fill the shared 4/4/8 domain", async () => {
+    const fixture = new ConcurrentJobsFixture();
+    const domains = new ExecutionConcurrencyDomains();
+    const codex = providerBinding("codex-assistant", 4);
+    const antigravity = providerBinding("google-nano-banana-2", 4);
+    const retryJob = fixture.addJob("retry-target", 1, codex, 8);
+    const firstWave = [
+      retryJob,
+      ...Array.from({ length: 3 }, (_, index) => fixture.addJob(`retry-codex-${index}`, 1, codex, 8)),
+      ...Array.from({ length: 4 }, (_, index) => fixture.addJob(`retry-antigravity-${index}`, 1, antigravity, 8))
+    ];
+    const failingExecutor = new ControlledExecutor({
+      failWorkItemId: "retry-target:step:work:0",
+      failAfterActive: 8,
+      failOnce: true
+    });
+    const firstScheduler = fixture.scheduler(failingExecutor, undefined, domains);
+    const firstRuns = firstWave.map((job) => firstScheduler.run(job.id));
+
+    await waitForExecutorActive(failingExecutor, 8, fixture);
+    expect(failingExecutor.maximumByProvider.get("codex")).toBe(4);
+    expect(failingExecutor.maximumByProvider.get("antigravity")).toBe(4);
+    expect(failingExecutor.maximumActive).toBe(8);
+    failingExecutor.release();
+    await Promise.all(firstRuns);
+    expect((await fixture.getJob(retryJob.id))?.status).toBe("failed");
+    expect(fixture.claimed(retryJob.id)).toBe(1);
+
+    const firstRetry = await fixture.retryFailed(retryJob.id, "retry-command");
+    const duplicateRetry = await fixture.retryFailed(retryJob.id, "retry-command");
+    expect(duplicateRetry).toEqual(firstRetry);
+    expect(fixture.claimed(retryJob.id)).toBe(1);
+
+    const secondWave = [
+      retryJob,
+      ...Array.from({ length: 3 }, (_, index) => fixture.addJob(`retry-second-codex-${index}`, 1, codex, 8)),
+      ...Array.from({ length: 4 }, (_, index) => fixture.addJob(`retry-second-antigravity-${index}`, 1, antigravity, 8))
+    ];
+    const retryExecutor = new ControlledExecutor();
+    const retryScheduler = fixture.scheduler(retryExecutor, undefined, domains);
+    const retryRuns = secondWave.map((job) => retryScheduler.run(job.id));
+
+    await waitForExecutorActive(retryExecutor, 8, fixture);
+    expect(retryExecutor.maximumByProvider.get("codex")).toBe(4);
+    expect(retryExecutor.maximumByProvider.get("antigravity")).toBe(4);
+    expect(retryExecutor.maximumActive).toBe(8);
+    expect([...retryExecutor.prompts.keys()].filter((id) => id === "retry-target:step:work:0")).toHaveLength(1);
+    retryExecutor.release();
+    await Promise.all(retryRuns);
+
+    expect(fixture.claimed(retryJob.id)).toBe(2);
+    expect((await fixture.getJob(retryJob.id))?.status).toBe("completed");
+  });
+
   it("fails closed at one for unknown providers even when they advertise a larger cap", () => {
     expect(providerParallelismLimit(providerBinding("unverified-external", 99))).toBe(1);
   });
@@ -217,7 +271,14 @@ class ControlledExecutor implements StepExecutor {
   private readonly released: Promise<void>;
   private releaseBlocked!: () => void;
 
-  constructor(private readonly options: { failOrdinal?: number; failAfterActive?: number } = {}) {
+  private failed = false;
+
+  constructor(private readonly options: {
+    failOrdinal?: number;
+    failWorkItemId?: string;
+    failAfterActive?: number;
+    failOnce?: boolean;
+  } = {}) {
     this.released = new Promise<void>((resolve) => { this.releaseBlocked = resolve; });
   }
 
@@ -238,7 +299,12 @@ class ControlledExecutor implements StepExecutor {
     this.contexts.set(context.plannedWorkItem.id, context.step.compiledContext);
     this.resolveStartedWaiters();
     try {
-      if (context.plannedWorkItem.ordinal === this.options.failOrdinal) {
+      const shouldFail = (
+        context.plannedWorkItem.ordinal === this.options.failOrdinal
+        || context.plannedWorkItem.id === this.options.failWorkItemId
+      ) && (!this.options.failOnce || !this.failed);
+      if (shouldFail) {
+        this.failed = true;
         await this.waitForActive(this.options.failAfterActive ?? 1);
         throw new ExecutorFailure("CONTROLLED_FAILURE", "Controlled scheduler failure.", true);
       }
@@ -289,6 +355,7 @@ class ConcurrentJobsFixture implements SchedulerPersistence {
   readonly documentId = "concurrency-document";
   readonly path = "C:\\EtherTest\\scheduler-concurrency.ether";
   readonly failures: Array<{ attemptId: string; code: string; message: string }> = [];
+  private readonly retryResults = new Map<string, ExecutionJob>();
   private readonly records = new Map<string, {
     job: ExecutionJob;
     plan: ExecutionPlan;
@@ -426,6 +493,22 @@ class ConcurrentJobsFixture implements SchedulerPersistence {
 
   async getJob(jobId: string): Promise<ExecutionJob | undefined> {
     return this.records.get(jobId)?.job;
+  }
+
+  async retryFailed(jobId: string, commandId: string): Promise<ExecutionJob> {
+    const duplicate = this.retryResults.get(commandId);
+    if (duplicate !== undefined) return duplicate;
+    const record = this.requireRecord(jobId);
+    record.states = record.states.map((state) => state === "failed" ? "queued" : state);
+    record.job = {
+      ...record.job,
+      status: "queued",
+      startedAt: null,
+      completedAt: null,
+      cancellationRequestedAt: null
+    };
+    this.retryResults.set(commandId, record.job);
+    return record.job;
   }
 
   async cancelJob(jobId: string): Promise<ExecutionJob> {
