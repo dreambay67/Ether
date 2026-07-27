@@ -26,6 +26,7 @@ import {
   applicationCommand,
   createLocalBridgeApplicationAdapter
 } from "../../packages/mcp-server/dist/index.js";
+import { resolveCodexCliPath } from "../../packages/providers/dist/index.js";
 
 const execFileAsync = promisify(execFile);
 const root = path.resolve(import.meta.dirname, "..", "..");
@@ -193,7 +194,8 @@ const environment = {
   ...process.env,
   APPDATA: appData,
   LOCALAPPDATA: localAppData,
-  USERPROFILE: profileRoot
+  USERPROFILE: profileRoot,
+  CODEX_CLI_PATH: resolveCodexCliPath(process.env) ?? process.env.CODEX_CLI_PATH
 };
 for (const key of [
   "ETHER_RENDERER_URL",

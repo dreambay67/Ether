@@ -4,26 +4,26 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "bb25b72a36e3d868de0ef8b3054dc42175afbe946f1927270f9b77773da177a8"
+    "sha256": "e3ee34eaf0912121fc176e1f75636aebbf81281b3c7d8d5dbfa86e7eaea29f41"
   },
   "executable": {
     "fileName": "Ether.exe",
-    "sha256": "439a5bd83bc7cf42b04c1a8197ececda4594ae083d32625314135ac0a44149bf"
+    "sha256": "efa858e514294d335cd61bb38bcecc31fa49300be5535c4b7215517b8f6d23f2"
   },
   "fixture": {
     "fileName": "Ether 4.0 Release Atlas.ether",
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "7960bc03ff6f583a4abc9072940121fcd82c0f7e885e61b48fbf08432b025d48"
+    "sha256": "1b9fdaa62b615e2da6c05593bdfa93f6e2a41ac45af3bdb16672d521ef73be4b"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-d7df13ef-666e-4531-9509-561630aa5eb4",
-    "contentHash": "sha256:v1:1cc07cd7c0a542bc406418be387e7c0ee6d5fa8d44cfc38349c347bc6190c561"
+    "planId": "plan-6f1a86f3-7eb7-4c51-b0a6-65aff68f4062",
+    "contentHash": "sha256:v1:c26fba5330fb22f25ea0dca803dcf0aa89ec139c6c6c24ea7b28934b7f4bf46f"
   },
-  "capturedAt": "2026-07-27T00:13:08.692Z",
+  "capturedAt": "2026-07-27T00:56:27.371Z",
   "labels": [
     "start",
     "build",
@@ -85,13 +85,13 @@
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "4ce14407364f18975898f123d17a954bada14b97a96bf192e47689bf300efc21"
+      "sha256": "362c2c02bacc4a37fb98cbde366471cffb2789da4aeaa22f76724eaa49fb9e04"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "132300fe567bca5d6534849a8401e1e530d943e30d3d9cef9e23e8b3a626109c"
+      "sha256": "258ce81ed42637a6f35491881f53b764f9e95d7b2f6c093d4802fbbb3436284c"
     },
     {
       "label": "reference-desk",
@@ -102,20 +102,20 @@
     {
       "label": "batch-matrix",
       "width": 1584,
-      "height": 727,
-      "sha256": "e232051bcdcc7cee19999527686fd63bce680417af1739d048927948920f4327"
+      "height": 757,
+      "sha256": "45754d74f1b3c84e360aeb39f164f9fe0052022c51434dacfbe3592c5e199dea"
     },
     {
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "93e29c1250f1ad7ab55caf0d0adc1efc623b35a63c26e280420eb4de0e79a9e6"
+      "sha256": "2c0b5187c917fe9d762a891797546b639c19a0fd1bee224df07c38190f5e619d"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "0ad9cb1867e29371134b113865399c80a9487e39d650ca84254af747f800b035"
+      "sha256": "7d77bdee4720c5f6f1a880ce6dfde878bbb6894d431f8ed3278d43066d8ce65a"
     },
     {
       "label": "recipes",
@@ -138,8 +138,8 @@
     {
       "label": "provider-health",
       "width": 980,
-      "height": 706,
-      "sha256": "8d0ffc6a3d5e2aba5268e161ed273b4d38f251dc7f4c947f8c3340481559b14b"
+      "height": 766,
+      "sha256": "e12edd3cb59cacf1e9268df2e743a7f1e2692fe059d34c7afe67d58df255df55"
     },
     {
       "label": "settings",
@@ -173,9 +173,9 @@
     },
     {
       "label": "plugin-run-permit",
-      "width": 528,
+      "width": 519,
       "height": 237,
-      "sha256": "700890c6de8b1ffed7b46cf22993963053a7377e7326dc581e20d4e5e46c673d"
+      "sha256": "4f1d4131688e597271db62b8127dfdd19246af05c85247b19e21a60fa80686ea"
     },
     {
       "label": "inspector-prompt-text",
@@ -199,13 +199,13 @@
       "label": "inspector-generation-image",
       "width": 400,
       "height": 620,
-      "sha256": "0741822059cbd01d3de3f3a14492b880a0109712049bc93f8e28dc8dc1839219"
+      "sha256": "43b451244076a46869464bcabb24aad34a2a547662ab777f61191af272a91cda"
     },
     {
       "label": "inspector-edit-image",
       "width": 400,
       "height": 620,
-      "sha256": "cdf6e02cca63008aa8c6b2be2da7ad9fa309ef8826e41ad1537ea1b76c70c550"
+      "sha256": "8fa83f05dcd8c10b6a42b5b8c68796731fe607597ea88c27622ffbc31aacf373"
     },
     {
       "label": "inspector-edit-mask",
