@@ -690,5 +690,6 @@ Ether 4.0 is launch-ready only when:
 - Large reference sets and artifact batches remain understandable and responsive.
 - The Codex plugin can create a tailored ready-to-run graph through one undoable transaction.
 - The packaged application passes security, recovery, performance, accessibility, and primary-journey acceptance gates.
+- The packaged runtime contains only the reviewed production closure, retains dependency and native-library notices, and excludes benchmark, fixture, specification, cache, source-map, and development-configuration material.
 
 The detailed technical contracts and measurable tests are normative in the companion specifications.

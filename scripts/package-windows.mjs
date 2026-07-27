@@ -19,6 +19,7 @@ export const packagedExecutablePath = path.join(unpackedDirectory, "Ether.exe");
 export const releaseAuditFileName = "release-audit.json";
 export const stagedInventoryFileName = "release-inventory.json";
 export const reviewedBuilderConfigFileName = "electron-builder.generated.yml";
+export const thirdPartyNoticesFileName = "THIRD-PARTY-NOTICES.txt";
 const releaseVersion = "4.0.0";
 const allowedReleaseRootEntries = new Set([
   "win-unpacked",
@@ -33,15 +34,18 @@ const electronBuilderDiagnosticFileNames = [
   "builder-effective-config.yml"
 ];
 const forbiddenDirectoryNames = new Set([
-  "__tests__", "doc", "docs", "example", "examples", "source", "src", "test", "tests"
+  "__tests__", "benchmark", "benchmarks", "doc", "docs", "example", "examples",
+  "fixture", "fixtures", "source", "spec", "specs", "src", "test", "tests"
 ]);
 const forbiddenFileExtensions = new Set([
   ".cts", ".db", ".ether", ".jsx", ".key", ".log", ".map", ".markdown", ".md",
   ".mts", ".p12", ".pem", ".pfx", ".sqlite", ".sqlite3", ".ts", ".tsx"
 ]);
 const forbiddenFileNames = new Set([
-  ".env", ".env.local", ".npmrc", "auth.json", "credentials.json", "cookies.json",
-  "npm-debug.log", "pnpm-lock.yaml", "package-lock.json", "yarn.lock"
+  ".editorconfig", ".env", ".env.local", ".npmrc", ".nycrc", ".prettierrc.json",
+  ".runkit_example.js", "auth.json", "credentials.json", "cookies.json",
+  "eslint.config.js", "eslint.config.mjs", "npm-debug.log", "pnpm-lock.yaml",
+  "package-lock.json", "tsconfig.json", "yarn.lock"
 ]);
 const workspacePackages = [
   ["@ether/application", "packages/application"],
@@ -310,6 +314,7 @@ export async function prepareReleaseProject(rootDir = workspaceRoot) {
     copyProductionTree(path.join(desktopRoot, "dist-electron"), path.join(projectRoot, "dist-electron")),
     copyProductionTree(path.join(desktopRoot, ".release-runtime"), path.join(projectRoot, "node_modules"))
   ]);
+  await writeThirdPartyNotices(rootDir, projectRoot);
   await writeFile(path.join(projectRoot, "package.json"), `${JSON.stringify({
     name: "ether-desktop-release",
     version: releaseVersion,
@@ -348,6 +353,7 @@ export async function prepareReleaseProject(rootDir = workspaceRoot) {
     "  - dist-electron/**/*",
     "  - node_modules/**/*",
     "  - package.json",
+    `  - ${thirdPartyNoticesFileName}`,
     `  - ${stagedInventoryFileName}`,
     "asarUnpack:",
     "  - node_modules/sharp/**/*",
@@ -400,9 +406,15 @@ function packagePathViolation(relativePath) {
   if (segments.some((segment) => forbiddenDirectoryNames.has(segment))) {
     return "source, test, example, or documentation directory";
   }
+  if (/^(?:licen[cs]e|copying|notice)(?:[._-].*|\..*)?$/iu.test(fileName)) {
+    return null;
+  }
   if (
     forbiddenFileNames.has(fileName) ||
     fileName.startsWith(".env.") ||
+    fileName.startsWith(".eslintrc.") ||
+    fileName.startsWith(".prettierrc.") ||
+    fileName.startsWith("tsconfig.") ||
     fileName.endsWith("-journal") ||
     fileName.endsWith("-shm") ||
     fileName.endsWith("-wal") ||
@@ -414,6 +426,26 @@ function packagePathViolation(relativePath) {
     return "source, documentation, or source-map extension";
   }
   return null;
+}
+
+async function writeThirdPartyNotices(rootDir, projectRoot) {
+  const sharpPackageRoot = await resolveInstalledPackageRoot(
+    path.join(rootDir, "packages", "application"),
+    "@img/sharp-win32-x64"
+  );
+  const sharpNotice = await readFile(path.join(sharpPackageRoot, "README.md"), "utf8");
+  if (!sharpNotice.includes("## Licensing") || !sharpNotice.includes("libvips") || !sharpNotice.includes("LGPLv3")) {
+    throw new Error("The reviewed sharp native-runtime license notice is incomplete.");
+  }
+  await writeFile(path.join(projectRoot, thirdPartyNoticesFileName), [
+    "ETHER 4.0 THIRD-PARTY NOTICES",
+    "",
+    "Individual dependency license files are retained beside their runtime packages.",
+    "The following native-runtime notice is preserved from @img/sharp-win32-x64 0.35.3.",
+    "",
+    sharpNotice.trim(),
+    ""
+  ].join("\n"));
 }
 
 export function releasePathViolation(relativePath) {
@@ -608,6 +640,7 @@ export async function auditPackagedRelease(options = {}) {
     if (violation !== null) throw new Error(`ASAR privacy audit refused ${archivePath}: ${violation}.`);
   }
   const requiredArchivePaths = [
+    thirdPartyNoticesFileName,
     "dist/index.html",
     "dist-electron/main/bootstrap.js",
     "dist-electron/main/diagnostics/localDiagnostics.js",
@@ -619,7 +652,13 @@ export async function auditPackagedRelease(options = {}) {
     "node_modules/@ether/application/dist/atomicExportPublisher.js",
     "node_modules/@ether/document/dist/sqliteSecurity.js",
     "node_modules/@ether/mcp-server/dist/index.js",
+    "node_modules/@img/colour/LICENSE.md",
+    "node_modules/express-rate-limit/license.md",
+    "node_modules/jose/LICENSE.md",
+    "node_modules/json-schema-typed/LICENSE.md",
+    "node_modules/ms/license.md",
     "node_modules/@modelcontextprotocol/sdk/package.json",
+    "node_modules/qs/LICENSE.md",
     stagedInventoryFileName
   ];
   const missingArchivePaths = requiredArchivePaths.filter((entry) => !archivePaths.includes(entry));

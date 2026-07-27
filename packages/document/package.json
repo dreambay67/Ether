@@ -8,6 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./benchmark/page-size": {
+      "types": "./dist/benchmark/pageSizeBenchmark.d.ts",
+      "import": "./dist/benchmark/pageSizeBenchmark.js"
     }
   },
   "files": [

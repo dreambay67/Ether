@@ -34,4 +34,5 @@ The scheduler uses one application-wide capacity domain across every job and bat
 - Preserve existing legacy folders separately; this release will refuse them without migration controls.
 - Keep `.ether` documents outside temporary/cache locations when they matter.
 - Install with the Windows installer, which associates `.ether` files with Ether. Uninstall does not remove your `.ether` documents or export folders.
+- The installed runtime retains dependency license files and a `THIRD-PARTY-NOTICES.txt` native-runtime notice; benchmark, fixture, specification, and development-configuration files are not shipped.
 - Read the [User Manual](ether-4.0-user-manual.md) and [Troubleshooting guide](ether-4.0-troubleshooting.md) before running provider-backed work.

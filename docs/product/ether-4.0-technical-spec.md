@@ -853,6 +853,7 @@ UI messages are concise. Run Detail and diagnostics retain bounded technical evi
 - React component interaction tests for Inspector, channel rails, role grid, Reference Desk, Batch Matrix, and Job Center
 - Playwright primary journeys against fake provider
 - Packaged Electron file association, protocol, Save/Open, drag export, and security tests
+- ASAR inventory audit rejects benchmark, fixture, specification, source-map, credential, cache, and development-configuration material; required dependency license files and `THIRD-PARTY-NOTICES.txt` are retained and hashed
 - Screenshot checks across 1920x1080, 1440x900, 1280x720, and high-DPI scaling
 - Canvas pixel/nonblank checks and overlap assertions
 

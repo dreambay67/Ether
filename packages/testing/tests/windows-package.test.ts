@@ -28,7 +28,8 @@ import {
   releaseDirectory,
   releasePathViolation,
   releaseRootArtifactViolation,
-  reviewedBuilderConfigFileName
+  reviewedBuilderConfigFileName,
+  thirdPartyNoticesFileName
 } from "../../../scripts/package-windows.mjs";
 
 const repoRoot = path.resolve(__dirname, "../../..");
@@ -88,12 +89,15 @@ describe("Windows installer release contract", () => {
     for (const rejected of [
       "src/main.ts", "tests/runtime.test.js", "examples/demo.js", "docs/readme.txt", "bundle.js.map",
       "user.ether", "cache.sqlite3", "cache.db-wal", "diagnostics.log", "certificate.pem", "private.key",
-      "module.cts", "module.mts", "component.jsx", ".env.production", "credentials.json"
+      "module.cts", "module.mts", "component.jsx", ".env.production", "credentials.json",
+      "benchmark/throughput.js", "spec/index.spec.js", "fixtures/schema.js", ".nycrc",
+      ".editorconfig", ".runkit_example.js", "eslint.config.mjs", "tsconfig.json"
     ]) {
       expect(releasePathViolation(rejected), rejected).not.toBeNull();
     }
     for (const allowed of [
-      "dist/main.js", "dist/index.html", "package.json", "LICENSE", "protocol/manifest.json",
+      "dist/main.js", "dist/index.html", "package.json", "LICENSE", "LICENSE.md", "license.md",
+      "NOTICE.txt", thirdPartyNoticesFileName, "protocol/manifest.json",
       "dist-electron/main/security/pathGrants.js", "lib/sharp-win32-x64-0.35.3.node", "lib/libvips-42.dll"
     ]) {
       expect(releasePathViolation(allowed), allowed).toBeNull();
@@ -313,12 +317,32 @@ describe("Windows installer release contract", () => {
       const generatedConfig = await readFile(path.join(releaseProject, "electron-builder.yml"), "utf8");
       expect(generatedConfig).not.toMatch(/[a-z]:[\\/]/i);
       expect(generatedConfig).toContain("output: ../../../release/windows");
+      expect(generatedConfig).toContain(`  - ${thirdPartyNoticesFileName}`);
+      const notices = await readFile(path.join(releaseProject, thirdPartyNoticesFileName), "utf8");
+      expect(notices).toContain("ETHER 4.0 THIRD-PARTY NOTICES");
+      expect(notices).toContain("@img/sharp-win32-x64");
+      expect(notices).toContain("libvips");
+      expect(notices).toContain("LGPLv3");
       const inventory = await createStagedInventory(releaseProject);
       expect(inventory.entries.length).toBeGreaterThan(100);
       expect(inventory.entries.some((entry) => entry.path === "electron-builder.yml")).toBe(false);
       expect(inventory.entries.some((entry) => entry.path.startsWith("docs/manual/"))).toBe(false);
       expect(inventory.entries.map((entry) => entry.path))
         .toContain("node_modules/@ether/application/dist/atomicExportPublisher.js");
+      expect(inventory.entries.map((entry) => entry.path)).toEqual(expect.arrayContaining([
+        thirdPartyNoticesFileName,
+        "node_modules/@img/colour/LICENSE.md",
+        "node_modules/express-rate-limit/license.md",
+        "node_modules/jose/LICENSE.md",
+        "node_modules/json-schema-typed/LICENSE.md",
+        "node_modules/ms/license.md",
+        "node_modules/qs/LICENSE.md"
+      ]));
+      expect(inventory.entries.map((entry) => entry.path)).not.toEqual(expect.arrayContaining([
+        "node_modules/@ether/document/dist/benchmark/pageSizeBenchmark.js",
+        "node_modules/fast-uri/benchmark/benchmark.mjs",
+        "node_modules/json-schema-traverse/spec/index.spec.js"
+      ]));
       expect(inventory.entries.map((entry) => entry.path)).toEqual(
         [...inventory.entries.map((entry) => entry.path)].sort((left, right) => left.localeCompare(right))
       );

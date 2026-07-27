@@ -334,6 +334,7 @@ For every recipe:
 - [ ] Uninstall never removes user `.ether` documents or export folders.
 - [ ] Cache cleanup removes only manifest-tracked Ether AppData.
 - [ ] Packaged application starts without source tree or development dependencies.
+- [ ] Packaged runtime omits benchmark, fixture, specification, and development-configuration material while retaining required third-party license files and native-library notices.
 
 ---
 

@@ -7,15 +7,6 @@ export * from "./format.js";
 export * from "./formatContract.js";
 export { migrate4x, type Ether4xMigrationResult } from "./migrations/migrate4x.js";
 export {
-  benchmarkPageSizes,
-  decideProductionPageSize,
-  ETHER_PAGE_SIZE_CANDIDATES,
-  ETHER_PAGE_SIZE_STABILITY_TOLERANCE,
-  type EtherPageSize,
-  type PageSizeBenchmarkResult,
-  type PageSizeProductionDecision
-} from "./benchmark/pageSizeBenchmark.js";
-export {
   DocumentStore,
   DocumentStoreError,
   type CompactStage,

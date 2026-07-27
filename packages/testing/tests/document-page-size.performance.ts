@@ -1,4 +1,9 @@
-import { ETHER_PAGE_SIZE, ETHER_PAGE_SIZE_STABILITY_TOLERANCE, benchmarkPageSizes, decideProductionPageSize } from "@ether/document";
+import { ETHER_PAGE_SIZE } from "@ether/document";
+import {
+  ETHER_PAGE_SIZE_STABILITY_TOLERANCE,
+  benchmarkPageSizes,
+  decideProductionPageSize
+} from "@ether/document/benchmark/page-size";
 import { describe, expect, it } from "vitest";
 
 describe("Ether 4.0 page-size format freeze", () => {

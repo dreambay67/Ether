@@ -28,6 +28,8 @@ Ether opens maximized so the canvas and its supporting panes use the available d
 
 Ether 4.0 does **not** open, import, or migrate legacy Ether folder projects. A directory containing `project.json`, `graph.json`, or `ether.db` is refused unchanged. Create a new `.ether` document and bring in only the source media you need.
 
+The installed runtime retains its dependency license files and a `THIRD-PARTY-NOTICES.txt` native-library notice. It does not ship benchmark, fixture, specification, source-map, cache, or development-configuration material.
+
 The title bar reports **Saving**, **Saved**, or **Needs attention**. Idle edits autosave after 1.5 seconds and are not deferred longer than ten seconds. `File > Save As` validates a new destination and switches to it only after success. `Save a Copy` validates a copy but leaves the original active. `Compact Document` reclaims abandoned embedded-object pages and reports the actual before/after size.
 
 ## Workspaces
