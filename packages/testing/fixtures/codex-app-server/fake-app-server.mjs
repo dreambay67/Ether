@@ -119,6 +119,8 @@ function handle(message) {
       ? "codex-cli/0.145.0"
       : mode === "desktop-user-agent"
         ? "Codex Desktop/0.144.2 (Windows 10.0.26200; x86_64) unknown (ether; 4.0.0)"
+        : mode === "client-user-agent"
+          ? "ether/0.144.2 (Windows 10.0.26200; x86_64) unknown (ether; 4.0.0)"
         : "codex-cli/0.144.2";
     send({ id: message.id, result: { codexHome: "C:\\CodexHome", platformFamily: "windows", platformOs: "windows", userAgent } });
     if (mode === "duplicate-response") send({ id: message.id, result: {} });

@@ -283,6 +283,18 @@ describe("Codex runtime lifecycle", () => {
     });
   });
 
+  it("accepts the pinned CLI version when App Server prefixes the user agent with the client name", async () => {
+    const instance = runtime("client-user-agent");
+    await instance.start();
+    expect(instance.health()).toMatchObject({
+      status: "ready",
+      transport: "app-server",
+      reportedVersion: "0.144.2",
+      versionCompatible: true,
+      imageCapability: "available"
+    });
+  });
+
   it("publishes health, rejects active work on death, and bounds restart generation", async () => {
     const instance = runtime("die-active");
     const states: string[] = [];
