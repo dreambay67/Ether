@@ -89,8 +89,12 @@ export function buildAntigravityProcessCall(input: {
 }
 
 function headlessAntigravityEnv(env: NodeJS.ProcessEnv | Record<string, string | undefined>) {
+  const sanitized = sanitizeProviderEnv(env);
+  delete sanitized.SSH_CONNECTION;
+  delete sanitized.SSH_CLIENT;
+  delete sanitized.SSH_TTY;
   return {
-    ...sanitizeProviderEnv(env),
+    ...sanitized,
     CI: "1",
     NO_BROWSER: "true"
   };

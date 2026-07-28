@@ -64,7 +64,15 @@ async function readyProvider(
   const brainRoot = path.join(projectPath, "brain");
   const conformanceRoot = path.join(projectPath, "conformance");
   const calls: ProviderProcessCall[] = [];
-  const env = { USERPROFILE: projectPath, ANTIGRAVITY_BRAIN_ROOT: brainRoot, FAKE_AGY_MODE: mode, PATH: process.env.PATH };
+  const env = {
+    USERPROFILE: projectPath,
+    ANTIGRAVITY_BRAIN_ROOT: brainRoot,
+    FAKE_AGY_MODE: mode,
+    PATH: process.env.PATH,
+    SSH_CONNECTION: "inherited-ssh-connection",
+    SSH_CLIENT: "inherited-ssh-client",
+    SSH_TTY: "inherited-ssh-tty"
+  };
   await writeAntigravityConformance(conformanceRoot, {
     schemaVersion: 1, cli: { version: "1.1.4", sha256: "fixture-sha" }, createdAt: new Date().toISOString(),
     profiles: [{
@@ -181,6 +189,8 @@ describe("Antigravity image provider", () => {
     expect(generationCall?.env.NO_BROWSER).toBe("true");
     expect(generationCall?.env.CI).toBe("1");
     expect(generationCall?.env.SSH_CONNECTION).toBeUndefined();
+    expect(generationCall?.env.SSH_CLIENT).toBeUndefined();
+    expect(generationCall?.env.SSH_TTY).toBeUndefined();
     expect(generationCall?.stdin).toBeUndefined();
   });
 
@@ -302,21 +312,53 @@ describe("Antigravity image provider", () => {
     await expect(provider.generate(input(projectPath))).rejects.toThrow(/exactly one newly created valid image/i);
   });
 
-  it("reports exhausted image quota without suggesting paid overages or accepting prose", async () => {
-    const { projectPath, provider } = await readyProvider("nano-banana-2");
-    const run = Reflect.get(provider, "run") as unknown;
-    expect(run).toBeTypeOf("function");
-    const quotaProvider = new AntigravityImageProvider("nano-banana-2", {
+  it("fails closed when concurrent calls create unattributed shared-brain images", async () => {
+    const { projectPath } = await readyProvider("nano-banana-2");
+    const brainRoot = path.join(projectPath, "brain");
+    const provider = new AntigravityImageProvider("nano-banana-2", {
       executablePath: "fake-agy",
       env: { USERPROFILE: projectPath, PATH: process.env.PATH },
-      brainRoot: path.join(projectPath, "brain"),
+      brainRoot,
       conformanceRoot: path.join(projectPath, "conformance"),
       fileExists: async () => true,
       sha256File: async () => "fixture-sha",
       creditOveragesPolicy: "never-confirmed",
-      run: async (call) => call.args.includes("--version")
-        ? { stdout: "1.1.4\n", stderr: "", exitCode: 0 }
-        : { stdout: "The request was not completed because the quota was exhausted.", stderr: "", exitCode: 0 }
+      run: async (call) => {
+        if (call.args.includes("--version")) return { stdout: "1.1.4\n", stderr: "", exitCode: 0 };
+        const foreignDirectory = path.join(brainRoot, randomUuidForAttempt(call.cwd));
+        await mkdir(foreignDirectory, { recursive: true });
+        await writeFile(path.join(foreignDirectory, "generated.png"), validPng);
+        return { stdout: "completed without a conversation log\n", stderr: "", exitCode: 0 };
+      }
+    });
+    const results = await Promise.allSettled([
+      provider.generate({ ...input(projectPath), runId: "foreign-one" }),
+      provider.generate({ ...input(projectPath), runId: "foreign-two" })
+    ]);
+    expect(results).toEqual([
+      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ message: expect.stringMatching(/found 0/i) }) }),
+      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ message: expect.stringMatching(/found 0/i) }) })
+    ]);
+  });
+
+  it("reports exhausted image quota before exit or artifact handling and never suggests paid overages", async () => {
+    const { projectPath } = await readyProvider("nano-banana-2");
+    const brainRoot = path.join(projectPath, "brain");
+    const quotaProvider = new AntigravityImageProvider("nano-banana-2", {
+      executablePath: "fake-agy",
+      env: { USERPROFILE: projectPath, PATH: process.env.PATH },
+      brainRoot,
+      conformanceRoot: path.join(projectPath, "conformance"),
+      fileExists: async () => true,
+      sha256File: async () => "fixture-sha",
+      creditOveragesPolicy: "never-confirmed",
+      run: async (call) => {
+        if (call.args.includes("--version")) return { stdout: "1.1.4\n", stderr: "", exitCode: 0 };
+        const foreignDirectory = path.join(brainRoot, randomUuidForAttempt(call.cwd));
+        await mkdir(foreignDirectory, { recursive: true });
+        await writeFile(path.join(foreignDirectory, "foreign.png"), validPng);
+        return { stdout: "The provider stopped due to quota exhaustion.", stderr: "", exitCode: 1 };
+      }
     });
     await expect(quotaProvider.generate(input(projectPath))).rejects.toThrow(
       /quota is exhausted; no image was created.*did not use credit overages/i
@@ -363,3 +405,8 @@ describe("Antigravity image provider", () => {
     })).toThrow(/staged inside the attempt directory/i);
   });
 });
+
+function randomUuidForAttempt(attemptDirectory: string) {
+  const suffix = Buffer.from(attemptDirectory).toString("hex").slice(-12).padStart(12, "0");
+  return `00000000-0000-4000-8000-${suffix}`;
+}

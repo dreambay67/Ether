@@ -194,21 +194,22 @@ export class AntigravityImageProvider implements GenerationProvider {
     } finally {
       await rm(logPath, { force: true });
     }
+    const redactedOutput = redactSensitiveText(`${result.stderr}\n${result.stdout}`);
+    if (/quota[^\r\n]{0,120}(?:exhausted|exhaustion)|resource exhaustion|429 Too Many Requests/i.test(redactedOutput)) {
+      throw new Error("Antigravity image quota is exhausted; no image was created. Ether did not use credit overages.");
+    }
+    const processOutput = redactedOutput.slice(0, 2_000);
     if (result.exitCode !== 0) {
-      throw new Error(`Antigravity CLI exited with ${result.exitCode}: ${redactSensitiveText(`${result.stderr}\n${result.stdout}`).slice(0, 2_000)}`);
+      throw new Error(`Antigravity CLI exited with ${result.exitCode}: ${processOutput}`);
     }
     const providerIdentity = extractExplicitProviderIdentity(result.stdout);
     const candidates = await changedImageCandidates(
-      conversationRoot === null ? [this.brainRoot, attemptDirectory] : [conversationRoot, attemptDirectory],
+      conversationRoot === null ? [attemptDirectory] : [conversationRoot, attemptDirectory],
       before
     );
     const validated = await Promise.all(candidates.map(validateImageCandidate));
     const images = validated.filter((candidate): candidate is ValidatedImage => candidate !== null);
     if (images.length !== 1) {
-      const output = redactSensitiveText(`${result.stderr}\n${result.stdout}`).slice(0, 2_000);
-      if (/quota[^\r\n]{0,120}exhausted|resource exhaustion|429 Too Many Requests/i.test(output)) {
-        throw new Error("Antigravity image quota is exhausted; no image was created. Ether did not use credit overages.");
-      }
       throw new Error(`Antigravity completed without exactly one newly created valid image artifact (found ${images.length}).`);
     }
     const image = images[0]!;

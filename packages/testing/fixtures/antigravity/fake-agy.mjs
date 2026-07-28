@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const args = process.argv.slice(2);
@@ -19,11 +20,19 @@ if (mode === "auth-failure") {
 }
 if (mode === "slow") {
   setInterval(() => {}, 1_000);
-} else if (mode !== "stale-only") {
+} else {
   const root = process.env.ANTIGRAVITY_BRAIN_ROOT;
   if (!root) throw new Error("ANTIGRAVITY_BRAIN_ROOT is required by fake agy.");
-  const destination = path.join(root, `conversation-${Date.now()}`, "generated.png");
-  mkdirSync(path.dirname(destination), { recursive: true });
-  writeFileSync(destination, png);
+  const conversationId = randomUUID();
+  const logPath = args[args.indexOf("--log-file") + 1];
+  if (typeof logPath === "string") {
+    mkdirSync(path.dirname(logPath), { recursive: true });
+    writeFileSync(logPath, `Created conversation ${conversationId}\n`);
+  }
+  if (mode !== "stale-only") {
+    const destination = path.join(root, conversationId, "generated.png");
+    mkdirSync(path.dirname(destination), { recursive: true });
+    writeFileSync(destination, png);
+  }
 }
 process.stdout.write("completed\n");

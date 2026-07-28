@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,6 +34,32 @@ describe("Antigravity capability conformance evidence", () => {
     });
     await expect(readAntigravityConformance(root, { version: "1.1.5", sha256: "hash-a" })).resolves.toBeNull();
     await expect(readAntigravityConformance(root, { version: "1.1.4", sha256: "hash-b" })).resolves.toBeNull();
+  });
+
+  it("rejects a matching record whose nested capability evidence is malformed", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-antigravity-evidence-malformed-"));
+    roots.push(root);
+    await writeFile(path.join(root, "antigravity-9999999999999.json"), JSON.stringify({
+      schemaVersion: 1,
+      cli: { version: "1.1.4", sha256: "hash-a" },
+      createdAt: new Date().toISOString(),
+      profiles: [{
+        requestedProfile: "nano-banana-2",
+        result: "pass",
+        resolutionControl: {
+          structurallySupported: false,
+          probes: [{
+            requestedResolution: "8K",
+            requestedAspectRatio: false,
+            actualWidth: -1,
+            actualHeight: "768",
+            sha256: null
+          }]
+        },
+        artifacts: [{ sha256: "image", width: "1024", height: 1024, mimeType: "image/png" }]
+      }]
+    }), "utf8");
+    await expect(readAntigravityConformance(root, { version: "1.1.4", sha256: "hash-a" })).resolves.toBeNull();
   });
 
   it("redacts auth markers and URLs from persisted evidence", async () => {
