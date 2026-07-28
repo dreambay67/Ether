@@ -182,7 +182,7 @@ describe.runIf(liveEnabled)("Antigravity live conformance", () => {
           ...(profile.lite1k ? { lite1kVerified: true } : {}),
           resolutionControl: {
             structurallySupported: false,
-            reason: "Antigravity CLI 1.1.7 generate_image exposes AspectRatio but no resolution or image-size parameter.",
+            reason: `Antigravity CLI ${cli.version} generate_image exposes AspectRatio but no resolution or image-size parameter.`,
             probes: resolutionProbes
           },
           artifacts

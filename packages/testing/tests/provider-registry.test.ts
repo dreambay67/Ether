@@ -184,6 +184,15 @@ describe("generation provider registry", () => {
     const codexBundle = await createReadyCodexBundle();
     const registry = createDefaultProviderRegistry({
       codexBundle,
+      antigravity: {
+        conformanceRoot: path.join(userProfile, "conformance"),
+        env: {
+          USERPROFILE: userProfile,
+          LOCALAPPDATA: userProfile,
+          PATH: ""
+        },
+        fileExists: async () => false
+      },
       env: {
         USERPROFILE: userProfile,
         OPENAI_API_KEY: "sk-should-stay-blocked"
