@@ -4,26 +4,26 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "f30bf31701c644ec59f321bacd3edff52a90cbf1e2eb6b353e235f6980f5a5f5"
+    "sha256": "5b388adfd35fca6b284eee025a4e7b9b1e6d7e91b9a049c03b0c5b55d8220630"
   },
   "executable": {
     "fileName": "Ether.exe",
-    "sha256": "158dffda14928f45239c801b756ec73d74eb46762d64eaeda122ce472316907e"
+    "sha256": "26c47a3bde21d7fdcf1e3ebd8bfa55fe9e7c5208f982faec13603dcb894228bc"
   },
   "fixture": {
     "fileName": "Ether 4.0 Release Atlas.ether",
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "0f3792083aab8e477c28b2ac2ea222cb19bd624de441a5a137caac095e47055d"
+    "sha256": "35888ea287e0e28d835a8c22800e4f53aae4fd514b4c858573e9afc046b2648b"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-03b1511b-70ea-4103-8bf4-295d1bd6774d",
-    "contentHash": "sha256:v1:f34c5a8a11afc60fda0277d990193b78a2ce07cca754d186585edbc99f213202"
+    "planId": "plan-b8987972-0b9e-476c-a448-b3d3ef22c1f2",
+    "contentHash": "sha256:v1:965b80a532cc89823dff7edbbb9a922260b8d61a324c3b042fd4befc5e7a8ef3"
   },
-  "capturedAt": "2026-07-28T15:46:47.233Z",
+  "capturedAt": "2026-07-28T17:00:53.443Z",
   "labels": [
     "start",
     "build",
@@ -79,19 +79,19 @@
       "label": "focus",
       "width": 1600,
       "height": 1000,
-      "sha256": "97f4fd02921c0482e37b3664880474b3c5f12a6906252bb2c31b39eef2c6f283"
+      "sha256": "292a53d4e8b7ed317c48463bd2179b905ff43b2ce244d0848fe94b9ee1e31134"
     },
     {
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "6c7abe6b03358c92a2c622238b949276dd3363eca0143ff7846626d1530c6e38"
+      "sha256": "53d07bd4562dfef961438434d39f7b78f7acdc1d62069ece62ee73a43ffe6485"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "9d586f2477314a81bb313316a6adb1d9d9c911d9f71677d56e96487ad1734dd6"
+      "sha256": "501e3aed4f79bb07eebd57fbd2ac1a23d7de373390978c22e375d727e3bebb67"
     },
     {
       "label": "reference-desk",
@@ -109,13 +109,13 @@
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "0fee373a0c5412d6f867e2d1c5487274455a340be5e45278274ca0b9490b102e"
+      "sha256": "9b656ee71d8fdbe0d26ddb92fc70e91e657c311f68f2c4500c1f815fe509cddf"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "8b7e461ef52a5a4778e95f2692bff596cd37ae10ce2cdd4fbd3088299ae33c5f"
+      "sha256": "e834aa2c9029ba88fcc325378b30e9ca5acf2c3c1641f0d8a270bd5f629bc16a"
     },
     {
       "label": "recipes",
@@ -133,13 +133,13 @@
       "label": "inspector-catalog",
       "width": 880,
       "height": 620,
-      "sha256": "8eff2b0780bf5cfff6aa9846d8cbadeff6f5a654e06cfbf9415b906366789bf2"
+      "sha256": "9766b56b74f831975c398f69fa498719eb7c68c51e77db9fec6a497b6ac3192e"
     },
     {
       "label": "provider-health",
       "width": 980,
       "height": 706,
-      "sha256": "c56e43742e84e8a497dc4d7c8dd29e071519186809fcb1a302b9bacba324899c"
+      "sha256": "81baebbebbfdd894f3317a8cfcae693bf0f4e57edd6484d8f363a24e68426abc"
     },
     {
       "label": "settings",
@@ -157,7 +157,7 @@
       "label": "saving",
       "width": 1600,
       "height": 1000,
-      "sha256": "da85327e496e1991c05ff5e72e41bbfa41e0c7373f8eee192fa1ad2088d17e7b"
+      "sha256": "81f1fa2e272e842dabda5fa0368de4d431a9f8b7ec7aa81f7d359a74d01d24a4"
     },
     {
       "label": "export",
@@ -169,13 +169,13 @@
       "label": "plugin-edit-permit",
       "width": 556,
       "height": 222,
-      "sha256": "4066b4a92a8d70c80f5df6972e5e5b371da16fa6833ee7bd226f1a2e335b3d5b"
+      "sha256": "cd9081674ace2f18213134cc92bd66b5e95015e3015175b9e604762781127aa3"
     },
     {
       "label": "plugin-run-permit",
-      "width": 524,
+      "width": 527,
       "height": 237,
-      "sha256": "f97d33149befbae930a7602e07d45c08d97ef6a5eeb952ccd8a51dfbfe638204"
+      "sha256": "4bba0c588d246ebf800c31e725e3ff30be601ea91b11a9e4f4ece5d738854eda"
     },
     {
       "label": "inspector-prompt-text",
@@ -199,7 +199,7 @@
       "label": "inspector-generation-image",
       "width": 400,
       "height": 620,
-      "sha256": "c1210d374512ac0ad4ac6b3543a3e89821f03a688789c7f58cfe817a498bc875"
+      "sha256": "e87262aa23c456e45b7995a4c8b567914eb63ca0944fe465f54d881898c1db91"
     },
     {
       "label": "inspector-edit-image",
@@ -241,25 +241,25 @@
       "label": "inspector-flow-variables",
       "width": 400,
       "height": 620,
-      "sha256": "d030c3f645f2341aab30a1817d3d2830d94aca7dc7a359a6bf70b17b5430ede8"
+      "sha256": "73b671ddce458ccf5f8c417edc01bab98f3b44da0312207868eeea930f933341"
     },
     {
       "label": "inspector-flow-batch",
       "width": 400,
       "height": 620,
-      "sha256": "bc9b32a60f04654aa604010ee92a1562f216e0b22a97ee79bbf8a52d5d62ee6b"
+      "sha256": "71be829e608152015b21ce70432f80290411a4f758eb9bc11625ed62e759a1fe"
     },
     {
       "label": "inspector-flow-join",
       "width": 400,
       "height": 620,
-      "sha256": "d7056ff0ee6d5da6ff9523649791d4837fa47a2f6f5303005533c505f7818ae6"
+      "sha256": "12196cbdfc5e252b89120dddd8c2d492fd7fa468ca2a71a059b971812bfb1672"
     },
     {
       "label": "inspector-output-collection",
       "width": 400,
       "height": 620,
-      "sha256": "536be9c10266913c71737be8751a0f2ba34c307cb0b5388d5bdf333b9d220a61"
+      "sha256": "52719813d679243758bb5ab9f2c3983eb4bb32300858589ad60a42c11b5986e9"
     },
     {
       "label": "inspector-output-export",
@@ -271,7 +271,7 @@
       "label": "inspector-canvas-note",
       "width": 400,
       "height": 620,
-      "sha256": "c63056a8bce0f382d4dfc435b49ff1396787fb58725213f4640ea4eeb986016a"
+      "sha256": "70a6255bbb0e3e364b26a2178a8eb978286fbb22c0190f8fe2cd65c58dd10922"
     },
     {
       "label": "inspector-canvas-drawing",
