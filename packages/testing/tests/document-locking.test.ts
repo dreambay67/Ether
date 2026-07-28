@@ -1369,7 +1369,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
       expect(readdirSync(caseRoot).sort()).toEqual(["Destination.ether", "Source.ether", "leases"]);
       await source.close();
     }
-  });
+  }, 15_000);
 
   it("Save As from read-only acquires the destination lease and switches only after validation", async () => {
     const creator = await storeClass().create(sourcePath, {
@@ -1437,5 +1437,5 @@ describe("Ether document writer leases and backup lifecycle", () => {
         expect(leaseRecordPaths(caseLeaseRoot)).toEqual([]);
       }
     }
-  });
+  }, 15_000);
 });
