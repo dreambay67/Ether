@@ -4,26 +4,26 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "5b388adfd35fca6b284eee025a4e7b9b1e6d7e91b9a049c03b0c5b55d8220630"
+    "sha256": "1701145d63a1a9ae5d1d1f6c485eeb25a61beccf53a94f6909748dc6deb5fcec"
   },
   "executable": {
     "fileName": "Ether.exe",
-    "sha256": "26c47a3bde21d7fdcf1e3ebd8bfa55fe9e7c5208f982faec13603dcb894228bc"
+    "sha256": "6c5c6f96d589eeab30293440df12b75de6c86433dcfc52559508d70e8f8dd1b8"
   },
   "fixture": {
     "fileName": "Ether 4.0 Release Atlas.ether",
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "6f27c2caa83ec8cc0df2deffc3ef42bf5aaf1c78767639dade72430d27b4b164"
+    "sha256": "53e7883e1906044cd48a1a9497909f6a4fc401fde8d0ccbd00b541ccd81ce84b"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-22854e8e-96b0-4096-9820-faf118f297b4",
-    "contentHash": "sha256:v1:1caf3a417554344b133b5b93fc60db101bfa5ba45161fdf5488d5ad1e47370fb"
+    "planId": "plan-b3dd015f-66c0-48ef-95e5-f05ca44d60fc",
+    "contentHash": "sha256:v1:9efdb05ff8b941b415e5e7e6927ff7ef054d5f902e753d14895cf25172473f95"
   },
-  "capturedAt": "2026-07-28T17:18:10.624Z",
+  "capturedAt": "2026-07-28T18:20:32.608Z",
   "labels": [
     "start",
     "build",
@@ -67,31 +67,31 @@
       "label": "start",
       "width": 1600,
       "height": 1000,
-      "sha256": "05c1263e5622f88c33edd6e348bec63db0cb1e3076349272d302be972f7a0b20"
+      "sha256": "81ba1c9ac17564eac609c5ee8a5b9ecb2688690281254b6b9da4ae8a5a61abdf"
     },
     {
       "label": "build",
       "width": 1600,
       "height": 1000,
-      "sha256": "f4cad3ca991d4e7650ee0cc0ffb920fadaa0fca9df75c94dc1b0f1679b6f43ce"
+      "sha256": "8d3d2dd25313ab8bd042b2c690a2169441f56abb2942ba87443bd40dacb18c30"
     },
     {
       "label": "focus",
       "width": 1600,
       "height": 1000,
-      "sha256": "292a53d4e8b7ed317c48463bd2179b905ff43b2ce244d0848fe94b9ee1e31134"
+      "sha256": "1e83e86f7d0ad87d3c84c5bc2ccf23a043d0cfdd31472721ab921724dde222b4"
     },
     {
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "9e6086787a75b946288146dcb6a16bc3e755b8fe1720f1afcf467ff47c54c0fe"
+      "sha256": "5b938b14f9d7698673cb4b7671ae99d53c0c6cab07e05eb03ada364001d81d73"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "28703ac378ae6268f78a09eff670d77298ea29489ad42c52e090883a6c769432"
+      "sha256": "5e207dcc5dfeefe6a5ebffc2bc2c1a75326933c574b7628a880edf0090750fd6"
     },
     {
       "label": "reference-desk",
@@ -109,13 +109,13 @@
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "b898c353a3650b1f8867fe63e5d3655c1ec6211fb3eca61da9a4ec7eb3acc265"
+      "sha256": "31c5327af07eb029f16d847e9630d7b56cc64714405c37ee2a074768974eb58a"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "07d29876f53a1534e999e83659c82812aaf4d8c40e0c6a944118f7ff8a705aba"
+      "sha256": "4237480906d0a2e88155a262e7ab8859dbe7a0c2277275c4297d6a2011caf389"
     },
     {
       "label": "recipes",
@@ -127,7 +127,7 @@
       "label": "channels-roles",
       "width": 1600,
       "height": 1000,
-      "sha256": "84a4fa463fd8809454ee9d6beb7d0ea0dec0178a96bc86211cefd163d2219985"
+      "sha256": "701837cfb6e3a277b883c6840ec554680a948c19d0fdaf9648bfa128e032dd88"
     },
     {
       "label": "inspector-catalog",
@@ -139,7 +139,7 @@
       "label": "provider-health",
       "width": 980,
       "height": 766,
-      "sha256": "91fce771da5262e7242435755ad66e7fef7230f7af6789100c939c2568751c2d"
+      "sha256": "874966cc26c03fdca9996796262e9103873d01055d346d57860eb83dc75872c2"
     },
     {
       "label": "settings",
@@ -157,7 +157,7 @@
       "label": "saving",
       "width": 1600,
       "height": 1000,
-      "sha256": "fda960eca7b245e93183cabfbae1cab5d5a312478864ca359302a53fdc4ca9e9"
+      "sha256": "4dcc7cf224250296651dd1a4a16b370d2a82b6745640c0dfbe9f55e33bf2fafe"
     },
     {
       "label": "export",
@@ -173,9 +173,9 @@
     },
     {
       "label": "plugin-run-permit",
-      "width": 525,
+      "width": 514,
       "height": 237,
-      "sha256": "0f9767d34ee4e9965b0d65b5fc008e82e473a3a2783336a38ca12c47d12245c3"
+      "sha256": "ec268e783cdf3f285faaed56712cf1bae9abe6c67bd8168b79620ec093e2a6b2"
     },
     {
       "label": "inspector-prompt-text",

@@ -288,11 +288,9 @@ try {
   if (context === undefined) throw new Error("The installed Ether candidate did not create a browser context.");
   const page = context.pages()[0] ?? await context.waitForEvent("page");
   await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.getByTestId("start-screen").waitFor({ state: "visible", timeout: 30_000 });
-  await waitForLocatorEnabled(
-    page.getByRole("button", { name: "New document", exact: true }),
-    30_000
-  );
+  await page.getByTestId("document-canvas").waitFor({ state: "visible", timeout: 30_000 });
+  await page.getByTestId("project-header").getByText("Untitled", { exact: true })
+    .waitFor({ state: "visible", timeout: 30_000 });
   assertPackagedRenderer(page.url());
   await settle(page);
   await capture(page, "start", page.locator("body"));
@@ -933,16 +931,6 @@ async function waitForGraphNodeCount(page, expectedCount, timeout) {
   throw new Error(
     `Installed graph contained ${actualCount} nodes, expected ${expectedCount}.`
   );
-}
-
-async function waitForLocatorEnabled(locator, timeout) {
-  await locator.waitFor({ state: "visible", timeout });
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeout) {
-    if (await locator.isEnabled()) return;
-    await delay(50);
-  }
-  throw new Error("Installed release control did not become enabled before capture.");
 }
 
 async function waitForProviderHealthResolved(page, dialog, timeout) {

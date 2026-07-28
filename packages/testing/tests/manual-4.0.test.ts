@@ -78,10 +78,12 @@ describe("Ether 4.0 release documentation", () => {
     expect(capture).toContain("installedExecutable");
     expect(capture).toContain('source: "installed-packaged-exe"');
     expect(capture).toContain(
-      'page.getByRole("button", { name: "New document", exact: true })',
+      'page.getByTestId("document-canvas").waitFor({ state: "visible", timeout: 30_000 })',
     );
-    expect(capture).toContain("async function waitForLocatorEnabled(locator, timeout)");
-    expect(capture).toContain("if (await locator.isEnabled()) return");
+    expect(capture).toContain(
+      'page.getByTestId("project-header").getByText("Untitled", { exact: true })',
+    );
+    expect(capture).not.toContain("async function waitForLocatorEnabled");
     expect(capture).toContain(
       "CODEX_CLI_PATH: process.env.CODEX_CLI_PATH ?? resolveCodexCliPath(process.env)",
     );
