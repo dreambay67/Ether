@@ -423,11 +423,11 @@ Antigravity CLI provides these user-facing profiles:
 - Nano Banana Pro
 - Nano Banana 2 Lite
 
-Ether requests the profile explicitly, records the request, probes actual output behavior, and never claims an unverified provider-reported model identity. Nano Banana 2 is the minimum acceptable launch integration. Pro and Lite remain launch targets; unavailable profiles are disabled honestly if conformance cannot be established.
+Ether requests the profile explicitly, records the request, probes actual output behavior, and never claims an unverified provider-reported model identity. Nano Banana 2 is the minimum acceptable launch integration. Nano Banana 2, Pro, and Lite passed the 4.0 release conformance; Lite is enabled only with its verified 1K constraint. A changed CLI version or executable hash invalidates that evidence and disables affected profiles until a new probe passes.
 
-The 4.0 automation baseline was verified with Antigravity CLI 1.1.4 and a recorded executable SHA-256, using noninteractive `--print`, explicit `--model`, workspace `--add-dir`, and bounded `--print-timeout`. Image-profile choice is an Ether-owned instruction contract until the CLI reports a distinct image-model identifier. Every detected CLI version and executable hash requires its own recorded conformance scenario covering exit state, output discovery, dimensions, staging containment, and failure behavior before a profile is enabled.
+The 4.0 release automation was verified with Antigravity CLI 1.1.7 and a recorded executable SHA-256, using the machine's persisted Antigravity session through noninteractive `--print`, explicit `--model`, workspace `--add-dir`, and bounded `--print-timeout`. Ether must not open an authentication window during an ordinary generation. Image-profile choice is an Ether-owned instruction contract until the CLI reports a distinct image-model identifier. Every detected CLI version and executable hash requires its own recorded conformance scenario covering exit state, output discovery, dimensions, staging containment, and failure behavior before a profile is enabled.
 
-Nano Banana 2 Lite is constrained to its verified 1K capability. Provider-derived aspect ratios, resolution limits, reference limits, and operation support drive the Inspector controls.
+The Antigravity CLI 1.1.7 `generate_image` tool structurally exposes aspect ratio but no resolution or image-size parameter. Direct 2K and 4K probes on Nano Banana 2 and Pro returned the corresponding 1K dimensions. Ether therefore exposes the verified 1K pixel size for each conformed ratio on all three profiles and does not present decorative 2K/4K choices. A future CLI may enable additional sizes only after its tool schema and real outputs pass conformance. Nano Banana 2 Lite remains constrained to its verified 1K capability.
 
 ### 10.3 Capability-Driven Controls
 

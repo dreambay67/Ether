@@ -124,6 +124,15 @@ export type ProviderCapabilityProfile = {
   unavailableReason?: string;
   messages?: string[];
   mediaLimits?: ProviderMediaLimits;
+  aspectRatios?: string[];
+  resolutions?: Array<{
+    id: string;
+    width: number;
+    height: number;
+    label: string;
+    aspectRatio?: string;
+    tier?: string;
+  }>;
   /** Provider-advertised concurrent request ceiling, when it is known. */
   maxParallelism?: number;
 };

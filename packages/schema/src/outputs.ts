@@ -44,7 +44,9 @@ export const ResolutionOptionSchema = z
     id: z.string().min(1),
     width: z.number().int().positive(),
     height: z.number().int().positive(),
-    label: z.string().min(1)
+    label: z.string().min(1),
+    aspectRatio: z.string().min(1).optional(),
+    tier: z.string().min(1).optional()
   })
   .strict();
 export type ResolutionOption = z.infer<typeof ResolutionOptionSchema>;

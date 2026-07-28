@@ -23,7 +23,7 @@ export type AntigravityWorkerRequest = {
 
 export function buildAntigravityPrompt(
   profile: AntigravityProfile,
-  input: Pick<GenerationProviderInput, "prompt" | "negativePrompt">,
+  input: Pick<GenerationProviderInput, "prompt" | "negativePrompt" | "output">,
   stagedReferences: string[] = []
 ) {
   const profileName = profile === "nano-banana-2"
@@ -33,9 +33,15 @@ export function buildAntigravityPrompt(
       : "Nano Banana 2 Lite";
   const prompt = input.prompt.trim().slice(0, 12_000);
   const negative = input.negativePrompt.trim().slice(0, 4_000);
+  const output = input.output;
+  const outputInstruction = output === undefined
+    ? ""
+    : `Set the image tool to ${resolutionTier(output.width, output.height)} resolution and ${output.aspectRatio} aspect ratio. ` +
+      `The expected conformed dimensions are ${output.width} x ${output.height} pixels; do not substitute another ratio or resolution tier.`;
   return [
     "Use the built-in generative image tool exactly once.",
     `Generate exactly one image using ${profileName}.`,
+    outputInstruction,
     "Do not use terminal, file-write, browser, MCP, or any other tools.",
     "Report provider model identity only if it is explicitly returned by the provider.",
     "Do not claim a model identity from the prompt, filenames, or local files.",
@@ -44,6 +50,13 @@ export function buildAntigravityPrompt(
     prompt || "Create a simple square color study.",
     negative ? `Avoid: ${negative}` : ""
   ].filter(Boolean).join("\n\n");
+}
+
+function resolutionTier(width: number, height: number) {
+  const longestEdge = Math.max(width, height);
+  if (longestEdge >= 3_500) return "4K";
+  if (longestEdge >= 1_500) return "2K";
+  return "1K";
 }
 
 export function buildAntigravityProcessCall(input: {
@@ -79,8 +92,7 @@ function headlessAntigravityEnv(env: NodeJS.ProcessEnv | Record<string, string |
   return {
     ...sanitizeProviderEnv(env),
     CI: "1",
-    NO_BROWSER: "true",
-    SSH_CONNECTION: "ether-antigravity-headless"
+    NO_BROWSER: "true"
   };
 }
 

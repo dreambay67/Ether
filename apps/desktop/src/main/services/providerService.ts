@@ -168,8 +168,8 @@ export function createProviderService(options: {
             outputChannels: [...profile.outputChannels],
             aspectRatios: profile.providerId === CODEX_PROVIDER_ID
               ? [...(health.imageCapabilityProfile?.verifiedAspectRatios ?? [])]
-              : [],
-            resolutions: [],
+              : [...(profile.aspectRatios ?? [])],
+            resolutions: (profile.resolutions ?? []).map((resolution) => ({ ...resolution })),
             maxReferences: profile.mediaLimits?.maxInputs
               ?? (profile.inputChannels.includes("image") ? 16 : 0),
             maxOutputsPerCall: 1,

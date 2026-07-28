@@ -20,7 +20,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
     const commands: Array<{ name: string; payload: Record<string, unknown> }> = []; const queries: unknown[] = [];
     const capabilities = [
       { providerId: "fake-image", profileId: "studio", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1", "16:9"], resolutions: [{ id: "1024", width: 1024, height: 1024, label: "1024 square" }, { id: "wide", width: 1536, height: 864, label: "1536 x 864" }], maxReferences: 4, maxOutputsPerCall: 3, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: ["No seed support"] },
-      { providerId: "fake-image", profileId: "cinematic", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["21:9", "16:9"], resolutions: [{ id: "cinema", width: 2048, height: 878, label: "2048 cinema" }, { id: "hd", width: 1920, height: 1080, label: "1920 x 1080" }], maxReferences: 6, maxOutputsPerCall: 2, supportsCancellation: true, supportsSeed: true, provenance: "conformance-verified", limitations: [] }
+      { providerId: "fake-image", profileId: "cinematic", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["21:9", "16:9"], resolutions: [{ id: "cinema", width: 2048, height: 878, label: "2K · 21:9", aspectRatio: "21:9", tier: "2K" }, { id: "cinema-4k", width: 4096, height: 1755, label: "4K · 21:9", aspectRatio: "21:9", tier: "4K" }, { id: "hd", width: 1920, height: 1080, label: "2K · 16:9", aspectRatio: "16:9", tier: "2K" }, { id: "uhd", width: 3840, height: 2160, label: "4K · 16:9", aspectRatio: "16:9", tier: "4K" }], maxReferences: 6, maxOutputsPerCall: 2, supportsCancellation: true, supportsSeed: true, provenance: "conformance-verified", limitations: [] }
     ];
     const outputs = [
       { id: "output-version-one", approval: { state: "unreviewed" }, outputPayloadIds: ["payload-1"], createdAt: now.toISOString() },
@@ -149,10 +149,13 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByText("Diagnostics & provenance", { exact: true }).click();
   await expect(page.getByText("Node ID:", { exact: false })).toBeVisible();
 
-  const selectWorker = async () => {
-    await page.getByTestId("rf__node-worker").evaluate((node) => {
+  const selectNode = async (nodeId: string) => {
+    await page.getByTestId(`rf__node-${nodeId}`).evaluate((node) => {
       node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+  };
+  const selectWorker = async () => {
+    await selectNode("worker");
     await expect(page.getByTestId("node-inspector").getByRole("button", { name: "Compare" })).toHaveCount(2);
   };
 
@@ -184,11 +187,17 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByRole("button", { name: "Restore" }).first().click();
   await expect.poll(commandNames).toEqual(expect.arrayContaining(["review.approve", "review.reject", "output.edit", "output.pin", "output.restore"]));
 
-  await page.locator('[data-testid="rf__node-image"] .ether-node-main p').click();
+  await selectNode("image");
   const beforeProvider = await commandCount();
   await page.getByRole("combobox", { name: "Provider profile" }).selectOption("fake-image:cinematic");
   await expect(page.getByText("Defaults reset for fake-image / cinematic", { exact: false })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Aspect ratio" })).toHaveValue("21:9");
+  await page.getByRole("combobox", { name: "Aspect ratio" }).selectOption("16:9");
+  await expect(page.getByRole("combobox", { name: "Resolution" })).toHaveValue("1920x1080");
+  await expect(page.getByRole("combobox", { name: "Resolution" }).locator("option")).toHaveCount(2);
+  await page.getByRole("combobox", { name: "Resolution" }).selectOption("3840x2160");
+  await page.getByRole("combobox", { name: "Aspect ratio" }).selectOption("21:9");
+  await expect(page.getByRole("combobox", { name: "Resolution" })).toHaveValue("4096x1755");
   await page.getByRole("combobox", { name: "Aspect ratio" }).selectOption("16:9");
   await page.getByRole("combobox", { name: "Resolution" }).selectOption("1920x1080");
   await page.getByRole("spinbutton", { name: "Output count" }).fill("2");
@@ -203,7 +212,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByText("Provider capability", { exact: true }).click();
   await expect(page.getByText("Provenance: conformance-verified", { exact: true })).toBeVisible();
 
-  await page.locator('[data-testid="rf__node-references"] .ether-node-main p').click();
+  await selectNode("references");
   await page.getByRole("textbox", { name: "Reference IDs" }).fill("reference-a, reference-b");
   await page.getByRole("button", { name: "Add references" }).click();
   await expect(page.getByText("2 saved members", { exact: false })).toBeVisible();

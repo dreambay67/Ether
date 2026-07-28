@@ -635,8 +635,8 @@ Provider controls bind to this profile. No hardcoded UI list may advertise value
 - Record requested profile separately from provider-reported identity.
 - Validate Lite output against 1K constraints.
 - Run a conformance probe when installation/version changes.
-- Disable profiles whose probe fails; Nano Banana 2 is the minimum launch gate.
-- The 4.0 baseline evidence targets Antigravity CLI 1.1.4 noninteractive `--print`, `--model`, `--add-dir`, and `--print-timeout` behavior; a changed detected version or executable hash requires new evidence rather than an assumed compatibility claim.
+- Disable profiles whose probe fails; Nano Banana 2 is the minimum launch gate. The 4.0 release evidence enables Nano Banana 2, Pro, and Lite. CLI 1.1.7 exposes `AspectRatio` but no structural resolution parameter: 2K and 4K probes on Nano Banana 2 and Pro returned 1K dimensions, so every 4.0 Antigravity resolution choice is restricted to the exact 1K size recorded for its conformed ratio. Lite remains explicitly 1K-only.
+- The 4.0 release evidence targets Antigravity CLI 1.1.7 noninteractive `--print`, `--model`, `--add-dir`, and `--print-timeout` behavior while reusing the host's persisted Antigravity session without launching authentication UI. A changed detected version or executable hash requires new evidence rather than an assumed compatibility claim.
 - Treat Nano Banana image-profile selection as a versioned textual instruction contract until the CLI reports a separate image model identifier.
 - Parse completion from process exit plus validated staged artifacts; printed prose alone never constitutes generation success.
 

@@ -13,9 +13,25 @@ describe("Antigravity capability conformance evidence", () => {
     roots.push(root);
     await writeAntigravityConformance(root, {
       schemaVersion: 1, cli: { version: "1.1.4", sha256: "hash-a" }, createdAt: new Date().toISOString(),
-      profiles: [{ requestedProfile: "nano-banana-2", result: "pass", artifacts: [{ sha256: "image-hash", width: 1, height: 1, mimeType: "image/png" }] }]
+      profiles: [{
+        requestedProfile: "nano-banana-2",
+        result: "pass",
+        artifacts: [{
+          sha256: "image-hash",
+          width: 2752,
+          height: 1536,
+          mimeType: "image/png",
+          requestedAspectRatio: "16:9",
+          requestedResolution: "2K"
+        }]
+      }]
     });
-    await expect(readAntigravityConformance(root, { version: "1.1.4", sha256: "hash-a" })).resolves.toMatchObject({ profiles: [{ result: "pass" }] });
+    await expect(readAntigravityConformance(root, { version: "1.1.4", sha256: "hash-a" })).resolves.toMatchObject({
+      profiles: [{
+        result: "pass",
+        artifacts: [{ requestedAspectRatio: "16:9", requestedResolution: "2K" }]
+      }]
+    });
     await expect(readAntigravityConformance(root, { version: "1.1.5", sha256: "hash-a" })).resolves.toBeNull();
     await expect(readAntigravityConformance(root, { version: "1.1.4", sha256: "hash-b" })).resolves.toBeNull();
   });

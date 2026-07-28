@@ -185,14 +185,15 @@ The implementation may introduce the missing script names, but the final release
 
 ### 6.2 Antigravity
 
-- [ ] Provider Health discovers `agy.exe` and authenticated status.
-- [ ] Nano Banana 2 generates a real imported image and is the minimum launch gate.
-- [ ] Nano Banana Pro is enabled only after its conformance scenario passes.
-- [ ] Nano Banana 2 Lite is enabled only after its conformance scenario passes and is restricted to verified 1K output.
-- [ ] Ether records requested profile separately from any provider-reported model identity.
-- [ ] Antigravity output staging is isolated per attempt and cleaned according to policy.
-- [ ] No browser automation, private endpoint, or extracted session token is used.
-- [ ] The Antigravity evidence record identifies CLI version, arguments, requested profile instruction, exit state, staged output hashes, dimensions, and conformance result.
+- [x] Provider Health discovers `agy.exe` and authenticated status.
+- [x] Nano Banana 2 generates a real imported image and is the minimum launch gate.
+- [x] Nano Banana Pro is enabled only after its conformance scenario passes.
+- [x] Nano Banana 2 Lite is enabled only after its conformance scenario passes and is restricted to verified 1K output.
+- [x] Antigravity aspect-ratio controls select their matching conformed pixel dimensions; CLI 1.1.7 exposes only honest 1K choices after real 2K/4K probes return 1K output.
+- [x] Ether records requested profile separately from any provider-reported model identity.
+- [x] Antigravity output staging is isolated per attempt and cleaned according to policy.
+- [x] No browser automation, private endpoint, or extracted session token is used.
+- [x] The Antigravity evidence record identifies CLI version, arguments, requested profile instruction, exit state, staged output hashes, dimensions, and conformance result.
 
 ### 6.3 Capability UI
 
@@ -215,11 +216,11 @@ The implementation may introduce the missing script names, but the final release
 - [ ] Reference Desk supports multi-select, include/exclude, role override, and assignment to sets.
 - [ ] Batch Matrix previews dimensions and exact work-item count.
 - [ ] Sequential execution is default.
-- [ ] Parallel execution uses one application-wide domain: 8 active calls globally, 4 shared across Codex, 4 shared across Antigravity, and 1 for an unknown provider.
-- [ ] Deterministic instrumentation reaches 4 Codex plus 4 Antigravity calls simultaneously; a fifth same-provider call and ninth global call queue across independent batches.
-- [ ] Prompt Worker and Image Generator exact provider/profile/model allocation lanes persist and execute under the same 4/4 family limits.
-- [ ] Cancellation, retry, and interrupted-work recovery remain repeat-safe at eight-way concurrency without duplicate accepted artifacts or leaked capacity.
-- [ ] Batch Matrix keeps Full batch, Provider and model allocation, and Concurrent run as separate legible control groups and reports the visible 4/4/8 limits honestly.
+- [x] Parallel execution uses one application-wide domain: 8 active calls globally, 4 shared across Codex, 4 shared across Antigravity, and 1 for an unknown provider.
+- [x] Deterministic instrumentation reaches 4 Codex plus 4 Antigravity calls simultaneously; a fifth same-provider call and ninth global call queue across independent batches.
+- [x] Prompt Worker and Image Generator exact provider/profile/model allocation lanes persist and execute under the same 4/4 family limits.
+- [x] Cancellation, retry, and interrupted-work recovery remain repeat-safe at eight-way concurrency without duplicate accepted artifacts or leaked capacity.
+- [x] Batch Matrix keeps Full batch, Provider and model allocation, and Concurrent run as separate legible control groups and reports the visible 4/4/8 limits honestly.
 - [ ] Excluding a matrix cell removes only that work item.
 - [ ] A 500-item fake-provider batch can stop, restart, retry failures, and finish without duplicate accepted artifacts.
 

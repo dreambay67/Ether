@@ -9,7 +9,25 @@ export type AntigravityProfileConformance = {
   reason?: string;
   providerIdentity?: string | null;
   lite1kVerified?: boolean;
-  artifacts?: Array<{ sha256: string; width: number; height: number; mimeType: string }>;
+  resolutionControl?: {
+    structurallySupported: boolean;
+    reason?: string;
+    probes: Array<{
+      requestedResolution: "2K" | "4K";
+      requestedAspectRatio: string;
+      actualWidth: number;
+      actualHeight: number;
+      sha256: string;
+    }>;
+  };
+  artifacts?: Array<{
+    sha256: string;
+    width: number;
+    height: number;
+    mimeType: string;
+    requestedAspectRatio?: string;
+    requestedResolution?: "1K" | "2K" | "4K";
+  }>;
 };
 
 export type AntigravityConformanceEvidence = {

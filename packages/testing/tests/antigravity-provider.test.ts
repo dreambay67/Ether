@@ -67,7 +67,24 @@ async function readyProvider(
   const env = { USERPROFILE: projectPath, ANTIGRAVITY_BRAIN_ROOT: brainRoot, FAKE_AGY_MODE: mode, PATH: process.env.PATH };
   await writeAntigravityConformance(conformanceRoot, {
     schemaVersion: 1, cli: { version: "1.1.4", sha256: "fixture-sha" }, createdAt: new Date().toISOString(),
-    profiles: [{ requestedProfile: profile, result: "pass", lite1kVerified: profile === "nano-banana-2-lite" }]
+    profiles: [{
+      requestedProfile: profile,
+      result: "pass",
+      lite1kVerified: profile === "nano-banana-2-lite",
+      resolutionControl: {
+        structurallySupported: false,
+        reason: "Fixture CLI has no structural resolution parameter.",
+        probes: []
+      },
+      artifacts: [{
+        sha256: "fixture-image",
+        width: 1024,
+        height: 1024,
+        mimeType: "image/png",
+        requestedAspectRatio: "1:1",
+        requestedResolution: "1K"
+      }]
+    }]
   });
   return {
     projectPath,
@@ -162,7 +179,8 @@ describe("Antigravity image provider", () => {
     expect(generationCall?.args.filter((arg) => arg === "--add-dir")).toHaveLength(1);
     expect(generationCall?.args[generationCall!.args.indexOf("--add-dir") + 1]).toBe(generationCall?.cwd);
     expect(generationCall?.env.NO_BROWSER).toBe("true");
-    expect(generationCall?.env.SSH_CONNECTION).toBe("ether-antigravity-headless");
+    expect(generationCall?.env.CI).toBe("1");
+    expect(generationCall?.env.SSH_CONNECTION).toBeUndefined();
     expect(generationCall?.stdin).toBeUndefined();
   });
 
@@ -260,7 +278,15 @@ describe("Antigravity image provider", () => {
 
   it("keeps requested profile and provider identity separate, disables unsupported profiles, and redacts diagnostics", async () => {
     const { provider } = await readyProvider("nano-banana-pro");
-    await expect(provider.diagnose()).resolves.toMatchObject({ availability: "available", details: { providerIdentity: null, requestedProfile: "nano-banana-pro" } });
+    await expect(provider.diagnose()).resolves.toMatchObject({
+      availability: "available",
+      details: { providerIdentity: null, requestedProfile: "nano-banana-pro" },
+      profiles: [{
+        aspectRatios: ["1:1"],
+        resolutions: [{ width: 1024, height: 1024, aspectRatio: "1:1", tier: "1K" }],
+        messages: [expect.stringMatching(/conformance passed/i), expect.stringMatching(/only conformed 1K outputs/i)]
+      }]
+    });
     const rootPath = await root();
     const lite = new AntigravityImageProvider("nano-banana-2-lite", {
       executablePath: "fake-agy", env: { USERPROFILE: rootPath, PATH: process.env.PATH }, brainRoot: path.join(rootPath, "brain"), conformanceRoot: path.join(rootPath, "none"),
@@ -276,6 +302,27 @@ describe("Antigravity image provider", () => {
     await expect(provider.generate(input(projectPath))).rejects.toThrow(/exactly one newly created valid image/i);
   });
 
+  it("reports exhausted image quota without suggesting paid overages or accepting prose", async () => {
+    const { projectPath, provider } = await readyProvider("nano-banana-2");
+    const run = Reflect.get(provider, "run") as unknown;
+    expect(run).toBeTypeOf("function");
+    const quotaProvider = new AntigravityImageProvider("nano-banana-2", {
+      executablePath: "fake-agy",
+      env: { USERPROFILE: projectPath, PATH: process.env.PATH },
+      brainRoot: path.join(projectPath, "brain"),
+      conformanceRoot: path.join(projectPath, "conformance"),
+      fileExists: async () => true,
+      sha256File: async () => "fixture-sha",
+      creditOveragesPolicy: "never-confirmed",
+      run: async (call) => call.args.includes("--version")
+        ? { stdout: "1.1.4\n", stderr: "", exitCode: 0 }
+        : { stdout: "The request was not completed because the quota was exhausted.", stderr: "", exitCode: 0 }
+    });
+    await expect(quotaProvider.generate(input(projectPath))).rejects.toThrow(
+      /quota is exhausted; no image was created.*did not use credit overages/i
+    );
+  });
+
   it("terminates the fake CLI on timeout and cancellation", async () => {
     const call: ProviderProcessCall = { command: process.execPath, args: [fixture], cwd: process.cwd(), env: { ...process.env, FAKE_AGY_MODE: "slow" } };
     await expect(runAntigravityProcess(call, { timeoutMs: 30 })).rejects.toThrow(/timed out/i);
@@ -286,9 +333,15 @@ describe("Antigravity image provider", () => {
   });
 
   it("builds the exact restricted image instruction contract", () => {
-    const prompt = buildAntigravityPrompt("nano-banana-2", { prompt: "subject", negativePrompt: "text" });
+    const prompt = buildAntigravityPrompt("nano-banana-2", {
+      prompt: "subject",
+      negativePrompt: "text",
+      output: { aspectRatio: "16:9", resolution: "4096x2304", width: 4096, height: 2304 }
+    });
     expect(prompt).toContain("built-in generative image tool exactly once");
     expect(prompt).toContain("exactly one image using Nano Banana 2");
+    expect(prompt).toContain("4K resolution and 16:9 aspect ratio");
+    expect(prompt).toContain("4096 x 2304 pixels");
     expect(prompt).toContain("Do not use terminal, file-write, browser, MCP, or any other tools");
     expect(extractExplicitProviderIdentity("Provider model identity: Nano Banana 2\n")).toBe("Nano Banana 2");
     expect(extractExplicitProviderIdentity("Nano Banana 2 in a filename.png")).toBeNull();

@@ -125,6 +125,9 @@ export class AntigravityImageProvider implements GenerationProvider {
     if (this.creditOveragesPolicy !== "never-confirmed") {
       return unavailable(this.descriptor, creditOveragesMessage, details, profileEvidence);
     }
+    details.resolutionControl = profileEvidence.resolutionControl?.structurallySupported === true
+      ? "supported"
+      : "1k-only";
     return {
       ...this.descriptor,
       capabilities: [...this.descriptor.capabilities],
@@ -145,6 +148,18 @@ export class AntigravityImageProvider implements GenerationProvider {
     const diagnostic = await this.diagnose();
     if (this.creditOveragesPolicy !== "never-confirmed") throw new ProviderUnavailableError(diagnostic);
     if (diagnostic.availability !== "available" && !this.allowConformanceProbe) throw new ProviderUnavailableError(diagnostic);
+    const verifiedResolution = input.output === undefined
+      ? undefined
+      : diagnostic.profiles?.flatMap((profile) => profile.resolutions ?? []).find((resolution) =>
+          resolution.width === input.output?.width &&
+          resolution.height === input.output?.height &&
+          (resolution.aspectRatio === undefined || resolution.aspectRatio === input.output?.aspectRatio)
+        );
+    if (!this.allowConformanceProbe && input.output !== undefined && verifiedResolution === undefined) {
+      throw new Error(
+        `Antigravity output ${input.output.aspectRatio} at ${input.output.width} x ${input.output.height} is not present in this CLI's conformance evidence.`
+      );
+    }
     const discovery = await discoverAntigravityCli(this.discoveryOptions);
     if (!discovery.executablePath) throw new ProviderUnavailableError(diagnostic);
     const attemptId = context?.providerAttemptId ?? randomUUID();
@@ -172,8 +187,10 @@ export class AntigravityImageProvider implements GenerationProvider {
       }
     });
     let result: { stdout: string; stderr: string; exitCode: number };
+    let conversationRoot: string | null;
     try {
       result = await this.run(call, { timeoutMs: input.timeoutMs ?? this.processTimeoutMs, signal: context?.signal });
+      conversationRoot = await readConversationRoot(logPath, this.brainRoot);
     } finally {
       await rm(logPath, { force: true });
     }
@@ -181,11 +198,29 @@ export class AntigravityImageProvider implements GenerationProvider {
       throw new Error(`Antigravity CLI exited with ${result.exitCode}: ${redactSensitiveText(`${result.stderr}\n${result.stdout}`).slice(0, 2_000)}`);
     }
     const providerIdentity = extractExplicitProviderIdentity(result.stdout);
-    const candidates = await changedImageCandidates([this.brainRoot, attemptDirectory], before);
+    const candidates = await changedImageCandidates(
+      conversationRoot === null ? [this.brainRoot, attemptDirectory] : [conversationRoot, attemptDirectory],
+      before
+    );
     const validated = await Promise.all(candidates.map(validateImageCandidate));
     const images = validated.filter((candidate): candidate is ValidatedImage => candidate !== null);
-    if (images.length !== 1) throw new Error(`Antigravity completed without exactly one newly created valid image artifact (found ${images.length}).`);
+    if (images.length !== 1) {
+      const output = redactSensitiveText(`${result.stderr}\n${result.stdout}`).slice(0, 2_000);
+      if (/quota[^\r\n]{0,120}exhausted|resource exhaustion|429 Too Many Requests/i.test(output)) {
+        throw new Error("Antigravity image quota is exhausted; no image was created. Ether did not use credit overages.");
+      }
+      throw new Error(`Antigravity completed without exactly one newly created valid image artifact (found ${images.length}).`);
+    }
     const image = images[0]!;
+    if (
+      verifiedResolution !== undefined &&
+      (image.width !== verifiedResolution.width || image.height !== verifiedResolution.height)
+    ) {
+      throw new Error(
+        `Antigravity returned ${image.width} x ${image.height}; the verified ${verifiedResolution.aspectRatio ?? "requested"} ` +
+        `${verifiedResolution.tier ?? "resolution"} output is ${verifiedResolution.width} x ${verifiedResolution.height}.`
+      );
+    }
     if (this.profile === "nano-banana-2-lite" && (image.width > 1024 || image.height > 1024)) {
       throw new Error("Nano Banana 2 Lite produced an image beyond the verified 1K limit.");
     }
@@ -259,6 +294,23 @@ function capabilityProfile(
   evidence?: AntigravityProfileConformance,
   unavailableReason?: string
 ) {
+  const verifiedArtifacts = (evidence?.artifacts ?? []).filter((artifact) =>
+    artifact.requestedAspectRatio !== undefined && artifact.requestedResolution !== undefined
+  );
+  const aspectRatios = [...new Set(verifiedArtifacts.map((artifact) => artifact.requestedAspectRatio!))];
+  const resolutions = verifiedArtifacts.map((artifact) => ({
+    id: `${artifact.requestedResolution!.toLowerCase()}-${artifact.requestedAspectRatio!.replace(":", "x")}`,
+    width: artifact.width,
+    height: artifact.height,
+    label: `${artifact.requestedResolution} · ${artifact.requestedAspectRatio} (${artifact.width} × ${artifact.height})`,
+    aspectRatio: artifact.requestedAspectRatio,
+    tier: artifact.requestedResolution
+  }));
+  const resolutionMessage = evidence?.resolutionControl?.structurallySupported === false
+    ? "This CLI exposes aspect ratio but no structural resolution parameter; only conformed 1K outputs are selectable."
+    : "Resolution choices come only from matching real conformance evidence.";
+  const maximumWidth = verifiedArtifacts.reduce((maximum, artifact) => Math.max(maximum, artifact.width), 0);
+  const maximumHeight = verifiedArtifacts.reduce((maximum, artifact) => Math.max(maximum, artifact.height), 0);
   return {
     providerId: descriptor.id,
     profileId: descriptor.id,
@@ -276,9 +328,15 @@ function capabilityProfile(
     model: evidence?.providerIdentity ?? undefined,
     unavailableReason: availability === "unavailable" ? redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.") : undefined,
     messages: availability === "available"
-      ? ["Real conformance passed. Antigravity shares four active requests across the application."]
+      ? ["Real conformance passed. Antigravity shares four active requests across the application.", resolutionMessage]
       : [redactSensitiveText(unavailableReason ?? evidence?.reason ?? "Conformance unavailable.")],
-    mediaLimits: descriptor.id === "google-nano-banana-2-lite" ? { maxWidth: 1024, maxHeight: 1024, notes: ["Enabled only after verified 1K conformance."] } : undefined
+    aspectRatios,
+    resolutions,
+    mediaLimits: descriptor.id === "google-nano-banana-2-lite"
+      ? { maxWidth: 1024, maxHeight: 1024, notes: ["Enabled only after verified 1K conformance."] }
+      : maximumWidth > 0 && maximumHeight > 0
+        ? { maxWidth: maximumWidth, maxHeight: maximumHeight, notes: [resolutionMessage] }
+        : undefined
   };
 }
 
@@ -355,6 +413,21 @@ function isImageExtension(filePath: string) { return [".png", ".jpg", ".jpeg"].i
 function safeSegment(value: string) { return value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || "attempt"; }
 function cancellationError() { return Object.assign(new Error("Antigravity image generation was cancelled."), { name: "AbortError", category: "cancellation" }); }
 async function sha256File(filePath: string) { try { return createHash("sha256").update(await readFile(filePath)).digest("hex"); } catch { return null; } }
+
+async function readConversationRoot(logPath: string, brainRoot: string) {
+  try {
+    const log = await readFile(logPath, "utf8");
+    const uuid = "([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})";
+    const conversationId = new RegExp(`Created conversation ${uuid}\\b`, "i").exec(log)?.[1]
+      ?? new RegExp(`Print mode: conversation=${uuid}\\b`, "i").exec(log)?.[1];
+    if (conversationId === undefined) return null;
+    const root = path.resolve(brainRoot);
+    const candidate = path.resolve(root, conversationId);
+    return path.dirname(candidate) === root ? candidate : null;
+  } catch {
+    return null;
+  }
+}
 
 const creditOveragesMessage = "Confirm the official Antigravity AI Credit Overages setting is Never before connecting or generating. Ether cannot override Google billing.";
 

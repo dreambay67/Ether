@@ -422,6 +422,8 @@ function cloneCapabilityProfile(profile: ProviderCapabilityProfile): ProviderCap
     inputChannels: [...profile.inputChannels],
     outputChannels: [...profile.outputChannels],
     messages: profile.messages ? [...profile.messages] : undefined,
+    aspectRatios: profile.aspectRatios ? [...profile.aspectRatios] : undefined,
+    resolutions: profile.resolutions ? profile.resolutions.map((resolution) => ({ ...resolution })) : undefined,
     mediaLimits: profile.mediaLimits
       ? {
           ...profile.mediaLimits,
