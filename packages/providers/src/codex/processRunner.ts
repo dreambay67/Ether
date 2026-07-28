@@ -69,6 +69,11 @@ export function classifyCodexCliFailure(output: string): CodexFailureClassificat
 export function resolveCodexCliPath(
   env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env
 ) {
+  const explicitPath = env.CODEX_CLI_PATH;
+  if (explicitPath && !isWindowsAppsCodexAlias(explicitPath)) {
+    return explicitPath;
+  }
+
   const configPath = path.join(env.USERPROFILE ?? process.env.USERPROFILE ?? "", ".codex", "config.toml");
 
   try {
@@ -82,8 +87,8 @@ export function resolveCodexCliPath(
     // Fall through to the explicit environment override.
   }
 
-  if (env.CODEX_CLI_PATH) {
-    return env.CODEX_CLI_PATH;
+  if (explicitPath) {
+    return explicitPath;
   }
 
   return null;

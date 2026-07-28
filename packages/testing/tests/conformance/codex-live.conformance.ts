@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -45,17 +45,25 @@ describe("Codex App Server authenticated conformance", () => {
     const sourceDirectory = path.join(runRoot, "source");
     const stagingDirectory = path.join(runRoot, "staging");
     const importDirectory = path.join(runRoot, "imported");
+    const isolatedCodexHome = path.join(runRoot, "codex-home");
     const evidencePath = path.join(runRoot, "evidence.json");
     await Promise.all([
       mkdir(sourceDirectory, { recursive: true }),
       mkdir(stagingDirectory, { recursive: true }),
-      mkdir(importDirectory, { recursive: true })
+      mkdir(importDirectory, { recursive: true }),
+      mkdir(isolatedCodexHome, { recursive: true })
     ]);
+    const sourceCodexHome = path.join(process.env.USERPROFILE ?? "", ".codex");
     const inputImagePath = path.join(sourceDirectory, "reference.png");
     await writeFile(inputImagePath, tinyPng);
     const runtime = new CodexAppServerRuntime({
       executablePath,
       cwd: runRoot,
+      env: {
+        ...process.env,
+        CODEX_CLI_PATH: executablePath,
+        CODEX_HOME: isolatedCodexHome
+      },
       initializationTimeoutMs: 20_000,
       restartBudget: 1,
       clientOptions: {
@@ -71,9 +79,20 @@ describe("Codex App Server authenticated conformance", () => {
       result: "running"
     };
     try {
+      await copyFile(path.join(sourceCodexHome, "auth.json"), path.join(isolatedCodexHome, "auth.json"));
       const runtimeStart = Date.now();
       await runtime.start();
       const health = runtime.health();
+      evidence.runtimeStartup = {
+        status: health.status,
+        transport: health.transport,
+        reportedVersion: health.reportedVersion,
+        versionCompatible: health.versionCompatible,
+        restartReason: health.restartReason,
+        fallbackReason: health.fallbackReason,
+        processPhase: health.processPhase,
+        initializationMs: health.initializationMs
+      };
       expect(health).toMatchObject({
         transport: "app-server",
         reportedVersion: CODEX_APP_SERVER_VERSION,
@@ -334,6 +353,7 @@ describe("Codex App Server authenticated conformance", () => {
       });
     } finally {
       await bundle.close();
+      await rm(isolatedCodexHome, { recursive: true, force: true });
     }
   }, liveTimeoutMs);
 });

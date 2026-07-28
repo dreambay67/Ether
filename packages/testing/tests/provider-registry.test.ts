@@ -837,6 +837,33 @@ describe("generation provider registry", () => {
     });
   });
 
+  it("prefers an explicit real Codex binary over a stale user config path", async () => {
+    const userProfile = await createTempRoot();
+    const configDir = path.join(userProfile, ".codex");
+    const configuredCodexPath = path.join(userProfile, "OpenAI", "Codex", "codex-alpha.exe");
+    const explicitCodexPath = path.join(userProfile, "reviewed", "codex.exe");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      path.join(configDir, "config.toml"),
+      `CODEX_CLI_PATH = '${configuredCodexPath}'\n`,
+      "utf8"
+    );
+    const provider = new CodexCliImageProvider({
+      env: {
+        USERPROFILE: userProfile,
+        CODEX_CLI_PATH: explicitCodexPath
+      },
+      fileExists: async (filePath) => filePath === explicitCodexPath
+    });
+
+    await expect(provider.diagnose()).resolves.toMatchObject({
+      availability: "available",
+      details: {
+        codexCliPath: explicitCodexPath
+      }
+    });
+  });
+
   it("rejects the WindowsApps Codex alias even when it exists", async () => {
     const projectPath = await createTempRoot();
     const calls: ProviderProcessCall[] = [];
