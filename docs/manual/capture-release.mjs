@@ -195,7 +195,7 @@ const environment = {
   APPDATA: appData,
   LOCALAPPDATA: localAppData,
   USERPROFILE: profileRoot,
-  CODEX_CLI_PATH: resolveCodexCliPath(process.env) ?? process.env.CODEX_CLI_PATH
+  CODEX_CLI_PATH: process.env.CODEX_CLI_PATH ?? resolveCodexCliPath(process.env)
 };
 for (const key of [
   "ETHER_RENDERER_URL",
@@ -289,6 +289,10 @@ try {
   const page = context.pages()[0] ?? await context.waitForEvent("page");
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.getByTestId("start-screen").waitFor({ state: "visible", timeout: 30_000 });
+  await waitForLocatorEnabled(
+    page.getByRole("button", { name: "New document", exact: true }),
+    30_000
+  );
   assertPackagedRenderer(page.url());
   await settle(page);
   await capture(page, "start", page.locator("body"));
@@ -373,15 +377,13 @@ try {
   if (await projectLensResizer.getAttribute("aria-valuenow") !== "400") {
     throw new Error("Release capture could not widen the Inspector atlas to the supported Project lens maximum.");
   }
-  await page
-    .getByTestId("document-canvas")
-    .getByRole("button", { name: "Fit View", exact: true })
-    .click();
-  const renderedNodes = page
-    .getByTestId("document-canvas")
-    .locator("[data-node-id]");
+  const documentCanvas = page.getByTestId("document-canvas");
+  const renderedNodes = documentCanvas.locator("[data-node-id]");
+  await waitForGraphNodeCount(page, inspectorNodes.length, 15_000);
+  await documentCanvas.getByRole("button", { name: "Fit View", exact: true }).click();
+  await settle(page);
   await waitForLocatorCount(renderedNodes, inspectorNodes.length, 15_000);
-  await capture(page, "inspector-catalog", page.getByTestId("document-canvas"));
+  await capture(page, "inspector-catalog", documentCanvas);
   const firstFixtureEdge = page.getByTestId("edge-role-chip").first();
   const roleButton = firstFixtureEdge.locator(":scope > button.ether-edge-role-chip");
   await roleButton.waitFor({ state: "visible" });
@@ -916,6 +918,33 @@ async function waitForGraphNodeTitle(page, nodeId, expectedTitle, timeout) {
   );
 }
 
+async function waitForGraphNodeCount(page, expectedCount, timeout) {
+  const startedAt = Date.now();
+  let actualCount = 0;
+  while (Date.now() - startedAt < timeout) {
+    actualCount = await page.evaluate(async () => {
+      const document = await globalThis.window.ether.document.bootstrap();
+      const snapshot = await globalThis.window.ether.graph.snapshot(document.documentId);
+      return snapshot.graph.nodes.length;
+    });
+    if (actualCount === expectedCount) return;
+    await delay(50);
+  }
+  throw new Error(
+    `Installed graph contained ${actualCount} nodes, expected ${expectedCount}.`
+  );
+}
+
+async function waitForLocatorEnabled(locator, timeout) {
+  await locator.waitFor({ state: "visible", timeout });
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    if (await locator.isEnabled()) return;
+    await delay(50);
+  }
+  throw new Error("Installed release control did not become enabled before capture.");
+}
+
 async function waitForProviderHealthResolved(page, dialog, timeout) {
   await dialog.getByRole("button", { name: "Check again", exact: true })
     .waitFor({ state: "visible", timeout });
@@ -934,6 +963,8 @@ async function waitForProviderHealthResolved(page, dialog, timeout) {
   }
   const metrics = dialog.locator(".provider-health-summary .status-metric");
   const runtime = metrics.filter({ hasText: "Runtime" }).locator("strong");
+  const transport = metrics.filter({ hasText: "Transport" }).locator("strong");
+  const verifiedProfiles = metrics.filter({ hasText: "Verified profiles" }).locator("strong");
   const checked = metrics.filter({ hasText: "Checked" }).locator("strong");
   await Promise.all([
     waitForLocatorTextOutside(runtime, new Set(["Checking", "Unknown"]), timeout),
@@ -941,6 +972,21 @@ async function waitForProviderHealthResolved(page, dialog, timeout) {
     dialog.getByText("No telemetry leaves this machine.", { exact: false })
       .waitFor({ state: "visible", timeout })
   ]);
+  const resolved = {
+    runtime: (await runtime.textContent())?.trim() ?? "",
+    transport: (await transport.textContent())?.trim() ?? "",
+    verifiedProfiles: (await verifiedProfiles.textContent())?.trim() ?? ""
+  };
+  if (
+    resolved.runtime !== "Available" ||
+    resolved.transport !== "app-server" ||
+    resolved.verifiedProfiles !== "16"
+  ) {
+    throw new Error(
+      "Installed Provider Health did not resolve to the reviewed Codex 0.144.2 release contract: " +
+      JSON.stringify(resolved)
+    );
+  }
 }
 
 async function diagnoseProviderHealthQueries(page) {

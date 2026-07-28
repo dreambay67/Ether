@@ -77,6 +77,14 @@ describe("Ether 4.0 release documentation", () => {
     expect(capture).toContain("Ether-4.0.0-Setup.exe");
     expect(capture).toContain("installedExecutable");
     expect(capture).toContain('source: "installed-packaged-exe"');
+    expect(capture).toContain(
+      'page.getByRole("button", { name: "New document", exact: true })',
+    );
+    expect(capture).toContain("async function waitForLocatorEnabled(locator, timeout)");
+    expect(capture).toContain("if (await locator.isEnabled()) return");
+    expect(capture).toContain(
+      "CODEX_CLI_PATH: process.env.CODEX_CLI_PATH ?? resolveCodexCliPath(process.env)",
+    );
     expect(capture).toMatch(/for \(const key of \[[\s\S]*?"ETHER_RENDERER_URL"[\s\S]*?\]\) delete environment\[key\]/u);
     expect(capture).toContain('await execFileAsync(installer, ["/S", `/D=${installRoot}`]');
     expect(capture).toContain("await access(installedExecutable)");
@@ -126,8 +134,20 @@ describe("Ether 4.0 release documentation", () => {
       /id: "manual-edge-prompt-worker"[\s\S]*?role: "subject"/u,
     );
     expect(capture).toContain(
-      "await waitForLocatorCount(renderedNodes, inspectorNodes.length, 15_000)",
+      "await waitForGraphNodeCount(page, inspectorNodes.length, 15_000)",
     );
+    expect(
+      capture.indexOf("await waitForGraphNodeCount(page, inspectorNodes.length, 15_000)"),
+    ).toBeLessThan(
+      capture.indexOf('documentCanvas.getByRole("button", { name: "Fit View", exact: true }).click()'),
+    );
+    expect(
+      capture.indexOf('documentCanvas.getByRole("button", { name: "Fit View", exact: true }).click()'),
+    ).toBeLessThan(
+      capture.indexOf("await waitForLocatorCount(renderedNodes, inspectorNodes.length, 15_000)"),
+    );
+    expect(capture).toContain("async function waitForGraphNodeCount(page, expectedCount, timeout)");
+    expect(capture).toContain("return snapshot.graph.nodes.length");
     expect(capture).toContain("await node.click()");
     expect(capture).not.toContain("new globalThis.MouseEvent");
     expect(capture).not.toContain("getByDisplayValue");
@@ -184,6 +204,12 @@ describe("Ether 4.0 release documentation", () => {
     expect(capture).toContain('"provider.capabilities"');
     expect(capture).toContain('new Set(["Checking", "Unknown"])');
     expect(capture).toContain('new Set(["Pending"])');
+    expect(capture).toContain('resolved.runtime !== "Available"');
+    expect(capture).toContain('resolved.transport !== "app-server"');
+    expect(capture).toContain('resolved.verifiedProfiles !== "16"');
+    expect(capture).toContain(
+      "Installed Provider Health did not resolve to the reviewed Codex 0.144.2 release contract",
+    );
     expect(settingsPanel).toContain('aria-labelledby="settings-title"');
     expect(settingsPanel).toContain('data-testid="release-recovery-status"');
     expect(settingsPanel).toContain('data-testid="about-ether"');
