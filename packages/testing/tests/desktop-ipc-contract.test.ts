@@ -120,6 +120,18 @@ describe("desktop IPC contract", () => {
       .toBe("ENOENT the selected file");
     expect(normalizeDesktopError(new Error("ENOENT //server/share/private.png")).message)
       .toBe("ENOENT the selected file");
+    expect(normalizeDesktopError(new Error(`Gemini rejected ${"AIza"}${"A".repeat(35)}`)).message)
+      .toBe("Gemini rejected [REDACTED]");
+  });
+
+  it("accepts Gemini key entry only at the protected write boundary and never defines a credential read channel", () => {
+    expect(desktopIpcContracts[desktopIpcChannels.runtime.connectGeminiCredential].request.safeParse({
+      apiKey: "local-test-key"
+    }).success).toBe(true);
+    expect(desktopIpcContracts[desktopIpcChannels.runtime.connectGeminiCredential].request.safeParse({
+      apiKey: "local-test-key", returnKey: true
+    }).success).toBe(false);
+    expect(desktopIpcChannelList.some((channel) => /(?:read|get).*gemini.*credential/iu.test(channel))).toBe(false);
   });
 
   it("validates the generic application command and query boundary end to end", async () => {
@@ -361,10 +373,14 @@ describe("desktop IPC contract", () => {
       openDroppedDocument: async () => ({ ok: true, value: undefined })
     });
     expect(Object.keys(bridge.runtime).sort()).toEqual([
+      "connectGeminiCredential",
+      "geminiCredentialStatus",
       "providerHealth",
       "providerPolicy",
+      "removeGeminiCredential",
       "rendererInteractive",
       "setProviderPolicy",
+      "testGeminiCredential",
       "versions"
     ]);
     expect(JSON.stringify(Object.keys(bridge.runtime))).not.toMatch(/spawn|start|stop|interrupt|process/i);

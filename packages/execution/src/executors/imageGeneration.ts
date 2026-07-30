@@ -37,7 +37,10 @@ export class ImageGenerationExecutor implements StepExecutor {
           aspectRatio: stringParameter(context.step.parameters, "aspectRatio", "1:1"),
           resolution: `${width}x${height}`,
           width,
-          height
+          height,
+          outputFormat: stringParameter(context.step.parameters, "outputFormat", "image/png") === "image/jpeg"
+            ? "image/jpeg"
+            : "image/png"
         },
         model: binding?.modelId ?? provider.descriptor.model,
         requestedAt: context.claim.attempt.startedAt ?? context.claim.attempt.createdAt
@@ -90,8 +93,12 @@ export class ImageEditExecutor implements StepExecutor {
         ? "The mask is guidance-only and is not guaranteed to produce pixel-exact native inpainting."
         : "",
       sections: [],
-      references: references(context),
+      references: references(context, new Set([
+        source.id,
+        ...(mask === undefined ? [] : [mask.id])
+      ])),
       edgeRoles: [],
+      outputCount,
       sourceImage: {
         assetId: source.content.kind === "artifact" ? source.content.artifactId : undefined,
         assetPath,
@@ -114,9 +121,15 @@ export class ImageEditExecutor implements StepExecutor {
   }
 }
 
-function references(context: ExecutorContext): GenerationReferenceInput[] {
+function references(
+  context: ExecutorContext,
+  excludedInputIds: ReadonlySet<string> = new Set()
+): GenerationReferenceInput[] {
   return context.inputs
-    .filter((input) => input.channel === "image" || input.channel === "video")
+    .filter((input) =>
+      !excludedInputIds.has(input.id) &&
+      (input.channel === "image" || input.channel === "video")
+    )
     .flatMap((input) => {
       const assetPath = readStringMetadata(input, "assetPath");
       if (assetPath === undefined) return [];

@@ -71,19 +71,19 @@ describe("DurableScheduler", () => {
     expect((await fixture.getJob(job.id))?.status).toBe("completed");
   });
 
-  it("shares one app-wide 4/4/8 domain across schedulers, queues provider fifths, and queues ninth global work", async () => {
+  it("shares one app-wide 4/4/8 domain across independent Codex and Gemini API batches, queues provider fifths, and queues ninth global work", async () => {
     const first = new ConcurrentJobsFixture();
     const second = new ConcurrentJobsFixture();
     const domains = new ExecutionConcurrencyDomains();
     const codex = providerBinding("codex-assistant", 1);
-    const antigravity = providerBinding("google-nano-banana-2", 1);
+    const gemini = providerBinding("google-gemini-api-nano-banana-2", 1);
     const firstJobs = [
       first.addJob("codex-batch-a", 3, codex, 8),
-      first.addJob("antigravity-batch-a", 3, antigravity, 8)
+      first.addJob("gemini-batch-a", 3, gemini, 8)
     ];
     const secondJobs = [
       second.addJob("codex-batch-b", 2, codex, 8),
-      second.addJob("antigravity-batch-b", 2, antigravity, 8)
+      second.addJob("gemini-batch-b", 2, gemini, 8)
     ];
     const executor = new ControlledExecutor();
     const firstScheduler = first.scheduler(executor, undefined, domains);
@@ -96,18 +96,18 @@ describe("DurableScheduler", () => {
     await waitForExecutorActive(executor, 8, first);
 
     expect(executor.activeByProvider.get("codex")).toBe(4);
-    expect(executor.activeByProvider.get("antigravity")).toBe(4);
+    expect(executor.activeByProvider.get("gemini-api")).toBe(4);
     expect(executor.maximumByProvider.get("codex")).toBe(4);
-    expect(executor.maximumByProvider.get("antigravity")).toBe(4);
+    expect(executor.maximumByProvider.get("gemini-api")).toBe(4);
     expect(executor.maximumActive).toBe(8);
     await Promise.all([
       waitForClaimed(first, "codex-batch-a", 3),
       waitForClaimed(second, "codex-batch-b", 2),
-      waitForClaimed(first, "antigravity-batch-a", 3),
-      waitForClaimed(second, "antigravity-batch-b", 2)
+      waitForClaimed(first, "gemini-batch-a", 3),
+      waitForClaimed(second, "gemini-batch-b", 2)
     ]);
     expect([...executor.prompts.keys()].filter((id) => id.startsWith("codex-batch-"))).toHaveLength(4);
-    expect([...executor.prompts.keys()].filter((id) => id.startsWith("antigravity-batch-"))).toHaveLength(4);
+    expect([...executor.prompts.keys()].filter((id) => id.startsWith("gemini-batch-"))).toHaveLength(4);
 
     const ninth = second.addJob("global-ninth", 1, providerBinding("unverified-external", 99), 1);
     const ninthRun = secondScheduler.run(ninth.id);

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "@ether/brand/brand.css";
 import "./styles.css";
 import { App } from "./App";
+import { GeminiCredentialSetup } from "./project/GeminiCredentialSetup";
 import { markPerformance } from "./performance/marks";
 
 markPerformance("cold-start:start");
@@ -13,8 +14,12 @@ if (!rootElement) {
   throw new Error("Ether renderer root element #root was not found.");
 }
 
+const RootSurface = new URLSearchParams(window.location.search).get("surface") === "gemini-connect"
+  ? GeminiCredentialSetup
+  : App;
+
 createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    <RootSurface />
   </React.StrictMode>
 );

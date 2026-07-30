@@ -53,7 +53,7 @@ const defaults: Record<NodeDefinitionId, () => NodeConfig> = {
   "prompt.text": () => ({ kind: "prompt.text", body: "", assembly: "append" }),
   "prompt.worker": () => ({ kind: "prompt.worker", behavior: "rewrite", instruction: "", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8_000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }),
   "reference.set": () => ({ kind: "reference.set", artifactIds: [], enabledChannels: [], ordering: "manual" }),
-  "generation.image": () => ({ kind: "generation.image", providerId: "codex", profileId: "image-default", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 }),
+  "generation.image": () => ({ kind: "generation.image", providerId: "codex", profileId: "image-default", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputFormat: "image/png", outputCount: 1 }),
   "edit.image": () => ({ kind: "edit.image", providerId: "codex", profileId: "image-edit", strength: 0.75, outputCount: 1 }),
   "edit.mask": () => ({ kind: "edit.mask", mode: "manual", feather: 0 }),
   "edit.transform": () => ({ kind: "edit.transform", operation: "resize", preserveAspectRatio: true }),
@@ -71,7 +71,7 @@ const defaults: Record<NodeDefinitionId, () => NodeConfig> = {
 
 const inspectorFields: Record<NodeDefinitionId, string[]> = {
   "prompt.text": ["body", "assembly"], "prompt.worker": ["instruction", "behavior", "profile", "model"],
-  "reference.set": ["artifactIds", "enabledChannels", "ordering"], "generation.image": ["providerId", "profileId", "aspectRatio", "resolution", "outputCount"],
+  "reference.set": ["artifactIds", "enabledChannels", "ordering"], "generation.image": ["providerId", "profileId", "aspectRatio", "resolution", "outputFormat", "outputCount"],
   "edit.image": ["providerId", "profileId", "strength", "outputCount"], "edit.mask": ["mode", "feather"],
   "edit.transform": ["operation", "width", "height", "preserveAspectRatio"], "review.compare": ["selectionMode", "minimumSelections"],
   "review.evaluate": ["instruction", "rubric", "profile", "model"], "review.filter": ["match", "rules", "routes"],

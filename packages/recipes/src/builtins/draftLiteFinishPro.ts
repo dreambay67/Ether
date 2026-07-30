@@ -2,14 +2,33 @@ import { briefParameter, checkpoint, edge, graph, manifest, node, requirement, s
 
 const graphRef = "recipe.draft-lite-finish-pro";
 const prompt = node("prompt", "prompt.text", "Creative brief", 54, 82, { kind: "prompt.text", body: "{{brief}}", assembly: "replace" });
-const draft = node("draft", "generation.image", "Draft with Lite", 332, 82, { kind: "generation.image", providerId: "antigravity", profileId: "nano-banana-2", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 2 });
-const finish = node("finish", "edit.image", "Finish with Pro", 610, 82, { kind: "edit.image", providerId: "codex", profileId: "image-edit", strength: 0.45, outputCount: 1 });
+const draft = node("draft", "generation.image", "Draft with Lite", 332, 82, { kind: "generation.image", providerId: "google-gemini-api-nano-banana-2-lite", profileId: "nano-banana-2-lite", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputFormat: "image/jpeg", outputCount: 1 });
+const finish = node("finish", "edit.image", "Finish with Pro", 610, 82, { kind: "edit.image", providerId: "google-gemini-api-nano-banana-pro", profileId: "nano-banana-pro", strength: 0.45, outputCount: 1 });
 const compare = node("compare", "review.compare", "Approve final", 888, 82, { kind: "review.compare", selectionMode: "one", minimumSelections: 1 });
-const draftRequirement = requirement("draft", "generate-image", ["text"], ["image"], 0, 2);
+const draftRequirement = requirement("draft", "generate-image", ["text"], ["image"], 0, 1);
 const finishRequirement = requirement("finish", "edit-image", ["image"], ["image"], 0);
-const substitutions = substitutionsFor([draftRequirement, finishRequirement]).map((item) => item.requirementId === "draft"
-  ? { ...item, priority: item.providerId === "antigravity" ? 0 : 1 }
-  : item);
+const substitutions = substitutionsFor([draftRequirement, finishRequirement]).map((item) => {
+  const useGemini = item.providerId === "google-gemini-api-nano-banana-2";
+  if (item.requirementId === "draft" && useGemini) {
+    return {
+      ...item,
+      providerId: "google-gemini-api-nano-banana-2-lite",
+      profileId: "nano-banana-2-lite",
+      priority: 0,
+      capability: { ...item.capability, providerId: "google-gemini-api-nano-banana-2-lite", profileId: "nano-banana-2-lite" }
+    };
+  }
+  if (item.requirementId === "finish" && useGemini) {
+    return {
+      ...item,
+      providerId: "google-gemini-api-nano-banana-pro",
+      profileId: "nano-banana-pro",
+      priority: 0,
+      capability: { ...item.capability, providerId: "google-gemini-api-nano-banana-pro", profileId: "nano-banana-pro" }
+    };
+  }
+  return { ...item, priority: useGemini ? 0 : 1 };
+});
 
 export const draftLiteFinishProRecipe = manifest({
   id: "draft-lite-finish-pro", title: "Draft with Lite, Finish with Pro", description: "Use a low-cost draft pass to explore, then a deliberate edit pass to produce the final.",
@@ -18,8 +37,7 @@ export const draftLiteFinishProRecipe = manifest({
   requirements: [draftRequirement, finishRequirement], substitutions, checkpoints: [checkpoint(graphRef, "compare", "Approve the finished image")], calls: 2, workItems: 3,
   scenario: { id: "draft-lite-finish-pro-fake", steps: [
     { kind: "success", requirementId: "draft", latencyMs: 8, outputs: [
-      { graphRef, nodeRef: "draft", channel: "image", fixtureId: "lite-draft-1", mediaType: "image/png" },
-      { graphRef, nodeRef: "draft", channel: "image", fixtureId: "lite-draft-2", mediaType: "image/png" }
+      { graphRef, nodeRef: "draft", channel: "image", fixtureId: "lite-draft-1", mediaType: "image/jpeg" }
     ] },
     { kind: "success", requirementId: "finish", latencyMs: 10, outputs: [{ graphRef, nodeRef: "finish", channel: "image", fixtureId: "pro-final", mediaType: "image/png" }] }
   ] }

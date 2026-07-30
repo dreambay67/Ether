@@ -4,26 +4,26 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "1701145d63a1a9ae5d1d1f6c485eeb25a61beccf53a94f6909748dc6deb5fcec"
+    "sha256": "1040eaa4c2e60a6883891b1c88a1f1747d1afc13dce28ea54506c937ab413e26"
   },
   "executable": {
     "fileName": "Ether.exe",
-    "sha256": "6c5c6f96d589eeab30293440df12b75de6c86433dcfc52559508d70e8f8dd1b8"
+    "sha256": "3b20a510da722e08836b6ef653d5a9fa3642b489f222b5c749882d547a4832cc"
   },
   "fixture": {
     "fileName": "Ether 4.0 Release Atlas.ether",
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "53e7883e1906044cd48a1a9497909f6a4fc401fde8d0ccbd00b541ccd81ce84b"
+    "sha256": "6297de4e519550615be61ec1362b9a685a46a44c83995ca6091100452ca52a05"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-b3dd015f-66c0-48ef-95e5-f05ca44d60fc",
-    "contentHash": "sha256:v1:9efdb05ff8b941b415e5e7e6927ff7ef054d5f902e753d14895cf25172473f95"
+    "planId": "plan-93e61819-dba2-4ee0-9cb9-74401074a596",
+    "contentHash": "sha256:v1:832166d429db079e4f2d139919a24ecb3d4772f67bf6d17988335e6cd56fc3ba"
   },
-  "capturedAt": "2026-07-28T18:20:32.608Z",
+  "capturedAt": "2026-07-30T20:55:26.106Z",
   "labels": [
     "start",
     "build",
@@ -67,97 +67,97 @@
       "label": "start",
       "width": 1600,
       "height": 1000,
-      "sha256": "81ba1c9ac17564eac609c5ee8a5b9ecb2688690281254b6b9da4ae8a5a61abdf"
+      "sha256": "24f7f624dcb9f867ca73b32e8d0422948d6242eeca5f74282199f1517d829604"
     },
     {
       "label": "build",
       "width": 1600,
       "height": 1000,
-      "sha256": "8d3d2dd25313ab8bd042b2c690a2169441f56abb2942ba87443bd40dacb18c30"
+      "sha256": "2e38f56d77c5d1d39c2b970a6267b1c02f569447579cfb88d1a33a4e2920571a"
     },
     {
       "label": "focus",
       "width": 1600,
       "height": 1000,
-      "sha256": "1e83e86f7d0ad87d3c84c5bc2ccf23a043d0cfdd31472721ab921724dde222b4"
+      "sha256": "292a53d4e8b7ed317c48463bd2179b905ff43b2ce244d0848fe94b9ee1e31134"
     },
     {
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "5b938b14f9d7698673cb4b7671ae99d53c0c6cab07e05eb03ada364001d81d73"
+      "sha256": "05d95b6e668480087606b498d74f7583b458e0eb3c5cc4f4e8e5c99132f2458b"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "5e207dcc5dfeefe6a5ebffc2bc2c1a75326933c574b7628a880edf0090750fd6"
+      "sha256": "f8ff9213952730140303b0fbf9f6a8afd18da119fc47766ddcd0bdc92f02237f"
     },
     {
       "label": "reference-desk",
       "width": 1600,
       "height": 180,
-      "sha256": "1b4bd55077557ac34cb54b04df47fa98318bb1722e77aecb2e60247233561787"
+      "sha256": "d85d2f1b2aab9ea4369d8ff401005ed9dbbc0759c15dea3d28eb2b823f77fad5"
     },
     {
       "label": "batch-matrix",
       "width": 1584,
-      "height": 757,
-      "sha256": "45754d74f1b3c84e360aeb39f164f9fe0052022c51434dacfbe3592c5e199dea"
+      "height": 727,
+      "sha256": "14df200977466321cc9b7e4c23fbd187289037686bff85cd517d5ce57c82bc56"
     },
     {
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "31c5327af07eb029f16d847e9630d7b56cc64714405c37ee2a074768974eb58a"
+      "sha256": "bcae96af242c618e3b21a885c5b3e01c7428b5a009256c62849753ed25869ad2"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "4237480906d0a2e88155a262e7ab8859dbe7a0c2277275c4297d6a2011caf389"
+      "sha256": "28ee765062b3d11b79afa65607e2ada929f82e6643edf1ac3f07c4ae77f65760"
     },
     {
       "label": "recipes",
       "width": 303,
-      "height": 403,
-      "sha256": "fa7843d4aaeed00f9e522f5c9716cfcd4b1063137fa567229a52d651a0013583"
+      "height": 423,
+      "sha256": "5a106f89c000acdaa37294cfea172b0e9aed8520c39b01abb323b1304c42431a"
     },
     {
       "label": "channels-roles",
       "width": 1600,
       "height": 1000,
-      "sha256": "701837cfb6e3a277b883c6840ec554680a948c19d0fdaf9648bfa128e032dd88"
+      "sha256": "71e64102b25c3eb798a2b3ad11a5af6a940abef09c5aff4a413ffe543e366ea9"
     },
     {
       "label": "inspector-catalog",
       "width": 880,
-      "height": 620,
-      "sha256": "9766b56b74f831975c398f69fa498719eb7c68c51e77db9fec6a497b6ac3192e"
+      "height": 640,
+      "sha256": "4b9d2c28f8aef1e4ca94a0f4d995e49ecc78e3f8640ea70cbe4b1db6043be82a"
     },
     {
       "label": "provider-health",
       "width": 980,
-      "height": 766,
-      "sha256": "874966cc26c03fdca9996796262e9103873d01055d346d57860eb83dc75872c2"
+      "height": 820,
+      "sha256": "b0616598ef49278d15423c4e9dcd2d77b0046099277762e336a3554af51fdae8"
     },
     {
       "label": "settings",
       "width": 980,
       "height": 820,
-      "sha256": "3d05a61c6e50de21aa43bd825e8e3fb5e39d8746b44bac3ea5aac3cf5dc4d6c6"
+      "sha256": "d96d15e31fb4d316b00a13eec9357b776fc66775f25d8a785faaf421157cfe1a"
     },
     {
       "label": "recovery",
       "width": 456,
-      "height": 221,
-      "sha256": "176b894f23bb4f696878f9c3b344a3b1af43ebcae3296f71dad469334e314006"
+      "height": 388,
+      "sha256": "512397b099995d355d32cb8bba4f65e1d7af7b3152f667aa7258f79a054a5e36"
     },
     {
       "label": "saving",
       "width": 1600,
       "height": 1000,
-      "sha256": "4dcc7cf224250296651dd1a4a16b370d2a82b6745640c0dfbe9f55e33bf2fafe"
+      "sha256": "37e1fcd3049ef7f8aa81cad3986ea05d586ca690340419b13c0ff1bb53fe2f3a"
     },
     {
       "label": "export",
@@ -169,115 +169,115 @@
       "label": "plugin-edit-permit",
       "width": 556,
       "height": 222,
-      "sha256": "ad060332b3625c2e8bc09b90f5e46cfebfddd995aa2b1b17d6d52071cb13f76e"
+      "sha256": "0b83b84e86beec2d593401c5e979b1f74c5279e868318af59bd89bf5ce90907b"
     },
     {
       "label": "plugin-run-permit",
-      "width": 514,
+      "width": 528,
       "height": 237,
-      "sha256": "ec268e783cdf3f285faaed56712cf1bae9abe6c67bd8168b79620ec093e2a6b2"
+      "sha256": "d5f5246ada398400107c8cc9d3d201299726e2046f80817b591c942ad855346d"
     },
     {
       "label": "inspector-prompt-text",
       "width": 400,
-      "height": 620,
-      "sha256": "4cb2143b6f40112d58e8cc4e184e02ffc1b06ee86fa7c163d498035317053451"
+      "height": 640,
+      "sha256": "af99241089acb7bd933972f21dfa8ed0dee0542e181fb1019d20688c854ef7e6"
     },
     {
       "label": "inspector-prompt-worker",
       "width": 400,
-      "height": 620,
-      "sha256": "8b06cd410090b12470df55236e11775e1d5e9fb41361a9e04ad5aa5418cb4af5"
+      "height": 640,
+      "sha256": "7f6f17d4296dd1dc25efce706b2a53735b49eefc29f41608b830628c3db5ca09"
     },
     {
       "label": "inspector-reference-set",
       "width": 400,
-      "height": 620,
-      "sha256": "15de87f057a4fe885dec73116915bc9b032c37f0b00a041f29f2d3fb715dc8bc"
+      "height": 640,
+      "sha256": "cb945e84ae1060aa9aa8d161205e47c82c281515eed29880d8303054023e090f"
     },
     {
       "label": "inspector-generation-image",
       "width": 400,
-      "height": 620,
-      "sha256": "43b451244076a46869464bcabb24aad34a2a547662ab777f61191af272a91cda"
+      "height": 640,
+      "sha256": "aee303fd6ed779b5d02018cce890a428dad686c4962db8a96e518482b00726c7"
     },
     {
       "label": "inspector-edit-image",
       "width": 400,
-      "height": 620,
-      "sha256": "8fa83f05dcd8c10b6a42b5b8c68796731fe607597ea88c27622ffbc31aacf373"
+      "height": 640,
+      "sha256": "d58931ba2487cec5d2e94887b5ea274c0675ef021cfbf5231d2d897f940aca51"
     },
     {
       "label": "inspector-edit-mask",
       "width": 400,
-      "height": 620,
-      "sha256": "a9d7bd4ae221731fb4a99960b5f11403eff2bfe8163da05604a0db099447d7b4"
+      "height": 640,
+      "sha256": "97f18adda6ff4c76d7d2b21bd69865c132466027abc3423e8b2b719dd8eb0e37"
     },
     {
       "label": "inspector-edit-transform",
       "width": 400,
-      "height": 620,
-      "sha256": "5215dea0f6d0d8e57f0bf88c0f59967e794bb58af8dd52d57906fe6a9f4b49c2"
+      "height": 640,
+      "sha256": "0c15707a20fc13ea7aac869719b85244c555d6d4b4c21ffb13eff2c64fab437b"
     },
     {
       "label": "inspector-review-compare",
       "width": 400,
-      "height": 620,
-      "sha256": "b97712b0195a1800746d523663ef20a52c417ff1d97b4ec91590cb8d66cbc25d"
+      "height": 640,
+      "sha256": "3baf800f817f29c7dd49de5707adab06f2437dc4f5d281093f4fd4def66b0878"
     },
     {
       "label": "inspector-review-evaluate",
       "width": 400,
-      "height": 620,
-      "sha256": "f0691d9d0058afb494968fc0dcb5e43a5cc7f22c20290086d3cc2656c7d64cfe"
+      "height": 640,
+      "sha256": "02c15b0640984e45b1d7b5495b48ccfe2356655c816e853b9f4b2d5ead8d7d06"
     },
     {
       "label": "inspector-review-filter",
       "width": 400,
-      "height": 620,
-      "sha256": "7a803d3155b2c1421a5c4490cc4455a4385a29b17814db71ad0258f67e2fedc2"
+      "height": 640,
+      "sha256": "eb2b63c72812de9932bdc9f160db93dcdf1d23656ccd1ed6dacd3c4019eaf55d"
     },
     {
       "label": "inspector-flow-variables",
       "width": 400,
-      "height": 620,
-      "sha256": "73b671ddce458ccf5f8c417edc01bab98f3b44da0312207868eeea930f933341"
+      "height": 640,
+      "sha256": "d718752c9e5e8f85e9eb0fae77bb065ad6243d523b9d11b7332f74485b4a6f8f"
     },
     {
       "label": "inspector-flow-batch",
       "width": 400,
-      "height": 620,
-      "sha256": "71be829e608152015b21ce70432f80290411a4f758eb9bc11625ed62e759a1fe"
+      "height": 640,
+      "sha256": "eaaf051030f8423ca448b7938c903d0a7a36d2955debdb43c72f01dc605de0ca"
     },
     {
       "label": "inspector-flow-join",
       "width": 400,
-      "height": 620,
-      "sha256": "12196cbdfc5e252b89120dddd8c2d492fd7fa468ca2a71a059b971812bfb1672"
+      "height": 640,
+      "sha256": "c7908189631cc212cd89f00b0ea83c0fd79ee26c6c45a160dae2c2894b9fb3ef"
     },
     {
       "label": "inspector-output-collection",
       "width": 400,
-      "height": 620,
-      "sha256": "52719813d679243758bb5ab9f2c3983eb4bb32300858589ad60a42c11b5986e9"
+      "height": 640,
+      "sha256": "18d91b6a0b2bd9e9bd89e834aae3ac0a1dda066a9cbd00656b643bcd86ca45f4"
     },
     {
       "label": "inspector-output-export",
       "width": 400,
-      "height": 620,
-      "sha256": "eb7019c63bfd82ff3b680c996dfa7bd6f20a31086d16009ca8b2f475d748452f"
+      "height": 640,
+      "sha256": "1b60192a05ddf9a07c7d502729f05dfb59027a2ec12e0a24a8efb03df9e15204"
     },
     {
       "label": "inspector-canvas-note",
       "width": 400,
-      "height": 620,
-      "sha256": "70a6255bbb0e3e364b26a2178a8eb978286fbb22c0190f8fe2cd65c58dd10922"
+      "height": 640,
+      "sha256": "5a3022e54d02ea412c1697555dd97d4114a3385fefe4c1fe47e083e4404a63f5"
     },
     {
       "label": "inspector-canvas-drawing",
       "width": 400,
-      "height": 620,
-      "sha256": "27820181057c654bc9dfcdabf5d541a6bf57902e49f4572cb815bf7a06d7d71d"
+      "height": 640,
+      "sha256": "98b404c37452addd5868eaaaba5588b124ca25fce5c7e9c712e3c71b4b161fc2"
     }
   ]
 }

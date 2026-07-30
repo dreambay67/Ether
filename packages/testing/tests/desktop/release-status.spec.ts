@@ -120,6 +120,10 @@ test("Provider Health and Settings expose truthful local runtime, privacy, layou
       },
       runtime: {
         providerHealth: async () => health,
+        geminiCredentialStatus: async () => ({ state: "not-configured" as const, verifiedAt: null }),
+        connectGeminiCredential: async () => ({ state: "configured" as const, verifiedAt: null }),
+        testGeminiCredential: async () => ({ state: "verified" as const, verifiedAt: "2026-07-30T00:00:00.000Z" }),
+        removeGeminiCredential: async () => ({ state: "not-configured" as const, verifiedAt: null }),
         providerPolicy: async () => ({
           antigravityCreditOveragesConfirmed: antigravityConfirmed
         }),
@@ -167,6 +171,23 @@ test("Provider Health and Settings expose truthful local runtime, privacy, layou
   await expect(settings).toContainText("Off in Ether 4.0");
   await expect(settings).toContainText("Credentials, user paths, and personal identifiers");
   await expect(settings.getByTestId("release-recovery-status")).toContainText("healthy");
+  const geminiSettings = settings.getByTestId("gemini-api-settings");
+  const geminiKey = geminiSettings.getByLabel("Gemini API key");
+  await expect(geminiKey).toHaveAttribute("type", "password");
+  await expect(geminiSettings).toContainText("Not configured");
+  await geminiKey.fill("test-only-protected-entry");
+  await geminiSettings.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(geminiKey).toHaveValue("");
+  await expect(geminiSettings).toContainText("Configured — test recommended");
+  await geminiSettings.getByRole("button", { name: "Test", exact: true }).click();
+  await expect(geminiSettings).toContainText("Verified");
+  await geminiKey.fill("replacement-test-entry");
+  await geminiSettings.getByRole("button", { name: "Replace", exact: true }).click();
+  await expect(geminiKey).toHaveValue("");
+  await geminiSettings.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(geminiSettings).toContainText("Not configured");
+  await expect(geminiSettings).not.toContainText("test-only-protected-entry");
+  await expect(geminiSettings).not.toContainText("replacement-test-entry");
   const antigravityPolicy = settings.getByRole("checkbox", {
     name: "Confirm Antigravity AI Credit Overages is Never"
   });

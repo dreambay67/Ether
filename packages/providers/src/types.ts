@@ -66,6 +66,7 @@ export type ProviderOperation =
 export type ProviderCapabilitySource =
   | "codex-cli"
   | "antigravity-cli"
+  | "gemini-developer-api"
   | "simulation"
   | "api-slot"
   | "adapter-slot"
@@ -86,6 +87,12 @@ export type ProviderAvailability = "available" | "unavailable";
 
 export type ProviderFailureCategory =
   | "authentication"
+  | "billing"
+  | "quota"
+  | "safety"
+  | "network"
+  | "server"
+  | "ambiguous"
   | "capability"
   | "invalid-input"
   | "timeout"
@@ -133,6 +140,8 @@ export type ProviderCapabilityProfile = {
     aspectRatio?: string;
     tier?: string;
   }>;
+  /** Provider-supported generated image formats. Input MIME types remain in mediaLimits. */
+  outputFormats?: readonly ("image/png" | "image/jpeg")[];
   /** Provider-advertised concurrent request ceiling, when it is known. */
   maxParallelism?: number;
 };
@@ -220,6 +229,7 @@ export type GenerationOutputSettings = {
   resolution: string;
   width: number;
   height: number;
+  outputFormat?: "image/png" | "image/jpeg";
 };
 
 export type GenerationProviderInput = {
@@ -292,6 +302,8 @@ export type ImageEditProviderInput = {
   sections: GenerationProviderInput["sections"];
   references: GenerationReferenceInput[];
   edgeRoles: GenerationProviderInput["edgeRoles"];
+  /** Expected artifacts for this paid call. Providers must reject unsupported counts before dispatch. */
+  outputCount?: number;
   sourceImage: ImageEditSourceInput;
   mask: ImageEditMaskInput;
   recipe?: ImageEditRecipeInput;

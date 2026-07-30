@@ -9,6 +9,7 @@ import {
   ipcMain,
   Menu,
   protocol,
+  safeStorage,
   type MenuItemConstructorOptions
 } from "electron";
 import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
@@ -26,6 +27,7 @@ import {
 } from "./protocol/etherAssetProtocol.js";
 import { isLocalDevelopmentRendererUrl } from "./rendererUrl.js";
 import { createDesktopSettingsStore } from "./settingsStore.js";
+import { createGeminiCredentialStore } from "./services/geminiCredentialStore.js";
 import {
   DesktopApplicationService,
   OpenDocumentController,
@@ -52,7 +54,11 @@ import {
   drainLifecycleSteps,
   startContainedLifecycle
 } from "./lifecycle.js";
-import { createMainWindowOptions, showMainWindowMaximized } from "./windowOptions.js";
+import {
+  createCredentialWindowOptions,
+  createMainWindowOptions,
+  showMainWindowMaximized
+} from "./windowOptions.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_RENDERER_INTERACTIVE_TIMEOUT_MS = 10_000;
@@ -77,6 +83,8 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   providerService: ProviderService | null;
   mcpBridge: EtherMcpApplicationBridge | null;
 }> {
+  const launchArgv = options.initialArgv ?? process.argv.slice(1);
+  const credentialOnly = launchArgv.includes("--connect-gemini");
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     throw Object.assign(new Error("Another Ether instance owns the application lock."), {
@@ -109,20 +117,34 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   process.on("uncaughtExceptionMonitor", flushDiagnosticsAfterCrash);
 
   const preloadPath = path.join(moduleDirectory, "..", "preload", "preload.cjs");
-  const mainWindow = new BrowserWindow(createMainWindowOptions(preloadPath));
+  const mainWindow = new BrowserWindow(credentialOnly
+    ? createCredentialWindowOptions(preloadPath)
+    : createMainWindowOptions(preloadPath));
   mainWindow.once("ready-to-show", () => {
-    showMainWindowMaximized(mainWindow);
+    if (credentialOnly) {
+      mainWindow.center();
+      mainWindow.show();
+    } else {
+      showMainWindowMaximized(mainWindow);
+    }
   });
   const rendererInteractive = createRendererInteractiveGate();
   const markRendererInteractive = () => rendererInteractive.mark();
-  const rendererUrl = options.rendererUrl ?? resolveRendererUrl();
+  const rendererUrl = credentialOnly
+    ? credentialRendererUrl(options.rendererUrl ?? resolveRendererUrl())
+    : options.rendererUrl ?? resolveRendererUrl();
   const dialogs = options.dialogs ?? createNativeDialogPort(() => mainWindow);
   const settings = createDesktopSettingsStore(() => path.join(app.getPath("userData"), "settings.json"));
+  const geminiCredentials = createGeminiCredentialStore({
+    credentialPath: () => path.join(app.getPath("userData"), "gemini-api-credential.json"),
+    safeStorage
+  });
   const initialSettings = await settings.load();
   const providerService = options.simulationMode === true
     ? null
     : options.providerService ?? createProviderService({
         codex: createCodexRuntimeService(),
+        geminiCredentials,
         antigravityCreditOveragesConfirmed:
           initialSettings.providerPolicy.antigravityCreditOveragesConfirmed
       });
@@ -455,10 +477,12 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     void openController.request("open-file", filePath).catch(reportFailure);
   });
 
-  const initialDocument = findEtherArgument(options.initialArgv ?? process.argv.slice(1));
-  initialDocumentStartup = initialDocument !== null
-    ? openController.request("argv", initialDocument)
-    : service.bootstrap();
+  const initialDocument = findEtherArgument(launchArgv);
+  initialDocumentStartup = credentialOnly
+    ? Promise.resolve(null)
+    : initialDocument !== null
+      ? openController.request("argv", initialDocument)
+      : service.bootstrap();
   const rendererStartup = mainWindow.loadURL(rendererUrl);
   await Promise.all([initialDocumentStartup, rendererStartup]);
   initialDocumentStartup = null;
@@ -484,11 +508,11 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     return { mainWindow, service, providerService, mcpBridge };
   }
   rendererLoaded = true;
-  app.setJumpList([{ type: "recent" }]);
-  if (rememberAfterRendererLoad) {
+  if (!credentialOnly) app.setJumpList([{ type: "recent" }]);
+  if (!credentialOnly && rememberAfterRendererLoad) {
     rememberWhenRendererLoaded();
   }
-  if (options.mcpBridgeFactory !== false) {
+  if (!credentialOnly && options.mcpBridgeFactory !== false) {
     const startMcpBridge = options.mcpBridgeFactory ?? startEtherMcpApplicationBridge;
     mcpBridgeStartup = startContainedLifecycle(
       () => startMcpBridge(createDesktopMcpBridgeHost(service)),
@@ -505,7 +529,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
       return bridge;
     });
   }
-  if (providerService !== null) {
+  if (!credentialOnly && providerService !== null) {
     providerStartup = startProviderServiceInBackground(providerService, (error) => {
       logDiagnostic({
         correlationId: randomUUID(),
@@ -522,6 +546,12 @@ function resolveRendererUrl(): string {
   const developmentUrl = process.env.ETHER_RENDERER_URL;
   if (isLocalDevelopmentRendererUrl(developmentUrl, !app.isPackaged)) return developmentUrl!;
   return pathToFileURL(path.join(app.getAppPath(), "dist", "index.html")).href;
+}
+
+function credentialRendererUrl(rendererUrl: string): string {
+  const url = new URL(rendererUrl);
+  url.searchParams.set("surface", "gemini-connect");
+  return url.href;
 }
 
 function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPort {

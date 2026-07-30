@@ -24,13 +24,18 @@ describe("Ether 4.0 release documentation", () => {
       "Concurrent run",
       "8 active calls globally",
       "4 Codex calls across App Server",
-      "4 Antigravity calls across verified profiles",
-      "fifth Codex or Antigravity call and ninth global call wait",
+      "4 Gemini Developer API image calls across all documents/jobs/batches",
+      "separate 4 only for explicitly selected Antigravity fallback work",
+      "A fifth same-family call and ninth global call wait",
       "dimension names and values",
       "Antigravity safety",
       "AI Credit Overages",
+      "Ether.exe --connect-gemini",
+      "fills the live Windows content area",
       "Terminal jobs do not show a misleading Resume button"
     ]) expect(manual).toContain(phrase);
+    expect(troubleshooting).toContain("fixed-size upper-left workspace");
+    expect(notes).toContain("protected Gemini credential connector");
     expect(notes).toContain("terminal jobs do not expose Resume");
     expect(troubleshooting).toContain("unknown providers remain at 1");
     expect(manual).not.toContain("**Resume** schedules unfinished work");
@@ -206,11 +211,11 @@ describe("Ether 4.0 release documentation", () => {
     expect(capture).toContain('"provider.capabilities"');
     expect(capture).toContain('new Set(["Checking", "Unknown"])');
     expect(capture).toContain('new Set(["Pending"])');
-    expect(capture).toContain('resolved.runtime !== "Available"');
-    expect(capture).toContain('resolved.transport !== "app-server"');
-    expect(capture).toContain('resolved.verifiedProfiles !== "16"');
+    expect(capture).toContain('["Available", "Degraded", "Unavailable"].includes(resolved.runtime)');
+    expect(capture).toContain('!resolved.transport');
+    expect(capture).toContain('!/^\\d+$/u.test(resolved.verifiedProfiles)');
     expect(capture).toContain(
-      "Installed Provider Health did not resolve to the reviewed Codex 0.144.2 release contract",
+      "Installed Provider Health did not resolve to a truthful local provider state",
     );
     expect(settingsPanel).toContain('aria-labelledby="settings-title"');
     expect(settingsPanel).toContain('data-testid="release-recovery-status"');

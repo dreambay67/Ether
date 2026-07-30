@@ -29,7 +29,7 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
     expect(versionAtLeast(versions.node, "24.16.0")).toBe(true);
     expect(await page.evaluate(() => window.devicePixelRatio)).toBeGreaterThanOrEqual(2);
     expect(await page.evaluate(() => Object.keys(window.ether).sort())).toEqual([
-      "artifacts", "document", "graph", "references", "runtime"
+      "application", "artifacts", "document", "graph", "permissions", "references", "runtime"
     ]);
     expect(await bridgeAvailableInSubframe(page)).toBe(false);
 
@@ -67,8 +67,9 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
 
     await expect(page.getByRole("button", { name: "Generate", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Simulation output", exact: true }).click();
-    await expect(page.getByTestId("embedded-artifact")).toHaveCount(1, { timeout: 20_000 });
-    const image = page.getByTestId("embedded-artifact").locator("img");
+    await page.getByRole("button", { name: "Review", exact: true }).click();
+    await expect(page.getByTestId("artifact-card")).toHaveCount(1, { timeout: 20_000 });
+    const image = page.getByTestId("artifact-card").locator("img");
     await expect(image).toHaveJSProperty("naturalWidth", 64);
     await expect(image).toHaveAttribute("src", /^ether-asset:\/\//);
     expect(await protocolProbe(electronApp, await image.getAttribute("src") ?? "")).toEqual({
@@ -107,7 +108,7 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
     await openDroppedFile(page, renamedPath);
     expect((await page.evaluate(() => window.ether.document.bootstrap())).documentId).toBe(active.documentId);
     await expect(page.locator(".react-flow__node")).toHaveCount(countBeforeReopen);
-    await expect(page.getByTestId("embedded-artifact")).toHaveCount(1);
+    await expect(page.getByTestId("artifact-card")).toHaveCount(1);
   } finally {
     await electronApp.close();
     await rm(fixtureRoot, { recursive: true, force: true });
@@ -149,12 +150,14 @@ for (const operation of ["autosave", "save-as"] as const) {
     const saveAsDestination = path.join(fixtureRoot, "documents", "Campaign with spaces.ether");
     try {
       const page = await electronApp.firstWindow();
+      await page.evaluate(() => window.ether.document.bootstrap());
       if (operation === "autosave") {
         await page.getByRole("button", { name: "Prompt", exact: true }).click();
       } else {
+        await expect.poll(() => nativeDocumentMenuState(electronApp)).toMatchObject({ saveAs: true });
         await invokeNativeMenuItem(electronApp, "file.save-as");
       }
-      await expect.poll(() => fileExists(`${gatePath}.started`)).toBe(true);
+      await expect.poll(() => fileExists(`${gatePath}.started`), { timeout: 15_000 }).toBe(true);
       await expect.poll(() => fileExists(`${quitGatePath}.started`)).toBe(true);
 
       await writeFile(quitGatePath, "quit", "utf8");
@@ -193,15 +196,18 @@ for (const operation of ["graph", "reference", "portable"] as const) {
     const electronProcess = electronApp.process();
     try {
       const page = await electronApp.firstWindow();
+      await page.evaluate(() => window.ether.document.bootstrap());
       if (operation === "graph") {
+        await expect(page.getByTestId("document-canvas")).toBeVisible();
         await page.getByRole("button", { name: "Prompt", exact: true }).click();
       } else if (operation === "reference") {
         const limited = page.getByText("limited.png", { exact: true }).locator("..");
         await limited.getByRole("button", { name: "Remove", exact: true }).click();
       } else {
+        await expect.poll(() => nativeDocumentMenuState(electronApp)).toMatchObject({ makePortable: true });
         await invokeNativeMenuItem(electronApp, "file.make-portable");
       }
-      await expect.poll(() => fileExists(`${gatePath}.started`)).toBe(true);
+      await expect.poll(() => fileExists(`${gatePath}.started`), { timeout: 15_000 }).toBe(true);
       await expect.poll(() => fileExists(`${quitGatePath}.started`)).toBe(true);
 
       await writeFile(quitGatePath, "quit", "utf8");

@@ -173,24 +173,32 @@ function capabilityFor(requirement: CapabilityRequirement, providerId: string, p
 }
 
 export function substitutionsFor(requirements: readonly CapabilityRequirement[]): ProviderSubstitution[] {
-  return requirements.flatMap((item) => [
-    {
+  return requirements.flatMap((item) => {
+    const substitutions: ProviderSubstitution[] = [{
       requirementId: item.id,
       providerId: "codex",
       profileId: item.operation === "edit-image" ? "image-edit" : item.operation === "llm" ? "balanced" : "image-default",
       priority: 0,
       capability: capabilityFor(item, "codex", item.operation === "edit-image" ? "image-edit" : item.operation === "llm" ? "balanced" : "image-default"),
       parameterBindings: []
-    },
-    {
+    }];
+    if (
+      (item.operation === "generate-image" || item.operation === "edit-image") &&
+      item.minimumOutputs === 1
+    ) substitutions.push({
       requirementId: item.id,
-      providerId: "antigravity",
-      profileId: item.operation === "edit-image" ? "nano-banana-2-edit" : item.operation === "llm" ? "reasoning" : "nano-banana-2",
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2",
       priority: 1,
-      capability: capabilityFor(item, "antigravity", item.operation === "edit-image" ? "nano-banana-2-edit" : item.operation === "llm" ? "reasoning" : "nano-banana-2"),
+      capability: {
+        ...capabilityFor(item, "google-gemini-api-nano-banana-2", "nano-banana-2"),
+        outputFormats: ["image/jpeg"],
+        maxOutputsPerCall: 1
+      },
       parameterBindings: []
-    }
-  ]);
+    });
+    return substitutions;
+  });
 }
 
 export function checkpoint(graphRef: string, nodeRef: string, title: string): ReviewCheckpoint {

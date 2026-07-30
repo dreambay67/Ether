@@ -1,6 +1,8 @@
 import { Accessibility, Info, LayoutPanelTop, LockKeyhole, RotateCcw, Settings2, ShieldCheck, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { GeminiCredentialControls } from "./GeminiCredentialControls";
+
 export type InterfacePreferences = {
   density: "comfortable" | "compact";
   motion: "system" | "reduced";
@@ -182,6 +184,8 @@ export function SettingsPanel({
               : "All Antigravity profiles are disabled. Codex remains available independently."}</p>
             <small role="status">{providerPolicySaving ? "Refreshing provider capabilities…" : providerPolicyMessage}</small>
           </section>
+
+          <GeminiCredentialControls />
 
           <section aria-labelledby="recovery-settings" data-testid="release-recovery-status">
             <div className="settings-section-title"><RotateCcw size={17} /><div><h3 id="recovery-settings">Recovery</h3><p>The active document's production recovery report.</p></div></div>

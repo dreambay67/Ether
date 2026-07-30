@@ -172,6 +172,64 @@ describe("Ether execution planner", () => {
     expect(plan.steps.find((step) => step.nodeId === "generator")?.dependencyStepIds).toEqual(["step-worker"]);
   });
 
+  it("normalizes historical Google aliases into the immutable Gemini binding and JPEG request", () => {
+    const graph = representativeGraph();
+    const generator = graph.nodes.find((candidate) => candidate.id === "generator")!;
+    if (generator.config.kind !== "generation.image") throw new Error("Expected Image Generator.");
+    generator.config = {
+      ...generator.config,
+      providerId: "google-nano-banana-default",
+      profileId: "nano-banana-2"
+    };
+    const gemini: ProviderCapability = {
+      ...capability,
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2",
+      modelId: "gemini-3.1-flash-image",
+      outputFormats: ["image/jpeg"],
+      maxParallelism: 4
+    };
+    const plan = compile(graph, { kind: "graph" }, [gemini]);
+    const step = plan.steps.find((candidate) => candidate.nodeId === "generator")!;
+    expect(step.providerBinding).toMatchObject({
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2"
+    });
+    expect(step.parameters).toMatchObject({
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2",
+      outputFormat: "image/jpeg"
+    });
+  });
+
+  it("rejects a persisted batch allocation that cannot honor the target output format", () => {
+    const graph = representativeGraph();
+    const batch = graph.nodes.find((candidate) => candidate.id === "batch")!;
+    if (batch.config.kind !== "flow.batch") throw new Error("Expected Batch.");
+    batch.config = {
+      ...batch.config,
+      allocations: [{
+        id: "incompatible-gemini",
+        targetNodeId: "generator",
+        count: 1,
+        providerId: "google-gemini-api-nano-banana-2",
+        profileId: "nano-banana-2",
+        modelId: "gemini-3.1-flash-image"
+      }]
+    };
+    const gemini: ProviderCapability = {
+      ...capability,
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2",
+      modelId: "gemini-3.1-flash-image",
+      outputFormats: ["image/jpeg"],
+      maxOutputsPerCall: 1
+    };
+    expect(() => compile(graph, { kind: "graph" }, [gemini])).toThrow(
+      /incompatible with the Image Generator ratio, resolution, output format, or output count/u
+    );
+  });
+
   it("resolves branch, selected, downstream, and refresh-upstream by edges", () => {
     const graph = representativeGraph();
     expect(resolveScope(graph, { kind: "branch", rootNodeId: "generator" })).toEqual([
@@ -250,12 +308,13 @@ describe("Ether execution planner", () => {
       modelId: "chatgpt-image-2",
       maxParallelism: 1
     };
-    const antigravity: ProviderCapability = {
+    const gemini: ProviderCapability = {
       ...capability,
-      providerId: "google-nano-banana-2",
-      profileId: "google-nano-banana-2",
-      modelId: "nano-banana-2",
-      maxParallelism: 1
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2",
+      modelId: "gemini-3.1-flash-image",
+      outputFormats: ["image/jpeg"],
+      maxParallelism: 4
     };
     const worker = graph.nodes.find((candidate) => candidate.id === "worker")!;
     if (worker.config.kind !== "prompt.worker") throw new Error("Expected the representative Worker node.");
@@ -270,7 +329,8 @@ describe("Ether execution planner", () => {
     generatorNode.config = {
       ...generatorNode.config,
       providerId: codexImage.providerId,
-      profileId: codexImage.profileId
+      profileId: codexImage.profileId,
+      outputFormat: "image/jpeg"
     };
     const batch = graph.nodes.find((candidate) => candidate.id === "batch")!;
     if (batch.config.kind !== "flow.batch") throw new Error("Expected the representative Batch node.");
@@ -304,16 +364,16 @@ describe("Ether execution planner", () => {
         profileId: codexImage.profileId,
         modelId: codexImage.modelId!
       }, {
-        id: "image-antigravity",
+        id: "image-gemini",
         targetNodeId: "generator",
         count: 4,
-        providerId: antigravity.providerId,
-        profileId: antigravity.profileId,
-        modelId: antigravity.modelId!
+        providerId: gemini.providerId,
+        profileId: gemini.profileId,
+        modelId: gemini.modelId!
       }]
     };
 
-    const capabilities = [codexWorkerA, codexWorkerB, codexImage, antigravity];
+    const capabilities = [codexWorkerA, codexWorkerB, codexImage, gemini];
     const first = compile(graph, { kind: "graph" }, capabilities);
     const second = compile(graph, { kind: "graph" }, capabilities);
     const workerStep = first.steps.find((step) => step.nodeId === "worker")!;
@@ -348,9 +408,9 @@ describe("Ether execution planner", () => {
     );
     expect(generatorItems.slice(4).map((item) => item.providerBindingOverride)).toEqual(
       Array.from({ length: 4 }, () => expect.objectContaining({
-        providerId: antigravity.providerId,
-        profileId: antigravity.profileId,
-        modelId: antigravity.modelId
+        providerId: gemini.providerId,
+        profileId: gemini.profileId,
+        modelId: gemini.modelId
       }))
     );
     expect(first.effectiveParallelism).toBe(8);

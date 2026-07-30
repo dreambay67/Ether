@@ -6,11 +6,17 @@ import {
   GenerationProviderRegistry,
   VisionEvaluationProviderRegistry,
   createAntigravityImageProviders,
+  createGeminiImageProviders,
+  GEMINI_IMAGE_PROVIDER_IDS,
+  resolveGoogleImageProviderAlias,
+  type GeminiCredentialState,
+  type GeminiImageProvider,
   type CodexRuntimeHealth
 } from "@ether/providers";
 import type { ProviderCapability, ProviderHealthResult } from "@ether/schema";
 
 import type { CodexRuntimeService } from "./codexRuntime.js";
+import type { GeminiCredentialStatus } from "./geminiCredentialStore.js";
 
 export type ProviderService = ReturnType<typeof createProviderService>;
 
@@ -116,12 +122,31 @@ export function startProviderServiceInBackground(
 export function createProviderService(options: {
   codex: CodexRuntimeService;
   antigravityCreditOveragesConfirmed?: boolean;
+  geminiCredentials?: {
+    status(): Promise<GeminiCredentialStatus>;
+    readApiKey(): Promise<string | null>;
+    connect(apiKey: string): Promise<GeminiCredentialStatus>;
+    markVerified(): Promise<GeminiCredentialStatus>;
+    remove(): Promise<GeminiCredentialStatus>;
+  };
 }) {
   let antigravityCreditOveragesConfirmed =
     options.antigravityCreditOveragesConfirmed === true;
   let antigravityPolicyUpdate: Promise<void> = Promise.resolve();
+  let geminiCredentialState: GeminiCredentialState = "not-configured";
+  let geminiCredentialStatus: GeminiCredentialStatus = { state: "not-configured", verifiedAt: null };
+  const refreshGeminiCredentialState = async () => {
+    if (options.geminiCredentials === undefined) return geminiCredentialStatus;
+    geminiCredentialStatus = await options.geminiCredentials.status();
+    geminiCredentialState = geminiCredentialStatus.state;
+    return geminiCredentialStatus;
+  };
   const createGenerationRegistry = () => new GenerationProviderRegistry([
     options.codex.bundle.generation,
+    ...(options.geminiCredentials === undefined ? [] : createGeminiImageProviders({
+      getApiKey: () => options.geminiCredentials!.readApiKey(),
+      credentialState: () => geminiCredentialState
+    })),
     ...createAntigravityImageProviders({
       creditOveragesPolicy: antigravityCreditOveragesConfirmed
         ? "never-confirmed"
@@ -143,6 +168,7 @@ export function createProviderService(options: {
   const refreshCapabilities = async () => {
     if (capabilityRefresh !== null) return capabilityRefresh;
     capabilityRefresh = (async () => {
+      await refreshGeminiCredentialState();
       await ensureRuntime();
       const health = options.codex.health();
       const imageDiagnostics = await Promise.all(generation.listDescriptors().map(async (descriptor) => {
@@ -173,6 +199,11 @@ export function createProviderService(options: {
             maxReferences: profile.mediaLimits?.maxInputs
               ?? (profile.inputChannels.includes("image") ? 16 : 0),
             maxOutputsPerCall: 1,
+            ...(profile.outputFormats === undefined
+              ? {}
+              : {
+                  outputFormats: [...profile.outputFormats]
+                }),
             ...(profile.maxParallelism === undefined
               ? {}
               : { maxParallelism: profile.maxParallelism }),
@@ -180,7 +211,9 @@ export function createProviderService(options: {
             supportsSeed: false,
             provenance: profile.capabilitySource === "antigravity-cli"
               ? "conformance-verified"
-              : "runtime-discovered",
+              : profile.capabilitySource === "gemini-developer-api"
+                ? "static-constraint"
+                : "runtime-discovered",
             limitations: [...(profile.messages ?? [])]
           }];
         }) ?? []
@@ -250,6 +283,40 @@ export function createProviderService(options: {
     antigravityPolicy: () => ({
       creditOveragesConfirmed: antigravityCreditOveragesConfirmed
     }),
+    geminiCredentialStatus: async () => {
+      await refreshGeminiCredentialState();
+      return { ...geminiCredentialStatus };
+    },
+    connectGeminiCredential: async (apiKey: string) => {
+      if (options.geminiCredentials === undefined) throw providerConfigurationError();
+      const status = await options.geminiCredentials.connect(apiKey);
+      geminiCredentialStatus = status;
+      geminiCredentialState = status.state;
+      capabilitySnapshot = null;
+      return { ...status };
+    },
+    testGeminiCredential: async () => {
+      if (options.geminiCredentials === undefined) throw providerConfigurationError();
+      await refreshGeminiCredentialState();
+      const provider = generation.get(GEMINI_IMAGE_PROVIDER_IDS["nano-banana-2"]);
+      if (!(provider instanceof Object) || typeof (provider as GeminiImageProvider).testConnection !== "function") {
+        throw providerConfigurationError();
+      }
+      await (provider as GeminiImageProvider).testConnection();
+      const status = await options.geminiCredentials.markVerified();
+      geminiCredentialStatus = status;
+      geminiCredentialState = status.state;
+      capabilitySnapshot = null;
+      return { ...status };
+    },
+    removeGeminiCredential: async () => {
+      if (options.geminiCredentials === undefined) throw providerConfigurationError();
+      const status = await options.geminiCredentials.remove();
+      geminiCredentialStatus = status;
+      geminiCredentialState = status.state;
+      capabilitySnapshot = null;
+      return { ...status };
+    },
     setAntigravityCreditOveragesConfirmed: (confirmed: boolean) => {
       const update = antigravityPolicyUpdate.then(async () => {
         if (confirmed === antigravityCreditOveragesConfirmed) {
@@ -280,10 +347,11 @@ export function createProviderService(options: {
     },
     resolveExecutionProviders: (binding: {
       providerId: string;
+      profileId?: string;
     } | null | undefined) => ({
       image: binding === null || binding === undefined
         ? options.codex.bundle.generation
-        : generation.get(binding.providerId) ?? undefined,
+        : generation.get(resolveGoogleImageProviderAlias(binding.providerId, binding.profileId).providerId) ?? undefined,
       worker: binding === null || binding === undefined
         ? options.codex.bundle.assistant
         : assistant.get(binding.providerId) ?? undefined,
@@ -302,6 +370,13 @@ export function createProviderService(options: {
       return closePromise;
     }
   };
+}
+
+function providerConfigurationError(): Error {
+  return Object.assign(new Error("Gemini credential storage is unavailable in this application mode."), {
+    code: "GEMINI_CREDENTIAL_SERVICE_UNAVAILABLE",
+    category: "provider"
+  });
 }
 
 function providerHealth(health: CodexRuntimeHealth): ProviderHealthResult {

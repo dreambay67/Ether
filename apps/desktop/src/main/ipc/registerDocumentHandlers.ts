@@ -111,6 +111,22 @@ export function registerDocumentHandlers(options: {
         );
       }
       return options.setProviderPolicy(policy.antigravityCreditOveragesConfirmed);
+    }],
+    [desktopIpcChannels.runtime.geminiCredentialStatus, () => providerService?.geminiCredentialStatus() ?? {
+      state: "encryption-unavailable" as const,
+      verifiedAt: null
+    }],
+    [desktopIpcChannels.runtime.connectGeminiCredential, (request) => {
+      if (providerService === undefined || providerService === null) throw geminiUnavailable();
+      return providerService.connectGeminiCredential((request as { apiKey: string }).apiKey);
+    }],
+    [desktopIpcChannels.runtime.testGeminiCredential, () => {
+      if (providerService === undefined || providerService === null) throw geminiUnavailable();
+      return providerService.testGeminiCredential();
+    }],
+    [desktopIpcChannels.runtime.removeGeminiCredential, () => {
+      if (providerService === undefined || providerService === null) throw geminiUnavailable();
+      return providerService.removeGeminiCredential();
     }]
   ];
 
@@ -134,6 +150,13 @@ export function registerDocumentHandlers(options: {
     unsubscribe();
     for (const [channel] of registrations) ipcMain.removeHandler(channel);
   };
+}
+
+function geminiUnavailable(): Error {
+  return Object.assign(new Error("Gemini credential controls are unavailable while providers are disabled."), {
+    code: "GEMINI_CREDENTIAL_SERVICE_UNAVAILABLE",
+    category: "provider"
+  });
 }
 
 function assertSender(event: IpcMainInvokeEvent, mainWindow: BrowserWindow, rendererUrl: string): void {

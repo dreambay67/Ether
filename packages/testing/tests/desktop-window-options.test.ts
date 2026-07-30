@@ -1,6 +1,7 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  createCredentialWindowOptions,
   createMainWindowOptions,
   showMainWindowMaximized
 } from "../../../apps/desktop/src/main/windowOptions";
@@ -21,7 +22,7 @@ describe("desktop BrowserWindow options", () => {
     });
   });
 
-  it("maximizes the first window before showing it", () => {
+  it("presents the Chromium surface before maximizing so content tracks the native frame", () => {
     const calls: string[] = [];
     showMainWindowMaximized({
       isDestroyed: () => false,
@@ -29,7 +30,26 @@ describe("desktop BrowserWindow options", () => {
       show: () => calls.push("show")
     });
 
-    expect(calls).toEqual(["maximize", "show"]);
+    expect(calls).toEqual(["show", "maximize"]);
+  });
+
+  it("uses a bounded non-maximizable window for credential-only setup", () => {
+    const options = createCredentialWindowOptions("dist-electron/preload/preload.js");
+    expect(options).toMatchObject({
+      width: 560,
+      height: 660,
+      minWidth: 500,
+      minHeight: 600,
+      maximizable: false,
+      fullscreenable: false,
+      autoHideMenuBar: true,
+      show: false
+    });
+    expect(options.webPreferences).toMatchObject({
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
+    });
   });
 
   it("does not present a destroyed launch window", () => {

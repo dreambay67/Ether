@@ -85,6 +85,45 @@ test("real Ether.exe opens, saves, and renders a portable document on Node 24", 
   }
 });
 
+test("real Ether.exe opens the protected Gemini connector without a workspace", async () => {
+  await requirePackagedApp();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ether-packaged-gemini-connector-"));
+  const appData = path.join(tempRoot, "AppData", "Roaming");
+  const localAppData = path.join(tempRoot, "AppData", "Local");
+  const userDataDirectory = path.join(localAppData, "Ether-Gemini-Connector");
+  const existingProcessIds = await packagedProcessIds();
+  let browser: Browser | null = null;
+
+  await mkdir(appData, { recursive: true });
+  await mkdir(localAppData, { recursive: true });
+  await mkdir(userDataDirectory, { recursive: true });
+  try {
+    const environment: NodeJS.ProcessEnv = { ...process.env, APPDATA: appData, LOCALAPPDATA: localAppData };
+    delete environment.ETHER_RENDERER_URL;
+    const appProcess = spawn(executablePath, [
+      "--remote-debugging-port=0",
+      `--user-data-dir=${userDataDirectory}`,
+      "--disable-gpu",
+      "--connect-gemini"
+    ], { env: environment, stdio: "pipe", windowsHide: true });
+    const processOutput = captureProcessOutput(appProcess);
+    browser = await connectToPackagedApp(userDataDirectory, appProcess, processOutput);
+    const page = browser.contexts()[0].pages()[0] ?? await browser.contexts()[0].waitForEvent("page", { timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Connect Gemini without opening a workspace" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("document-canvas")).toHaveCount(0);
+    await expect(page.getByLabel("Gemini API key")).toHaveAttribute("type", "password");
+    const viewport = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    expect(viewport.width).toBeLessThanOrEqual(560);
+    expect(viewport.height).toBeLessThanOrEqual(660);
+    await page.close();
+    await waitForPackagedExit(existingProcessIds, 15_000);
+  } finally {
+    await browser?.close();
+    await stopPackagedProcesses(existingProcessIds);
+    await rm(tempRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+  }
+});
+
 async function createPortableFixture(tempRoot: string, documentPath: string) {
   const service = new DesktopApplicationService({
     appDataRoot: path.join(tempRoot, "fixture-appdata"),

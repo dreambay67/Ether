@@ -8,10 +8,11 @@ Ether 4.0.0 is a Windows-first, local-first release centered on a single portabl
 - A frozen graph model with 17 canonical nodes, six channels, and 15 explicit connection roles.
 - Durable immutable run plans, Job Center cancellation and failed-work retry, automatic interrupted-work recovery, Batch Matrix, and output versions.
 - Reference Desk, Artifact Observatory, Compare, Codex-backed Evaluate, deterministic Filter, collections, explicit export, and an opt-in Live Output mirror.
-- Real local Codex and Antigravity capability discovery with conformance-gated controls and no hidden paid API fallback.
+- Real local Codex capability discovery plus a paid Gemini Developer API Nano Banana route with no hidden provider substitution; retained Antigravity CLI is explicit fallback only.
 - Twelve executable starter recipes and a typed Codex plugin/MCP workflow guarded by Inspect, Edit, and plan-bound Run permits.
 - AppData-owned recovery, read-only recovery where possible, non-destructive repair, security-scoped media/file access, and installable Windows packaging.
-- Maximized-by-default launch with standard Windows minimize, restore, resize, and close controls retained.
+- Maximized-by-default launch with standard Windows minimize, restore, resize, full-screen, and close controls retained; the workspace continuously fills the live window content area.
+- A dedicated `Ether.exe --connect-gemini` launch opens only the protected Gemini credential connector, so a key can be connected or tested without opening a workspace or putting credential material in a command.
 
 ## Important compatibility change
 
@@ -19,15 +20,15 @@ Ether 4.0.0 is a Windows-first, local-first release centered on a single portabl
 
 ## Provider availability
 
-Provider controls are present only after local discovery and conformance validation. Codex image behavior is version-pinned. Antigravity Nano Banana 2, Nano Banana Pro, and Nano Banana 2 Lite all passed the 4.0 release probe against CLI 1.1.7. That CLI structurally supports aspect ratio but not output size: real 2K/4K requests on Nano Banana 2 and Pro returned 1K files. Ether consequently offers only the exact conformed 1K size for each verified Antigravity ratio; it does not mislabel 1K output as 2K or 4K. Lite is also restricted to verified 1K output. Ether silently reuses the machine's persisted Antigravity CLI session and does not open an authentication window during ordinary generation. A CLI version or executable-hash change disables stale capabilities until a new probe passes. Codex LLM work, Evaluate, and semantic adapters use Codex only in 4.0. No subscription CLI action silently falls back to a paid API.
+Provider controls are present only after their required local/runtime checks. Nano Banana now normally uses the paid Gemini Developer API through the documented `v1beta` Interactions API. Settings accepts the API key once through a protected field and Electron main stores it with Windows-backed encryption; the renderer can see only configured/verified/error state. Nano Banana 2 maps to `gemini-3.1-flash-image` (0.5K/1K/2K/4K), Pro to `gemini-3-pro-image` (1K/2K/4K), and Lite to `gemini-3.1-flash-lite-image` (1K). Ether requests documented structural ratio/size and the live-conformed JPEG output format, validates returned MIME/dimensions/hash before import, uses no Google Search/Image Search grounding, and records only redacted provenance. Google's guide currently contains conflicting PNG examples, but its output-format schema and the paid service accept JPEG only on this route; Ether does not convert or relabel it. The initial protected representative matrix passed all eight planned calls; together with two earlier format probes, the migration session generated 10 images. Each repeatable release-gate invocation is independently capped at eight images with a conservative maximum estimate of $1.129. The visible cost figures are estimates rather than billing truth. Codex LLM work, Evaluate, and semantic adapters use Codex only in 4.0.
 
-Antigravity routes also require a persisted confirmation under **Settings > Antigravity safety** that the official Antigravity **AI Credit Overages** option is set to **Never**. An unchecked confirmation disables all Antigravity profiles. A checked confirmation does not bypass CLI, authentication, version, or profile conformance checks.
+Antigravity is retained as a visibly labelled **legacy fallback / explicit-only** route. Existing documents bound to `google-nano-banana-*` preserve that choice; no Gemini authentication, billing, quota, safety, network, server, timeout, cancellation, or malformed-output failure switches providers. Antigravity routes require the existing persisted **Settings > Antigravity safety** confirmation and matching CLI conformance; its old 1K-only constraint remains honest for that fallback.
 
 ## Batch allocation and concurrency
 
 Batch Matrix now separates **Full batch**, **Provider and model allocation**, and **Concurrent run**. You can assign exact, stable item counts to verified provider/profile/model lanes for reachable Prompt Workers and Image Generators; unassigned items retain the node default. Ether injects each item's dimension values into its effective prompt.
 
-The scheduler uses one application-wide capacity domain across every job and batch: 8 active calls globally, 4 shared across Codex App Server and explicit executable fallback work, and 4 shared across verified Antigravity profiles. A fifth same-provider call and ninth global call wait; an unknown provider fails closed at 1. A Codex or Antigravity route that cannot meet its four-call contract is unavailable instead of becoming a hidden serial fallback. Job Center offers Cancel for eligible work and Retry for failed work. Ether recovers interrupted queued work on reopen, and terminal jobs do not expose Resume.
+The scheduler uses one application-wide capacity domain across every job and batch: 8 active calls globally, 4 shared across Codex App Server and explicit executable fallback work, 4 shared across Gemini Developer API image profiles, and 4 retained for explicitly selected Antigravity fallback profiles. A fifth same-family call and ninth global call wait; an unknown provider fails closed at 1. A route that cannot meet its four-call contract is unavailable instead of becoming a hidden serial fallback. Job Center offers Cancel for eligible work and Retry for failed work. Ether recovers interrupted queued work on reopen, and terminal jobs do not expose Resume.
 
 ## Before installing
 

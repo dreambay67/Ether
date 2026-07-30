@@ -52,7 +52,7 @@ describe("recipe application boundary", () => {
           selectedProviderId: "ether-fake-local",
           options: [
             expect.objectContaining({ providerId: "codex", available: false }),
-            expect.objectContaining({ providerId: "antigravity", available: false })
+            expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2", available: false })
           ]
         })]
       }

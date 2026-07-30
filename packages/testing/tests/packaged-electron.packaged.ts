@@ -145,6 +145,25 @@ test("NSIS installs a self-contained per-user Ether candidate and preserves user
     });
     expect(launchWindow.bounds.width).toBeGreaterThanOrEqual(launchWindow.workAreaSize.width - 16);
     expect(launchWindow.bounds.height).toBeGreaterThanOrEqual(launchWindow.workAreaSize.height - 16);
+    const rendererSurface = await page.evaluate(() => {
+      const root = document.querySelector("#root")?.getBoundingClientRect();
+      const shell = document.querySelector("main.ether-shell")?.getBoundingClientRect();
+      if (!root || !shell) throw new Error("Packaged renderer surface was unavailable.");
+      return {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        root: { x: root.x, y: root.y, width: root.width, height: root.height },
+        shell: { x: shell.x, y: shell.y, width: shell.width, height: shell.height }
+      };
+    });
+    expect(rendererSurface.viewport.width).toBeCloseTo(launchWindow.contentBounds.width, 0);
+    expect(rendererSurface.viewport.height).toBeCloseTo(launchWindow.contentBounds.height, 0);
+    expect(rendererSurface.root).toEqual({
+      x: 0,
+      y: 0,
+      width: rendererSurface.viewport.width,
+      height: rendererSurface.viewport.height
+    });
+    expect(rendererSurface.shell).toEqual(rendererSurface.root);
     await expect(probeNativeLaunchWindow(installedExecutable(installRoot))).resolves.toEqual({
       caption: true,
       maximizable: true,
@@ -484,6 +503,7 @@ type PackagedSqliteSecurityProbe = {
 
 type PackagedLaunchWindowProbe = {
   bounds: { height: number; width: number };
+  contentBounds: { height: number; width: number };
   count: number;
   fullScreen: boolean;
   maximized: boolean;
@@ -500,6 +520,7 @@ async function probePackagedLaunchWindow(inspectorPort: number): Promise<Package
     if (window === undefined) {
       return {
         bounds: { height: 0, width: 0 },
+        contentBounds: { height: 0, width: 0 },
         count: 0,
         fullScreen: false,
         maximized: false,
@@ -509,6 +530,7 @@ async function probePackagedLaunchWindow(inspectorPort: number): Promise<Package
     }
     return {
       bounds: window.getBounds(),
+      contentBounds: window.getContentBounds(),
       count: windows.length,
       fullScreen: window.isFullScreen(),
       maximized: window.isMaximized(),

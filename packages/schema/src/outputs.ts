@@ -73,6 +73,7 @@ export const ProviderCapabilitySchema = z
     resolutions: z.array(ResolutionOptionSchema),
     maxReferences: z.number().int().nonnegative(),
     maxOutputsPerCall: z.number().int().positive(),
+    outputFormats: z.array(z.enum(["image/png", "image/jpeg"])).optional(),
     maxParallelism: z.number().int().positive().optional(),
     supportsCancellation: z.boolean(),
     supportsSeed: z.boolean(),

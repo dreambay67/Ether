@@ -4,6 +4,20 @@
 **Date:** 2026-07-16
 **Applies to:** Windows packaged Ether 4.0 and its Codex plugin
 
+> **Google image-provider migration addendum (2026-07-30):** This addendum supersedes earlier requirements that treat Antigravity CLI as Nano Banana's default or launch gate. Acceptance requires the paid Gemini Developer API route, while retaining Antigravity only as an explicitly chosen legacy fallback.
+
+## Gemini Developer API migration
+
+- Settings and the credential-only `Ether.exe --connect-gemini` surface show nontechnical Connect, Test, Replace, and Remove controls. The credential-only surface opens no workspace and accepts no key as an argument. Neither surface displays a submitted key, and Test does not generate an image.
+- Windows protected storage is mandatory. If Electron safeStorage is unavailable, malformed, or cannot decrypt its record, Gemini is unavailable; no environment or plaintext fallback is used.
+- Primary IDs are `google-gemini-api-nano-banana-2`, `google-gemini-api-nano-banana-pro`, and `google-gemini-api-nano-banana-2-lite`. Existing `google-nano-banana-*` documents reopen as their explicit Antigravity fallback choice. No API failure changes a binding to Antigravity.
+- Nano Banana 2 sends `gemini-3.1-flash-image` and supports exact 0.5K/1K/2K/4K documented ratio dimensions. Pro sends `gemini-3-pro-image` at 1K/2K/4K; Lite sends `gemini-3.1-flash-lite-image` at 1K only. The selected UI profile exposes only supported ratios, reference limit, and the live-conformed JPEG output format. Ether never labels non-PNG bytes as PNG.
+- The Interactions API request uses `store: false`, contains no Search/Image Search tool, honors cancellation and a bounded timeout, and validates response image MIME, exact dimensions, SHA-256, staging, and provenance before durable import. Generated provenance marks Google-documented SynthID without claiming to inspect it.
+- Redacted outcomes distinguish authentication, billing/prepay, quota/429, safety, network, server, timeout, cancellation, malformed output, and ambiguous completion. Only a bounded Retry-After retry after an unambiguous 429 is permitted. There is no automatic provider substitution.
+- Provider Health truthfully labels Gemini Developer API as the default Nano Banana route and Antigravity as explicit fallback / legacy CLI. Cost guidance is clearly an estimate, not Google billing truth.
+- Two independent jobs prove four Codex plus four Gemini API calls active concurrently, fifth Gemini work queues, ninth global work queues, retry/recovery cannot duplicate accepted output, retained Antigravity stays separately bounded, and unknown provider work remains at one.
+- Paid live conformance is performed only after a user enters the key in protected Settings or the credential-only connector. It records no prompt, key, personal path, or response body in release evidence; each invocation is internally capped at eight generated images with a conservative maximum estimate of $1.129, well below the separately approved live-test spend ceiling. It covers Flash/Pro 1K/2K/4K, Lite 1K, representative ratios, reference input, and editing. The initial 2026-07-30 protected run passed all eight planned calls; including two earlier format probes, that migration session generated 10 images.
+
 Ether 4.0 is not complete because individual components exist. It is complete only when the packaged application passes the end-to-end gates below with real behavior, reliable recovery, and no deceptive fallback.
 
 ---
@@ -30,11 +44,16 @@ pnpm run test:integration
 pnpm run test:smoke
 pnpm run desktop:build
 pnpm run desktop:package:win
+pnpm run release:package:audit
 pnpm run test:packaged
 pnpm run test:performance
 pnpm run test:conformance:codex
+pnpm run test:conformance:gemini
 pnpm run test:conformance:antigravity
 node packages/codex-plugin/scripts/validate-plugin.mjs packages/codex-plugin/ether
+pnpm run manual:capture
+pnpm run manual:build
+pnpm run manual:verify
 ```
 
 The implementation may introduce the missing script names, but the final release must expose one equivalent command for every gate.
@@ -216,8 +235,8 @@ The implementation may introduce the missing script names, but the final release
 - [ ] Reference Desk supports multi-select, include/exclude, role override, and assignment to sets.
 - [ ] Batch Matrix previews dimensions and exact work-item count.
 - [ ] Sequential execution is default.
-- [x] Parallel execution uses one application-wide domain: 8 active calls globally, 4 shared across Codex, 4 shared across Antigravity, and 1 for an unknown provider.
-- [x] Deterministic instrumentation reaches 4 Codex plus 4 Antigravity calls simultaneously; a fifth same-provider call and ninth global call queue across independent batches.
+- [x] Parallel execution uses one application-wide domain: 8 active calls globally, 4 shared across Codex, 4 shared across Gemini API, a separately retained 4 for explicit Antigravity fallback, and 1 for an unknown provider.
+- [x] Deterministic instrumentation reaches 4 Codex plus 4 Gemini API calls simultaneously; a fifth same-provider call and ninth global call queue across independent batches.
 - [x] Prompt Worker and Image Generator exact provider/profile/model allocation lanes persist and execute under the same 4/4 family limits.
 - [x] Cancellation, retry, and interrupted-work recovery remain repeat-safe at eight-way concurrency without duplicate accepted artifacts or leaked capacity.
 - [x] Batch Matrix keeps Full batch, Provider and model allocation, and Concurrent run as separate legible control groups and reports the visible 4/4/8 limits honestly.

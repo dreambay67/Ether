@@ -12,6 +12,7 @@ type ProviderSnapshot = {
   capabilities: ProviderCapability[];
   providers: ProviderHealthResult[];
   runtime: ProviderHealthResult;
+  gemini: { state: "not-configured" | "configured" | "verified" | "error" | "encryption-unavailable"; verifiedAt: string | null };
 };
 
 export function ProviderStatusPanel({ open, onClose }: ProviderStatusPanelProps) {
@@ -24,15 +25,17 @@ export function ProviderStatusPanel({ open, onClose }: ProviderStatusPanelProps)
     setChecking(true);
     setError(null);
     try {
-      const [runtime, health, capabilities] = await Promise.all([
+      const [runtime, health, capabilities, gemini] = await Promise.all([
         window.ether.runtime.providerHealth(),
         window.ether.application.query(query("provider.health")),
-        window.ether.application.query(query("provider.capabilities"))
+        window.ether.application.query(query("provider.capabilities")),
+        window.ether.runtime.geminiCredentialStatus()
       ]);
       setSnapshot({
         runtime,
         providers: (health.payload as { providers: ProviderHealthResult[] }).providers,
-        capabilities: (capabilities.payload as { capabilities: ProviderCapability[] }).capabilities
+        capabilities: (capabilities.payload as { capabilities: ProviderCapability[] }).capabilities,
+        gemini
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Provider health could not be read.");
@@ -116,6 +119,19 @@ export function ProviderStatusPanel({ open, onClose }: ProviderStatusPanelProps)
               </ul>
             ) : <p>No verified provider profile is available. Generation controls remain unavailable instead of guessing.</p>}
           </article>
+          <article className="provider-capability-card" data-testid="gemini-provider-health">
+            <div className="provider-card-title">
+              <div><span>Default Nano Banana route</span><strong>Gemini Developer API</strong></div>
+              <HealthBadge status={snapshot?.gemini.state === "verified" || snapshot?.gemini.state === "configured" ? "available" : "unavailable"} />
+            </div>
+            <dl className="evidence-list">
+              <Evidence label="Connection" value={geminiConnectionLabel(snapshot?.gemini.state)} />
+              <Evidence label="Models" value="Nano Banana 2, Pro, and 2 Lite" />
+              <Evidence label="Grounding" value="Google Search and Image Search off" />
+              <Evidence label="Fallback" value="None — Antigravity is explicit legacy CLI only" />
+            </dl>
+            <p>Credentials remain in protected Windows storage in the main process; this report never reads or displays them.</p>
+          </article>
         </div>
 
         {providerRows.length > 0 ? (
@@ -174,4 +190,12 @@ function StatusMetric({
 
 function Evidence({ label, value }: { label: string; value: string }) {
   return <div><dt>{label}</dt><dd>{value}</dd></div>;
+}
+
+function geminiConnectionLabel(state: ProviderSnapshot["gemini"]["state"] | undefined) {
+  if (state === "verified") return "Verified without generating an image";
+  if (state === "configured") return "Configured — test recommended";
+  if (state === "error") return "Needs replacement";
+  if (state === "encryption-unavailable") return "Protected storage unavailable (fail-closed)";
+  return "Not configured";
 }

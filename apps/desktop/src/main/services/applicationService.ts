@@ -1165,6 +1165,9 @@ export class DesktopApplicationService {
     }
     return this.enqueueLifecycle(async () => {
       if ("documentId" in parsed) this.assertScope(parsed.documentId);
+      if (parsed.name === "graph.applyTransaction") {
+        await this.options.mutationOperationCheckpoint?.("graph");
+      }
       const response = await this.requireApplication().execute(parsed);
       if (response.kind === "error") throw boundaryError(response.error);
       const validated = ApplicationCommandResponseSchema.parse(response);

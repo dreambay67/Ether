@@ -125,6 +125,18 @@ export function createEtherBridge(transport: BridgeTransport) {
             antigravityCreditOveragesConfirmed
           })
         ),
+      geminiCredentialStatus: () => unwrap<{ state: "not-configured" | "configured" | "verified" | "error" | "encryption-unavailable"; verifiedAt: string | null }>(
+        transport.invoke(desktopIpcChannels.runtime.geminiCredentialStatus, {})
+      ),
+      connectGeminiCredential: (apiKey: string) => unwrap<{ state: "not-configured" | "configured" | "verified" | "error" | "encryption-unavailable"; verifiedAt: string | null }>(
+        transport.invoke(desktopIpcChannels.runtime.connectGeminiCredential, { apiKey })
+      ),
+      testGeminiCredential: () => unwrap<{ state: "not-configured" | "configured" | "verified" | "error" | "encryption-unavailable"; verifiedAt: string | null }>(
+        transport.invoke(desktopIpcChannels.runtime.testGeminiCredential, {})
+      ),
+      removeGeminiCredential: () => unwrap<{ state: "not-configured" | "configured" | "verified" | "error" | "encryption-unavailable"; verifiedAt: string | null }>(
+        transport.invoke(desktopIpcChannels.runtime.removeGeminiCredential, {})
+      ),
       rendererInteractive: () => unwrap<null>(transport.invoke(desktopIpcChannels.runtime.rendererInteractive, {}))
     }
   };

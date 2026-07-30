@@ -1,6 +1,7 @@
 import {
   SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM,
   SAFE_CODEX_PROVIDER_PARALLELISM,
+  SAFE_GEMINI_API_PROVIDER_PARALLELISM,
   SAFE_GLOBAL_PARALLELISM,
   SAFE_UNKNOWN_PROVIDER_PARALLELISM,
   type ProviderBinding
@@ -9,12 +10,14 @@ import {
 export {
   SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM,
   SAFE_CODEX_PROVIDER_PARALLELISM,
+  SAFE_GEMINI_API_PROVIDER_PARALLELISM,
   SAFE_GLOBAL_PARALLELISM,
   SAFE_UNKNOWN_PROVIDER_PARALLELISM
 } from "@ether/schema";
 
 export function providerConcurrencyGroup(providerId: string): string {
   if (providerId.startsWith("codex-")) return "codex";
+  if (providerId.startsWith("google-gemini-api-")) return "gemini-api";
   if (providerId.startsWith("google-nano-banana-")) return "antigravity";
   return providerId;
 }
@@ -23,6 +26,7 @@ export function providerParallelismLimit(binding: ProviderBinding): number {
   const group = providerConcurrencyGroup(binding.providerId);
   if (group === "codex") return SAFE_CODEX_PROVIDER_PARALLELISM;
   if (group === "antigravity") return SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM;
+  if (group === "gemini-api") return SAFE_GEMINI_API_PROVIDER_PARALLELISM;
   return SAFE_UNKNOWN_PROVIDER_PARALLELISM;
 }
 

@@ -171,7 +171,8 @@ export function redactSensitiveText(
   const secrets = value
     .replace(/\bBearer\s+("[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/giu, `Bearer ${replacements.secret}`)
     .replace(SECRET_LABEL, (_match, label: string) => `${label}=${replacements.secret}`)
-    .replace(/\b(?:sk|gh[pousr]|xox[baprs])[-_][A-Za-z0-9_-]{6,}\b/giu, replacements.secret);
+    .replace(/\b(?:sk|gh[pousr]|xox[baprs])[-_][A-Za-z0-9_-]{6,}\b/giu, replacements.secret)
+    .replace(/\bAIza[A-Za-z0-9_-]{16,}\b/gu, replacements.secret);
   const quoted = redactQuotedPaths(secrets, replacements, redactFileUris);
   const spaced = redactUnquotedSpacedPaths(quoted, replacements);
   const extensionless = redactExtensionlessSpacedPaths(spaced, replacements);

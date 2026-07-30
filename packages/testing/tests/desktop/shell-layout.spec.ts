@@ -38,6 +38,19 @@ test("keeps the canvas dominant, with its minimap inside its bounds at presentat
 
   for (const viewport of [{ width: 1920, height: 1080 }, { width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
     await page.setViewportSize(viewport);
+    const surface = await page.evaluate(() => {
+      const root = document.querySelector("#root")?.getBoundingClientRect();
+      const shell = document.querySelector("main.ether-shell")?.getBoundingClientRect();
+      if (!root || !shell) throw new Error("Root surface geometry was unavailable");
+      return {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        root: { x: root.x, y: root.y, width: root.width, height: root.height },
+        shell: { x: shell.x, y: shell.y, width: shell.width, height: shell.height }
+      };
+    });
+    expect(surface.root).toEqual({ x: 0, y: 0, width: surface.innerWidth, height: surface.innerHeight });
+    expect(surface.shell).toEqual({ x: 0, y: 0, width: surface.innerWidth, height: surface.innerHeight });
     const layout = await page.evaluate(() => {
       const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
       const canvas = rect("[data-testid=document-canvas]");

@@ -131,9 +131,9 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await expect(page.getByText("1 selected · 100 total")).toBeVisible();
   await page.getByRole("article").filter({ hasText: "Reference 001.png" }).getByRole("checkbox", { name: "Include" }).uncheck();
   await page.getByRole("combobox", { name: "Reference 001.png role override" }).selectOption("style");
-  await page.getByRole("button", { name: "Add to set" }).click();
+  await page.getByRole("button", { name: "Add to set" }).press("Enter");
   await page.getByRole("checkbox", { name: "Select Reference 003.png" }).check();
-  await page.getByRole("button", { name: "Replace set" }).click();
+  await page.getByRole("button", { name: "Replace set" }).press("Enter");
   await page.getByRole("button", { name: "Link file" }).click();
   await page.getByRole("button", { name: "Embed copy" }).click();
   const grid = page.getByTestId("reference-grid");
@@ -144,7 +144,7 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await grid.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll", { bubbles: true })); });
   await page.getByRole("checkbox", { name: "Select Reference 001.png" }).check();
   await page.getByRole("combobox", { name: "Batch dimension" }).selectOption({ label: "Markets × treatments · Market" });
-  await page.getByRole("button", { name: "Send to Batch" }).click();
+  await page.getByRole("button", { name: "Send to Batch" }).press("Enter");
   const assignment = await page.evaluate(() => (window as typeof window & { __workflowState: { commands: Array<{ name: string; payload: Record<string, unknown> }>; pickers: Array<{ storage: string }> } }).__workflowState);
   expect(assignment.commands.find((command) => command.name === "reference.assignToSet")?.payload).toMatchObject({ members: [{ kind: "linked-reference", referenceId: "reference-0", enabled: false, roleOverride: "style" }], replace: false });
   expect(assignment.commands.find((command) => command.name === "reference.assignToSet" && command.payload.replace === true)?.payload).toMatchObject({ members: [{ kind: "linked-reference", referenceId: "reference-2", enabled: true }], replace: true });
@@ -185,9 +185,9 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   const imageTarget = allocation.locator(".batch-target").filter({ hasText: "Image Generator" });
   await expect(workerTarget).toContainText("Prompt Worker");
   await expect(imageTarget).toContainText("Image Generator");
-  await expect(concurrency).toContainText("8 calls globally, shares 4 across Codex, shares 4 across Antigravity");
+  await expect(concurrency).toContainText("8 calls globally, shares 4 across Codex, shares 4 across Gemini API");
   await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Codex up to 4 at once");
-  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Antigravity up to 4 at once");
+  await expect(concurrency.getByLabel("Provider concurrency limits")).toContainText("Antigravity fallback up to 4 at once");
   await workerTarget.getByRole("button", { name: "Add lane" }).click();
   await expect(batchMatrix.getByRole("status")).toContainText("Saving batch changes");
   const workerProvider = workerTarget.getByRole("combobox", { name: "Prompt Worker provider and model route" });
@@ -205,7 +205,7 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   const imageItems = imageTarget.getByRole("spinbutton", { name: "Image Generator allocated items" });
   await expect(imageItems).toHaveValue("10000");
   await expect(imageTarget.getByRole("textbox", { name: "Image Generator model" })).toHaveCount(0);
-  await expect(imageProvider).toContainText("Antigravity · Nano Banana Pro");
+  await expect(imageProvider).toContainText("Antigravity fallback · Nano Banana Pro");
   await expect(imageProvider).not.toContainText("wide-image-only");
   await expect(imageProvider).not.toContainText("small-image-only");
   await imageProvider.selectOption("google-nano-banana-pro\u0000google-nano-banana-pro");

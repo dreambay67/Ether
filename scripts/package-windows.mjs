@@ -1040,12 +1040,13 @@ function assertPrivateText(content, label, rootDir) {
       pattern: /-----BEGIN ((?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY)-----\r?\n(?:[A-Za-z0-9+/=]{20,}\r?\n){2,}-----END \1-----/u
     },
     { name: "OpenAI token", pattern: /\bsk-(?:(?:proj|svcacct|admin)-)?[A-Za-z0-9_-]{20,}\b/u },
+    { name: "Google Gemini API key", pattern: /\bAIza[A-Za-z0-9_-]{16,}\b/u },
     { name: "GitHub token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b/u },
     { name: "Slack token", pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/u },
     { name: "AWS access key", pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/u },
     {
       name: "assigned credential",
-      pattern: /\b(?:OPENAI_API_KEY|GITHUB_TOKEN|SLACK_(?:APP|BOT|USER)_TOKEN|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*["'`][A-Za-z0-9_./+=-]{20,}["'`]/u
+      pattern: /\b(?:OPENAI_API_KEY|GOOGLE_API_KEY|GEMINI_API_KEY|GITHUB_TOKEN|SLACK_(?:APP|BOT|USER)_TOKEN|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*["'`][A-Za-z0-9_./+=-]{20,}["'`]/u
     },
     {
       name: "assigned bearer credential",

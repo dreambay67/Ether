@@ -105,6 +105,7 @@ describe("Windows installer release contract", () => {
     for (const secret of [
       `-----BEGIN PRIVATE KEY-----\n${"a".repeat(64)}\n${"b".repeat(64)}\n-----END PRIVATE KEY-----`,
       `OPENAI_API_KEY="${`sk-${"a".repeat(32)}`}"`,
+      `GEMINI_API_KEY="${`AIza${"f".repeat(32)}`}"`,
       `GITHUB_TOKEN="${`ghp_${"b".repeat(36)}`}"`,
       `SLACK_BOT_TOKEN="${`xoxb-${"c".repeat(32)}`}"`,
       `AWS_ACCESS_KEY_ID=${`AKIA${"D".repeat(16)}`}`,

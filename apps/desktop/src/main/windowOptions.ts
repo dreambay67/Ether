@@ -26,6 +26,20 @@ export function createMainWindowOptions(preloadPath: string): BrowserWindowConst
 
 export function showMainWindowMaximized(window: LaunchWindow): void {
   if (window.isDestroyed()) return;
-  window.maximize();
   window.show();
+  window.maximize();
+}
+
+export function createCredentialWindowOptions(preloadPath: string): BrowserWindowConstructorOptions {
+  return {
+    ...createMainWindowOptions(preloadPath),
+    width: 560,
+    height: 660,
+    minWidth: 500,
+    minHeight: 600,
+    maximizable: false,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    title: "Connect Gemini to Ether"
+  };
 }

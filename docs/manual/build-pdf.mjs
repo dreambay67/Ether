@@ -64,7 +64,7 @@ const captureTitles = {
   "channels-roles": "Channel lane and role chooser",
   "inspector-catalog": "Canvas containing all 17 canonical nodes",
   "provider-health": "Provider Health with installed runtime evidence",
-  "settings": "Settings with fail-closed Antigravity safety",
+  "settings": "Settings with protected Gemini API and fail-closed Antigravity safety",
   "recovery": "Production recovery status",
   "saving": "Document saving state",
   "export": "Artifact export dialog",

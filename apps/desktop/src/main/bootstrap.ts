@@ -9,9 +9,15 @@ import { installChromiumNetworkContainment } from "./security/navigationPolicy.j
 installChromiumNetworkContainment(app.commandLine);
 registerEtherAssetScheme(protocol);
 
-void import("./main.js").then(({ startEtherDesktop }) => startEtherDesktop()).catch((error) => {
+const liveGeminiConformance = process.argv.includes("--validate-gemini-live");
+const startup = liveGeminiConformance
+  ? import("./geminiLiveConformance.js").then(({ runGeminiLiveConformance }) =>
+      runGeminiLiveConformance().finally(() => app.quit()))
+  : import("./main.js").then(({ startEtherDesktop }) => startEtherDesktop());
+
+void startup.catch((error) => {
   if ((error as { code?: unknown } | null)?.code !== "SECOND_INSTANCE") {
     console.error(error);
-    app.quit();
+    app.exit(1);
   }
 });

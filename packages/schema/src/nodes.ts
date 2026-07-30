@@ -198,6 +198,8 @@ export const GenerationImageConfigSchema = z
     profileId: z.string().min(1),
     aspectRatio: z.string().min(1),
     resolution: ResolutionSchema,
+    /** Optional for pre-migration documents; executors default the missing value to PNG. */
+    outputFormat: z.enum(["image/png", "image/jpeg"]).optional(),
     outputCount: z.number().int().positive(),
     seed: z.number().int().optional()
   })

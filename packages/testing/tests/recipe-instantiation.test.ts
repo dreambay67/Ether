@@ -65,10 +65,14 @@ describe("recipe instantiation", () => {
       baseDocumentRevisionId: "document-revision", baseGraphRevisions: { root: "root-revision" },
       providerCapabilities: capabilitiesFor(recipe, 1)
     });
-    expect(result).toMatchObject({ kind: "ready", providers: [expect.objectContaining({ mode: "substitution", substitutionProviderId: "antigravity" })] });
+    expect(result).toMatchObject({ kind: "ready", providers: [expect.objectContaining({ mode: "substitution", substitutionProviderId: "google-gemini-api-nano-banana-2" })] });
     if (result.kind !== "ready") return;
     const generated = result.transaction.operations.find((operation) => operation.type === "addNode" && operation.node.definitionId === "generation.image");
-    expect(generated).toMatchObject({ node: { config: { providerId: "antigravity", profileId: "nano-banana-2" } } });
+    expect(generated).toMatchObject({ node: { config: {
+      providerId: "google-gemini-api-nano-banana-2",
+      profileId: "nano-banana-2",
+      outputFormat: "image/jpeg"
+    } } });
   });
 
   it("reports primary, substitution, compatible, and missing setup states from enabled capabilities", () => {
@@ -79,12 +83,12 @@ describe("recipe instantiation", () => {
       selectedProviderId: "codex",
       options: [
         expect.objectContaining({ providerId: "codex", available: true }),
-        expect.objectContaining({ providerId: "antigravity", available: false })
+        expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2", available: false })
       ]
     }]);
 
     const substitution = inspectRecipeProviderSetup(recipe, capabilitiesFor(recipe, 1));
-    expect(substitution).toMatchObject([{ state: "substitution", selectedProviderId: "antigravity" }]);
+    expect(substitution).toMatchObject([{ state: "substitution", selectedProviderId: "google-gemini-api-nano-banana-2" }]);
 
     const compatibleCapability = {
       ...capabilitiesFor(recipe)[0]!,
@@ -96,7 +100,7 @@ describe("recipe instantiation", () => {
       selectedProviderId: "ether-fake-local",
       options: [
         expect.objectContaining({ providerId: "codex", available: false }),
-        expect.objectContaining({ providerId: "antigravity", available: false })
+        expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2", available: false })
       ]
     }]);
     expect(inspectRecipeProviderSetup(recipe, [])).toMatchObject([{ state: "missing", selectedProviderId: null }]);
@@ -136,7 +140,7 @@ describe("recipe instantiation", () => {
     const configured = result.transaction.operations.flatMap((operation) =>
       operation.type === "addNode" && operation.node.definitionId === "generation.image" ? [operation.node.config] : []);
     expect(configured).toEqual(expect.arrayContaining([
-      expect.objectContaining({ providerId: "antigravity", profileId: "nano-banana-2" }),
+      expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2-lite", profileId: "nano-banana-2-lite" }),
       expect.objectContaining({ providerId: "codex", profileId: "image-default" })
     ]));
   });

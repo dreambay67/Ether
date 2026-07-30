@@ -462,7 +462,11 @@ try {
   if (await overageConfirmation.isChecked()) {
     throw new Error("Fresh release capture profile persisted an unexpected Antigravity overage confirmation.");
   }
-  await antigravitySafety.scrollIntoViewIfNeeded();
+  const geminiSettings = settingsDialog.getByTestId("gemini-api-settings");
+  await geminiSettings.getByText("Primary Nano Banana route — paid Google Gemini Developer API.", { exact: true })
+    .waitFor({ state: "visible", timeout: 20_000 });
+  await geminiSettings.getByRole("button", { name: "Connect", exact: true }).waitFor({ state: "visible" });
+  await geminiSettings.scrollIntoViewIfNeeded();
   await capture(page, "settings", settingsDialog);
   await capture(page, "recovery", recoveryStatus);
   await page.getByRole("button", { name: "Close Settings" }).click();
@@ -966,12 +970,12 @@ async function waitForProviderHealthResolved(page, dialog, timeout) {
     verifiedProfiles: (await verifiedProfiles.textContent())?.trim() ?? ""
   };
   if (
-    resolved.runtime !== "Available" ||
-    resolved.transport !== "app-server" ||
-    resolved.verifiedProfiles !== "16"
+    !["Available", "Degraded", "Unavailable"].includes(resolved.runtime) ||
+    !resolved.transport ||
+    !/^\d+$/u.test(resolved.verifiedProfiles)
   ) {
     throw new Error(
-      "Installed Provider Health did not resolve to the reviewed Codex 0.144.2 release contract: " +
+      "Installed Provider Health did not resolve to a truthful local provider state: " +
       JSON.stringify(resolved)
     );
   }

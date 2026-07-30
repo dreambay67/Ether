@@ -13,6 +13,7 @@
     "test:performance": "pnpm --filter @ether/testing test:performance",
     "test:conformance:codex": "pnpm --filter @ether/testing test:conformance:codex",
     "test:conformance:antigravity": "pnpm --filter @ether/testing test:conformance:antigravity",
+    "test:conformance:gemini": "node scripts/run-gemini-live-conformance.mjs",
     "test:smoke": "pnpm --filter @ether/testing test:smoke",
     "test:desktop": "pnpm --filter @ether/testing test:desktop",
     "acceptance:smoke": "pnpm run test:acceptance",

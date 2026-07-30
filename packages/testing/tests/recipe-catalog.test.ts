@@ -33,11 +33,19 @@ describe("Ether 4.0 executable recipe catalog", () => {
       expect(recipe.expectedWork.minimumCalls).toBeGreaterThan(0);
       expect(recipe.acceptanceScenario.steps.length).toBeGreaterThanOrEqual(recipe.capabilityRequirements.length);
       expect(recipe.acceptanceScenario.steps.length).toBe(recipe.expectedWork.maximumCalls);
-      expect(recipe.substitutions).toHaveLength(recipe.capabilityRequirements.length * 2);
       for (const requirement of recipe.capabilityRequirements) {
         expect([recipe.graph, ...recipe.moduleGraphs].some((graph) => graph.nodes.some((node) => node.id === requirement.id)), `${recipe.id}:${requirement.id}`).toBe(true);
         expect(recipe.substitutions.some((item) => item.requirementId === requirement.id && item.priority === 0)).toBe(true);
-        expect(recipe.substitutions.some((item) => item.requirementId === requirement.id && item.priority === 1)).toBe(true);
+        const substitutions = recipe.substitutions.filter((item) => item.requirementId === requirement.id);
+        expect(substitutions.length).toBeGreaterThanOrEqual(1);
+        for (const substitution of substitutions) {
+          expect(substitution.capability.operation).toBe(requirement.operation);
+          expect(substitution.capability.maxOutputsPerCall).toBeGreaterThanOrEqual(requirement.minimumOutputs);
+          if (substitution.providerId.startsWith("google-gemini-api-")) {
+            expect(["generate-image", "edit-image"]).toContain(requirement.operation);
+            expect(substitution.capability.maxOutputsPerCall).toBe(1);
+          }
+        }
         const declaredOutputs = recipe.acceptanceScenario.steps
           .filter((step) => step.kind === "success" && step.requirementId === requirement.id)
           .flatMap((step) => step.kind === "success" ? step.outputs : []);
@@ -50,7 +58,7 @@ describe("Ether 4.0 executable recipe catalog", () => {
     const imageEdit = BUILTIN_RECIPES.find((recipe) => recipe.id === "image-edit-with-mask")!;
     expect(imageEdit.parameters.find((parameter) => parameter.id === "references")).toMatchObject({ type: "artifact", minimumItems: 1, maximumItems: 1 });
     const draft = BUILTIN_RECIPES.find((recipe) => recipe.id === "draft-lite-finish-pro")!;
-    expect(draft.substitutions.find((item) => item.requirementId === "draft" && item.priority === 0)).toMatchObject({ providerId: "antigravity", profileId: "nano-banana-2" });
-    expect(draft.substitutions.find((item) => item.requirementId === "finish" && item.priority === 0)).toMatchObject({ providerId: "codex", profileId: "image-edit" });
+    expect(draft.substitutions.find((item) => item.requirementId === "draft" && item.priority === 0)).toMatchObject({ providerId: "google-gemini-api-nano-banana-2-lite", profileId: "nano-banana-2-lite" });
+    expect(draft.substitutions.find((item) => item.requirementId === "finish" && item.priority === 0)).toMatchObject({ providerId: "google-gemini-api-nano-banana-pro", profileId: "nano-banana-pro" });
   });
 });

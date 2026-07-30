@@ -13,6 +13,7 @@ import { ProviderNotFoundError } from "./errors.js";
 import { FAKE_PROVIDER_ID, FakeImageProvider } from "./fake.js";
 import { createAntigravityImageProviders } from "./antigravity/imageProvider.js";
 import type { AntigravityCliImageProviderOptions } from "./antigravity/imageProvider.js";
+import { createGeminiImageProviders, type GeminiImageProviderOptions } from "./gemini/imageProvider.js";
 import { UnavailableImageProvider } from "./unavailable.js";
 import type {
   AssistantProvider,
@@ -33,6 +34,7 @@ import type { ApiProviderDiagnostic } from "./api/types.js";
 export type DefaultProviderRegistryOptions = Partial<CodexCliImageProviderOptions> & {
   codexBundle?: CodexAppServerProviderBundle;
   antigravity?: AntigravityCliImageProviderOptions;
+  gemini?: GeminiImageProviderOptions;
 };
 export type DefaultVisionEvaluationProviderRegistryOptions = Partial<CodexCliVisionEvaluationProviderOptions> & {
   codexBundle?: CodexAppServerProviderBundle;
@@ -199,6 +201,7 @@ export function createDefaultProviderRegistry(options: DefaultProviderRegistryOp
   const registry = new GenerationProviderRegistry([
     new FakeImageProvider(),
     codexProvider,
+    ...(options.gemini ? createGeminiImageProviders(options.gemini) : []),
     ...createAntigravityImageProviders(options.antigravity)
   ]);
   if (options.codexBundle) runtimeBundles.set(registry, options.codexBundle);
@@ -378,7 +381,7 @@ function buildDiagnosticProfiles(diagnostic: ProviderDiagnostic | ApiProviderDia
   const availability = diagnostic.availability;
   const profileStatus = availability === "available" ? "ready" : "unavailable";
   const unavailableReason = availability === "unavailable" ? diagnostic.messages[0] : undefined;
-  const capabilitySource = capabilitySourceForRoute(diagnostic.route);
+  const capabilitySource = capabilitySourceForDiagnostic(diagnostic);
   const requiresExplicitSelection =
     capabilitySource === "api-slot" || capabilitySource === "adapter-slot";
   const noHiddenFallback = Boolean(diagnostic.noHiddenFallback) || capabilitySource === "api-slot";
@@ -424,6 +427,7 @@ function cloneCapabilityProfile(profile: ProviderCapabilityProfile): ProviderCap
     messages: profile.messages ? [...profile.messages] : undefined,
     aspectRatios: profile.aspectRatios ? [...profile.aspectRatios] : undefined,
     resolutions: profile.resolutions ? profile.resolutions.map((resolution) => ({ ...resolution })) : undefined,
+    outputFormats: profile.outputFormats ? [...profile.outputFormats] : undefined,
     mediaLimits: profile.mediaLimits
       ? {
           ...profile.mediaLimits,
@@ -434,13 +438,18 @@ function cloneCapabilityProfile(profile: ProviderCapabilityProfile): ProviderCap
   };
 }
 
-function capabilitySourceForRoute(route: ProviderCapabilityProfile["route"]) {
+function capabilitySourceForDiagnostic(diagnostic: ProviderDiagnostic) {
+  const route = diagnostic.route;
   if (route === "codex-cli") {
     return "codex-cli";
   }
 
   if (route === "antigravity-cli") {
     return "antigravity-cli";
+  }
+
+  if (route === "api-generation" && diagnostic.details?.providerRoute === "gemini-developer-api") {
+    return "gemini-developer-api";
   }
 
   if (route === "local-fake") {

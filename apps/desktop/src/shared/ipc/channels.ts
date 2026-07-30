@@ -40,6 +40,10 @@ export const desktopIpcChannels = {
     providerHealth: "ether:runtime:provider-health",
     providerPolicy: "ether:runtime:provider-policy",
     setProviderPolicy: "ether:runtime:set-provider-policy",
+    geminiCredentialStatus: "ether:runtime:gemini-credential-status",
+    connectGeminiCredential: "ether:runtime:connect-gemini-credential",
+    testGeminiCredential: "ether:runtime:test-gemini-credential",
+    removeGeminiCredential: "ether:runtime:remove-gemini-credential",
     rendererInteractive: "ether:runtime:renderer-interactive"
   }
 } as const;

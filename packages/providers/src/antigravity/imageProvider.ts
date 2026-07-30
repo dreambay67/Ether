@@ -268,13 +268,13 @@ export function createAntigravityImageProviders(options: AntigravityCliImageProv
 
 function profileDescriptor(profile: AntigravityProfile) {
   const id = ANTIGRAVITY_PROFILE_IDS_BY_PROVIDER[profile];
-  const name = profile === "nano-banana-2" ? "Nano Banana 2" : profile === "nano-banana-pro" ? "Nano Banana Pro" : "Nano Banana 2 Lite";
+  const name = profile === "nano-banana-2" ? "Nano Banana 2 / Antigravity fallback" : profile === "nano-banana-pro" ? "Nano Banana Pro / Antigravity fallback" : "Nano Banana 2 Lite / Antigravity fallback";
   return {
     id,
     name,
     route: "antigravity-cli" as const,
     capabilities: ["image.generate"] as const,
-    notes: ["Official local Antigravity CLI only; no API, browser, or token fallback.", "Enabled only by matching real CLI conformance evidence."]
+    notes: ["Legacy local Antigravity CLI fallback. Select it explicitly; Ether never switches to it automatically.", "Enabled only by matching real CLI conformance evidence."]
   };
 }
 

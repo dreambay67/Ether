@@ -196,6 +196,15 @@ function configuredNodes(
     if ((nodeBlueprint.definitionId === "generation.image" || nodeBlueprint.definitionId === "edit.image") && provider !== undefined) {
       config.providerId = provider.capability.providerId;
       config.profileId = provider.capability.profileId;
+      if (
+        nodeBlueprint.definitionId === "generation.image" &&
+        provider.capability.outputFormats?.length
+      ) {
+        const configured = config.outputFormat === "image/jpeg" ? "image/jpeg" : "image/png";
+        config.outputFormat = provider.capability.outputFormats.includes(configured)
+          ? configured
+          : provider.capability.outputFormats[0]!;
+      }
     }
     return {
       ...nodeBlueprint,

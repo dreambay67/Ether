@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary
 
-Ether 4.0 is a professional local creative-production environment for constructing, inspecting, executing, and reviewing multimodal AI workflows on an infinite node canvas. It combines intelligent Codex-powered LLM workers, subscription-backed image generation through Codex and Antigravity CLIs, strong reference handling, durable batch execution, and artifact review in one Windows application.
+Ether 4.0 is a professional local creative-production environment for constructing, inspecting, executing, and reviewing multimodal AI workflows on an infinite node canvas. It combines intelligent Codex-powered LLM workers, Codex image generation, paid Gemini Developer API image generation, an explicit legacy Antigravity fallback, strong reference handling, durable batch execution, and artifact review in one Windows application.
 
 The 4.0 release is a clean break. A project is no longer a Windows directory pretending to be an `.ether` file. It is one genuine, portable `.ether` document containing its graphs, history, generated media, recipes, runs, collections, and review state. Ether 4.0 does not open or migrate legacy Ether project folders.
 
@@ -417,6 +417,8 @@ Ether does not infer image capabilities from the ordinary Codex model list. Befo
 
 ### 10.2 Antigravity Image
 
+**Superseded default-route note.** The following CLI material describes the retained explicit legacy fallback, not Ether's normal Nano Banana route. The normal route is the Gemini Developer API described in the migration review. A saved `google-nano-banana-*` binding remains pinned to this fallback; it is never silently migrated or selected following an API error.
+
 Antigravity CLI provides these user-facing profiles:
 
 - Nano Banana 2
@@ -435,6 +437,12 @@ The Antigravity CLI 1.1.7 `generate_image` tool structurally exposes aspect rati
 - Unsupported values are disabled with explanations.
 - Switching providers preserves compatible settings and identifies changed settings before execution.
 - Run Preview shows the provider, requested profile, dimensions, references, work count, and known limitations.
+
+### 10.4 Gemini Developer API Image (primary Nano Banana route)
+
+`google-gemini-api-nano-banana-2`, `google-gemini-api-nano-banana-pro`, and `google-gemini-api-nano-banana-2-lite` use the official GA Interactions REST surface with `store: false`. Electron main owns the encrypted key and only returns connection state to the renderer. Settings provides Connect, Test, Replace, and Remove; the entry field is cleared immediately and the key is never rendered.
+
+Nano Banana 2 (`gemini-3.1-flash-image`) provides exact 0.5K/1K/2K/4K ratio-dependent dimensions. Pro (`gemini-3-pro-image`) provides 1K/2K/4K. Lite (`gemini-3.1-flash-lite-image`) is 1K-only. The Inspector shows only the selected profile's documented ratio, dimension, reference, and live-conformed JPEG output format. Although Google's image-generation guide currently includes some PNG response-format examples, its canonical Interactions `ImageResponseFormat` schema enumerates only `image/jpeg`, and the paid live service rejected explicit `image/png` before generation while the default response returned JPEG bytes. Generic image-content enums that list PNG also cover image inputs and do not override the output-format schema. Ether does not mislabel or locally convert that result. The adapter validates returned MIME and pixel dimensions before staged import and records only redacted route/model/SynthID/hash/dimension provenance. Search and image-search grounding are intentionally not sent.
 
 ---
 
@@ -472,7 +480,7 @@ The matrix separates three decisions:
 
 - **Full batch** previews the Cartesian work count and permits explicit exclusions.
 - **Provider and model allocation** assigns exact, stable item counts to verified provider/profile/model lanes for reachable Prompt Workers and Image Generators. Unassigned items retain the node default.
-- **Concurrent run** controls throughput independently from batch size. Sequential is the default. One application-wide domain caps active provider work at 8, with 4 shared across every Codex route and 4 shared across every Antigravity route; a fifth same-family call and ninth global call wait. Unknown providers fail closed at 1. A Codex or Antigravity route that cannot support its four-call family contract is unavailable rather than exposed as a serial fallback.
+- **Concurrent run** controls throughput independently from batch size. Sequential is the default. One application-wide domain caps active provider work at 8, with 4 shared across every Codex route, 4 shared across Gemini Developer API image profiles, and 4 retained for explicitly selected Antigravity fallback work; a fifth same-family call and ninth global call wait. Unknown providers fail closed at 1. A route that cannot support its four-call family contract is unavailable rather than exposed as a serial fallback.
 - The capacity domain is shared by every job, batch, and document scheduler owned by the running application. Opening another batch never creates a second allowance, and large batches claim work only through the bounded scheduler.
 
 Each work item carries its dimension names and values into the effective provider prompt. Excessive expansion is visibly capped rather than allowed to exhaust the application or system.
@@ -683,7 +691,7 @@ Ether 4.0 is launch-ready only when:
 
 - A clean Windows install can create, save, reopen, move, and double-click a complete `.ether` document.
 - Codex LLM Workers and Codex image generation perform real authenticated work.
-- Nano Banana 2 performs real authenticated image generation through Antigravity CLI.
+- Nano Banana 2 performs real authenticated image generation through the paid Gemini Developer API; Antigravity CLI is an explicit fallback only.
 - Graph, branch, selection, and batch execution are previewable, cancellable, durable, and recoverable.
 - All enabled connections have verified effects.
 - The 12 starter recipes execute their fake-provider acceptance scenarios, and provider-backed recipes validate capabilities before launch.

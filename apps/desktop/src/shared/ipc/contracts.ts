@@ -112,6 +112,11 @@ export const DesktopReferenceSchema = z.object({
   actions: z.array(ReferenceActionSchema)
 }).strict();
 export type DesktopReference = z.infer<typeof DesktopReferenceSchema>;
+export const GeminiCredentialStatusSchema = z.object({
+  state: z.enum(["not-configured", "configured", "verified", "error", "encryption-unavailable"]),
+  verifiedAt: z.string().datetime().nullable()
+}).strict();
+export type GeminiCredentialStatus = z.infer<typeof GeminiCredentialStatusSchema>;
 export const ReferenceFileSelectionResultSchema = z.discriminatedUnion("cancelled", [
   z.object({ cancelled: z.literal(true) }).strict(),
   z.object({ cancelled: z.literal(false), referenceId: id }).strict()
@@ -237,6 +242,22 @@ export const desktopIpcContracts = {
     response: resultSchema(z.object({
       antigravityCreditOveragesConfirmed: z.boolean()
     }).strict())
+  },
+  [desktopIpcChannels.runtime.geminiCredentialStatus]: {
+    request: empty,
+    response: resultSchema(GeminiCredentialStatusSchema)
+  },
+  [desktopIpcChannels.runtime.connectGeminiCredential]: {
+    request: z.object({ apiKey: z.string().min(1).max(4_096) }).strict(),
+    response: resultSchema(GeminiCredentialStatusSchema)
+  },
+  [desktopIpcChannels.runtime.testGeminiCredential]: {
+    request: empty,
+    response: resultSchema(GeminiCredentialStatusSchema)
+  },
+  [desktopIpcChannels.runtime.removeGeminiCredential]: {
+    request: empty,
+    response: resultSchema(GeminiCredentialStatusSchema)
   },
   [desktopIpcChannels.runtime.rendererInteractive]: {
     request: empty,

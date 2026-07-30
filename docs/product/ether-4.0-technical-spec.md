@@ -628,6 +628,8 @@ Provider controls bind to this profile. No hardcoded UI list may advertise value
 
 ### 7.3 Antigravity Adapter
 
+This is an explicit legacy fallback section. It is not the default Nano Banana launch gate and no Gemini API failure may route here automatically.
+
 - Discover `agy.exe` and authenticated status.
 - Use only official CLI behavior.
 - Isolate each attempt in a unique staging directory.
@@ -641,6 +643,12 @@ Provider controls bind to this profile. No hardcoded UI list may advertise value
 - Parse completion from process exit plus validated staged artifacts; printed prose alone never constitutes generation success.
 
 ### 7.4 API Infrastructure
+
+### 7.5 Gemini Developer API image adapter
+
+The primary Nano Banana adapter calls `POST /v1beta/interactions` with an `x-goog-api-key`, `store: false`, image/text input blocks, and a single image `response_format`. No `tools` field is sent, which keeps Google Search and Image Search grounding off. The output request uses `image/jpeg`: the canonical `ImageResponseFormat` schema and paid service expose only JPEG even though separate generic image-content schemas and some guide examples mention PNG. Ether performs no conversion or MIME relabelling. The adapter accepts only the profile-owned model, validates requested ratio/size against Google’s pixel table, combines cancellation with a bounded timeout, validates base64/MIME/pixel dimensions, SHA-256 stages the output, and asks the durable importer to accept it only after validation.
+
+The credential store lives under Electron main only. It requires `safeStorage.isEncryptionAvailable()`, encrypts before persistent write, and never supplies plaintext to settings JSON, renderer/preload getters, document data, logs, evidence, package contents, child environments, or crash records. The public IPC state has no credential member. The `--connect-gemini` process option is a mode selector only: it opens a bounded credential surface, starts no document workspace or provider background discovery, accepts no credential argument, and reuses the same main-process IPC/store lifecycle as Settings. 401/403, 402/billing/prepay, 429 quota, safety, network, 5xx, timeout, cancellation, malformed output, and ambiguous completion are separate redacted errors. A single bounded `Retry-After` retry is allowed only after an unambiguous 429; all completed/ambiguous calls are manual-retry only.
 
 The provider interface supports future API adapters for generation and LLM operations. API adapters are disabled until the user deliberately configures credentials and selects the route. Ether 4.0 exposes no non-Codex LLM route in the production UI: LLM Worker, Evaluate, and semantic adapters remain Codex-powered. The dormant interface can be activated only by a later approved product change. There is no hidden fallback from subscription CLI to paid API.
 
@@ -684,7 +692,7 @@ The UI does not show a generic Run Node button on non-runnable nodes.
 ### 8.3 Scheduler
 
 - Sequential is default.
-- Batch size and concurrency are independent. `ExecutionConcurrencyDomains` is owned by the desktop application service and injected into every document scheduler. It enforces one application-wide global gate of 8, one Codex-family gate of 4 across App Server and explicit executable fallback work, one Antigravity-family gate of 4 across every verified profile, and a fail-closed gate of 1 for each unknown provider. Provider-family capacity is acquired before global capacity so a saturated family cannot reserve all global slots while waiting.
+- Batch size and concurrency are independent. `ExecutionConcurrencyDomains` is owned by the desktop application service and injected into every document scheduler. It enforces one application-wide global gate of 8, one Codex-family gate of 4 across App Server and explicit executable fallback work, one Gemini Developer API image-family gate of 4 across every document/job/batch, an explicit Antigravity fallback-family gate of 4, and a fail-closed gate of 1 for each unknown provider. Provider-family capacity is acquired before global capacity so a saturated family cannot reserve all global slots while waiting.
 - A fifth Codex or Antigravity call and a ninth global call remain claimed but undispatched until the shared permit is released. Scheduler detach, cancellation, failure, retry, and recovery release permits idempotently; no job or reopened document creates another capacity domain.
 - Usable Codex and Antigravity capability profiles report `maxParallelism: 4`. A route that cannot sustain four active calls is diagnosed unavailable and is not selected as a serial fallback. Exact provider/profile/model bindings never fall back to an unrelated registered provider.
 - Provider-family gates are shared across simultaneous jobs. A saturated provider cannot consume capacity reserved for an unrelated provider.

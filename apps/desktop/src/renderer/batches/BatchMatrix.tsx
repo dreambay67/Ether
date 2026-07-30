@@ -3,6 +3,7 @@ import { Gauge, Image, Rows3, Sparkles, Trash2 } from "lucide-react";
 import {
   SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM,
   SAFE_CODEX_PROVIDER_PARALLELISM,
+  SAFE_GEMINI_API_PROVIDER_PARALLELISM,
   type BatchProviderAllocation,
   type EtherGraph,
   type ProviderCapability
@@ -277,7 +278,7 @@ export function BatchMatrix({
       <section className="batch-control-section batch-concurrency" aria-labelledby="concurrency-heading">
         <div className="batch-section-heading">
           <div><span className="eyebrow">Throughput</span><h3 id="concurrency-heading">Concurrent run</h3></div>
-          <p>Total concurrency is separate from batch size. Ether permits 8 calls globally, shares 4 across Codex, shares 4 across Antigravity, and fails closed at 1 for an unknown provider.</p>
+          <p>Total concurrency is separate from batch size. Ether permits 8 calls globally, shares 4 across Codex, shares 4 across Gemini API, keeps Antigravity as an explicit fallback family, and fails closed at 1 for an unknown provider.</p>
         </div>
         <label className="batch-policy">Total simultaneous work
           <select aria-label="Batch execution policy" value={String(config.parallelism)} disabled={isUpdating} onChange={(event) => void updateParallelism(Number(event.target.value))}>
@@ -336,7 +337,11 @@ function capabilitiesForTarget(
         resolution.width === targetResolution.width &&
         resolution.height === targetResolution.height
     );
-    return supportsAspectRatio && supportsResolution;
+    const outputFormat = target.config.outputFormat ?? "image/png";
+    const supportsOutputFormat = capability.outputFormats === undefined ||
+      capability.outputFormats.includes(outputFormat);
+    const supportsOutputCount = capability.maxOutputsPerCall >= target.config.outputCount;
+    return supportsAspectRatio && supportsResolution && supportsOutputFormat && supportsOutputCount;
   });
 }
 
@@ -379,7 +384,8 @@ function targetKind(target: AllocationTarget) {
 
 function providerLabel(providerId: string) {
   if (providerId.startsWith("codex-")) return "Codex";
-  if (providerId.startsWith("google-nano-banana-")) return "Antigravity";
+  if (providerId.startsWith("google-gemini-api-")) return "Gemini API";
+  if (providerId.startsWith("google-nano-banana-")) return "Antigravity fallback";
   return providerId;
 }
 
@@ -413,18 +419,22 @@ function providerCaps(
       if (capability === undefined) continue;
       const family = capability.providerId.startsWith("codex-")
         ? "codex"
+        : capability.providerId.startsWith("google-gemini-api-")
+          ? "gemini-api"
         : capability.providerId.startsWith("google-nano-banana-")
           ? "antigravity"
           : capability.providerId;
       const maximum = family === "codex"
         ? SAFE_CODEX_PROVIDER_PARALLELISM
+        : family === "gemini-api"
+          ? SAFE_GEMINI_API_PROVIDER_PARALLELISM
         : family === "antigravity"
           ? SAFE_ANTIGRAVITY_PROVIDER_PARALLELISM
           : 1;
       const existing = selected.get(family);
       selected.set(family, {
         id: family,
-        label: family === "codex" ? "Codex" : family === "antigravity" ? "Antigravity" : capability.providerId,
+        label: family === "codex" ? "Codex" : family === "gemini-api" ? "Gemini API" : family === "antigravity" ? "Antigravity fallback" : capability.providerId,
         maximum: Math.min(existing?.maximum ?? maximum, maximum)
       });
     }

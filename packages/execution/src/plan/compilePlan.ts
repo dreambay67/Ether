@@ -23,6 +23,7 @@ import {
   type ProviderBinding,
   type ProviderCapability
 } from "@ether/schema";
+import { resolveGoogleImageProviderAlias } from "@ether/providers";
 
 import {
   BatchExpansionError,
@@ -589,7 +590,7 @@ function makeNodeStep(input: {
     targetPayloadIds: edge.targetPayloadIds,
     consequence: edge.consequence
   }));
-  const parameters = input.target.config as unknown as JsonObject;
+  const parameters = normalizedNodeParameters(input.target.config, providerBinding);
   return {
     id: nodeStepId(input.target.id),
     nodeId: input.target.id,
@@ -717,10 +718,8 @@ function allocationBindingsFor(
       { nodeId: target.id }
     );
   }
-  return selected.map((allocation) => ({
-    id: allocation.id,
-    count: allocation.count,
-    binding: makeProviderBinding(
+  return selected.map((allocation) => {
+    const binding = makeProviderBinding(
       input,
       allocation.providerId,
       allocation.modelId,
@@ -729,8 +728,49 @@ function allocationBindingsFor(
         targetNodeId: allocation.targetNodeId
       }),
       allocation.profileId
-    )
-  }));
+    );
+    if (target.config.kind === "generation.image") {
+      assertGenerationAllocationCompatible(target, binding);
+    }
+    return { id: allocation.id, count: allocation.count, binding };
+  });
+}
+
+function assertGenerationAllocationCompatible(
+  target: PlannerNode,
+  binding: ProviderBinding
+): void {
+  if (target.config.kind !== "generation.image") return;
+  const capability = binding.capabilitySnapshot;
+  const config = target.config;
+  const outputFormat = config.outputFormat ?? "image/png";
+  const supportsAspectRatio = capability.aspectRatios.length === 0 ||
+    capability.aspectRatios.includes(config.aspectRatio);
+  const supportsResolution = capability.resolutions.length === 0 ||
+    capability.resolutions.some((resolution) =>
+      resolution.width === config.resolution.width &&
+      resolution.height === config.resolution.height
+    );
+  const supportsOutputFormat = capability.outputFormats === undefined ||
+    capability.outputFormats.includes(outputFormat);
+  if (
+    !supportsAspectRatio ||
+    !supportsResolution ||
+    !supportsOutputFormat ||
+    capability.maxOutputsPerCall < config.outputCount
+  ) {
+    throw new PlanCompilationError(
+      "PROVIDER_CAPABILITY_UNAVAILABLE",
+      `Batch allocation ${binding.providerId}/${binding.profileId} is incompatible with the Image Generator ratio, resolution, output format, or output count.`,
+      {
+        nodeId: target.id,
+        providerId: binding.providerId,
+        profileId: binding.profileId,
+        outputFormat,
+        outputCount: config.outputCount
+      }
+    );
+  }
 }
 
 function materializeWorkItems(drafts: readonly StepDraft[]): {
@@ -936,8 +976,10 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
       const providerId = config.providerId ?? input.capability.providerId;
       return makeProviderBinding(input, providerId, config.model, config, config.profileId);
     }
-    case "generation.image":
-      return makeProviderBinding(input, config.providerId, undefined, config, config.profileId);
+    case "generation.image": {
+      const selection = resolveGoogleImageProviderAlias(config.providerId, config.profileId);
+      return makeProviderBinding(input, selection.providerId, undefined, config, config.profileId);
+    }
     case "edit.image": {
       if (config.workspace?.capability.mode === "unsupported") {
         throw new PlanCompilationError(
@@ -946,7 +988,8 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
           { providerId: config.providerId, profileId: config.profileId }
         );
       }
-      const binding = makeProviderBinding(input, config.providerId, undefined, config, config.profileId);
+      const selection = resolveGoogleImageProviderAlias(config.providerId, config.profileId);
+      const binding = makeProviderBinding(input, selection.providerId, undefined, config, config.profileId);
       const capability = binding.capabilitySnapshot;
       if (capability.operation !== "edit-image" || !capability.inputChannels.includes("image") || !capability.outputChannels.includes("image")) {
         throw new PlanCompilationError(
@@ -973,6 +1016,28 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
     default:
       return null;
   }
+}
+
+function normalizedNodeParameters(
+  config: PlannerNode["config"],
+  binding: ProviderBinding | null
+): JsonObject {
+  const parameters = { ...(config as unknown as Record<string, JsonValue>) };
+  if (
+    (config.kind === "generation.image" || config.kind === "edit.image") &&
+    binding !== null
+  ) {
+    parameters.providerId = binding.providerId;
+    parameters.profileId = binding.profileId;
+  }
+  if (config.kind === "generation.image" && binding !== null) {
+    const outputFormats = binding.capabilitySnapshot.outputFormats;
+    const configured = config.outputFormat ?? "image/png";
+    if (outputFormats?.length && !outputFormats.includes(configured)) {
+      parameters.outputFormat = outputFormats[0]!;
+    }
+  }
+  return jsonObject(parameters);
 }
 
 function makeProviderBinding(

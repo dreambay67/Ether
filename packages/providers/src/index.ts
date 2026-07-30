@@ -130,6 +130,21 @@ export {
   type AntigravityProfile
 } from "./antigravity/imageProvider.js";
 export {
+  GEMINI_IMAGE_PROVIDER_IDS,
+  GEMINI_INTERACTIONS_API_VERSION,
+  GEMINI_INTERACTIONS_ENDPOINT,
+  GeminiImageProvider,
+  GeminiImageProviderError,
+  createGeminiImageProviders,
+  type GeminiCredentialState,
+  type GeminiImageProfile,
+  type GeminiImageProviderOptions
+} from "./gemini/imageProvider.js";
+export {
+  DEFAULT_GOOGLE_NANO_BANANA_PROVIDER_ID,
+  resolveGoogleImageProviderAlias
+} from "./gemini/routing.js";
+export {
   discoverAntigravityCli,
   resolveAntigravityCliPath,
   type AntigravityCliDiscovery,
