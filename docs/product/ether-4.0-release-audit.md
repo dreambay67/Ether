@@ -3,7 +3,7 @@
 Status: **release candidate ready for exact-commit verification and publication**
 
 Audit date: 2026-07-30
-Candidate source commit: `5eedf81e4c1d50fcfcbf71f623dfe99cf2c51de5`
+Candidate source commit: `2bf2d86edf61e4c4081804d40acc23fd40255a09`
 Audit baseline: `2cd4e9e1fe9e08d3ca43e8a0591b01e48073233c`
 Required branch: `feature/ether-4.0-phase-6`
 Publication branch: `feature/ether-4.0`
@@ -124,12 +124,25 @@ returned a server error for the final Pro edit. Ether correctly did not retry an
 ambiguous paid operation. That run exposed an exit-status defect in the conformance
 bootstrap; the bootstrap and runner were fixed, repackaged, and then proved by the
 8-of-8 pass. The migration session used 10 generated images before the quota reset;
-the final candidate work used 15 after the reset, for 25 generated images across the
-migration and Phase 6 candidate validation to this point.
+the final candidate work used 15 after the reset, and the first exact-release
+verification used 8, for 33 generated images across the migration and Phase 6
+validation to this point.
+
+The first hosted Windows CI run exposed two environment-specific release defects
+after typecheck, lint, and unit tests passed. The runner presented its temporary
+directory through an equivalent Windows 8.3 path alias, and the workflow selected
+the floating pnpm 11 release instead of the reviewed 11.5.1 toolchain. Commit
+`2bf2d86edf61e4c4081804d40acc23fd40255a09` now accepts a differing AppData spelling
+only when `lstat` proves the same directory identity, continues to reject reparse
+points, resolves configured cloud roots through the same native canonicalization
+as document paths, keeps the native probe bounded at eight seconds, and pins pnpm
+11.5.1 in both repository metadata and CI. The corrected full local gate passed
+237 unit and 461 integration tests, including real fixed-volume, cloud-junction,
+junction-retarget, recovery, and reparse-rejection cases.
 
 The destructive recovery suite previously passed all 15 hard-kill and
 publication-boundary journeys. Performance validation preserved the frozen 16 KiB
-document-format budget and completed the 500-item lifecycle in about 99.2 seconds,
+document-format budget and completed the 500-item lifecycle in about 97.9 seconds,
 inside its declared bound.
 
 ## Windows package
@@ -138,18 +151,18 @@ Retained candidate artifacts:
 
 | Artifact | SHA-256 |
 |---|---|
-| `release/windows/Ether-4.0.0-Setup.exe` | `F6114DC4E9A87DE2C772E000E70241FEC429AE475AAB19425D43935333E2B9D5` |
-| `release/windows/win-unpacked/Ether.exe` | `3B20A510DA722E08836B6EF653D5A9FA3642B489F222B5C749882D547A4832CC` |
-| `release/windows/win-unpacked/resources/app.asar` | `AD2ADFF74276356A98709C04B6CA2A036E010470B821ACE178B87D089E0C1280` |
-| `docs/product/ether-4.0-user-manual.pdf` | `5FFFA4BF4EA5DB1829AF10E1A260FDE7A5094AA85CA7312C0828CD217026E91A` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `036BD37789E6978791E084E2F4EA7E791E94A0EFDF079A64E4CC888AB29EEB5A` |
+| `release/windows/win-unpacked/Ether.exe` | `CA0ABFB7B727F04C039752B1C35AD3961981B8F33E804B05A1C04CCB50ECC398` |
+| `release/windows/win-unpacked/resources/app.asar` | `5D133413E6BF56431E2962E12D2E3C66728331EAC4BC9D4A0EEB5C324761E57E` |
+| `docs/product/ether-4.0-user-manual.pdf` | `60B23FC39F3795FE848E66699686F94A80C7779CB731DB99FECE32F44CA5DB96` |
 
 The NSIS and Chromium PDF containers embed build metadata, so byte hashes can
 change on a rebuild. Source, staged runtime closure, NSIS payload inventory,
 installed captures, PDF structure, and rendered content are the reproducibility
 contract. The capture manifest binds the manual to installer
-`F6114DC4E9A87DE2C772E000E70241FEC429AE475AAB19425D43935333E2B9D5`
+`036BD37789E6978791E084E2F4EA7E791E94A0EFDF079A64E4CC888AB29EEB5A`
 and executable
-`3B20A510DA722E08836B6EF653D5A9FA3642B489F222B5C749882D547A4832CC`.
+`CA0ABFB7B727F04C039752B1C35AD3961981B8F33E804B05A1C04CCB50ECC398`.
 
 The package audit recorded:
 
