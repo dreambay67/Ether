@@ -4,7 +4,7 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "1040eaa4c2e60a6883891b1c88a1f1747d1afc13dce28ea54506c937ab413e26"
+    "sha256": "f6114dc4e9a87de2c772e000e70241fec429ae475aab19425d43935333e2b9d5"
   },
   "executable": {
     "fileName": "Ether.exe",
@@ -15,15 +15,15 @@
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "6297de4e519550615be61ec1362b9a685a46a44c83995ca6091100452ca52a05"
+    "sha256": "0cfe89917ed54af4a8e0de307a01ec3c0adcdec9477ef848f5d998d91731a7ea"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-93e61819-dba2-4ee0-9cb9-74401074a596",
-    "contentHash": "sha256:v1:832166d429db079e4f2d139919a24ecb3d4772f67bf6d17988335e6cd56fc3ba"
+    "planId": "plan-297cdc19-48c4-44d7-8b9f-ad8f13eadd1c",
+    "contentHash": "sha256:v1:871ff51064c5ed80d22eaa01b111ed9df58c6c15f1a36706173e2be08082faa2"
   },
-  "capturedAt": "2026-07-30T20:55:26.106Z",
+  "capturedAt": "2026-07-30T21:14:25.225Z",
   "labels": [
     "start",
     "build",
@@ -85,13 +85,13 @@
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "05d95b6e668480087606b498d74f7583b458e0eb3c5cc4f4e8e5c99132f2458b"
+      "sha256": "2c5c5552598adfa8839d5f89005ef7d2ace742ae832f892e6787a2c636d64512"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "f8ff9213952730140303b0fbf9f6a8afd18da119fc47766ddcd0bdc92f02237f"
+      "sha256": "2a8a6fd590514b3b2b99beed1a6a9400c279bb76ec474dde47785cb18aa2ae6d"
     },
     {
       "label": "reference-desk",
@@ -109,13 +109,13 @@
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "bcae96af242c618e3b21a885c5b3e01c7428b5a009256c62849753ed25869ad2"
+      "sha256": "5e4e4c22575347d06141681688859a7f03cb01df3c09afd3aea362d8e5ca1560"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "28ee765062b3d11b79afa65607e2ada929f82e6643edf1ac3f07c4ae77f65760"
+      "sha256": "7905efc088501b2657439eaa25ca2b1788c8298988b751599a92e6965e512f00"
     },
     {
       "label": "recipes",
@@ -139,7 +139,7 @@
       "label": "provider-health",
       "width": 980,
       "height": 820,
-      "sha256": "b0616598ef49278d15423c4e9dcd2d77b0046099277762e336a3554af51fdae8"
+      "sha256": "e8e9d31be58ba290668dbcc5b051ccff0b26d1b16e6c01c8e42040f6e96c14d0"
     },
     {
       "label": "settings",
@@ -157,7 +157,7 @@
       "label": "saving",
       "width": 1600,
       "height": 1000,
-      "sha256": "37e1fcd3049ef7f8aa81cad3986ea05d586ca690340419b13c0ff1bb53fe2f3a"
+      "sha256": "1e636477be2a21adc88d3ccf0ab28b89c99d120bf0574304613ef4fe126e19ee"
     },
     {
       "label": "export",
@@ -173,9 +173,9 @@
     },
     {
       "label": "plugin-run-permit",
-      "width": 528,
+      "width": 522,
       "height": 237,
-      "sha256": "d5f5246ada398400107c8cc9d3d201299726e2046f80817b591c942ad855346d"
+      "sha256": "8b9278e79c155e17d04be983dcff7b40fc317f919f5d2fcc383aee3b4536b528"
     },
     {
       "label": "inspector-prompt-text",
@@ -199,7 +199,7 @@
       "label": "inspector-generation-image",
       "width": 400,
       "height": 640,
-      "sha256": "aee303fd6ed779b5d02018cce890a428dad686c4962db8a96e518482b00726c7"
+      "sha256": "355ae7c800bdb551da433bed93a121b50727b1f27b77b12f9f8d0a6a45e1e92f"
     },
     {
       "label": "inspector-edit-image",
