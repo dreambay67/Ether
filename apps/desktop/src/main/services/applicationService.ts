@@ -2097,7 +2097,7 @@ export function createWindowsLocationCapability(
           timer = setTimeout(() => {
             controller.abort();
             reject(codedError("LOCATION_PROBE_TIMEOUT", "The location capability probe timed out."));
-          }, options.timeoutMs ?? 2_000);
+          }, options.timeoutMs ?? 8_000);
         });
         const inspection = await Promise.race([port.inspect(filePath, controller.signal), timeout]);
         const normalized = normalizeWindowsPath(inspection.finalPath);
@@ -2158,6 +2158,12 @@ function productionWindowsLocationPort(): WindowsLocationCapabilityPort {
       "  }",
       "}",
       "'@",
+      "function Resolve-EtherNativePath([string]$path) {",
+      "  $native = [EtherNativePath]::Resolve([System.IO.Path]::GetFullPath($path))",
+      "  if ($native.StartsWith('\\\\?\\UNC\\')) { return '\\\\' + $native.Substring(8) }",
+      "  if ($native.StartsWith('\\\\?\\')) { return $native.Substring(4) }",
+      "  return $native",
+      "}",
       "$requested = [System.IO.Path]::GetFullPath([Console]::In.ReadToEnd())",
       "$existing = $requested",
       "while (-not (Test-Path -LiteralPath $existing)) {",
@@ -2166,14 +2172,18 @@ function productionWindowsLocationPort(): WindowsLocationCapabilityPort {
       "  $existing = $parent",
       "}",
       "$item = Get-Item -LiteralPath $existing -Force -ErrorAction Stop",
-      "$native = [EtherNativePath]::Resolve($existing)",
-      "$resolved = if ($native.StartsWith('\\\\?\\UNC\\')) { '\\\\' + $native.Substring(8) } elseif ($native.StartsWith('\\\\?\\')) { $native.Substring(4) } else { $native }",
+      "$resolved = Resolve-EtherNativePath $existing",
       "$suffix = [System.IO.Path]::GetRelativePath($existing, $requested)",
       "$finalPath = if ($suffix -eq '.') { $resolved } else { [System.IO.Path]::GetFullPath((Join-Path $resolved $suffix)) }",
       "$root = [System.IO.Path]::GetPathRoot($finalPath)",
       "$driveType = ([System.IO.DriveInfo]::new($root)).DriveType.ToString().ToLowerInvariant()",
       "$attributes = [int64]$item.Attributes",
-      "$cloudRoots = @($env:OneDrive, $env:OneDriveCommercial, $env:OneDriveConsumer, $env:Dropbox) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }",
+      "$cloudRoots = @($env:OneDrive, $env:OneDriveCommercial, $env:OneDriveConsumer, $env:Dropbox) |",
+      "  Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |",
+      "  ForEach-Object {",
+      "    $cloudRoot = [System.IO.Path]::GetFullPath($_)",
+      "    if (Test-Path -LiteralPath $cloudRoot) { Resolve-EtherNativePath $cloudRoot } else { $cloudRoot }",
+      "  }",
       "[pscustomobject]@{ finalPath = $finalPath; driveType = $driveType; attributes = $attributes; cloudRoots = $cloudRoots } | ConvertTo-Json -Compress"
     ].join("\n");
     const raw = await runBoundedLocationProbe(script, filePath, signal);

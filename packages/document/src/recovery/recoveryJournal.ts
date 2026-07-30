@@ -90,7 +90,8 @@ function assertCanonicalAppDataRoot(appDataRoot: string): string {
     throw new Error(`Ether AppData root is not a canonical directory: ${resolved}`);
   }
   const canonical = realpathSync.native(resolved);
-  if (!samePath(canonical, resolved)) {
+  const canonicalIdentity = lstatSync(canonical);
+  if (!samePath(canonical, resolved) && !sameIdentity(before, canonicalIdentity)) {
     throw new Error(`Ether AppData root is redirected from its canonical path: ${resolved}`);
   }
   const after = lstatSync(resolved);

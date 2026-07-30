@@ -2,6 +2,7 @@
   "name": "ether",
   "version": "4.0.0",
   "private": true,
+  "packageManager": "pnpm@11.5.1",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter @ether/providers build && pnpm --filter @ether/graph-kernel build && pnpm --filter @ether/document build && pnpm --filter @ether/execution build && pnpm --filter @ether/application build && pnpm --filter @ether/mcp-server build && pnpm --filter @ether/desktop build",
