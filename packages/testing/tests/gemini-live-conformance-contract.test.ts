@@ -9,9 +9,10 @@ const read = (relative: string) => readFile(path.join(root, relative), "utf8");
 
 describe("Gemini paid live-conformance contract", () => {
   it("uses only the protected main-process store and enforces a conservative per-run image ceiling", async () => {
-    const [bootstrap, runner] = await Promise.all([
+    const [bootstrap, runner, launcher] = await Promise.all([
       read("apps/desktop/src/main/bootstrap.ts"),
-      read("apps/desktop/src/main/geminiLiveConformance.ts")
+      read("apps/desktop/src/main/geminiLiveConformance.ts"),
+      read("scripts/run-gemini-live-conformance.mjs")
     ]);
 
     expect(bootstrap).toContain('process.argv.includes("--validate-gemini-live")');
@@ -27,6 +28,10 @@ describe("Gemini paid live-conformance contract", () => {
     expect(runner).not.toMatch(/\btools\s*:/u);
     const publicSummary = runner.slice(runner.indexOf("function publicSummary"));
     expect(publicSummary).not.toContain("evidencePath");
+    expect(launcher).toContain("ETHER_GEMINI_CONFORMANCE_USER_DATA");
+    expect(launcher).toContain("path.isAbsolute(configuredUserData)");
+    expect(launcher).toContain('path.join(conformanceUserData, "gemini-api-credential.json")');
+    expect(launcher).toContain("`--user-data-dir=${conformanceUserData}`");
   });
 
   it("records only redacted conformance facts, never credentials or prompts, in evidence results", async () => {
