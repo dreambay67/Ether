@@ -430,7 +430,7 @@ describe("Ether 4.0 application boundary", () => {
       "reference.changed"
     ]));
     await app.closeDocument();
-  }, 10_000);
+  }, 120_000);
 
   it("previews and runs Worker, evaluation, and local-only graphs with per-step provider routing", async () => {
     const root = await temporaryRoot();

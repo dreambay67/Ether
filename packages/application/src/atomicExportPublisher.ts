@@ -626,7 +626,7 @@ async function publishWindowsBundle(
             "The export destination already contains different bytes."
           ));
         }
-        const pathFailure = /ETHER_EXPORT_(?:DIRECTORY_CHANGED|REPARSE)/u.test(stderr);
+        const pathFailure = /ETHER_EXPORT_(?:DIRECTORY_CHANGED|DIRECTORY_OPEN|REPARSE)/u.test(stderr);
         reject(publicationError(
           pathFailure ? "PATH_GRANT_CHANGED" : "EXPORT_PUBLICATION_FAILED",
           `The atomic export publisher failed${code === null ? "" : ` (${code})`}: ${stderr.trim() || "no diagnostic"}`

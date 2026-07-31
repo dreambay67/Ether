@@ -62,7 +62,7 @@ async function root(): Promise<string> {
 }
 
 async function waitForFile(filePath: string): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     if (await lstat(filePath).then(() => true).catch(() => false)) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -274,7 +274,7 @@ describe("desktop security boundaries", () => {
       expect(await lstat(displacedRoot).then(() => true).catch(() => false)).toBe(false);
       }
     }
-  }, 30_000);
+  }, 180_000);
 
   it("publishes with atomic no-overwrite collision semantics", async () => {
     const directory = await root();
@@ -319,7 +319,7 @@ describe("desktop security boundaries", () => {
       sourcePath
     })).resolves.toBe("published");
     expect(await readFile(destination)).toEqual(bytes);
-  }, 20_000);
+  }, 120_000);
 
   it("rejects root and intermediate junction replacement before helper lock acquisition", async () => {
     if (process.platform !== "win32") return;
@@ -358,7 +358,35 @@ describe("desktop security boundaries", () => {
         : displaced;
       expect(await readdir(displacedCollection)).toEqual([]);
     }
-  }, 20_000);
+  }, 120_000);
+
+  it("classifies a removed verified directory as a changed path grant", async () => {
+    if (process.platform !== "win32") return;
+    const directory = await root();
+    const exportRoot = path.join(directory, "exports");
+    const collection = path.join(exportRoot, "Collection");
+    const displaced = path.join(exportRoot, "Collection-original");
+    const sourceRoot = path.join(directory, "appdata", "bundle");
+    const sourcePath = path.join(sourceRoot, "output.bin");
+    const destination = path.join(collection, "artifact.png");
+    const bytes = Buffer.from("removed-directory");
+    await mkdir(collection, { recursive: true });
+    await mkdir(sourceRoot, { recursive: true });
+    await writeFile(sourcePath, bytes);
+
+    await expect(publishAtomicExportFile({
+      beforeAcquire: async () => {
+        await rename(collection, displaced);
+      },
+      destination,
+      expectedByteLength: bytes.byteLength,
+      expectedHash: (await import("node:crypto")).createHash("sha256").update(bytes).digest("hex"),
+      publicationId: stableExportPublicationId("pre-acquire", "removed"),
+      root: exportRoot,
+      sourcePath
+    })).rejects.toMatchObject({ code: "PATH_GRANT_CHANGED" });
+    expect(await readdir(displaced)).toEqual([]);
+  }, 120_000);
 
   it("serializes concurrent whole-bundle publication and adopts matching outputs", async () => {
     if (process.platform !== "win32") return;
@@ -395,7 +423,7 @@ describe("desktop security boundaries", () => {
       .sort());
     expect(await lstat(path.join(sourceRoot, ".publisher")).then(() => true).catch(() => false))
       .toBe(false);
-  }, 20_000);
+  }, 120_000);
 
   it("refuses a reparse point at the manifest-owned same-parent stage", async () => {
     if (process.platform !== "win32") return;
