@@ -3,7 +3,7 @@
 Status: **release gate complete; exact product commit published and hosted verification green**
 
 Audit date: 2026-07-31
-Audited product release commit: `15fac4f040a3ba4b4b3e08ae0f19c9e2ffa0c610`
+Audited product release commit: `6e869450f5e0b8770f90845dc9706e1254361269`
 Audit baseline: `2cd4e9e1fe9e08d3ca43e8a0591b01e48073233c`
 Required branch: `feature/ether-4.0-phase-6`
 Publication branch: `feature/ether-4.0`
@@ -213,7 +213,8 @@ the former eight-second deadline and failed closed as `unknown`, while the
 immediately warmed probe passed. Commit
 `15fac4f040a3ba4b4b3e08ae0f19c9e2ffa0c610` raises the still-hard-bounded default
 to 12 seconds and adds deterministic fake-timer proof that a nine-second cold
-probe succeeds. The final exact gate passed 237 unit and 463 integration tests.
+probe succeeds. The final product-owner gate at `6e86945` passed the complete
+unit suite, 475 integration tests, and 21 Chromium smoke journeys.
 
 The destructive recovery suite previously passed all 15 hard-kill and
 publication-boundary journeys. Performance validation preserved the frozen 16 KiB
@@ -226,23 +227,21 @@ Retained candidate artifacts:
 
 | Artifact | SHA-256 |
 |---|---|
-| `release/windows/Ether-4.0.0-Setup.exe` | `76C0E29549E7EFA403D5025A0F543D38A3D2EC3DFC4C106C54EB30436556E4A7` |
-| `release/windows/win-unpacked/Ether.exe` | `ADA0F75FEC28C3ED97877124B582DC9314ADE61E46ACD3CDEE9F17B96143CD15` |
-| `release/windows/win-unpacked/resources/app.asar` | `DE6E5DC39F17ADCC45F4EBE00E4169469E70266E61C134A505EE6C352B61DD09` |
-| `docs/product/ether-4.0-user-manual.pdf` | `C619F1967B1DA112929B20E52C44A7CBC107381ED3F4AAD2C343DC5056A275A7` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `02B6CB7135844449B2A2427B680AAE9F0A38038CA319C944F996716EBAE68DD0` |
+| `release/windows/win-unpacked/Ether.exe` | `3EBAF18E76E34E6D70FF027875902D50AA4A80E8F5EFBBC5DA40A7A0D1655031` |
+| `release/windows/win-unpacked/resources/app.asar` | `0A35F13E03C48EA9F6A47B84EC0CA1AEF42FD921871101AF59AACBA54496ADE7` |
+| `docs/product/ether-4.0-user-manual.pdf` | `24366F1757882C092581137678B95B0D7BC3390F892F9468AB4626DED9A8EE60` |
 
 The NSIS and Chromium PDF containers embed build metadata, so byte hashes can
 change on a rebuild. Source, staged runtime closure, NSIS payload inventory,
 installed captures, PDF structure, and rendered content are the reproducibility
 contract. The capture manifest binds the retained manual to installer
-`76C0E29549E7EFA403D5025A0F543D38A3D2EC3DFC4C106C54EB30436556E4A7`
+`02B6CB7135844449B2A2427B680AAE9F0A38038CA319C944F996716EBAE68DD0`
 and executable
-`ADA0F75FEC28C3ED97877124B582DC9314ADE61E46ACD3CDEE9F17B96143CD15`.
+`3EBAF18E76E34E6D70FF027875902D50AA4A80E8F5EFBBC5DA40A7A0D1655031`.
 The retained installer, executable, and ASAR are byte-identical copies of the
-exact-worktree artifacts. The exact worktree's independently built PDF hash was
-`9F9504E1A242ED8A77BA2DF7540B66EE16BD531E32DD0D17DFFCCFE132902F37`;
-the expected PDF-container difference is limited to Chromium build metadata, and
-both PDFs pass the same structural and rendered-content verifier.
+exact product-owner audit artifacts. The manual passes the same structural and
+rendered-content verifier used at the preceding release gate.
 
 The package audit recorded:
 
@@ -299,6 +298,40 @@ pages. Settings shows the complete Connect/Test/Remove surface and the statement
 that Google billing is authoritative; no key is present. The Batch Matrix keeps
 the three allocation/control groups separate and legible.
 
+## Final product-owner audit
+
+Commit `6e869450f5e0b8770f90845dc9706e1254361269` is the final audited product
+state. The pass concentrated on the first-run and daily creation journeys:
+
+- New Image nodes select a genuinely discovered image provider and never bind to
+  a simulation profile in production.
+- Existing unavailable provider bindings remain explicit instead of silently
+  impersonating another provider.
+- Node and multi-node runs use a real two-step preview/start flow that identifies
+  provider, model, work-item count, output dimensions, and warnings before work
+  begins.
+- Recipe insertion preserves focus, rejects stale asynchronous setup, and uses a
+  responsive keyboard-accessible gallery.
+- Canvas nodes remain visible after hydration and resizing, node runtime status
+  prioritizes active work, and canvas resizing preserves the user's focal point.
+- Large generated outputs are chunked and integrity-checked instead of failing at
+  the document storage boundary.
+- Save As verifies destination bytes as well as document identity, preventing a
+  rematerialized or substituted destination from being accepted as the source.
+
+The exact source gate passed typecheck, lint, the full unit suite, 475 integration
+tests, and 21 Chromium smoke journeys. The exact Windows package then passed 7
+package-audit checks and 3 installed-package acceptance journeys. Two Gemini image
+requests were used during this audit, below the authorized cap of 12. The second
+request completed through Ether and imported a 554.4 KiB JPEG into Artifact
+Observatory; no ambiguous request was automatically retried.
+
+The final installed-release manual contains 36 recaptured product views across 31
+tagged A4 pages, 38 unique images, and 11 internal links. Representative full
+workspace, Recipe Gallery, inspector, execution, review, and artifact views were
+visually inspected for clipping, overlap, inaccessible controls, and misleading
+states.
+
 ## Known limitations
 
 - Windows binaries are unsigned; Windows can show SmartScreen or publisher-trust
@@ -313,7 +346,7 @@ the three allocation/control groups separate and legible.
 - Merge, tag, GitHub Release, and changes to remote `main` are deliberately outside
   Task 29 and require a separate release-owner decision.
 
-## Publication record
+## Prior publication record
 
 The audited product release commit
 `15fac4f040a3ba4b4b3e08ae0f19c9e2ffa0c610` was pushed without force to
@@ -331,7 +364,12 @@ all passed. The workflow's authenticated-provider and destructive-chaos steps
 were explicitly optional and skipped; the exact local gate supplies their required
 release evidence. The documentation closeout changes only release evidence,
 installed-release captures, the generated manual, and Task 29 checkboxes; the
-product binary remains the exact-gated `15fac4f` build.
+product binary for that publication remained the exact-gated `15fac4f` build.
+
+The final product-owner commit `6e869450f5e0b8770f90845dc9706e1254361269`
+supersedes that candidate and is intended only for a non-force update of
+`refs/heads/feature/ether-4.0`. Remote `main`, merge, tag, and GitHub Release
+creation remain outside this audit.
 
 Merge, tag, GitHub Release creation, and any change to remote `main` remain
 unperformed and require a separate explicit release-owner decision.

@@ -351,21 +351,8 @@ try {
   await page.locator(".adaptive-workspace[data-workspace='build']").waitFor();
   await page.getByRole("button", { name: "Recipes", exact: true }).click();
   await page.getByTestId("recipe-gallery").waitFor({ state: "visible" });
-  const buildToolsResizer = page.getByRole("separator", { name: "Resize Build tools", exact: true });
-  for (let index = 0; index < 3; index += 1) {
-    await buildToolsResizer.press("Shift+ArrowRight");
-  }
-  await settle(page);
-  if (await buildToolsResizer.getAttribute("aria-valuenow") !== "320") {
-    throw new Error("Release capture could not widen Recipe Gallery to the supported Build tools maximum.");
-  }
-  await captureVisibleViewport(
-    page,
-    "recipes",
-    page.getByTestId("recipe-gallery"),
-    page.getByTestId("pane-tools").locator(".resizable-pane-content")
-  );
-  await page.getByRole("button", { name: "Recipes", exact: true }).click();
+  await capture(page, "recipes", page.getByRole("dialog", { name: "Recipe Gallery" }));
+  await page.getByRole("button", { name: "Close Recipe Gallery", exact: true }).click();
 
   const projectLensResizer = page.getByRole("separator", { name: "Resize Project lens", exact: true });
   for (let index = 0; index < 3; index += 1) {
