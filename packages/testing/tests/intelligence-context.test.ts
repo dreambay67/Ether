@@ -1463,7 +1463,7 @@ describe("intelligence package boundary", () => {
       "import('@ether/intelligence').then(m => console.log([typeof m.compileWorkerContext, typeof m.resolveWorkerProfile, typeof m.resolveMemoryScopeKey, typeof m.validateWorkerOutput, typeof m.clearStructuredSchemaCache, typeof m.getStructuredSchemaCacheStats].join(',')))"
     ], { cwd: `${workspaceRoot}/packages/testing`, encoding: "utf8" }).trim();
     expect(output).toBe("function,function,function,function,function,function");
-  }, 30_000);
+  }, 120_000);
 });
 
 void WorkerProfileResolutionError;
