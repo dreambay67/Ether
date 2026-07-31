@@ -89,6 +89,18 @@ function canonicalPath(filePath: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
+function samePath(left: string, right: string): boolean {
+  if (canonicalPath(left) === canonicalPath(right)) return true;
+  if (process.platform !== "win32") return false;
+  try {
+    const first = readAliasIdentity(left);
+    const second = readAliasIdentity(right);
+    return sameIdentity(first, second);
+  } catch {
+    return false;
+  }
+}
+
 function serializeIdentity(identity: EtherFileIdentity): SerializedIdentity {
   return {
     birthtimeNs: identity.birthtimeNs.toString(),
@@ -528,8 +540,8 @@ async function processReplacementRecovery(
           if (replacement !== undefined) {
             if (
               replacement.journalId !== compact.replacementJournalId ||
-              canonicalPath(replacement.destinationPath) !== canonicalPath(compact.destinationPath) ||
-              canonicalPath(replacement.staging.path) !== canonicalPath(compact.stagingPath)
+              !samePath(replacement.destinationPath, compact.destinationPath) ||
+              !samePath(replacement.staging.path, compact.stagingPath)
             ) {
               attention = true;
               continue;
@@ -557,7 +569,7 @@ async function processReplacementRecovery(
     const recordedDestination = typeof input === "object" && input !== null && "destinationPath" in input
       ? (input as { destinationPath?: unknown }).destinationPath
       : undefined;
-    if (typeof recordedDestination !== "string" || canonicalPath(recordedDestination) !== canonicalPath(destinationPath)) {
+    if (typeof recordedDestination !== "string" || !samePath(recordedDestination, destinationPath)) {
       continue;
     }
     pending = true;

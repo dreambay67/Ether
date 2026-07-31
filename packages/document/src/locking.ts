@@ -151,6 +151,29 @@ function canonicalPath(filePath: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
+function stableDocumentPathKey(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  const parent = path.dirname(resolved);
+  try {
+    const parentStats = statSync(parent, { bigint: true });
+    if (parentStats.isDirectory()) {
+      const basename = process.platform === "win32"
+        ? path.basename(resolved).toLowerCase()
+        : path.basename(resolved);
+      return [
+        "parent",
+        parentStats.birthtimeNs.toString(),
+        parentStats.dev.toString(),
+        parentStats.ino.toString(),
+        basename
+      ].join(":");
+    }
+  } catch {
+    // An invalid or not-yet-created parent retains the fail-closed lexical key.
+  }
+  return canonicalPath(resolved);
+}
+
 function insidePath(candidate: string, root: string): boolean {
   const relative = path.relative(canonicalPath(root), canonicalPath(candidate));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -224,7 +247,7 @@ export function resolveDocumentStoreEnvironment(
 export type DocumentStoreRuntime = ReturnType<typeof resolveDocumentStoreEnvironment>;
 
 export function documentPathHash(filePath: string): string {
-  return createHash("sha256").update(canonicalPath(filePath)).digest("hex");
+  return createHash("sha256").update(stableDocumentPathKey(filePath)).digest("hex");
 }
 
 function leasePath(runtime: ResolvedEnvironment, filePath: string): string {

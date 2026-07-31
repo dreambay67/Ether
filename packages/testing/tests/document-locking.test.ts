@@ -165,14 +165,30 @@ function leaseRecordPaths(leaseRoot: string): string[] {
 }
 
 function leasePathFor(leaseRoot: string, filePath: string): string {
-  let resolved = path.resolve(filePath);
+  const resolved = path.resolve(filePath);
+  let key: string;
   try {
-    resolved = realpathSync.native(resolved);
+    const parentStats = statSync(path.dirname(resolved), { bigint: true });
+    const basename = process.platform === "win32"
+      ? path.basename(resolved).toLowerCase()
+      : path.basename(resolved);
+    key = [
+      "parent",
+      parentStats.birthtimeNs.toString(),
+      parentStats.dev.toString(),
+      parentStats.ino.toString(),
+      basename
+    ].join(":");
   } catch {
-    // Match the production fallback for not-yet-created destinations.
+    let canonical = resolved;
+    try {
+      canonical = realpathSync.native(canonical);
+    } catch {
+      // Match the production fallback for an invalid or not-yet-created parent.
+    }
+    key = process.platform === "win32" ? canonical.toLowerCase() : canonical;
   }
-  const canonical = process.platform === "win32" ? resolved.toLowerCase() : resolved;
-  const hash = createHash("sha256").update(canonical).digest("hex");
+  const hash = createHash("sha256").update(key).digest("hex");
   return path.join(leaseRoot, `${hash}.json`);
 }
 
