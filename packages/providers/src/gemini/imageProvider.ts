@@ -76,7 +76,7 @@ const PROFILE_DEFINITIONS: Record<GeminiImageProfile, GeminiProfileDefinition> =
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_AGGREGATE_IMAGE_BYTES = 100 * 1024 * 1024;
-const MAX_TIMEOUT_MS = 120_000;
+const MAX_TIMEOUT_MS = 300_000;
 const MAX_RETRY_AFTER_MS = 5_000;
 
 export class GeminiImageProviderError extends Error {

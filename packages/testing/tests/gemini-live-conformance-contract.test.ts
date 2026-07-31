@@ -9,16 +9,20 @@ const read = (relative: string) => readFile(path.join(root, relative), "utf8");
 
 describe("Gemini paid live-conformance contract", () => {
   it("uses only the protected main-process store and enforces a conservative per-run image ceiling", async () => {
-    const [bootstrap, runner, launcher] = await Promise.all([
+    const [bootstrap, runner, launcher, provider] = await Promise.all([
       read("apps/desktop/src/main/bootstrap.ts"),
       read("apps/desktop/src/main/geminiLiveConformance.ts"),
-      read("scripts/run-gemini-live-conformance.mjs")
+      read("scripts/run-gemini-live-conformance.mjs"),
+      read("packages/providers/src/gemini/imageProvider.ts")
     ]);
 
     expect(bootstrap).toContain('process.argv.includes("--validate-gemini-live")');
     expect(bootstrap).toContain("app.exit(1)");
     expect(runner).toContain("const INTERNAL_RUN_GENERATED_IMAGE_LIMIT = 8");
     expect(runner).toContain("const PLANNED_GENERATED_IMAGES = 8");
+    expect(runner).toContain("const LIVE_GENERATION_TIMEOUT_MS = 300_000");
+    expect(runner).toContain("timeoutMs: LIVE_GENERATION_TIMEOUT_MS");
+    expect(provider).toContain("const MAX_TIMEOUT_MS = 300_000");
     expect(runner).toContain("if (PLANNED_GENERATED_IMAGES > INTERNAL_RUN_GENERATED_IMAGE_LIMIT)");
     expect(runner).toContain("credentialState: \"verified\"");
     expect(runner).toContain("createGeminiCredentialStore");

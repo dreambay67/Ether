@@ -15,6 +15,7 @@ import { createGeminiCredentialStore } from "./services/geminiCredentialStore.js
 const INTERNAL_RUN_GENERATED_IMAGE_LIMIT = 8;
 const PLANNED_GENERATED_IMAGES = 8;
 const MAX_ESTIMATED_COST_USD = 1.129;
+const LIVE_GENERATION_TIMEOUT_MS = 300_000;
 
 type GenerationScenario = {
   id: string;
@@ -233,7 +234,7 @@ export async function runGeminiLiveConformance(): Promise<void> {
           height: scenario.height,
           outputFormat: "image/jpeg"
         },
-        timeoutMs: 120_000,
+        timeoutMs: LIVE_GENERATION_TIMEOUT_MS,
         requestedAt: new Date().toISOString()
       } satisfies GenerationProviderInput, executionContext(stagingRoot, scenario.id));
       const artifact = requireArtifact(result.artifacts[0]);
@@ -262,7 +263,7 @@ export async function runGeminiLiveConformance(): Promise<void> {
       outputCount: 1,
       sourceImage: { assetPath: editSource },
       mask: null,
-      timeoutMs: 120_000,
+      timeoutMs: LIVE_GENERATION_TIMEOUT_MS,
       requestedAt: new Date().toISOString()
     } satisfies ImageEditProviderInput, executionContext(stagingRoot, "pro-edit"));
     const editedArtifact = requireArtifact(editResult.artifacts[0]);
