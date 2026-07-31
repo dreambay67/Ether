@@ -2292,7 +2292,9 @@ function normalizeWindowsPath(filePath: string): string {
   let normalized = filePath.replaceAll("/", "\\");
   if (normalized.toLocaleLowerCase().startsWith("\\\\?\\unc\\")) normalized = `\\\\${normalized.slice(8)}`;
   else if (normalized.startsWith("\\\\?\\")) normalized = normalized.slice(4);
-  return normalized.replace(/\\+$/u, "").toLocaleLowerCase();
+  normalized = normalized.toLocaleLowerCase();
+  const root = path.win32.parse(normalized).root;
+  return normalized === root ? root : normalized.replace(/\\+$/u, "");
 }
 
 function insideWindowsPath(candidate: string, root: string): boolean {

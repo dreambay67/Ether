@@ -2323,6 +2323,32 @@ describe("Windows writable location classification", () => {
     await expect(capability.classify(input)).resolves.toBe(expected);
   });
 
+  it("keeps a drive-root cloud directory rooted when Ether runs from that drive", async () => {
+    const create = Reflect.get(applicationServiceModule, "createWindowsLocationCapability") as
+      | ((port: {
+          inspect(filePath: string, signal: AbortSignal): Promise<{
+            finalPath: string;
+            volumeType: string;
+            cloudRoots: readonly string[];
+            cloudPlaceholder: boolean;
+          }>;
+        }) => { classify(filePath: string): Promise<string> })
+      | undefined;
+    expect(create).toBeTypeOf("function");
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue("D:\\a\\Ether\\Ether");
+    try {
+      const capability = create!({ inspect: async () => ({
+        finalPath: "D:\\Campaign.ether",
+        volumeType: "fixed",
+        cloudRoots: ["D:\\"],
+        cloudPlaceholder: false
+      }) });
+      await expect(capability.classify("D:\\Campaign.ether")).resolves.toBe("cloud-placeholder");
+    } finally {
+      cwd.mockRestore();
+    }
+  });
+
   it("times out and cancels a hanging native probe without blocking the event loop", async () => {
     const create = Reflect.get(applicationServiceModule, "createWindowsLocationCapability") as (
       port: { inspect(filePath: string, signal: AbortSignal): Promise<never> },
