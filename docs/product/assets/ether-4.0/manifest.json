@@ -4,26 +4,26 @@
   "sourceProfile": "disposable-scoped-profile",
   "installer": {
     "fileName": "Ether-4.0.0-Setup.exe",
-    "sha256": "036bd37789e6978791e084e2f4ea7e791e94a0efdf079a64e4cc888ab29eeb5a"
+    "sha256": "76c0e29549e7efa403d5025a0f543d38a3d2ec3dfc4c106c54eb30436556e4a7"
   },
   "executable": {
     "fileName": "Ether.exe",
-    "sha256": "ca0abfb7b727f04c039752b1c35ad3961981b8f33e804b05a1c04ccb50ecc398"
+    "sha256": "ada0f75fec28c3ed97877124b582dc9314ade61e46acd3cdee9f17b96143cd15"
   },
   "fixture": {
     "fileName": "Ether 4.0 Release Atlas.ether",
     "graphId": "manual-release-graph",
     "nodeCount": 17,
     "referenceCount": 1,
-    "sha256": "91fbfd7019be21d60c37387324118d2a9a463eecf56d84d155959377b505dfea"
+    "sha256": "95024200630c4382a9ea4c728cabbe4e10e81b57bba805453e5cd72ba83ef824"
   },
   "permitEvidence": {
     "editPermit": "active",
     "runPermit": "active-exact-plan",
-    "planId": "plan-fb92ba6d-05e6-49e6-83f3-ca94d3cfb8d4",
-    "contentHash": "sha256:v1:dbf0592fe99a6627b1c4d7bc76c7b8dc0f99784e0aec969e8c291340fe06e44c"
+    "planId": "plan-09db884e-1d1a-48dd-9c78-f5d76b7cf46c",
+    "contentHash": "sha256:v1:1dcdf728779e0d52c672c1034b4ede9fa814b4fffc60a1bdc724ef6f6ae4fbb8"
   },
-  "capturedAt": "2026-07-30T22:52:51.555Z",
+  "capturedAt": "2026-07-31T07:32:22.516Z",
   "labels": [
     "start",
     "build",
@@ -85,13 +85,13 @@
       "label": "run",
       "width": 1600,
       "height": 1000,
-      "sha256": "61bc1dba76a130e90162ba9e2dc9f7e40e62511f0782f0196e693074e5ec3b61"
+      "sha256": "4c7f146a7696127390147b7543419f600ca5f5d17976646101c634b320265023"
     },
     {
       "label": "review",
       "width": 1600,
       "height": 1000,
-      "sha256": "ee36b0d3128eb0b9626a8faf7458fc18ad9e27eb7bb5259606b6c285a68880ad"
+      "sha256": "699dc43f2f4cdc4924655b092baf8f997c0aacd97c1563b210800ae2cae62e7f"
     },
     {
       "label": "reference-desk",
@@ -109,13 +109,13 @@
       "label": "job-center",
       "width": 1600,
       "height": 184,
-      "sha256": "b5996a15cfb4354128278b52ea303397a7a99111488fd1fe527d41f680eb2517"
+      "sha256": "b1ecbc61c591bcdc454179883907da9de451763f57bca4c3e77ddc2e1e382576"
     },
     {
       "label": "artifact-observatory",
       "width": 1265,
       "height": 768,
-      "sha256": "38e219610a4cd3db48e53aa059585a4c389503b1a6168b410c64f1b83f376d0c"
+      "sha256": "9c522ed0ee4c6bfa9de0d0faca233b834cb11665bd7e9ca6608bec76280a7b02"
     },
     {
       "label": "recipes",
@@ -139,7 +139,7 @@
       "label": "provider-health",
       "width": 980,
       "height": 820,
-      "sha256": "53a0e46115f2f6ae795e404fc7cd9213e5bf3b1f113db57eb61b1cb8281f64fa"
+      "sha256": "20005413babf5349091c663e25a9ab51fb81def51c271319868c30b22eabfce5"
     },
     {
       "label": "settings",
@@ -173,9 +173,9 @@
     },
     {
       "label": "plugin-run-permit",
-      "width": 525,
+      "width": 520,
       "height": 237,
-      "sha256": "6e7f2c90bd402641514ab8824ffb485cbb5300790a99578b61f62e7b97d86221"
+      "sha256": "8858acf09b26f626fae7111b51424d52e96b38f682dc7f18758f58257989ef1c"
     },
     {
       "label": "inspector-prompt-text",
@@ -199,7 +199,7 @@
       "label": "inspector-generation-image",
       "width": 400,
       "height": 640,
-      "sha256": "dbbd2da01216a51fbe48f6a7456f1dc01f17e425380cc9eeb91aa8266c638910"
+      "sha256": "498514dd8584756fa942e4fbdc0fa2e9bfcf0d534455015c9a71565a0e7310e8"
     },
     {
       "label": "inspector-edit-image",
@@ -211,7 +211,7 @@
       "label": "inspector-edit-mask",
       "width": 400,
       "height": 640,
-      "sha256": "97f18adda6ff4c76d7d2b21bd69865c132466027abc3423e8b2b719dd8eb0e37"
+      "sha256": "5d4e0c9c7e076e663d0db1a0ec170ef71049c985bb657ba04debb733a12b18b8"
     },
     {
       "label": "inspector-edit-transform",
@@ -235,7 +235,7 @@
       "label": "inspector-review-filter",
       "width": 400,
       "height": 640,
-      "sha256": "eb2b63c72812de9932bdc9f160db93dcdf1d23656ccd1ed6dacd3c4019eaf55d"
+      "sha256": "98bfa1cca55aff63dfe251505371d36d26087223a5474e6ac82d4804a995cc38"
     },
     {
       "label": "inspector-flow-variables",

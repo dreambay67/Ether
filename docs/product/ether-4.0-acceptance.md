@@ -12,7 +12,7 @@
 - Windows protected storage is mandatory. If Electron safeStorage is unavailable, malformed, or cannot decrypt its record, Gemini is unavailable; no environment or plaintext fallback is used.
 - Primary IDs are `google-gemini-api-nano-banana-2`, `google-gemini-api-nano-banana-pro`, and `google-gemini-api-nano-banana-2-lite`. Existing `google-nano-banana-*` documents reopen as their explicit Antigravity fallback choice. No API failure changes a binding to Antigravity.
 - Nano Banana 2 sends `gemini-3.1-flash-image` and supports exact 0.5K/1K/2K/4K documented ratio dimensions. Pro sends `gemini-3-pro-image` at 1K/2K/4K; Lite sends `gemini-3.1-flash-lite-image` at 1K only. The selected UI profile exposes only supported ratios, reference limit, and the live-conformed JPEG output format. Ether never labels non-PNG bytes as PNG.
-- The Interactions API request uses `store: false`, contains no Search/Image Search tool, honors cancellation and a bounded timeout, and validates response image MIME, exact dimensions, SHA-256, staging, and provenance before durable import. Generated provenance marks Google-documented SynthID without claiming to inspect it.
+- The Interactions API request uses `store: false`, contains no Search/Image Search tool, honors cancellation and a bounded five-minute timeout for slow high-resolution calls, and validates response image MIME, exact dimensions, SHA-256, staging, and provenance before durable import. Generated provenance marks Google-documented SynthID without claiming to inspect it.
 - Redacted outcomes distinguish authentication, billing/prepay, quota/429, safety, network, server, timeout, cancellation, malformed output, and ambiguous completion. Only a bounded Retry-After retry after an unambiguous 429 is permitted. There is no automatic provider substitution.
 - Provider Health truthfully labels Gemini Developer API as the default Nano Banana route and Antigravity as explicit fallback / legacy CLI. Cost guidance is clearly an estimate, not Google billing truth.
 - Two independent jobs prove four Codex plus four Gemini API calls active concurrently, fifth Gemini work queues, ninth global work queues, retry/recovery cannot duplicate accepted output, retained Antigravity stays separately bounded, and unknown provider work remains at one.
@@ -81,6 +81,7 @@ The implementation may introduce the missing script names, but the final release
 - [ ] Dragging an `.ether` document onto Ether opens it.
 - [ ] Opening an already-open document focuses its window.
 - [ ] A competing process cannot acquire writable access; read-only open remains available.
+- [ ] A cold native fixed-volume probe can complete after nine seconds, while location classification remains fail-closed and hard-bounded at 12 seconds.
 - [ ] Recent Documents and Jump List entries open their target or report that it is missing.
 - [ ] Unicode, spaces, long paths, removable drives, and local cloud-synced locations behave predictably.
 
