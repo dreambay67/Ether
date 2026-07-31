@@ -360,6 +360,13 @@ function samePath(left: string, right: string): boolean {
     : leftResolved === rightResolved;
 }
 
+function sameDirectoryIdentity(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 async function captureDirectoryIdentities(
   root: string,
   outputs: readonly AtomicExportOutput[]
@@ -383,7 +390,12 @@ async function captureDirectoryIdentities(
       throw publicationError("PATH_ESCAPE", "The export directory chain contains a reparse point.");
     }
     const canonical = await realpath(directory);
-    if (!samePath(canonical, directory)) {
+    const canonicalIdentity = await lstat(canonical, { bigint: true });
+    if (
+      !canonicalIdentity.isDirectory() ||
+      canonicalIdentity.isSymbolicLink() ||
+      (!samePath(canonical, directory) && !sameDirectoryIdentity(before, canonicalIdentity))
+    ) {
       throw publicationError("PATH_ESCAPE", "The export directory chain changed during validation.");
     }
     const after = await lstat(directory, { bigint: true });

@@ -2471,6 +2471,15 @@ function sameExportPathIdentity(left: ExportPathIdentity, right: ExportPathIdent
     left.ino === right.ino;
 }
 
+function sameExportFileIdentity(
+  left: { birthtimeNs: bigint; dev: bigint; ino: bigint },
+  right: { birthtimeNs: bigint; dev: bigint; ino: bigint }
+): boolean {
+  return left.birthtimeNs === right.birthtimeNs &&
+    left.dev === right.dev &&
+    left.ino === right.ino;
+}
+
 function sameExportParentChain(
   left: readonly ExportPathIdentity[],
   right: readonly ExportPathIdentity[]
@@ -2521,21 +2530,24 @@ async function captureExportParentChain(
       );
     }
     const canonical = await realpath(directory);
-    const canonicalRoot = identities[0]?.canonicalPath ?? (
-      process.platform === "win32" ? resolvedRoot.toLowerCase() : resolvedRoot
-    );
     const normalizedCanonical = process.platform === "win32" ? canonical.toLowerCase() : canonical;
+    const canonicalInfo = await lstat(canonical, { bigint: true });
+    if (
+      !canonicalInfo.isDirectory() ||
+      canonicalInfo.isSymbolicLink() ||
+      (index === 0 && !samePath(canonical, resolvedRoot) && !sameExportFileIdentity(before, canonicalInfo))
+    ) {
+      throw new ApplicationServiceError(
+        "PATH_ESCAPE",
+        "The export root cannot be a symbolic link or junction."
+      );
+    }
+    const canonicalRoot = identities[0]?.canonicalPath ?? normalizedCanonical;
     const relative = path.relative(canonicalRoot, normalizedCanonical);
     if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
       throw new ApplicationServiceError(
         "PATH_ESCAPE",
         "The export destination parent escaped its granted root."
-      );
-    }
-    if (index === 0 && !samePath(canonical, resolvedRoot)) {
-      throw new ApplicationServiceError(
-        "PATH_ESCAPE",
-        "The export root cannot be a symbolic link or junction."
       );
     }
     const after = await lstat(directory, { bigint: true });

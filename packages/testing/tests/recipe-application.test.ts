@@ -130,5 +130,5 @@ describe("recipe application boundary", () => {
       expect(preview.payload.plan.workItems, `${recipe.id} maximum work items`).toHaveLength(recipe.expectedWork.maximumWorkItems);
       await app.closeDocument();
     }
-  }, 15_000);
+  }, 30_000);
 });

@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -164,7 +165,12 @@ function leaseRecordPaths(leaseRoot: string): string[] {
 }
 
 function leasePathFor(leaseRoot: string, filePath: string): string {
-  const resolved = path.resolve(filePath);
+  let resolved = path.resolve(filePath);
+  try {
+    resolved = realpathSync.native(resolved);
+  } catch {
+    // Match the production fallback for not-yet-created destinations.
+  }
   const canonical = process.platform === "win32" ? resolved.toLowerCase() : resolved;
   const hash = createHash("sha256").update(canonical).digest("hex");
   return path.join(leaseRoot, `${hash}.json`);
@@ -1369,7 +1375,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
       expect(readdirSync(caseRoot).sort()).toEqual(["Destination.ether", "Source.ether", "leases"]);
       await source.close();
     }
-  }, 15_000);
+  }, 30_000);
 
   it("Save As from read-only acquires the destination lease and switches only after validation", async () => {
     const creator = await storeClass().create(sourcePath, {

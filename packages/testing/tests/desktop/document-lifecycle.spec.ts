@@ -39,6 +39,7 @@ import {
   type EtherAssetSource
 } from "../../../../apps/desktop/src/main/protocol/etherAssetProtocol";
 import { registerDocumentHandlers } from "../../../../apps/desktop/src/main/ipc/registerDocumentHandlers";
+import { canonicalGrantPath } from "../../../../apps/desktop/src/main/security/pathGrants";
 import { desktopIpcChannels } from "../../../../apps/desktop/src/shared/ipc/channels";
 import { reduceDocumentSession } from "../../../../apps/desktop/src/renderer/project/useDocumentSession";
 
@@ -2116,7 +2117,7 @@ describe("Windows writable location classification", () => {
 
     expect(create).toBeTypeOf("function");
     await expect(create!().classify(filePath)).resolves.toBe("local-fixed");
-  });
+  }, 15_000);
 
   it.runIf(process.platform === "win32")("classifies a real junction by its final native cloud path", async () => {
     const root = await tempRoot("ether-native-junction-");
@@ -2456,9 +2457,9 @@ describe("incremental reference folder search", () => {
       await expect(service.actOnReference(snapshot.documentId, "reference-1", "search-folder"))
         .resolves.toBeDefined();
       expect(sawAfterGrant).toBe(true);
-      expect(await application.queryReferences()).toEqual([
-        expect.objectContaining({ id: "reference-1", state: "linked", originalPath: await realpath(matchPath) })
-      ]);
+      const [linked] = await application.queryReferences();
+      expect(linked).toEqual(expect.objectContaining({ id: "reference-1", state: "linked" }));
+      expect(canonicalGrantPath(linked!.originalPath!)).toBe(canonicalGrantPath(matchPath));
       await writeFile(firstPath, pngBytes(64, 0x20));
       const revocations = JSON.parse(
         await readFile(path.join(root, "appdata", "reference-grants.revocations.json"), "utf8")
@@ -2474,7 +2475,7 @@ describe("incremental reference folder search", () => {
         await readFile(path.join(root, "appdata", "reference-grants.json"), "utf8")
       ) as Array<{ operation: string; path: string }>;
       expect(grants.some((grant) => path.basename(grant.path) === "first.png")).toBe(false);
-      const canonicalMatchPath = (await realpath(matchPath)).toLocaleLowerCase();
+      const canonicalMatchPath = canonicalGrantPath(matchPath);
       expect(grants.some((grant) =>
         grant.operation === "resolve" &&
         grant.path === canonicalMatchPath

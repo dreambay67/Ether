@@ -6,6 +6,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -141,7 +142,12 @@ function defaultRecoveryRoot(): string {
 }
 
 function canonicalPath(filePath: string): string {
-  const resolved = path.resolve(filePath);
+  let resolved = path.resolve(filePath);
+  try {
+    resolved = realpathSync.native(resolved);
+  } catch {
+    // Destinations that do not exist yet retain their resolved lexical path.
+  }
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 

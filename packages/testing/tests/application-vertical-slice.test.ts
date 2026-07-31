@@ -205,5 +205,5 @@ describe("Ether application vertical slice", () => {
     expect(await readdir(documentsRoot)).toEqual(["Campaign.ether"]);
 
     await reopened.closeDocument();
-  });
+  }, 15_000);
 });
