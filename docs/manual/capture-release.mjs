@@ -674,51 +674,6 @@ async function capture(page, label, locator) {
   });
 }
 
-async function captureVisibleViewport(page, label, locator, viewportLocator) {
-  const visibleLocator = locator.filter({ visible: true });
-  const visibleViewport = viewportLocator.filter({ visible: true });
-  if (await visibleLocator.count() !== 1 || await visibleViewport.count() !== 1) {
-    throw new Error(`Installed release surface '${label}' must resolve to one target and one viewport.`);
-  }
-  await Promise.all([
-    visibleLocator.waitFor({ state: "visible", timeout: 20_000 }),
-    visibleViewport.waitFor({ state: "visible", timeout: 20_000 })
-  ]);
-  await settle(page);
-  const [targetBounds, viewportBounds] = await Promise.all([
-    visibleLocator.boundingBox(),
-    visibleViewport.boundingBox()
-  ]);
-  const pageViewport = page.viewportSize();
-  if (targetBounds === null || viewportBounds === null || pageViewport === null) {
-    throw new Error(`Installed release surface '${label}' has no stable visible capture bounds.`);
-  }
-  const left = Math.max(0, targetBounds.x, viewportBounds.x);
-  const top = Math.max(0, targetBounds.y, viewportBounds.y);
-  const right = Math.min(
-    pageViewport.width,
-    targetBounds.x + targetBounds.width,
-    viewportBounds.x + viewportBounds.width
-  );
-  const bottom = Math.min(
-    pageViewport.height,
-    targetBounds.y + targetBounds.height,
-    viewportBounds.y + viewportBounds.height
-  );
-  const clip = { x: left, y: top, width: right - left, height: bottom - top };
-  if (clip.width < 300 || clip.height < 100) {
-    throw new Error(
-      `Installed release surface '${label}' has an implausible visible viewport ` +
-      `${Math.round(clip.width)}x${Math.round(clip.height)}.`
-    );
-  }
-  await page.screenshot({
-    path: path.join(captureOutput, `${label}.png`),
-    animations: "disabled",
-    clip
-  });
-}
-
 async function captureExpandedScrollable(page, label, locator) {
   const visibleLocator = locator.filter({ visible: true });
   if (await visibleLocator.count() !== 1) {
