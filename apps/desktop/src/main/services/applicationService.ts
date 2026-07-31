@@ -2097,7 +2097,7 @@ export function createWindowsLocationCapability(
           timer = setTimeout(() => {
             controller.abort();
             reject(codedError("LOCATION_PROBE_TIMEOUT", "The location capability probe timed out."));
-          }, options.timeoutMs ?? 8_000);
+          }, options.timeoutMs ?? 12_000);
         });
         const inspection = await Promise.race([port.inspect(filePath, controller.signal), timeout]);
         const normalized = normalizeWindowsPath(inspection.finalPath);

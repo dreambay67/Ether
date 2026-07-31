@@ -2184,6 +2184,37 @@ describe("Windows writable location classification", () => {
     expect(inspect).not.toHaveBeenCalled();
   });
 
+  it("allows a cold native probe beyond eight seconds while retaining a hard default bound", async () => {
+    const create = Reflect.get(applicationServiceModule, "createWindowsLocationCapability") as (
+      port: {
+        inspect(filePath: string, signal: AbortSignal): Promise<{
+          finalPath: string;
+          volumeType: "fixed";
+          cloudRoots: readonly string[];
+          cloudPlaceholder: false;
+        }>;
+      }
+    ) => { classify(filePath: string): Promise<string> };
+    vi.useFakeTimers();
+    try {
+      const capability = create({
+        inspect: () => new Promise((resolve) => {
+          setTimeout(() => resolve({
+            finalPath: "D:\\Campaign.ether",
+            volumeType: "fixed",
+            cloudRoots: [],
+            cloudPlaceholder: false
+          }), 9_000);
+        })
+      });
+      const classification = capability.classify("D:\\Campaign.ether");
+      await vi.advanceTimersByTimeAsync(9_000);
+      await expect(classification).resolves.toBe("local-fixed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ["secondary fixed drive", "D:\\Projects\\Campaign.ether", "D:\\Projects\\Campaign.ether", "fixed", [], false, "local-fixed"],
     ["removable drive", "E:\\Campaign.ether", "E:\\Campaign.ether", "removable", [], false, "removable"],
