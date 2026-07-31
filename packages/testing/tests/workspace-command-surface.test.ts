@@ -119,6 +119,10 @@ describe("workspace command surface", () => {
     expect(workflow).toContain("pnpm.cmd run test:destructive-chaos");
     expect(workflow).toContain('ETHER_RUN_DESTRUCTIVE_CHAOS: "1"');
     expect(workflow).not.toContain("test:integration -- --run tests/document-chaos.integration.ts");
+    const browserBootstrap = workflow.indexOf("pnpm.cmd --dir packages/testing exec playwright install chromium");
+    const smokeGate = workflow.indexOf("pnpm.cmd run test:smoke");
+    expect(browserBootstrap).toBeGreaterThanOrEqual(0);
+    expect(browserBootstrap).toBeLessThan(smokeGate);
     await expect(
       access(path.join(repositoryRoot, "packages/testing/vitest.integration.config.ts"))
     ).resolves.toBeUndefined();

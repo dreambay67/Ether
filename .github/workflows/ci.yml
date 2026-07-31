@@ -31,6 +31,7 @@ jobs:
           node-version: 24.16.0
           cache: pnpm
       - run: pnpm.cmd install --frozen-lockfile
+      - run: pnpm.cmd --dir packages/testing exec playwright install chromium
       - run: pnpm.cmd run typecheck
       - run: pnpm.cmd run lint
       - run: pnpm.cmd run test:unit
