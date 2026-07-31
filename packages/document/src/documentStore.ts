@@ -848,7 +848,12 @@ export class DocumentStore {
       });
       this.runtime.onCompactStage?.("rollback-created");
 
-      replaceWithOwnedTemporaryDatabase(temporaryPath, this.currentPath, temporaryIdentity);
+      replaceWithOwnedTemporaryDatabase(
+        temporaryPath,
+        this.currentPath,
+        temporaryIdentity,
+        this.currentDocumentId
+      );
       temporaryIdentity = undefined;
       markReplacementPublished(recovery);
       this.runtime.onCompactStage?.("publication");
@@ -1414,7 +1419,6 @@ export class DocumentStore {
       }
 
       this.runtime.onSaveStage?.("publication");
-      publishedIdentity = temporaryIdentity;
       if (switchActive) {
         if (destinationExisted) {
           if (existingDestinationDocumentId === undefined) {
@@ -1437,12 +1441,18 @@ export class DocumentStore {
           );
           await recordReplacementRollback(replacementRecovery, replacementRollback);
         }
-        replaceWithOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
+        publishedIdentity = replaceWithOwnedTemporaryDatabase(
+          temporaryPath,
+          absoluteDestination,
+          temporaryIdentity,
+          nextDocumentId
+        );
         if (replacementRecovery !== undefined) {
           markReplacementPublished(replacementRecovery);
         }
       } else {
         publishOwnedTemporaryDatabase(temporaryPath, absoluteDestination, temporaryIdentity);
+        publishedIdentity = temporaryIdentity;
       }
       temporaryIdentity = undefined;
 

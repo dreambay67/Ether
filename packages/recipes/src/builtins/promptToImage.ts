@@ -13,7 +13,7 @@ const compare = node("compare", "review.compare", "Choose a direction", 610, 82,
 const collection = node("collection", "output.collection", "First selects", 888, 82, {
   kind: "output.collection", collectionId: "first-selects", membershipMode: "add", makePrimary: true
 });
-const generate = requirement("image", "generate-image", ["text", "image", "data"], ["image"], 0, 1);
+const generate = requirement("image", "generate-image", ["text", "image"], ["image"], 0, 1);
 
 export const promptToImageRecipe = manifest({
   id: "prompt-to-image",

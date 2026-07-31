@@ -1,18 +1,45 @@
 import { useCallback } from "react";
-import type { EtherGraph, EtherNode, GraphOperation, ModuleInterface, NodeDefinitionId, NodePosition, NodeSize } from "@ether/schema";
+import type { EtherGraph, EtherNode, GraphOperation, ModuleInterface, NodeDefinitionId, NodePosition, NodeSize, ProviderCapability } from "@ether/schema";
+
+type CapabilityBridge = { query(query: unknown): Promise<{ payload?: { capabilities?: ProviderCapability[] } }> };
+
+async function defaultGenerationConfig() {
+  let capabilities: ProviderCapability[] = [];
+  try {
+    const bridge = (window.ether as unknown as { application?: CapabilityBridge }).application;
+    const response = await bridge?.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "provider.capabilities", payload: {} });
+    capabilities = response?.payload?.capabilities?.filter((capability) => capability.operation === "generate-image") ?? [];
+  } catch {
+    // A visible unavailable Codex binding is safer than a hidden simulation provider.
+  }
+  const capability = capabilities.find((item) => item.providerId === "codex" && item.profileId === "image-default")
+    ?? capabilities.find((item) => item.providerId === "google-gemini-api-nano-banana-2" && item.profileId === "nano-banana-2")
+    ?? capabilities[0];
+  const aspectRatio = capability?.aspectRatios.includes("1:1") === true ? "1:1" : capability?.aspectRatios[0] ?? "1:1";
+  const resolution = capability?.resolutions.find((item) => item.aspectRatio === aspectRatio) ?? capability?.resolutions[0];
+  return {
+    kind: "generation.image" as const,
+    providerId: capability?.providerId ?? "codex",
+    profileId: capability?.profileId ?? "image-default",
+    aspectRatio,
+    resolution: resolution ? { width: resolution.width, height: resolution.height } : { width: 1024, height: 1024 },
+    outputFormat: capability?.outputFormats?.[0] ?? "image/png" as const,
+    outputCount: 1
+  };
+}
 
 function defaultConfig(definitionId: NodeDefinitionId) {
-  if (definitionId === "generation.image") return { kind: definitionId, providerId: "ether-fake-local", profileId: "default", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 } as const;
   if (definitionId === "canvas.note") return { kind: definitionId, body: "", style: "plain" } as const;
   return { kind: "prompt.text", body: "Describe the creative direction", assembly: "append" } as const;
 }
 function bounds(nodes: EtherNode[]) { const left = Math.min(...nodes.map((node) => node.position.x)); const top = Math.min(...nodes.map((node) => node.position.y)); const right = Math.max(...nodes.map((node) => node.position.x + node.size.width)); const bottom = Math.max(...nodes.map((node) => node.position.y + node.size.height)); return { left, top, width: right - left, height: bottom - top }; }
 
 export function useNodeCommands(graph: EtherGraph, apply: (operations: GraphOperation[], title: string) => Promise<boolean>, onStatus: (message: string) => void) {
-  const createNode = useCallback((definitionId: NodeDefinitionId, position: NodePosition = { x: 120 + graph.nodes.length * 28, y: 120 + graph.nodes.length * 20 }) => {
+  const createNode = useCallback(async (definitionId: NodeDefinitionId, position: NodePosition = { x: 120 + graph.nodes.length * 28, y: 120 + graph.nodes.length * 20 }) => {
     const title = definitionId === "generation.image" ? "Image Generator" : definitionId === "canvas.note" ? "Note" : "Prompt";
-    const node = { id: crypto.randomUUID(), definitionId, title: `${title} ${graph.nodes.filter((item) => item.definitionId === definitionId).length + 1}`, position, size: { width: 260, height: 156 }, config: defaultConfig(definitionId), presentation: { collapsed: false, accent: "default", previewMode: definitionId === "prompt.text" ? "content" : "summary" } } as EtherNode;
-    void apply([{ type: "addNode", graphId: graph.id, node } as GraphOperation], `Add ${title}`);
+    const config = definitionId === "generation.image" ? await defaultGenerationConfig() : defaultConfig(definitionId);
+    const node = { id: crypto.randomUUID(), definitionId, title: `${title} ${graph.nodes.filter((item) => item.definitionId === definitionId).length + 1}`, position, size: { width: 260, height: 156 }, config, presentation: { collapsed: false, accent: "default", previewMode: definitionId === "prompt.text" ? "content" : "summary" } } as EtherNode;
+    await apply([{ type: "addNode", graphId: graph.id, node } as GraphOperation], `Add ${title}`);
   }, [apply, graph.id, graph.nodes]);
   const removeNode = useCallback((nodeId: string) => void apply([{ type: "removeNode", graphId: graph.id, nodeId }], "Delete node"), [apply, graph.id]);
   const moveNodes = useCallback((positions: { nodeId: string; position: NodePosition }[]) => void apply([{ type: "moveNodes", graphId: graph.id, positions }], positions.length > 1 ? "Move selected nodes" : "Move node"), [apply, graph.id]);

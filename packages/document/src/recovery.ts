@@ -511,7 +511,7 @@ async function processReplacementRecovery(
       input = JSON.parse(readFileSync(filePath, "utf8"));
       const compact = parseCompactStagingRecord(input);
       if (compact !== undefined) {
-        if (canonicalPath(compact.destinationPath) !== canonicalPath(destinationPath)) continue;
+        if (!samePath(compact.destinationPath, destinationPath)) continue;
         pending = true;
         if (!compactStagingPathIsOwned(compact)) {
           attention = true;

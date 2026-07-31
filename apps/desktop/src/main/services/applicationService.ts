@@ -2298,7 +2298,11 @@ function normalizeWindowsPath(filePath: string): string {
 function insideWindowsPath(candidate: string, root: string): boolean {
   if (root === "") return false;
   const relative = path.win32.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.win32.isAbsolute(relative));
+  return relative === "" || (
+    relative !== ".." &&
+    !relative.startsWith(`..${path.win32.sep}`) &&
+    !path.win32.isAbsolute(relative)
+  );
 }
 
 function documentCommandCapabilities(mode: DocumentDescriptor["mode"]): DocumentDescriptor["commands"] {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Background, Controls, MiniMap, ReactFlow, SelectionMode, type Connection, type Node, type NodeProps, type OnNodeDrag, type Viewport, type XYPosition } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, SelectionMode, useReactFlow, type Connection, type Node, type NodeProps, type OnNodeDrag, type Viewport, type XYPosition } from "@xyflow/react";
 import type { EtherGraph, PayloadChannel } from "@ether/schema";
 import { EtherEdge, type EtherFlowEdgeData } from "./edges/EtherEdge";
 import { EtherNode, type EtherCanvasNodeData, ModuleNode } from "./EtherNode";
@@ -19,6 +19,9 @@ export function CanvasSurface({ graph, nodeStatuses, readOnly, viewport, onMove,
   graph: EtherGraph; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; viewport?: Viewport; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveGroup(id: string, position: XYPosition): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onTitle(id: string, title: string): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onViewport(viewport: Viewport): void;
 }) {
   markPerformance("canvas:projection:start");
+  const flow = useReactFlow();
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const previousSurfaceSize = useRef<{ width: number; height: number } | null>(null);
   const selection = useMarqueeSelection(onSelected);
   const marqueeActive = useRef(false);
   const viewportInitialized = useRef(false);
@@ -29,6 +32,32 @@ export function CanvasSurface({ graph, nodeStatuses, readOnly, viewport, onMove,
   useEffect(() => {
     setSemanticOverview(largeGraph && initialViewport.zoom < 0.4);
   }, [graph.id, initialViewport.zoom, largeGraph]);
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface || typeof ResizeObserver === "undefined") return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const next = { width: entry.contentRect.width, height: entry.contentRect.height };
+      const previous = previousSurfaceSize.current;
+      previousSurfaceSize.current = next;
+      if (!previous || graph.nodes.length === 0 || next.width <= 0 || next.height <= 0) return;
+      const xShift = (next.width - previous.width) / 2;
+      const yShift = (next.height - previous.height) / 2;
+      if (Math.abs(xShift) < 0.5 && Math.abs(yShift) < 0.5) return;
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const current = flow.getViewport();
+        void flow.setViewport({ ...current, x: current.x + xShift, y: current.y + yShift }, { duration: 0 });
+      });
+    });
+    observer.observe(surface);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+      previousSurfaceSize.current = null;
+    };
+  }, [flow, graph.id, graph.nodes.length]);
   const compatibleChannels = useCallback((edge: EtherGraph["edges"][number], endpoint: "source" | "target") => {
     const value = endpoint === "source" ? edge.from : edge.to; const oppositeChannel = endpoint === "source" ? edge.to.channel : edge.from.channel;
     if (value.kind === "module") return [value.channel];
@@ -59,13 +88,15 @@ export function CanvasSurface({ graph, nodeStatuses, readOnly, viewport, onMove,
       draggable: false,
       selectable: false,
       data: { count: cluster.count, title: `Region ${cluster.column + 1}.${cluster.row + 1}` },
+      width: cellWidth - 80,
+      height: cellHeight - 80,
       style: { width: cellWidth - 80, height: cellHeight - 80, zIndex: 1 }
     } satisfies Node));
   }, [graph.nodes, showSemanticOverview]);
   const nodes = useMemo<Node[]>(() => [
-    ...graph.groups.map((group) => ({ id: `group:${group.id}`, type: "group", position: group.position, draggable: !readOnly, selectable: false, data: { title: group.title, color: group.color }, style: { width: group.size.width, height: group.size.height, zIndex: 0 } })),
-    ...graph.modules.map((module) => ({ id: `module:${module.id}`, type: "module", position: module.position, draggable: !readOnly, data: { title: module.title, collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id) }, style: { width: module.size.width, height: module.size.height, zIndex: 1 } })),
-    ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => ({ id: node.id, type: "etherNode", position: node.position, selected: selection.selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], status: nodeStatuses[node.id] ?? null, readOnly, onSelect: selection.selectNode, onDelete, onResize, onTitle } satisfies EtherCanvasNodeData, style: { width: node.size.width, height: node.size.height, zIndex: 1 } })))
+    ...graph.groups.map((group) => ({ id: `group:${group.id}`, type: "group", position: group.position, width: group.size.width, height: group.size.height, draggable: !readOnly, selectable: false, data: { title: group.title, color: group.color }, style: { width: group.size.width, height: group.size.height, zIndex: 0 } })),
+    ...graph.modules.map((module) => ({ id: `module:${module.id}`, type: "module", position: module.position, width: module.size.width, height: module.size.height, draggable: !readOnly, data: { title: module.title, collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id) }, style: { width: module.size.width, height: module.size.height, zIndex: 1 } })),
+    ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => ({ id: node.id, type: "etherNode", position: node.position, width: node.size.width, height: node.size.height, selected: selection.selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], status: nodeStatuses[node.id] ?? null, readOnly, onSelect: selection.selectNode, onDelete, onResize, onTitle } satisfies EtherCanvasNodeData, style: { width: node.size.width, height: node.size.height, zIndex: 1 } })))
   ], [activity, graph.groups, graph.modules, graph.nodes, nodeStatuses, onDelete, onModuleEnter, onModuleToggle, onResize, onTitle, overviewClusters, readOnly, selection.selectNode, selection.selectedIds, showSemanticOverview]);
   const edges = useMemo(() => showSemanticOverview ? [] : graph.edges.map((edge) => ({ id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, data: { edge, readOnly, compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel } satisfies EtherFlowEdgeData })), [compatibleChannels, graph.edges, onChannel, onDeleteEdge, onRole, readOnly, showSemanticOverview]);
   markPerformance("canvas:projection:end");
@@ -85,5 +116,5 @@ export function CanvasSurface({ graph, nodeStatuses, readOnly, viewport, onMove,
     const nextOverview = graph.nodes.length >= 500 && nextViewport.zoom < 0.4;
     setSemanticOverview((current) => current === nextOverview ? current : nextOverview);
   }, [graph.nodes.length]);
-  return <div className="canvas-surface" data-testid="ether-canvas-surface" data-graph-node-count={graph.nodes.length} data-semantic-overview={showSemanticOverview ? "true" : "false"} onClickCapture={(event) => { const node = (event.target as HTMLElement).closest<HTMLElement>("[data-node-id]"); if (node) selection.selectNode(node.dataset.nodeId ?? "", event.ctrlKey || event.metaKey || event.shiftKey); }}><ReactFlow key={graph.id} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultViewport={initialViewport} minZoom={0.1} fitView={fitSmallGraph} onlyRenderVisibleElements={!showSemanticOverview} nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable selectionOnDrag panOnDrag={[2]} selectionMode={SelectionMode.Partial} selectNodesOnDrag={false} onInit={(instance) => { viewportInitialized.current = true; const current = instance.getViewport(); setSemanticOverview(graph.nodes.length >= 500 && current.zoom < 0.4); markPerformance("graph-hydration:interactive"); measurePerformance("graph-hydration:interactive", "graph-hydration:start", "graph-hydration:interactive"); notifyRendererInteractive(); }} onMove={updateSemanticZoom} onSelectionStart={() => { marqueeActive.current = true; }} onSelectionChange={({ nodes: selected }) => { if (marqueeActive.current) selection.onSelectionChange({ nodes: selected.filter((node) => graph.nodes.some((item) => item.id === node.id)) }); }} onSelectionEnd={() => { marqueeActive.current = false; }} onNodeClick={(event, node) => { if (graph.nodes.some((item) => item.id === node.id)) selection.selectNode(node.id, event.ctrlKey || event.metaKey || event.shiftKey); }} onEdgeClick={(_event, edge) => onEdgeSelected(edge.id)} onNodeDragStop={onNodeDragStop} onConnect={onConnectFlow} onMoveEnd={(_event, nextViewport) => onViewport(nextViewport)} onPaneClick={(event) => { if ((event.target as HTMLElement).closest(".react-flow__node")) return; selection.clearSelection(); onEdgeSelected(null); }} onPaneContextMenu={(event) => event.preventDefault()}><Background color="#304051" gap={24} size={1} /><Controls showInteractive={false} />{fitSmallGraph ? <MiniMap pannable zoomable nodeColor="#37e6ea" /> : null}</ReactFlow></div>;
+  return <div ref={surfaceRef} className="canvas-surface" data-testid="ether-canvas-surface" data-graph-node-count={graph.nodes.length} data-semantic-overview={showSemanticOverview ? "true" : "false"} onClickCapture={(event) => { const node = (event.target as HTMLElement).closest<HTMLElement>("[data-node-id]"); if (node) selection.selectNode(node.dataset.nodeId ?? "", event.ctrlKey || event.metaKey || event.shiftKey); }}><ReactFlow key={graph.id} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultViewport={initialViewport} minZoom={0.1} fitView={fitSmallGraph} onlyRenderVisibleElements={!showSemanticOverview} nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable selectionOnDrag panOnDrag={[2]} selectionMode={SelectionMode.Partial} selectNodesOnDrag={false} onInit={(instance) => { viewportInitialized.current = true; const current = instance.getViewport(); setSemanticOverview(graph.nodes.length >= 500 && current.zoom < 0.4); markPerformance("graph-hydration:interactive"); measurePerformance("graph-hydration:interactive", "graph-hydration:start", "graph-hydration:interactive"); notifyRendererInteractive(); }} onMove={updateSemanticZoom} onSelectionStart={() => { marqueeActive.current = true; }} onSelectionChange={({ nodes: selected }) => { if (marqueeActive.current) selection.onSelectionChange({ nodes: selected.filter((node) => graph.nodes.some((item) => item.id === node.id)) }); }} onSelectionEnd={() => { marqueeActive.current = false; }} onNodeClick={(event, node) => { if (graph.nodes.some((item) => item.id === node.id)) selection.selectNode(node.id, event.ctrlKey || event.metaKey || event.shiftKey); }} onEdgeClick={(_event, edge) => onEdgeSelected(edge.id)} onNodeDragStop={onNodeDragStop} onConnect={onConnectFlow} onMoveEnd={(_event, nextViewport) => onViewport(nextViewport)} onPaneClick={(event) => { if ((event.target as HTMLElement).closest(".react-flow__node")) return; selection.clearSelection(); onEdgeSelected(null); }} onPaneContextMenu={(event) => event.preventDefault()}><Background color="#304051" gap={24} size={1} /><Controls showInteractive={false} />{fitSmallGraph ? <MiniMap pannable zoomable nodeColor="#37e6ea" /> : null}</ReactFlow></div>;
 }

@@ -252,6 +252,22 @@ export class BlobRepository {
     this.updateImportProgress(importId, contentKey, data.byteLength, 0);
   }
 
+  writeBytes(importId: string, contentKeyInput: string, data: Uint8Array): void {
+    const contentKey = ContentKeySchema.parse(contentKeyInput).toLowerCase();
+    if (data.byteLength <= INLINE_BLOB_LIMIT) {
+      this.writeInline(importId, contentKey, data);
+      return;
+    }
+    for (let offset = 0, index = 0; offset < data.byteLength; offset += BLOB_CHUNK_SIZE, index += 1) {
+      const chunk = data.subarray(offset, Math.min(offset + BLOB_CHUNK_SIZE, data.byteLength));
+      this.writeChunk(importId, contentKey, {
+        index,
+        byteLength: chunk.byteLength,
+        sha256: createHash("sha256").update(chunk).digest("hex")
+      }, chunk);
+    }
+  }
+
   writeChunk(importId: string, contentKeyInput: string, chunk: StagedBlobChunk, data: Uint8Array): void {
     const contentKey = ContentKeySchema.parse(contentKeyInput).toLowerCase();
     this.assertImportBinding(importId, contentKey);

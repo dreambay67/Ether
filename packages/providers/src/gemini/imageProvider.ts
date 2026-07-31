@@ -363,30 +363,49 @@ export class GeminiImageProvider implements GenerationProvider {
   }
 
   private async request(url: string, init: RequestInit, allowQuotaRetry: boolean, timeoutMs = this.timeoutMs): Promise<Response> {
-    const first = await this.fetchWithBoundary(url, init, timeoutMs);
-    if (!allowQuotaRetry || first.status !== 429) return first;
-    const retryAfterMs = retryAfter(first.headers.get("retry-after"));
-    if (retryAfterMs === null) return first;
-    // 429 does not contain an output. One bounded retry is safe; all ambiguous completions fail closed.
-    await waitForRetry(retryAfterMs, init.signal ?? undefined);
-    return this.fetchWithBoundary(url, init, timeoutMs);
-  }
-
-  private async fetchWithBoundary(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
     const controller = new AbortController();
     let timedOut = false;
-    const forwardAbort = () => controller.abort();
+    let rejectBoundary: ((error: GeminiImageProviderError) => void) | null = null;
+    const boundary = new Promise<never>((_resolve, reject) => { rejectBoundary = reject; });
+    const forwardAbort = () => {
+      controller.abort();
+      rejectBoundary?.(cancellationError());
+    };
     init.signal?.addEventListener("abort", forwardAbort, { once: true });
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      rejectBoundary?.(timeoutError());
+    }, timeoutMs);
+    const fetchBuffered = async () => {
+      const response = await this.fetchImpl(url, { ...init, signal: controller.signal });
+      const body = response.body === null ? null : await response.arrayBuffer();
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
+      });
+    };
+    const operation = async () => {
+      const first = await fetchBuffered();
+      if (!allowQuotaRetry || first.status !== 429) return first;
+      const retryAfterMs = retryAfter(first.headers.get("retry-after"));
+      if (retryAfterMs === null) return first;
+      // A 429 cannot contain an image output. One retry shares the original deadline.
+      await waitForRetry(retryAfterMs, controller.signal);
+      return fetchBuffered();
+    };
     try {
-      return await this.fetchImpl(url, { ...init, signal: controller.signal });
-    } catch (_error) {
+      return await Promise.race([operation(), boundary]);
+    } catch (error) {
       if (init.signal?.aborted) throw cancellationError();
-      if (timedOut) throw new GeminiImageProviderError("timeout", "GEMINI_TIMEOUT", "Gemini did not respond before Ether's bounded timeout.");
+      if (timedOut) throw timeoutError();
+      if (error instanceof GeminiImageProviderError) throw error;
       throw new GeminiImageProviderError("network", "GEMINI_NETWORK", "Ether could not reach the Gemini API. No output was accepted; retry manually if appropriate.");
     } finally {
       clearTimeout(timer);
       init.signal?.removeEventListener("abort", forwardAbort);
+      rejectBoundary = null;
     }
   }
 }
@@ -408,7 +427,9 @@ function capabilityProfile(
     providerName: `${definition.name} / Gemini API`,
     route: "api-generation" as const,
     operation,
-    inputChannels: ["text", "image"] as const,
+    inputChannels: operation === "image.edit"
+      ? ["text", "image", "mask"] as const
+      : ["text", "image"] as const,
     outputChannels: ["image"] as const,
     availability: available ? "available" as const : "unavailable" as const,
     status: available ? "ready" as const : "unavailable" as const,
@@ -662,6 +683,7 @@ function uniqueImagePaths(filePaths: readonly string[]) {
   });
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function timeoutError() { return new GeminiImageProviderError("timeout", "GEMINI_TIMEOUT", "Gemini did not respond before Ether's bounded timeout."); }
 function cancellationError() { return new GeminiImageProviderError("cancellation", "GEMINI_CANCELLED", "Gemini image generation was cancelled."); }
 function credentialMessage(state: GeminiCredentialState) {
   if (state === "encryption-unavailable") return "Windows protected storage is unavailable, so Gemini API use is fail-closed.";

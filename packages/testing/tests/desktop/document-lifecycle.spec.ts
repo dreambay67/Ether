@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { copyFileSync, renameSync, unlinkSync } from "node:fs";
 import {
   copyFile,
   link,
@@ -42,6 +43,7 @@ import { registerDocumentHandlers } from "../../../../apps/desktop/src/main/ipc/
 import { canonicalGrantPath } from "../../../../apps/desktop/src/main/security/pathGrants";
 import { desktopIpcChannels } from "../../../../apps/desktop/src/shared/ipc/channels";
 import { reduceDocumentSession } from "../../../../apps/desktop/src/renderer/project/useDocumentSession";
+import { __setDocumentBoundaryTestHooks } from "../../../../packages/document/src/database";
 
 const roots: string[] = [];
 
@@ -1722,6 +1724,74 @@ describe("autosave and event ordering", () => {
     await service.close();
   });
 
+  it("keeps Save As writable when Windows rematerializes the published file", async () => {
+    const root = await tempRoot("ether-save-as-rematerialized-");
+    const savedPath = path.join(root, "Rematerialized.ether");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => savedPath }),
+      provider: new FakeImageProvider()
+    });
+    const initial = await service.bootstrap();
+    const restoreHooks = __setDocumentBoundaryTestHooks({
+      afterOwnedReplacementRename: (destinationPath) => {
+        const rematerializedPath = `${destinationPath}.rematerialized`;
+        copyFileSync(destinationPath, rematerializedPath);
+        unlinkSync(destinationPath);
+        renameSync(rematerializedPath, destinationPath);
+      }
+    });
+    try {
+      const saved = await service.saveAs(initial.documentId);
+      expect(saved).toMatchObject({
+        displayName: "Rematerialized.ether",
+        mode: "writable",
+        named: true,
+        saveState: "saved"
+      });
+      await service.closeDocument();
+      await expect(service.openPath(savedPath)).resolves.toMatchObject({
+        documentId: saved.documentId,
+        mode: "writable"
+      });
+    } finally {
+      restoreHooks();
+      await service.close();
+    }
+  });
+
+  it("rejects a rematerialized Save As destination whose content differs from staging", async () => {
+    const root = await tempRoot("ether-save-as-substituted-");
+    const savedPath = path.join(root, "Substituted.ether");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => savedPath }),
+      provider: new FakeImageProvider()
+    });
+    const initial = await service.bootstrap();
+    const restoreHooks = __setDocumentBoundaryTestHooks({
+      afterOwnedReplacementRename: (destinationPath) => {
+        const rematerializedPath = `${destinationPath}.rematerialized`;
+        copyFileSync(destinationPath, rematerializedPath);
+        const substituted = new DatabaseSync(rematerializedPath);
+        substituted.prepare("UPDATE document SET title = ? WHERE singleton = 1").run("Substituted");
+        substituted.close();
+        unlinkSync(destinationPath);
+        renameSync(rematerializedPath, destinationPath);
+      }
+    });
+    try {
+      await expect(service.saveAs(initial.documentId)).rejects.toMatchObject({
+        code: "PATH_CHANGED"
+      });
+    } finally {
+      restoreHooks();
+      await service.close();
+    }
+  });
+
   it("aborts an active reference search synchronously before terminal lifecycle drain", async () => {
     const root = await tempRoot("ether-shutdown-search-abort-");
     const service = new DesktopApplicationService({
@@ -2221,6 +2291,9 @@ describe("Windows writable location classification", () => {
     ["mapped drive", "Z:\\Campaign.ether", "Z:\\Campaign.ether", "network", [], false, "mapped-network"],
     ["UNC share", "\\\\server\\share\\Campaign.ether", "\\\\server\\share\\Campaign.ether", "fixed", [], false, "mapped-network"],
     ["OneDrive path", "C:\\Users\\Deny\\OneDrive\\Campaign.ether", "C:\\Users\\Deny\\OneDrive\\Campaign.ether", "fixed", ["C:\\Users\\Deny\\OneDrive"], false, "cloud-placeholder"],
+    ["cloud child beginning with parent marker", "C:\\Users\\Deny\\OneDrive\\..Projects\\Campaign.ether", "C:\\Users\\Deny\\OneDrive\\..Projects\\Campaign.ether", "fixed", ["C:\\Users\\Deny\\OneDrive"], false, "cloud-placeholder"],
+    ["path traversing out of cloud root", "C:\\Users\\Deny\\OneDrive\\..\\Elsewhere\\Campaign.ether", "C:\\Users\\Deny\\OneDrive\\..\\Elsewhere\\Campaign.ether", "fixed", ["C:\\Users\\Deny\\OneDrive"], false, "local-fixed"],
+    ["drive root cloud path", "D:\\Campaign.ether", "D:\\Campaign.ether", "fixed", ["D:\\"], false, "cloud-placeholder"],
     ["junction into cloud", "D:\\Junction\\Campaign.ether", "C:\\Users\\Deny\\OneDrive\\Campaign.ether", "fixed", ["C:\\Users\\Deny\\OneDrive"], false, "cloud-placeholder"],
     ["cloud placeholder attribute", "D:\\Cloud\\Campaign.ether", "D:\\Cloud\\Campaign.ether", "fixed", [], true, "cloud-placeholder"],
     ["Unicode fixed path", "D:\\Kampaň Ω\\Obrázok.ether", "D:\\Kampaň Ω\\Obrázok.ether", "fixed", [], false, "local-fixed"],

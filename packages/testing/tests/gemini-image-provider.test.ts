@@ -136,7 +136,9 @@ describe("Gemini Developer API image provider", () => {
 
   it("exposes structural model/ratio/size matrices and rejects fake dimensions", async () => {
     const provider = new GeminiImageProvider("nano-banana-2", { getApiKey: () => null, credentialState: () => "not-configured" });
-    const profile = provider.diagnose().profiles?.[0];
+    const profiles = provider.diagnose().profiles ?? [];
+    const profile = profiles.find((item) => item.operation === "image.generate");
+    const editProfile = profiles.find((item) => item.operation === "image.edit");
     expect(profile).toMatchObject({
       model: "gemini-3.1-flash-image",
       aspectRatios: expect.arrayContaining(["1:8", "8:1", "16:9"]),
@@ -148,6 +150,8 @@ describe("Gemini Developer API image provider", () => {
       expect.objectContaining({ tier: "0.5K", aspectRatio: "1:1", width: 512, height: 512 }),
       expect.objectContaining({ tier: "4K", aspectRatio: "16:9", width: 5504, height: 3072 })
     ]));
+    expect(profile?.inputChannels).toEqual(["text", "image"]);
+    expect(editProfile?.inputChannels).toEqual(["text", "image", "mask"]);
     await expect(provider.generate(input(await root(), 1000, 1000))).rejects.toMatchObject({ code: "GEMINI_OUTPUT_UNSUPPORTED", category: "provider", failureCategory: "invalid-input" });
   });
 
@@ -190,6 +194,73 @@ describe("Gemini Developer API image provider", () => {
       "message",
       expect.stringMatching(/output_size|project|api_key|should-not-escape/u)
     );
+  });
+
+  it("keeps response streaming and the single quota retry inside one deadline", async () => {
+    const workspacePath = await root();
+    const delayedBody = () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        setTimeout(() => {
+          controller.enqueue(new TextEncoder().encode("{}"));
+          controller.close();
+        }, 80);
+      }
+    }));
+    const stalled = new GeminiImageProvider("nano-banana-2", {
+      getApiKey: () => "local-test-key",
+      credentialState: () => "verified",
+      timeoutMs: 25,
+      fetch: async () => delayedBody()
+    });
+    await expect(stalled.generate(input(workspacePath))).rejects.toMatchObject({
+      code: "GEMINI_TIMEOUT",
+      failureCategory: "timeout"
+    });
+
+    let calls = 0;
+    const retry = new GeminiImageProvider("nano-banana-2", {
+      getApiKey: () => "local-test-key",
+      credentialState: () => "verified",
+      timeoutMs: 35,
+      fetch: async () => {
+        calls += 1;
+        if (calls === 1) return response({ error: { message: "quota" } }, { status: 429, headers: { "retry-after": "0.02" } });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return response({ steps: [{ type: "model_output", content: [{ type: "image", mime_type: "image/jpeg", data: jpeg().toString("base64") }] }] });
+      }
+    });
+    await expect(retry.generate(input(workspacePath))).rejects.toMatchObject({
+      code: "GEMINI_TIMEOUT",
+      failureCategory: "timeout"
+    });
+    expect(calls).toBe(2);
+  });
+
+  it("cancels a response whose body has not completed", async () => {
+    const workspacePath = await root();
+    const controller = new AbortController();
+    const provider = new GeminiImageProvider("nano-banana-2", {
+      getApiKey: () => "local-test-key",
+      credentialState: () => "verified",
+      timeoutMs: 500,
+      fetch: async () => new Response(new ReadableStream<Uint8Array>({
+        start(streamController) {
+          setTimeout(() => {
+            streamController.enqueue(new TextEncoder().encode("{}"));
+            streamController.close();
+          }, 80);
+        }
+      }))
+    });
+    const pending = provider.generate(input(workspacePath), {
+      signal: controller.signal,
+      providerAttemptId: "cancel-body",
+      attemptOrdinal: 1,
+      stagingDirectory: workspacePath,
+      complete: async () => undefined
+    });
+    setTimeout(() => controller.abort(), 15);
+    await expect(pending).rejects.toMatchObject({ code: "GEMINI_CANCELLED", failureCategory: "cancellation" });
   });
 
   it("fails closed on cancellation and malformed paid output", async () => {

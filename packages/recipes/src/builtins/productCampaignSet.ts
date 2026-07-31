@@ -7,7 +7,7 @@ const batch = node("formats", "flow.batch", "Campaign formats", 332, 82, { kind:
 const image = node("image", "generation.image", "Produce campaign images", 610, 82, { kind: "generation.image", providerId: "codex", profileId: "image-default", aspectRatio: "4:5", resolution: { width: 1024, height: 1280 }, outputCount: 1 });
 const compare = node("compare", "review.compare", "Select campaign set", 888, 82, { kind: "review.compare", selectionMode: "many", minimumSelections: 2 });
 const collection = node("collection", "output.collection", "Campaign selects", 1166, 82, { kind: "output.collection", collectionId: "campaign-selects", membershipMode: "add", makePrimary: true });
-const generate = requirement("image", "generate-image", ["text", "image", "data"], ["image"], 1, 1);
+const generate = requirement("image", "generate-image", ["text", "image"], ["image"], 1, 1);
 
 export const productCampaignSetRecipe = manifest({
   id: "product-campaign-set", title: "Product Campaign Set", description: "Build a coherent, reviewable campaign set across hero, detail, social, and editorial formats.",

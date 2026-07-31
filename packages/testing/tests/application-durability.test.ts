@@ -526,6 +526,20 @@ describe("durable application execution", () => {
     await ready.application.closeDocument();
   });
 
+  it("persists repeated previews with plan-scoped step and work-item identities", async () => {
+    const ready = await createReadyApplication({ dispatchMode: "manual" });
+    const nextPlan = await ready.application.previewRun({
+      commandId: "second-preview-command",
+      graphId: "graph-root",
+      scope: { kind: "graph" }
+    });
+
+    expect(nextPlan.id).not.toBe(ready.plan.id);
+    expect(nextPlan.steps.map((step) => step.id)).not.toEqual(ready.plan.steps.map((step) => step.id));
+    expect(nextPlan.workItems.map((item) => item.id)).not.toEqual(ready.plan.workItems.map((item) => item.id));
+    await ready.application.closeDocument();
+  });
+
   it("deduplicates graph transactions by durable command ID", async () => {
     const documentsRoot = await temp("ether-graph-command-doc-");
     const application = new EtherApplication({
@@ -696,6 +710,46 @@ describe("durable application execution", () => {
     expect(observedJournal).toBe(true);
     expect(listRecoveryJournalPaths(ready.appDataRoot)).toEqual([]);
     await ready.application.closeDocument();
+  });
+
+  it("accepts provider images larger than the inline blob limit through chunked storage", async () => {
+    const provider = new ArtifactProbeProvider((result) => {
+      const artifact = result.artifacts[0]!;
+      const original = Buffer.from(artifact.content as Uint8Array);
+      const largePng = Buffer.alloc(256 * 1024 + 1, 0x41);
+      original.copy(largePng);
+      return {
+        ...result,
+        artifacts: [{ ...artifact, content: largePng }]
+      };
+    });
+    const ready = await createReadyApplication({ provider, dispatchMode: "manual" });
+    const started = await ready.application.startRun({
+      commandId: "large-provider-output-start",
+      planId: ready.plan.id,
+      contentHash: ready.plan.contentHash,
+      runPermitId: ready.permit.id
+    });
+
+    try {
+      expect((await ready.application.runPending(started.id)).status).toBe("completed");
+      const artifacts = await ready.application.searchArtifacts({ text: "" });
+      expect(artifacts).toHaveLength(1);
+      expect(artifacts[0]!.byteLength).toBe(256 * 1024 + 1);
+      const database = new DatabaseSync(ready.documentPath, { readOnly: true });
+      try {
+        const blob = database.prepare(
+          "SELECT inline_data, chunk_count FROM blobs WHERE content_key = ?"
+        ).get(artifacts[0]!.contentKey) as { inline_data: Uint8Array | null; chunk_count: number };
+        expect(blob.inline_data).toBeNull();
+        expect(blob.chunk_count).toBe(1);
+      } finally {
+        database.close();
+      }
+      expect(listRecoveryJournalPaths(ready.appDataRoot)).toEqual([]);
+    } finally {
+      await ready.application.closeDocument();
+    }
   });
 
   it("accepts every provider artifact in deterministic order", async () => {

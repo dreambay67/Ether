@@ -169,7 +169,9 @@ describe("Ether execution planner", () => {
         providerBinding: null
       })
     );
-    expect(plan.steps.find((step) => step.nodeId === "generator")?.dependencyStepIds).toEqual(["step-worker"]);
+    expect(plan.steps.find((step) => step.nodeId === "generator")?.dependencyStepIds).toEqual([
+      plan.steps.find((step) => step.nodeId === "worker")?.id
+    ]);
   });
 
   it("normalizes historical Google aliases into the immutable Gemini binding and JPEG request", () => {

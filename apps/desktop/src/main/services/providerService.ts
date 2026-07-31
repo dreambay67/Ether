@@ -393,7 +393,7 @@ function providerHealth(health: CodexRuntimeHealth): ProviderHealthResult {
     message: health.fallbackReason ?? health.restartReason,
     checkedAt: new Date().toISOString(),
     transport: health.transport,
-    version: health.version,
+    version: health.reportedVersion,
     manifestHash: health.manifestHash,
     generation: health.generation,
     restartCount: health.restartCount,

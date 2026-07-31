@@ -6,12 +6,13 @@ import {
   ETHER_SCHEMA_VERSION,
   ETHER_SQLITE_APPLICATION_ID
 } from "@ether/schema";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   linkSync,
   lstatSync,
   openSync,
+  readSync,
   renameSync,
   statSync,
   unlinkSync
@@ -40,6 +41,7 @@ import { hardenEtherSqliteConnection } from "./sqliteSecurity.js";
 const TEST_HOOKS_SYMBOL = Symbol.for("@ether/document/boundary-test-hooks");
 
 export interface DocumentBoundaryTestHooks {
+  afterOwnedReplacementRename?: (destinationPath: string) => void;
   afterWritableOpen?: (location: string) => void;
   beforeHardLinkPublication?: (temporaryPath: string, destinationPath: string) => void;
   beforeTemporaryDatabaseOpen?: (temporaryPath: string) => void;
@@ -373,16 +375,53 @@ export function publishOwnedTemporaryDatabase(
 export function replaceWithOwnedTemporaryDatabase(
   temporaryPath: string,
   destinationPath: string,
-  temporaryIdentity: EtherFileIdentity
-): void {
+  temporaryIdentity: EtherFileIdentity,
+  expectedDocumentId: string
+): EtherFileIdentity {
   const absoluteDestination = path.resolve(destinationPath);
   assertSameOwnedFile(temporaryPath, temporaryIdentity);
+  const stagedSha256 = hashStableFile(temporaryPath, temporaryIdentity);
   try {
     renameSync(temporaryPath, absoluteDestination);
-    assertSameOwnedFile(absoluteDestination, temporaryIdentity);
+    testHooks().afterOwnedReplacementRename?.(absoluteDestination);
+    try {
+      assertSameOwnedFile(absoluteDestination, temporaryIdentity);
+      return temporaryIdentity;
+    } catch (identityError) {
+      const observedIdentity = readEtherFileIdentity(absoluteDestination, true);
+      const inspection = inspectEtherDocument(absoluteDestination);
+      const publishedSha256 = hashStableFile(absoluteDestination, observedIdentity);
+      const stableIdentity = readEtherFileIdentity(absoluteDestination, true);
+      if (
+        inspection.document.documentId !== expectedDocumentId ||
+        !sameIdentity(observedIdentity, stableIdentity) ||
+        publishedSha256 !== stagedSha256
+      ) {
+        throw identityError;
+      }
+      return stableIdentity;
+    }
   } catch (error) {
     throw replacementError(error);
   }
+}
+
+function hashStableFile(filePath: string, expectedIdentity: EtherFileIdentity): string {
+  assertSameOwnedFile(filePath, expectedIdentity);
+  const descriptor = openSync(filePath, "r");
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(256 * 1024);
+  try {
+    while (true) {
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+  assertSameOwnedFile(filePath, expectedIdentity);
+  return hash.digest("hex");
 }
 
 export interface OwnedReplacementRollback {

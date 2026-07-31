@@ -180,7 +180,7 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
       .map((nodeId) => topology.nodeById.get(nodeId))
       .filter((node): node is PlannerNode => node !== undefined)
       .filter(isPlanStepNode)
-      .map((node) => [node.id, nodeStepId(node.id)] as const)
+      .map((node) => [node.id, nodeStepId(input.id, node.id)] as const)
   );
   validateNodeConfigurations(topology);
   const edgeResolutions = resolveEdges(
@@ -253,12 +253,12 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
     }
 
     const batchContext = batchContextForNode(nodeId, batchNodes, topology, input);
-    const expansion = expandForStep(nodeStepId(nodeId), batchContext, input);
+    const expansion = expandForStep(nodeStepId(input.id, nodeId), batchContext, input);
     batchResults.push(expansion);
     if (expansion.summary.capped) {
       warnings.push({
         code: "BATCH_EXPANSION_CAPPED",
-        message: `Batch expansion for ${nodeStepId(nodeId)} was capped at ${expansion.summary.cap}.`,
+        message: `Batch expansion for ${nodeStepId(input.id, nodeId)} was capped at ${expansion.summary.cap}.`,
         nodeId: target.id,
         blocking: false
       });
@@ -452,7 +452,7 @@ function resolveEdges(
       requiredAdapterCapability: adapter?.requiredCapability ?? null,
       failureReason: null
     }) as unknown as JsonObject;
-    const adapterStepId = adapter === null ? null : adapterStepIdFor(edge);
+    const adapterStepId = adapter === null ? null : adapterStepIdFor(input.id, edge);
     const targetPayloadIds = adapter === null
       ? sourcePayloadIds
       : sourcePayloadIds.map((payloadId, index) =>
@@ -592,7 +592,7 @@ function makeNodeStep(input: {
   }));
   const parameters = normalizedNodeParameters(input.target.config, providerBinding);
   return {
-    id: nodeStepId(input.target.id),
+    id: nodeStepId(input.input.id, input.target.id),
     nodeId: input.target.id,
     subject: { kind: "node", nodeId: input.target.id },
     executor: input.target.definition.executor,
@@ -1199,12 +1199,12 @@ function planScope(scope: PlannerExecutionScope, resolution: ScopeResolution): E
     : { kind: "node", nodeId: fallbackNodeId };
 }
 
-function nodeStepId(nodeId: string): string {
-  return `step-${nodeId}`;
+function nodeStepId(planId: string, nodeId: string): string {
+  return `step-${digest(planId)}-${nodeId}`;
 }
 
-function adapterStepIdFor(edge: EtherEdge): string {
-  return `step-adapter-${edge.id}`;
+function adapterStepIdFor(planId: string, edge: EtherEdge): string {
+  return `step-${digest(planId)}-adapter-${edge.id}`;
 }
 
 function logicalPayloadId(edge: EtherEdge): string {

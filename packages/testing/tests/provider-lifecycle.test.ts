@@ -283,6 +283,24 @@ describe("Codex runtime lifecycle", () => {
     });
   });
 
+  it("reports a prerelease version accurately while preserving the exact-version gate", async () => {
+    const instance = runtime("prerelease-version");
+    await instance.start();
+    expect(instance.health()).toMatchObject({
+      status: "degraded",
+      transport: "unavailable",
+      reportedVersion: "0.146.0-alpha.3.1",
+      versionCompatible: false,
+      restartReason: "Codex App Server reported 0.146.0-alpha.3.1; Ether requires 0.144.2."
+    });
+    const providers = createProviderService({ codex: createCodexRuntimeService({ runtime: instance }) });
+    expect(providers.providerHealth()).toMatchObject({
+      status: "unavailable",
+      version: "0.146.0-alpha.3.1",
+      message: "Codex App Server reported 0.146.0-alpha.3.1; Ether requires 0.144.2."
+    });
+  });
+
   it("accepts the pinned CLI version when App Server prefixes the user agent with the client name", async () => {
     const instance = runtime("client-user-agent");
     await instance.start();

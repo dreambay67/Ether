@@ -439,7 +439,7 @@ export class CodexAppServerRuntime {
 }
 
 function reportedVersionFromUserAgent(userAgent: string) {
-  return /^[^/\r\n]+\/([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)/u.exec(userAgent.trim())?.[1] ?? null;
+  return /^[^/\r\n]+\/([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?:\s|$)/u.exec(userAgent.trim())?.[1] ?? null;
 }
 
 function discoveryHealth(reportedVersion: string, models: CodexModel[]): Partial<CodexRuntimeHealth> {

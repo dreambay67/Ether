@@ -4,7 +4,7 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
   await page.addInitScript(() => {
     const node = {
       id: "prompt-to-image-prompt", definitionId: "prompt.text", title: "Recipe brief",
-      position: { x: 80, y: 80 }, size: { width: 220, height: 140 },
+      position: { x: 4_200, y: 2_600 }, size: { width: 220, height: 140 },
       config: { kind: "prompt.text", body: "A precise editorial still life", assembly: "replace" },
       presentation: { collapsed: false, accent: "#37e6ea", previewMode: "content" }
     };
@@ -39,10 +39,11 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
       graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) },
       application: {
         onEvent: () => () => undefined,
-        query: async (query: { name: string; payload?: { recipeId?: string } }) => query.name === "recipe.catalog"
-          ? { payload: { recipes } }
-          : query.name === "recipe.setupSchema"
-            ? { payload: {
+        query: async (query: { name: string; payload?: { recipeId?: string } }) => {
+          if (query.name === "recipe.catalog") return { payload: { recipes } };
+          if (query.name === "recipe.setupSchema") {
+            await new Promise((resolve) => setTimeout(resolve, query.payload?.recipeId === "provider-blocked" ? 80 : 5));
+            return { payload: {
                 parameters: [{ id: "brief", title: "Creative brief", description: "The direction for this graph.", type: "string", required: true, defaultValue: "A precise editorial still life", minLength: 3, maxLength: 1200 }],
                 capabilities: [{
                   requirementId: "prompt", operation: "generate-image", inputChannels: ["text"], outputChannels: ["image"],
@@ -54,8 +55,10 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
                     { providerId: "antigravity", profileId: "nano-banana-2", priority: 1, available: false }
                   ]
                 }]
-              } }
-            : { payload: { graph, documentRevisionId: "revision-1", graphRevisionId: "graph-revision-1" } },
+              } };
+          }
+          return { payload: { graph, documentRevisionId: "revision-1", graphRevisionId: "graph-revision-1" } };
+        },
         command: async (command: { name: string; payload: { recipeId?: string } }) => {
           if (command.name === "recipe.preview") {
             if (command.payload.recipeId === "provider-blocked") throw new Error("No enabled provider can satisfy prompt (generate-image).");
@@ -72,7 +75,20 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
 
   await page.goto("/");
   await page.getByRole("button", { name: "Recipes" }).click();
+  const dialog = page.getByRole("dialog", { name: "Recipe Gallery" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  expect(await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", { name: "Recipes" })).toBeFocused();
+  await page.getByRole("button", { name: "Recipes" }).click();
   await expect(page.getByTestId("recipe-gallery")).toBeVisible();
+  await page.getByTestId("recipe-card-provider-blocked").click();
+  await page.getByTestId("recipe-card-prompt-to-image").click();
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Compatible provider");
+  await page.waitForTimeout(100);
+  await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Compatible provider");
   await page.getByTestId("recipe-card-provider-blocked").click();
   await expect(page.getByTestId("recipe-gallery-status")).toContainText("Blocked: 1 provider requirement");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Provider missing");
@@ -83,10 +99,17 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Compatible provider");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("ether-fake-local");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Fallback · antigravity");
-  await page.getByRole("button", { name: "Preview" }).click();
+  const previewButton = page.getByRole("button", { name: "Preview" });
+  await expect(previewButton).toHaveCSS("background-color", "rgb(16, 29, 42)");
+  await expect(previewButton).toHaveCSS("color", "rgb(233, 244, 248)");
+  await previewButton.click();
   await expect(page.getByTestId("recipe-gallery-status")).toContainText("Preview ready");
   await page.getByRole("button", { name: "Insert recipe" }).click();
-  await expect(page.locator('[data-testid="rf__node-prompt-to-image-prompt"]')).toBeVisible();
-  await expect(page.getByTestId("recipe-gallery-status")).toContainText("inserted");
+  await expect(page.getByRole("dialog", { name: "Recipe Gallery" })).toBeHidden();
+  const insertedNode = page.locator('[data-testid="rf__node-prompt-to-image-prompt"]');
+  await expect(insertedNode).toBeVisible();
+  await expect(insertedNode).toBeInViewport({ ratio: 0.999 });
+  await page.setViewportSize({ width: 900, height: 760 });
+  await expect(insertedNode).toBeInViewport({ ratio: 0.999 });
   await expect(page.getByTestId("canvas-status")).toContainText("Focused the inserted recipe node");
 });

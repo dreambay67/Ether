@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink, Workflow } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink, Workflow, X } from "lucide-react";
 import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, RecipeManifest } from "@ether/schema";
 
 import type {
@@ -51,9 +51,29 @@ export function App() {
     normalizeInterfacePreferences
   );
   const canvasRef = useRef<EtherCanvasHandle>(null);
+  const recipesButtonRef = useRef<HTMLButtonElement>(null);
+  const recipesDialogRef = useRef<HTMLElement>(null);
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
   const applicationAvailable = typeof window.ether.application?.onEvent === "function";
+  const closeRecipes = useCallback(() => {
+    setRecipesOpen(false);
+    globalThis.requestAnimationFrame(() => recipesButtonRef.current?.focus());
+  }, []);
+  const keepRecipeFocus = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const focusable = [...(recipesDialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex='-1'])") ?? [])];
+    if (focusable.length === 0) return;
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    if (event.shiftKey && globalThis.document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && globalThis.document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }, []);
 
   useEffect(() => {
     globalThis.document.documentElement.dataset.density = interfacePreferences.density;
@@ -102,6 +122,15 @@ export function App() {
     });
     return () => { current = false; };
   }, [applicationAvailable, recipesOpen]);
+
+  useEffect(() => {
+    if (!recipesOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeRecipes();
+    };
+    globalThis.addEventListener("keydown", closeOnEscape);
+    return () => globalThis.removeEventListener("keydown", closeOnEscape);
+  }, [closeRecipes, recipesOpen]);
 
   useEffect(() => {
     if (state.commandResult !== null) setMessage(formatDocumentCommandResult(state.commandResult));
@@ -265,18 +294,9 @@ export function App() {
           <button type="button" title="Reload graph" onClick={() => void loadGraph(document)}>
             <RefreshCcw size={16} aria-hidden="true" />Refresh
           </button>
-          <button type="button" title="Open Recipe Gallery" aria-expanded={recipesOpen} aria-pressed={recipesOpen} onClick={() => setRecipesOpen((open) => !open)}>
+          <button ref={recipesButtonRef} type="button" title="Open Recipe Gallery" aria-expanded={recipesOpen} aria-pressed={recipesOpen} onClick={() => setRecipesOpen((open) => !open)}>
             <Workflow size={16} aria-hidden="true" />Recipes
           </button>
-          {recipesOpen ? applicationAvailable ? recipeCatalogError === null ? (
-            <Suspense fallback={<p className="recipe-gallery-error">Loading Recipe Gallery…</p>}><TemplateGallery
-              recipes={recipes}
-              readOnly={document.mode === "read-only"}
-              onLoadSetup={loadRecipeSetup}
-              onPreviewRecipe={previewRecipe}
-              onInstantiateRecipe={instantiateRecipe}
-            /></Suspense>
-          ) : <p className="recipe-gallery-error" role="alert">Blocked: {recipeCatalogError}</p> : <p className="recipe-gallery-error" role="alert">Recipe Gallery needs the application service.</p> : null}
         </aside>
       )}
       canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
@@ -303,6 +323,33 @@ export function App() {
         onPreferences={setInterfacePreferences}
         onClose={() => setSettingsOpen(false)}
       />
+      {recipesOpen ? (
+        <div className="recipe-gallery-overlay" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeRecipes();
+        }}>
+          <section ref={recipesDialogRef} className="recipe-gallery-dialog" role="dialog" aria-modal="true" aria-labelledby="recipe-gallery-title" onKeyDown={keepRecipeFocus}>
+            <header className="recipe-gallery-dialog-header">
+              <div>
+                <span>Workflow builder</span>
+                <strong id="recipe-gallery-title">Recipe Gallery</strong>
+              </div>
+              <button type="button" aria-label="Close Recipe Gallery" title="Close Recipe Gallery" autoFocus onClick={closeRecipes}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </header>
+            {applicationAvailable ? recipeCatalogError === null ? (
+              <Suspense fallback={<p className="recipe-gallery-error">Loading Recipe Gallery…</p>}><TemplateGallery
+                recipes={recipes}
+                readOnly={document.mode === "read-only"}
+                onLoadSetup={loadRecipeSetup}
+                onPreviewRecipe={previewRecipe}
+                onInstantiateRecipe={instantiateRecipe}
+                onInserted={closeRecipes}
+              /></Suspense>
+            ) : <p className="recipe-gallery-error" role="alert">Blocked: {recipeCatalogError}</p> : <p className="recipe-gallery-error" role="alert">Recipe Gallery needs the application service.</p>}
+          </section>
+        </div>
+      ) : null}
       {actionableMissing.length > 0 ? (
         <section className="missing-reference-strip" aria-label="Missing references">
           {actionableMissing.map((reference) => (

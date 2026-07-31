@@ -24,6 +24,26 @@ function valuesFor(recipe: RecipeManifest) {
     .map((parameter) => ({ parameterId: parameter.id, value: ["artifact-source-1"] }));
 }
 
+function geminiCapability(operation: "generate-image" | "edit-image"): ProviderCapability {
+  return {
+    providerId: "google-gemini-api-nano-banana-2",
+    profileId: "nano-banana-2",
+    modelId: "gemini-3.1-flash-image",
+    operation,
+    inputChannels: operation === "edit-image" ? ["text", "image", "mask"] : ["text", "image"],
+    outputChannels: ["image"],
+    aspectRatios: ["1:1", "4:5", "16:9"],
+    resolutions: [{ id: "1k-1x1", width: 1024, height: 1024, label: "1K / 1:1" }],
+    maxReferences: 16,
+    maxOutputsPerCall: 1,
+    maxParallelism: 4,
+    supportsCancellation: true,
+    supportsSeed: false,
+    provenance: "static-constraint",
+    limitations: []
+  };
+}
+
 describe("recipe instantiation", () => {
   it("inserts every built-in recipe as one previewable, undoable graph transaction", () => {
     for (const recipe of BUILTIN_RECIPES) {
@@ -104,6 +124,23 @@ describe("recipe instantiation", () => {
       ]
     }]);
     expect(inspectRecipeProviderSetup(recipe, [])).toMatchObject([{ state: "missing", selectedProviderId: null }]);
+  });
+
+  it("keeps compiled graph data out of provider-boundary recipe requirements", () => {
+    const generationRecipes = [
+      "prompt-to-image",
+      "character-consistency-sheet",
+      "product-campaign-set",
+      "batch-variations-contact-sheet"
+    ];
+    for (const id of generationRecipes) {
+      const recipe = BUILTIN_RECIPES.find((item) => item.id === id)!;
+      expect(inspectRecipeProviderSetup(recipe, [geminiCapability("generate-image")]), id)
+        .toEqual([expect.objectContaining({ state: expect.not.stringMatching("missing"), selectedProviderId: "google-gemini-api-nano-banana-2" })]);
+    }
+    const editRecipe = BUILTIN_RECIPES.find((item) => item.id === "image-edit-with-mask")!;
+    expect(inspectRecipeProviderSetup(editRecipe, [geminiCapability("edit-image")]))
+      .toEqual([expect.objectContaining({ state: expect.not.stringMatching("missing"), selectedProviderId: "google-gemini-api-nano-banana-2" })]);
   });
 
   it("binds providers to their requirement nodes, including two nodes with the same operation", () => {

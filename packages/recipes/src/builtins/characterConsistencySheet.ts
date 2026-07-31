@@ -7,7 +7,7 @@ const batch = node("views", "flow.batch", "Sheet views", 332, 82, { kind: "flow.
 const image = node("image", "generation.image", "Generate sheet", 610, 82, { kind: "generation.image", providerId: "codex", profileId: "image-default", aspectRatio: "4:5", resolution: { width: 1024, height: 1280 }, outputCount: 1 });
 const compare = node("compare", "review.compare", "Check consistency", 888, 82, { kind: "review.compare", selectionMode: "many", minimumSelections: 1 });
 const collect = node("collection", "output.collection", "Character sheet", 1166, 82, { kind: "output.collection", collectionId: "character-sheet", membershipMode: "add", makePrimary: false });
-const generate = requirement("image", "generate-image", ["text", "image", "data"], ["image"], 1, 1);
+const generate = requirement("image", "generate-image", ["text", "image"], ["image"], 1, 1);
 
 export const characterConsistencySheetRecipe = manifest({
   id: "character-consistency-sheet", title: "Character Consistency Sheet", description: "Turn approved character references into a clear multi-view sheet with a human consistency check.",

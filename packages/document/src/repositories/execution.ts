@@ -1004,7 +1004,7 @@ export class ExecutionRepository {
         sourceName: output.fileName
       });
       if (ownership === "owner") {
-        blobs.writeInline(output.importId, contentKey, output.bytes);
+        blobs.writeBytes(output.importId, contentKey, output.bytes);
         blobs.finalize(output.importId, contentKey);
       } else if (ownership !== "ready") {
         throw new ExecutionRepositoryError("BLOB_IMPORT_BUSY", "An incomplete duplicate blob import exists.");
@@ -1029,7 +1029,7 @@ export class ExecutionRepository {
           sourceName: `${output.fileName}.thumbnail`
         });
         if (thumbnailOwnership === "owner") {
-          blobs.writeInline(thumbnailImportId, thumbnailContentKey, output.thumbnailBytes);
+          blobs.writeBytes(thumbnailImportId, thumbnailContentKey, output.thumbnailBytes);
           blobs.finalize(thumbnailImportId, thumbnailContentKey);
         } else if (thumbnailOwnership !== "ready") {
           throw new ExecutionRepositoryError(

@@ -7,7 +7,7 @@ const image = node("image", "generation.image", "Generate batch", 610, 82, { kin
 const join = node("contact-sheet", "flow.join", "Assemble contact sheet", 888, 82, { kind: "flow.join", strategy: "ordered", requireComplete: true });
 const compare = node("compare", "review.compare", "Review contact sheet", 1166, 82, { kind: "review.compare", selectionMode: "many", minimumSelections: 1 });
 const collection = node("collection", "output.collection", "Variation selects", 1444, 82, { kind: "output.collection", collectionId: "variation-selects", membershipMode: "add", makePrimary: false });
-const generate = requirement("image", "generate-image", ["text", "data"], ["image"], 0, 1);
+const generate = requirement("image", "generate-image", ["text"], ["image"], 0, 1);
 
 export const batchVariationsContactSheetRecipe = manifest({
   id: "batch-variations-contact-sheet", title: "Batch Variations and Contact Sheet", description: "Expand an intentional variation matrix, rejoin the results, and make the review decision in one place.",

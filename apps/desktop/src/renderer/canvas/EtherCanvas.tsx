@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
-import { ReactFlowProvider, type Viewport } from "@xyflow/react";
+import { ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
 import type { EtherGraph, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter } from "@ether/schema";
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import { CanvasSidePanels } from "./CanvasSidePanels";
@@ -16,13 +16,19 @@ export type EtherCanvasProps = { graph: EtherGraph | null; document: DocumentDes
 type ParentFrame = { graph: EtherGraph; moduleId: string; selectedIds: string[] };
 type ApplicationQueryBridge = {
   query(query: unknown): Promise<{ payload?: Record<string, unknown> }>;
+  command(command: unknown): Promise<{ payload?: Record<string, unknown> }>;
   onEvent?(listener: (event: { name?: string }) => void): () => void;
 };
+type PreparedSelectionPlan = { id: string; contentHash: string; estimatedCalls: number };
 function emptyCanvasGraph(documentId: string): EtherGraph { return { id: `loading-${documentId}`, title: "Canvas", kind: "root", createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z", nodes: [], edges: [], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null } }; }
 function typedQueryBridge() { return (window.ether as unknown as { application?: ApplicationQueryBridge }).application; }
 
 function queryRequest(name: string, documentId: string, payload: unknown) {
   return { kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name, documentId, payload };
+}
+
+function commandRequest(name: string, documentId: string, payload: unknown) {
+  return { kind: "command", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name, documentId, payload };
 }
 
 function useNodeRuntimeStatuses(documentId: string, graphId: string) {
@@ -42,8 +48,7 @@ function useNodeRuntimeStatuses(documentId: string, graphId: string) {
           return { job, plan: response.payload?.plan as ExecutionPlan | undefined };
         }));
         if (!current) return;
-        const next: Record<string, NodeRuntimeStatus> = {};
-        const priority = { done: 1, queued: 2, running: 3, attention: 4 } as const;
+        const candidates: Record<string, { active: boolean; at: number; status: Exclude<NodeRuntimeStatus, null> }> = {};
         const now = Date.now();
         let nextExpiry = Number.POSITIVE_INFINITY;
         for (const { job, plan } of plans) {
@@ -59,11 +64,25 @@ function useNodeRuntimeStatuses(documentId: string, graphId: string) {
                 : null;
           if (!status) continue;
           if (status === "done" && job.completedAt !== null) nextExpiry = Math.min(nextExpiry, Date.parse(job.completedAt) + 10_000);
+          const candidate = {
+            active: status === "queued" || status === "running",
+            at: Date.parse(job.startedAt ?? job.createdAt),
+            status
+          };
           for (const step of plan.steps) {
-            const previous = next[step.nodeId];
-            if (!previous || priority[status] > priority[previous]) next[step.nodeId] = status;
+            const previous = candidates[step.nodeId];
+            const replacesPrevious = previous === undefined ||
+              (candidate.active && !previous.active) ||
+              (candidate.active === previous.active && (
+                candidate.at > previous.at ||
+                (candidate.at === previous.at && candidate.status === "running" && previous.status === "queued")
+              ));
+            if (replacesPrevious) candidates[step.nodeId] = candidate;
           }
         }
+        const next = Object.fromEntries(
+          Object.entries(candidates).map(([nodeId, candidate]) => [nodeId, candidate.status])
+        );
         setStatuses(next);
         if (Number.isFinite(nextExpiry)) expiryTimer = setTimeout(() => void refresh(), Math.max(25, nextExpiry - Date.now() + 25));
       } catch {
@@ -99,8 +118,13 @@ export const EtherCanvas = forwardRef<EtherCanvasHandle, EtherCanvasProps>(funct
 
 const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; viewport?: Viewport; revisionSeed?: GraphRevisionSeed; parentFrame?: ParentFrame; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onParentGraph(graph: EtherGraph): void; status: string; report(message: string): void; selectedIds: string[]; setSelectedIds(ids: string[]): void; onInspectorChange?(context: InspectorContext | null): void; onViewport(viewport: Viewport): void; onEnterModule(id: string, graph: EtherGraph): void; onLeaveModule?(): void; }>(function CanvasInner({ graph, viewport, revisionSeed, parentFrame, document, onGraph, onParentGraph, status, report, selectedIds, setSelectedIds, onInspectorChange, onViewport, onEnterModule, onLeaveModule }, ref) {
   const transactions = useTransactionCommands({ document, graph, revisionSeed, onGraph, onStatus: report }); const nodes = useNodeCommands(graph, transactions.apply, report); const edges = useEdgeCommands(graph, transactions.apply, report); const readOnly = document.mode !== "writable";
+  const flow = useReactFlow();
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [preparedSelection, setPreparedSelection] = useState<PreparedSelectionPlan | null>(null);
+  const [selectionBusy, setSelectionBusy] = useState(false);
   const nodeStatuses = useNodeRuntimeStatuses(document.documentId, graph.id);
+  const selectionFingerprint = selectedIds.join("\u001f");
+  useEffect(() => { setPreparedSelection(null); }, [document.documentId, graph.id, graph.updatedAt, selectionFingerprint]);
   const refreshGraph = useCallback(async () => {
     const bridge = typedQueryBridge();
     if (!bridge) return null;
@@ -123,10 +147,13 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; viewport?
       if (graph.nodes.some((node) => node.id === nodeId)) {
         setSelectedEdgeId(null);
         setSelectedIds([nodeId]);
+        window.requestAnimationFrame(() => {
+          void flow.fitView({ nodes: [{ id: nodeId }], padding: 0.65, minZoom: 0.35, maxZoom: 1, duration: 240 });
+        });
         report("Focused the inserted recipe node");
       }
     }
-  }), [graph.nodes, nodes, report, setSelectedIds]);
+  }), [flow, graph.nodes, nodes, report, setSelectedIds]);
   const persistViewport = async () => { const next = viewport ?? graph.viewState.viewport; return transactions.apply([{ type: "updateGraphProperties", graphId: graph.id, viewState: { ...graph.viewState, viewport: next } }], "Save canvas viewport"); };
   const toggleModule = (id: string) => { if (readOnly) return; const module = graph.modules.find((item) => item.id === id); if (module) void transactions.apply([{ type: "updateModule", graphId: graph.id, moduleId: id, module: { ...module, collapsed: !module.collapsed } }], module.collapsed ? "Expand module" : "Collapse module"); };
   const enter = async (id: string) => { if (readOnly || await persistViewport()) onEnterModule(id, graph); };
@@ -141,5 +168,33 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; viewport?
     const operations: GraphOperation[] = [{ type: "updateModuleInterface", graphId: parentFrame.graph.id, moduleId: module.id, interface: nextInterface }];
     void transactions.apply(operations, "Expose module parameter").then((saved) => { if (saved) onParentGraph({ ...parentFrame.graph, modules: parentFrame.graph.modules.map((item) => item.id === module.id ? { ...item, interface: nextInterface } : item) }); });
   };
-  return <div className="ether-canvas" onDragOver={(event) => event.preventDefault()}><CanvasToolbar readOnly={readOnly} onPrompt={() => nodes.createNode("prompt.text")} onImage={() => nodes.createNode("generation.image")} onGroup={() => nodes.createGroup(selectedIds)} onModule={() => nodes.createModule(selectedIds)} onUndo={transactions.undo} onRedo={transactions.redo} /><CanvasSurface graph={graph} nodeStatuses={nodeStatuses} readOnly={readOnly} viewport={viewport} onMove={nodes.moveNodes} onMoveGroup={nodes.moveGroup} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onTitle={nodes.rename} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setSelectedIds([]); setSelectedEdgeId(id); }} onViewport={onViewport} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 1} onRunSelected={() => report("Selected run is ready for Run workspace review.")} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} /></div>;
+  const runSelected = async () => {
+    const bridge = typedQueryBridge();
+    if (!bridge || selectedIds.length < 2) return;
+    setSelectionBusy(true);
+    try {
+      if (preparedSelection === null) {
+        const response = await bridge.command(commandRequest("run.preview", document.documentId, { graphId: graph.id, scope: { kind: "selected", nodeIds: selectedIds } }));
+        const plan = response.payload?.plan as Partial<ExecutionPlan> | undefined;
+        if (!plan || typeof plan.id !== "string" || typeof plan.contentHash !== "string" || typeof plan.estimatedCalls !== "number") throw new Error("Ether could not prepare the selected-node plan.");
+        setPreparedSelection({ id: plan.id, contentHash: plan.contentHash, estimatedCalls: plan.estimatedCalls });
+        report(`Selected plan ready: ${plan.estimatedCalls} provider call${plan.estimatedCalls === 1 ? "" : "s"}. Review, then start it.`);
+        return;
+      }
+      const permit = await bridge.command(commandRequest("permission.grantRun", document.documentId, { planId: preparedSelection.id, contentHash: preparedSelection.contentHash }));
+      const permitId = permit.payload?.permitId;
+      if (typeof permitId !== "string") throw new Error("Ether did not issue a permit for the selected-node plan.");
+      const response = await bridge.command(commandRequest("run.start", document.documentId, { planId: preparedSelection.id, contentHash: preparedSelection.contentHash, runPermitId: permitId }));
+      const job = response.payload?.job as { id?: string } | undefined;
+      setPreparedSelection(null);
+      report(typeof job?.id === "string" ? `Selected run started: ${job.id}` : "Selected run started. Follow it in the Run desk.");
+    } catch (error) {
+      setPreparedSelection(null);
+      report(error instanceof Error ? error.message : "The selected-node run needs attention.");
+    } finally {
+      setSelectionBusy(false);
+    }
+  };
+  const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
+  return <div className="ether-canvas" onDragOver={(event) => event.preventDefault()}><CanvasToolbar readOnly={readOnly} onPrompt={() => void nodes.createNode("prompt.text")} onImage={() => void nodes.createNode("generation.image")} onGroup={() => nodes.createGroup(selectedIds)} onModule={() => nodes.createModule(selectedIds)} onUndo={transactions.undo} onRedo={transactions.redo} /><CanvasSurface graph={graph} nodeStatuses={nodeStatuses} readOnly={readOnly} viewport={viewport} onMove={nodes.moveNodes} onMoveGroup={nodes.moveGroup} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onTitle={nodes.rename} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setSelectedIds([]); setSelectedEdgeId(id); }} onViewport={onViewport} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 1} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runDetail={preparedSelection ? "The exact selected-node plan is ready." : "Prepare an exact plan before any provider work starts."} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} /></div>;
 });

@@ -28,6 +28,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
     ];
     const plans: Record<string, unknown> = {
       "plan-running": { id: "plan-running", graphId: "inspector-graph", steps: [{ nodeId: "worker" }] },
+      "plan-old-attention": { id: "plan-old-attention", graphId: "inspector-graph", steps: [{ nodeId: "worker" }] },
       "plan-queued": { id: "plan-queued", graphId: "inspector-graph", steps: [{ nodeId: "prompt" }] },
       "plan-done": { id: "plan-done", graphId: "inspector-graph", steps: [{ nodeId: "image" }] },
       "plan-attention": { id: "plan-attention", graphId: "inspector-graph", steps: [{ nodeId: "references" }] }
@@ -82,7 +83,10 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
               })
             };
           }
-          return command.name === "run.preview" ? { payload: { plan: { id: "plan-preview", estimatedCalls: 1 } } } : { payload: { documentRevisionId: "revision-2", graphRevisions: [{ graphId: "inspector-graph", revisionId: `graph-revision-${commands.length + 1}` }] } };
+          if (command.name === "run.preview") return { payload: { plan: { id: `plan-preview-${commands.length}`, contentHash: `hash-preview-${commands.length}`, estimatedCalls: 1 } } };
+          if (command.name === "permission.grantRun") return { payload: { permitId: "permit-preview" } };
+          if (command.name === "run.start") return { payload: { job: { id: "job-preview" } } };
+          return { payload: { documentRevisionId: "revision-2", graphRevisions: [{ graphId: "inspector-graph", revisionId: `graph-revision-${commands.length + 1}` }] } };
         },
         query: async (request: { name: string; payload: Record<string, unknown> }) => {
           queries.push(request);
@@ -90,10 +94,11 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
           if (request.name === "node.compiledInputPreview") return { payload: { nodeId: request.payload.nodeId, instruction: "A quiet editorial still life\n\n[assembled reference context]", contextHash: "context-hash-123456789" } };
           if (request.name === "node.outputs") return { payload: { outputs: request.payload.nodeId === "worker" ? outputs : [] } };
           if (request.name === "job.list") return { payload: { jobs: [
-            { id: "job-queued", planId: "plan-queued", status: "queued", completedAt: null },
-            { id: "job-running", planId: "plan-running", status: "running", completedAt: null },
-            { id: "job-done", planId: "plan-done", status: "completed", completedAt: completed },
-            { id: "job-attention", planId: "plan-attention", status: "needs-attention", completedAt: completed }
+            { id: "job-queued", planId: "plan-queued", status: "queued", createdAt: now.toISOString(), startedAt: now.toISOString(), completedAt: null },
+            { id: "job-running", planId: "plan-running", status: "running", createdAt: now.toISOString(), startedAt: now.toISOString(), completedAt: null },
+            { id: "job-old-attention", planId: "plan-old-attention", status: "failed", createdAt: new Date(now.getTime() - 20_000).toISOString(), startedAt: new Date(now.getTime() - 20_000).toISOString(), completedAt: new Date(now.getTime() - 19_000).toISOString() },
+            { id: "job-done", planId: "plan-done", status: "completed", createdAt: completed, startedAt: completed, completedAt: completed },
+            { id: "job-attention", planId: "plan-attention", status: "needs-attention", createdAt: completed, startedAt: completed, completedAt: completed }
           ] } };
           if (request.name === "plan.summary") return { payload: { plan: plans[String(request.payload.planId)] } };
           return { payload: { graph, documentRevisionId: `revision-${documentRevision}`, graphRevisionId: `graph-revision-${documentRevision}` } };
@@ -112,6 +117,9 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await expect(page.getByTestId("node-status-done")).toHaveCount(1);
   await expect(page.getByTestId("node-status-attention")).toHaveCount(1);
   await expect(page.getByTestId("node-status-done")).toHaveCount(0, { timeout: 4_000 });
+  await expect.poll(() => page.locator(".react-flow__node").evaluateAll((nodes) =>
+    nodes.every((node) => getComputedStyle(node).visibility === "visible")
+  )).toBe(true);
 
   await page.locator('[data-testid="rf__node-prompt"] .ether-node-main p').click();
   const beforeTitle = await commandCount();
@@ -170,6 +178,9 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await expect.poll(commandCount).toBe(beforeWorker + 1);
   await page.getByRole("button", { name: "Generate Output" }).click();
   await expect.poll(async () => (await commandNames()).includes("run.preview")).toBeTruthy();
+  await expect(page.getByRole("button", { name: "Start 1 call" })).toBeVisible();
+  await page.getByRole("button", { name: "Start 1 call" }).click();
+  await expect.poll(commandNames).toEqual(expect.arrayContaining(["permission.grantRun", "run.start"]));
 
   await page.getByRole("button", { name: "Approve" }).first().click();
   await selectWorker();

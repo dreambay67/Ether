@@ -247,6 +247,36 @@ function killCompactAt(input: {
   );
 }
 
+function windowsShortPath(filePath: string): string | null {
+  const script = [
+    "Add-Type -Language CSharp -TypeDefinition @'",
+    "using System;",
+    "using System.Runtime.InteropServices;",
+    "using System.Text;",
+    "public static class EtherShortPath {",
+    "  [DllImport(\"kernel32.dll\", CharSet = CharSet.Unicode, SetLastError = true)]",
+    "  public static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint bufferLength);",
+    "}",
+    "'@",
+    "$path = [Console]::In.ReadToEnd()",
+    "$shortPath = New-Object System.Text.StringBuilder 32768",
+    "$length = [EtherShortPath]::GetShortPathName($path, $shortPath, $shortPath.Capacity)",
+    "if ($length -eq 0 -or $length -ge $shortPath.Capacity) { exit 1 }",
+    "[Console]::Out.Write($shortPath.ToString())"
+  ].join("\n");
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", input: filePath, windowsHide: true }
+  );
+  const shortPath = result.stdout.trim();
+  return result.status === 0 &&
+    shortPath.length > 0 &&
+    shortPath.toLocaleLowerCase() !== path.resolve(filePath).toLocaleLowerCase()
+    ? shortPath
+    : null;
+}
+
 describe("Ether document writer leases and backup lifecycle", () => {
   let root: string;
   let leaseRoot: string;
@@ -715,6 +745,55 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(recovered.mode).toEqual({ kind: "writable" });
     await recovered.close();
     expect(readdirSync(root).filter((name) => name.includes("compact") || name.includes("rollback"))).toEqual([]);
+    expect(readdirSync(recoveryRoot, { recursive: true })).toEqual([]);
+  }, 20_000);
+
+  it.runIf(process.platform === "win32")("recovers compact staging through an 8.3 destination alias", async () => {
+    const recoveryRoot = path.join(root, "recovery");
+    const source = await storeClass().create(sourcePath, {
+      appVersion: "4.0.0",
+      documentId: "document-compact-short-path",
+      environment: environment(leaseRoot, "compact-short-path-create", { recoveryRoot }),
+      initialGraph: initialGraph(),
+      title: "Compact short path"
+    });
+    await source.close();
+    expect(killCompactAt({ leaseRoot, recoveryRoot, sourcePath, stage: "fsync" }).status).not.toBe(0);
+
+    const shortRoot = windowsShortPath(root);
+    if (shortRoot === null) return; // The active volume does not expose 8.3 aliases.
+    const journalPath = path.join(recoveryRoot, readdirSync(recoveryRoot).find((name) => name.endsWith(".json"))!);
+    const compact = JSON.parse(readFileSync(journalPath, "utf8")) as {
+      destinationPath: string;
+      stagingPath: string;
+    };
+    const aliasedDestination = path.join(shortRoot, path.relative(root, compact.destinationPath));
+    const aliasedStaging = path.join(shortRoot, path.relative(root, compact.stagingPath));
+    writeFileSync(journalPath, JSON.stringify({
+      ...compact,
+      destinationPath: aliasedDestination,
+      stagingPath: aliasedStaging
+    }));
+    const sourceIdentity = statSync(sourcePath, { bigint: true });
+    const aliasedIdentity = statSync(aliasedDestination, { bigint: true });
+    expect(aliasedIdentity.birthtimeNs).toBe(sourceIdentity.birthtimeNs);
+    expect(aliasedIdentity.dev).toBe(sourceIdentity.dev);
+    expect(aliasedIdentity.ino).toBe(sourceIdentity.ino);
+    expect(await documentPackage.inspectReplacementRecovery(sourcePath, recoveryRoot)).toEqual({
+      attention: false,
+      pending: true
+    });
+
+    const recovered = await storeClass().open(sourcePath, {
+      access: "require-write",
+      environment: environment(leaseRoot, "compact-short-path-recovery", {
+        now: () => Date.now() + 60_000,
+        processIsAlive: () => false,
+        recoveryRoot,
+        staleMs: 1
+      })
+    });
+    await recovered.close();
     expect(readdirSync(recoveryRoot, { recursive: true })).toEqual([]);
   }, 20_000);
 

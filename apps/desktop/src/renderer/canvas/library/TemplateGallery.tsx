@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphTransaction, JsonValue, RecipeManifest, RecipeParameter, RecipeParameterValue } from "@ether/schema";
 
 export type RecipeSetupRequest = {
@@ -36,6 +36,7 @@ type TemplateGalleryProps = {
   onLoadSetup(recipeId: string, version: string): Promise<RecipeSetup>;
   onPreviewRecipe(request: RecipeSetupRequest): Promise<RecipePreview>;
   onInstantiateRecipe(request: RecipeSetupRequest): Promise<void>;
+  onInserted?(): void;
 };
 
 function defaultValue(parameter: RecipeParameter): JsonValue {
@@ -86,13 +87,14 @@ function capabilityStateLabel(state: RecipeCapabilitySetup["state"]): string {
   }
 }
 
-export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe }: TemplateGalleryProps) {
+export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe, onInserted }: TemplateGalleryProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [parameters, setParameters] = useState<readonly RecipeParameter[]>([]);
   const [capabilities, setCapabilities] = useState<readonly RecipeCapabilitySetup[]>([]);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
   const [busy, setBusy] = useState<"setup" | "preview" | "insert" | null>(null);
   const [status, setStatus] = useState("Choose a recipe to inspect its setup.");
+  const setupRequest = useRef(0);
   const selected = useMemo(() => recipes.find((recipe) => `${recipe.id}@${recipe.version}` === selectedKey) ?? null, [recipes, selectedKey]);
   const ready = selected !== null
     && busy === null
@@ -110,6 +112,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
   }, [recipes, selectedKey]);
 
   const choose = async (recipe: RecipeManifest) => {
+    const requestId = ++setupRequest.current;
     setSelectedKey(`${recipe.id}@${recipe.version}`);
     setParameters([]);
     setCapabilities([]);
@@ -118,6 +121,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
     setStatus(`Loading ${recipe.title} setup…`);
     try {
       const setup = await onLoadSetup(recipe.id, recipe.version);
+      if (requestId !== setupRequest.current) return;
       setParameters(setup.parameters);
       setCapabilities(setup.capabilities);
       setValues(valuesFor(setup.parameters));
@@ -129,12 +133,13 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
           ? `${recipe.title} setup is ready with ${substitutions} declared substitution${substitutions === 1 ? "" : "s"}.`
           : `${recipe.title} setup is ready.`);
     } catch (error) {
+      if (requestId !== setupRequest.current) return;
       setParameters([]);
       setCapabilities([]);
       setValues({});
       setStatus(`Blocked: ${errorMessage(error)}`);
     } finally {
-      setBusy(null);
+      if (requestId === setupRequest.current) setBusy(null);
     }
   };
 
@@ -159,6 +164,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
     try {
       await onInstantiateRecipe(requestFor(selected, parameters, values));
       setStatus(`${selected.title} inserted. Its focus node is selected on the canvas.`);
+      onInserted?.();
     } catch (error) {
       setStatus(`Blocked: ${errorMessage(error)}`);
     } finally {
@@ -169,8 +175,8 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
   return (
     <section className="template-gallery" data-testid="recipe-gallery" aria-label="Recipe Gallery">
       <header className="template-gallery-header">
-        <span>Graph starters</span>
-        <strong>Recipe Gallery</strong>
+        <span>Starter catalog</span>
+        <strong>Choose a workflow</strong>
         <small>{recipes.length} versioned workflows</small>
       </header>
       <div className="template-gallery-list">
@@ -259,7 +265,12 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
             <button type="submit" disabled={!ready || readOnly}>{busy === "insert" ? "Inserting…" : "Insert recipe"}</button>
           </div>
         </form>
-      ) : null}
+      ) : (
+        <section className="recipe-setup-empty" aria-label="Recipe setup">
+          <span>Setup</span>
+          <strong>No recipe selected</strong>
+        </section>
+      )}
       <p className="recipe-gallery-status" aria-live="polite" data-testid="recipe-gallery-status">{status}</p>
     </section>
   );
