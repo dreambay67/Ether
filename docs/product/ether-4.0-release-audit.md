@@ -3,7 +3,7 @@
 Status: **release gate complete; exact product commit published and hosted verification green**
 
 Audit date: 2026-07-31
-Audited product release commit: `6e869450f5e0b8770f90845dc9706e1254361269`
+Audited product release commit: `e881471e467ed52b3848e57540ea9c28f55c14f4`
 Audit baseline: `2cd4e9e1fe9e08d3ca43e8a0591b01e48073233c`
 Required branch: `feature/ether-4.0-phase-6`
 Publication branch: `feature/ether-4.0`
@@ -213,8 +213,8 @@ the former eight-second deadline and failed closed as `unknown`, while the
 immediately warmed probe passed. Commit
 `15fac4f040a3ba4b4b3e08ae0f19c9e2ffa0c610` raises the still-hard-bounded default
 to 12 seconds and adds deterministic fake-timer proof that a nine-second cold
-probe succeeds. The final product-owner gate at `6e86945` passed the complete
-unit suite, 475 integration tests, and 21 Chromium smoke journeys.
+probe succeeds. The final product-owner gate at `e881471` passed the complete
+unit suite, 476 integration tests, and 21 Chromium smoke journeys.
 
 The destructive recovery suite previously passed all 15 hard-kill and
 publication-boundary journeys. Performance validation preserved the frozen 16 KiB
@@ -227,18 +227,18 @@ Retained candidate artifacts:
 
 | Artifact | SHA-256 |
 |---|---|
-| `release/windows/Ether-4.0.0-Setup.exe` | `02B6CB7135844449B2A2427B680AAE9F0A38038CA319C944F996716EBAE68DD0` |
-| `release/windows/win-unpacked/Ether.exe` | `3EBAF18E76E34E6D70FF027875902D50AA4A80E8F5EFBBC5DA40A7A0D1655031` |
-| `release/windows/win-unpacked/resources/app.asar` | `0A35F13E03C48EA9F6A47B84EC0CA1AEF42FD921871101AF59AACBA54496ADE7` |
-| `docs/product/ether-4.0-user-manual.pdf` | `24366F1757882C092581137678B95B0D7BC3390F892F9468AB4626DED9A8EE60` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `0E78420EF5258F707FA1E68C68FA753149937771BF326DC0E8B8128D38DBEAED` |
+| `release/windows/win-unpacked/Ether.exe` | `AD8489E8D5FAC5CED6C0923C569D062F1C5A3A3644FEFDF1464B78F69388DDFF` |
+| `release/windows/win-unpacked/resources/app.asar` | `9579A9F479DC16AE92FB9D994AE74E14EDCA71446595AD3AC4A973FF597D3DBC` |
+| `docs/product/ether-4.0-user-manual.pdf` | `FA7B514F5C6DE455A66EC47909EEF02C86C8B5B865D01A7DFFABC50CFC3BB849` |
 
 The NSIS and Chromium PDF containers embed build metadata, so byte hashes can
 change on a rebuild. Source, staged runtime closure, NSIS payload inventory,
 installed captures, PDF structure, and rendered content are the reproducibility
 contract. The capture manifest binds the retained manual to installer
-`02B6CB7135844449B2A2427B680AAE9F0A38038CA319C944F996716EBAE68DD0`
+`0E78420EF5258F707FA1E68C68FA753149937771BF326DC0E8B8128D38DBEAED`
 and executable
-`3EBAF18E76E34E6D70FF027875902D50AA4A80E8F5EFBBC5DA40A7A0D1655031`.
+`AD8489E8D5FAC5CED6C0923C569D062F1C5A3A3644FEFDF1464B78F69388DDFF`.
 The retained installer, executable, and ASAR are byte-identical copies of the
 exact product-owner audit artifacts. The manual passes the same structural and
 rendered-content verifier used at the preceding release gate.
@@ -300,7 +300,7 @@ the three allocation/control groups separate and legible.
 
 ## Final product-owner audit
 
-Commit `6e869450f5e0b8770f90845dc9706e1254361269` is the final audited product
+Commit `e881471e467ed52b3848e57540ea9c28f55c14f4` is the final audited product
 state. The pass concentrated on the first-run and daily creation journeys:
 
 - New Image nodes select a genuinely discovered image provider and never bind to
@@ -318,8 +318,11 @@ state. The pass concentrated on the first-run and daily creation journeys:
   the document storage boundary.
 - Save As verifies destination bytes as well as document identity, preventing a
   rematerialized or substituted destination from being accepted as the source.
+- Windows drive and UNC roots retain rooted semantics during cloud-location
+  classification, so an entire synchronized drive cannot be mistaken for a
+  local fixed path because Ether happens to run from that drive.
 
-The exact source gate passed typecheck, lint, the full unit suite, 475 integration
+The exact source gate passed typecheck, lint, the full unit suite, 476 integration
 tests, and 21 Chromium smoke journeys. The exact Windows package then passed 7
 package-audit checks and 3 installed-package acceptance journeys. Two Gemini image
 requests were used during this audit, below the authorized cap of 12. The second
@@ -366,7 +369,7 @@ release evidence. The documentation closeout changes only release evidence,
 installed-release captures, the generated manual, and Task 29 checkboxes; the
 product binary for that publication remained the exact-gated `15fac4f` build.
 
-The final product-owner commit `6e869450f5e0b8770f90845dc9706e1254361269`
+The final product-owner commit `e881471e467ed52b3848e57540ea9c28f55c14f4`
 supersedes that candidate and is intended only for a non-force update of
 `refs/heads/feature/ether-4.0`. Remote `main`, merge, tag, and GitHub Release
 creation remain outside this audit.
