@@ -9,6 +9,7 @@ function event(overrides: Partial<KeyboardEvent> = {}): Pick<KeyboardEvent, "ctr
 describe("document save shortcut", () => {
   it("routes a single Ctrl+S from ordinary canvas/chrome focus", () => {
     expect(shouldSaveDocumentFromShortcut(event(), null)).toBe(true);
+    expect(shouldSaveDocumentFromShortcut(event(), { matches: () => false } as never)).toBe(true);
   });
 
   it("does not steal repeated, modified, or text-editor keyboard input", () => {

@@ -15,8 +15,8 @@ export function shouldSaveDocumentFromShortcut(
   );
 }
 
-function isShortcutTarget(target: EventTarget | null): target is EventTarget & DocumentShortcutTarget {
-  return target !== null && typeof target === "object" && (
-    "matches" in target || "closest" in target
-  );
+function isShortcutTarget(target: EventTarget | null): target is EventTarget & Required<DocumentShortcutTarget> {
+  if (target === null || typeof target !== "object") return false;
+  const candidate = target as DocumentShortcutTarget;
+  return typeof candidate.matches === "function" && typeof candidate.closest === "function";
 }
