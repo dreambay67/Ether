@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,8 @@ import {
 import {
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
+  SHELL_UI_APPROVAL,
+  SHELL_UI_APPROVAL_VALUE,
   WINDOWS_INTEGRATION_MODE,
   assertExactPackagedEtherExecutable,
   assertExactPackagedProcess,
@@ -27,11 +29,16 @@ import {
   completeNativeFileDialogWithUia,
   createAssociationDryRunPlan,
   createWindowsIntegrationRoot,
+  dragDocumentFromExplorerWithNativePointer,
   findExactPackagedProcessId,
   invokeDocumentFromExplorerWithUia,
+  invokeJumpListRecentDocumentWithUia,
   minimizeExactWindowWithUia,
   removeTestOwnedDisposableRoots,
-  restoreReversibleAssociation
+  readAndCloseExactNativeErrorDialog,
+  cleanupTestOwnedRecentShortcuts,
+  restoreReversibleAssociation,
+  snapshotTestOwnedRecentShortcuts
 } from "../../recovery/windowsIntegration.js";
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -55,6 +62,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   try {
     primary = await launch(executable, "a02-windows-primary");
     primaryProfile = primary.profile;
+    const recentBefore = await snapshotTestOwnedRecentShortcuts({ appData: primary.profile.appData, root, documentPaths: [documentPath, renamedPath, copyPath] });
     const primaryPid = await findExactPackagedProcessId(executable, primary.profile.userData);
     await expect(primary.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await primary.input.leftClick(primary.page.getByRole("button", { name: "Prompt", exact: true }), "Create a document through visible UI", "The blank canvas has one UI-authored node before native Save.");
@@ -64,6 +72,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     await assertOneFileDocument(root, documentPath);
     await assertDocumentIdentity(documentPath);
     primary.input.observe("One-file format identity", "The saved document is a single valid Ether document with format/application/schema identity.", `Validated ${path.basename(documentPath)} with inspectEtherDocument.`);
+    primary.input.observe("Recent shortcut snapshot", "Only shortcuts resolving to unique test-owned paths are eligible for later cleanup.", `Found ${recentBefore.length} pre-existing matching isolated-profile Recent shortcuts.`);
 
     await primary.input.leftClick(primary.page.getByRole("button", { name: "Save as", exact: true }), "Save As through the native Windows picker", "The UI switches only after the Unicode destination validates.");
     await completeNativeFileDialogWithUia(primaryPid, renamedPath);
@@ -117,6 +126,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   } finally {
     if (reopened !== null) await reopened.close("failed");
     if (primary !== null) await primary.close("failed");
+    if (primaryProfile !== null) await cleanupTestOwnedRecentShortcuts({ appData: primaryProfile.appData, root, documentPaths: [documentPath, renamedPath, copyPath] }).catch(() => undefined);
     if (primaryProfile !== null) await cleanupIsolatedJourneyProfile(primaryProfile).catch(() => undefined);
     await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
   }
@@ -136,6 +146,7 @@ test("runs the separately approved reversible Explorer association route", async
   try {
     session = await launch(executable, "a02-windows-association");
     profile = session.profile;
+    await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     const primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create a test-owned association document", "A visible blank-UI node is saved before Explorer invokes the association.");
@@ -161,10 +172,122 @@ test("runs the separately approved reversible Explorer association route", async
   } finally {
     if (plan !== null) await restoreReversibleAssociation(plan).catch(() => undefined);
     if (session !== null) await session.close("failed");
+    if (profile !== null) await cleanupTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] }).catch(() => undefined);
     if (profile !== null) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
     await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
   }
 });
+
+test("runs the separately approved Explorer pointer drag/drop route", async () => {
+  test.skip(
+    process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
+    `Main must explicitly authorize ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
+  );
+  const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
+  const root = await createWindowsIntegrationRoot();
+  const sourcePath = path.join(root, "Explorer drag source \u017dlt\u00fd.ether");
+  const targetPath = path.join(root, "Explorer drag target \u017dlt\u00fd.ether");
+  let session: RecoveryJourneySession | null = null;
+  let profile: RecoveryJourneySession["profile"] | null = null;
+  try {
+    session = await launch(executable, "a02-windows-explorer-drag");
+    profile = session.profile;
+    await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [sourcePath, targetPath] });
+    const primaryPid = await findExactPackagedProcessId(executable, profile.userData);
+    await expect(session.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
+    await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create the Explorer drag source through visible UI", "The source .ether document has a real graph authored through the canvas UI.");
+    await session.input.pressKey("Control+S", "Save unique Explorer drag source", "The native picker saves the test-owned drag source.");
+    await completeNativeFileDialogWithUia(primaryPid, sourcePath);
+    await expect.poll(() => isFile(sourcePath)).toBe(true);
+    await session.input.leftClick(session.page.getByRole("button", { name: "New", exact: true }), "Create a visibly different active drag target", "The target begins as a new blank document while the saved Explorer source remains unchanged.");
+    await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Add first target node", "The active target graph differs from the saved one-node source.");
+    await session.input.leftClick(session.page.getByRole("button", { name: "Image", exact: true }), "Add second target node", "The active target visibly has two nodes before the Explorer drop.");
+    await expect(session.page.locator(".react-flow__node")).toHaveCount(2);
+    await session.input.pressKey("Control+S", "Save distinct active drag target", "The native picker saves the two-node target separately from the source.");
+    await completeNativeFileDialogWithUia(primaryPid, targetPath);
+    await expect(session.page.getByTestId("project-header")).toContainText(path.basename(targetPath));
+    const target = await nativeScreenPointForCanvas(session);
+    const drag = await dragDocumentFromExplorerWithNativePointer({ documentPath: sourcePath, etherPid: primaryPid, target });
+    await expect(session.page.getByTestId("project-header")).toContainText(path.basename(sourcePath), { timeout: 30_000 });
+    await expect(session.page.locator(".react-flow__node")).toHaveCount(1);
+    await expect.poll(() => session?.page.evaluate(() => document.hasFocus()) ?? false).toBe(true);
+    await assertExactPackagedProcess(executable, primaryPid);
+    await assertExactWindowForegroundWithUia(primaryPid);
+    session.input.observe("Explorer pointer drag/drop", "A real OS pointer drag from the uniquely named Explorer item onto the exact Fixer Ether canvas opens the source document.", `${drag}; canvas target=(${target.x},${target.y}).`);
+    await session.close("passed");
+    session = null;
+  } finally {
+    if (session !== null) await session.close("failed");
+    if (profile !== null) await cleanupTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [sourcePath, targetPath] }).catch(() => undefined);
+    if (profile !== null) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
+    await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
+  }
+});
+
+test("runs the separately approved Windows Jump List known-and-missing target route", async () => {
+  test.skip(
+    process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
+    `Main must explicitly authorize ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
+  );
+  const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
+  const root = await createWindowsIntegrationRoot();
+  const documentPath = path.join(root, "Jump List unique \u017dlt\u00fd.ether");
+  let session: RecoveryJourneySession | null = null;
+  let profile: RecoveryJourneySession["profile"] | null = null;
+  try {
+    session = await launch(executable, "a02-windows-jump-list");
+    profile = session.profile;
+    await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
+    const primaryPid = await findExactPackagedProcessId(executable, profile.userData);
+    await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create unique Jump List document", "Saving it lets Ether register the unique target with app.addRecentDocument and its recent Jump List category.");
+    await session.input.pressKey("Control+S", "Save unique Jump List target", "The native picker saves the exact test-owned recent document.");
+    await completeNativeFileDialogWithUia(primaryPid, documentPath);
+    await expect.poll(() => isFile(documentPath)).toBe(true);
+    await session.page.waitForTimeout(1_000);
+    await minimizeExactWindowWithUia(primaryPid);
+    const knownTarget = await invokeJumpListRecentDocumentWithUia({ documentPath, etherPid: primaryPid });
+    await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
+    await expect.poll(() => session?.page.evaluate(() => document.hasFocus()) ?? false).toBe(true);
+    await assertExactPackagedProcess(executable, primaryPid);
+    await assertExactWindowForegroundWithUia(primaryPid);
+    session.input.observe("Jump List known target", "The exact unique Windows shell recent item routes to and focuses the existing Fixer Ether document.", knownTarget);
+
+    await session.input.leftClick(session.page.getByRole("button", { name: "New", exact: true }), "Switch to a new document before missing-target check", "The Jump List document is no longer open when its test-owned source file is deleted.");
+    await expect(session.page.getByTestId("project-header")).not.toContainText(path.basename(documentPath));
+    await rm(documentPath, { force: true });
+    await expect.poll(() => isFile(documentPath)).toBe(false);
+    const missingTarget = await invokeJumpListRecentDocumentWithUia({ documentPath, etherPid: primaryPid });
+    const nativeError = await readAndCloseExactNativeErrorDialog(primaryPid, documentPath);
+    session.input.observe("Jump List missing target", "The exact unique recent item reports an Ether-owned native error naming the deleted test document.", `${missingTarget}; ${nativeError}`);
+    await session.close("passed");
+    session = null;
+  } finally {
+    if (session !== null) await session.close("failed");
+    if (profile !== null) await cleanupTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] }).catch(() => undefined);
+    if (profile !== null) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
+    await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
+  }
+});
+
+async function nativeScreenPointForCanvas(session: RecoveryJourneySession): Promise<{ x: number; y: number }> {
+  const canvas = session.page.getByTestId("document-canvas");
+  const bounds = await canvas.boundingBox();
+  if (bounds === null) throw new Error("The exact Ether canvas has no browser bounding box for native drag/drop.");
+  const metrics = await session.page.evaluate(() => ({
+    innerHeight: window.innerHeight,
+    innerWidth: window.innerWidth,
+    outerHeight: window.outerHeight,
+    outerWidth: window.outerWidth,
+    screenX: window.screenX,
+    screenY: window.screenY
+  }));
+  const chromeX = Math.max(0, (metrics.outerWidth - metrics.innerWidth) / 2);
+  const chromeY = Math.max(0, metrics.outerHeight - metrics.innerHeight);
+  return {
+    x: Math.round(metrics.screenX + chromeX + bounds.x + bounds.width / 2),
+    y: Math.round(metrics.screenY + chromeY + bounds.y + bounds.height / 2)
+  };
+}
 
 async function launch(executablePath: string, journeyId: string, profile?: RecoveryJourneySession["profile"], openPath?: string): Promise<RecoveryJourneySession> {
   return launchRecoveryJourney({

@@ -10,6 +10,8 @@ const execFileAsync = promisify(execFile);
 export const WINDOWS_INTEGRATION_MODE = "ETHER_WINDOWS_INTEGRATION_MODE";
 export const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
 export const ASSOCIATION_APPROVAL_VALUE = "approved-by-main";
+export const SHELL_UI_APPROVAL = "ETHER_A02_SHELL_UI_APPROVAL";
+export const SHELL_UI_APPROVAL_VALUE = "approved-by-main";
 export const TEST_ROOT_PREFIX = "ether-a02-windows-integration-";
 export const ASSOCIATION_ROOT = "HKCU\\Software\\Classes";
 export const ETHER_EXTENSION_KEY = `${ASSOCIATION_ROOT}\\.ether`;
@@ -74,6 +76,12 @@ export function requireAssociationMutationApproval(environment: NodeJS.ProcessEn
     throw new Error(
       `Association mutation is dry-run only. Main must explicitly set ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE}.`
     );
+  }
+}
+
+export function requireShellUiApproval(environment: NodeJS.ProcessEnv = process.env): void {
+  if (environment[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE) {
+    throw new Error(`Windows shell interaction is disabled. Main must explicitly set ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`);
   }
 }
 
@@ -198,6 +206,133 @@ export async function invokeDocumentFromExplorerWithUia(documentPath: string): P
     "try { ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); Write-Output ('uia-invoked explorerPid=' + $explorerPid + ' folder=' + $folder + ' item=' + $itemName) } finally { if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }"
   ].join("; ");
   return runPowerShell(script);
+}
+
+export type NativeScreenPoint = { x: number; y: number };
+
+/**
+ * Sends a real OS pointer drag from the uniquely named Explorer item to a
+ * caller-supplied point inside one exact packaged Ether window. No renderer
+ * DataTransfer, bridge, or synthetic DOM drop is involved.
+ */
+export async function dragDocumentFromExplorerWithNativePointer(input: {
+  documentPath: string;
+  etherPid: number;
+  target: NativeScreenPoint;
+}): Promise<string> {
+  requireShellUiApproval();
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Pointer { [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int X, int Y, int cx, int cy, uint flags); }'",
+    `$document = '${ps(input.documentPath)}'`,
+    "$folder = Split-Path -LiteralPath $document -Parent",
+    "$itemName = [System.IO.Path]::GetFileName($document)",
+    `$etherPid = ${input.etherPid}`,
+    `$targetX = ${Math.round(input.target.x)}`,
+    `$targetY = ${Math.round(input.target.y)}`,
+    "Start-Process explorer.exe -ArgumentList $folder | Out-Null",
+    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
+    "$shell = New-Object -ComObject Shell.Application; $matchedWindow = $null; $explorerPid = $null; $item = $null",
+    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) {",
+    "  foreach ($window in @($shell.Windows())) { try { if ([string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$pid = 0; [EtherA02Pointer]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$pid) | Out-Null; $explorerPid = [int]$pid; $matchedWindow = $window; break } } catch {} }",
+    "  if ($null -eq $explorerPid) { Start-Sleep -Milliseconds 150; continue }",
+    "  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName)",
+    "  foreach ($candidate in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) { if ($candidate.Current.ProcessId -eq $explorerPid) { $item = $candidate; break } }",
+    "  if ($null -eq $item) { Start-Sleep -Milliseconds 150 }",
+    "}",
+    "if ($null -eq $item) { if ($null -ne $matchedWindow) { $matchedWindow.Quit() }; throw ('Explorer UIA did not expose exact drag source ' + $itemName) }",
+    "$down = $false",
+    "try { $etherCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $etherPid); $etherWindows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $etherCondition); if ($etherWindows.Count -ne 1) { throw ('Expected one exact Ether drag target window; found ' + $etherWindows.Count) }; $targetWindow = $etherWindows[0].Current.BoundingRectangle; if ($targetX -lt $targetWindow.Left -or $targetX -gt $targetWindow.Right -or $targetY -lt $targetWindow.Top -or $targetY -gt $targetWindow.Bottom) { throw 'Requested drop point is outside the exact Ether window' }; $moveX = if ($targetX -gt 520) { 0 } else { [int]([System.Windows.SystemParameters]::PrimaryScreenWidth - 460) }; [EtherA02Pointer]::SetWindowPos([intptr]$matchedWindow.HWND, [intptr]::Zero, $moveX, 0, 440, 520, 0x0040) | Out-Null; Start-Sleep -Milliseconds 300; $explorerBounds = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND).Current.BoundingRectangle; if ($targetX -ge $explorerBounds.Left -and $targetX -le $explorerBounds.Right -and $targetY -ge $explorerBounds.Top -and $targetY -le $explorerBounds.Bottom) { throw 'Exact Explorer window still covers the requested Ether drop target' }; $item = $null; $deadline = [DateTime]::UtcNow.AddSeconds(10); while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName); foreach ($candidate in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) { if ($candidate.Current.ProcessId -eq $explorerPid) { $item = $candidate; break } }; if ($null -eq $item) { Start-Sleep -Milliseconds 150 } }; if ($null -eq $item) { throw 'Exact Explorer source disappeared after arranging its matched window' }; $source = $item.Current.BoundingRectangle; if ($source.Width -le 0 -or $source.Height -le 0) { throw 'Exact Explorer source has no usable screen bounds after arranging window' }; if ($targetX -ge $source.Left -and $targetX -le $source.Right -and $targetY -ge $source.Top -and $targetY -le $source.Bottom) { throw 'Explorer source and Ether target rectangles overlap' }; $sourceX = [int][Math]::Round($source.Left + ($source.Width / 2)); $sourceY = [int][Math]::Round($source.Top + ($source.Height / 2)); [EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null; Start-Sleep -Milliseconds 100; [EtherA02Pointer]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); $down = $true; for ($step = 1; $step -le 12; $step++) { [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)), [int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null; Start-Sleep -Milliseconds 25 }; [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); $down = $false; Write-Output ('native-explorer-drag explorerPid=' + $explorerPid + ' etherPid=' + $etherPid + ' source=(' + $sourceX + ',' + $sourceY + ') target=(' + $targetX + ',' + $targetY + ')') } finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }"
+  ].join("; ");
+  return runPowerShell(script);
+}
+
+/**
+ * Uses the actual taskbar/Jumplist surface only when a unique Ether taskbar
+ * entry and unique recent document item are exposed to UI Automation. Any
+ * ambiguity fails with diagnostics instead of guessing or using argv.
+ */
+export async function invokeJumpListRecentDocumentWithUia(input: {
+  documentPath: string;
+  etherPid: number;
+  taskbarAppName?: string;
+}): Promise<string> {
+  requireShellUiApproval();
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02JumpList { [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra); }'",
+    `$itemName = '${ps(path.basename(input.documentPath))}'`,
+    `$etherPid = ${input.etherPid}`,
+    `$appName = '${ps(input.taskbarAppName ?? "Ether")}'`,
+    "$root = [System.Windows.Automation.AutomationElement]::RootElement; $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $appName)",
+    "$taskbarCandidates = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $nameCondition) | Where-Object { $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 })",
+    "if ($taskbarCandidates.Count -ne 1) { throw ('JUMP_LIST_UNAVAILABLE: expected one exact visible taskbar item named ' + $appName + '; found ' + $taskbarCandidates.Count + '. Refusing ambiguous shell interaction.') }",
+    "$taskbar = $taskbarCandidates[0]; $bounds = $taskbar.Current.BoundingRectangle; $x = [int][Math]::Round($bounds.Left + ($bounds.Width / 2)); $y = [int][Math]::Round($bounds.Top + ($bounds.Height / 2))",
+    "[EtherA02JumpList]::SetCursorPos($x, $y) | Out-Null; [EtherA02JumpList]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); [EtherA02JumpList]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 500",
+    "try { $itemCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName); $recentItems = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition) | Where-Object { $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 }); if ($recentItems.Count -ne 1) { throw ('JUMP_LIST_UNAVAILABLE: expected one exact visible recent item ' + $itemName + '; found ' + $recentItems.Count + '. The host did not expose a safe exact Jump List target.') }; $invoke = $recentItems[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $invoke) { throw 'JUMP_LIST_UNAVAILABLE: exact recent item has no InvokePattern' }; ([System.Windows.Automation.InvokePattern]$invoke).Invoke(); Write-Output ('uia-jumplist-invoked etherPid=' + $etherPid + ' item=' + $itemName + ' taskbar=(' + $x + ',' + $y + ')') } finally { [EtherA02JumpList]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [EtherA02JumpList]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero) }"
+  ].join("; ");
+  return runPowerShell(script);
+}
+
+/** Reads and closes only the exact Ether-owned native failure dialog. */
+export async function readAndCloseExactNativeErrorDialog(ownerPid: number, expectedPath: string): Promise<string> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    `$ownerPid = ${ownerPid}`,
+    `$expectedName = '${ps(path.basename(expectedPath))}'`,
+    "$deadline = [DateTime]::UtcNow.AddSeconds(15); $dialog = $null",
+    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid); foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)) { if ($window.Current.ClassName -eq '#32770') { $dialog = $window; break } }; if ($null -eq $dialog) { Start-Sleep -Milliseconds 150 } }",
+    "if ($null -eq $dialog) { throw 'JUMP_LIST_MISSING_TARGET_UNPROVEN: no exact Ether native error dialog appeared' }",
+    "$texts = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) | ForEach-Object { $_.Current.Name }) -join ' '",
+    "if ($texts -notlike ('*' + $expectedName + '*')) { throw ('JUMP_LIST_MISSING_TARGET_UNPROVEN: exact Ether dialog did not name the missing target. Dialog=' + $texts) }",
+    "$buttons = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))); $ok = @($buttons | Where-Object { $_.Current.Name -in @('OK', 'Close') }) | Select-Object -First 1; if ($null -eq $ok) { throw 'Exact Ether error dialog has no safe close button' }; ([System.Windows.Automation.InvokePattern]$ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke(); Write-Output ('native-error etherPid=' + $ownerPid + ' text=' + $texts)"
+  ].join("; ");
+  return runPowerShell(script);
+}
+
+/** Snapshot only Recent shortcuts that resolve to these exact test-owned targets. */
+export async function snapshotTestOwnedRecentShortcuts(input: {
+  appData: string;
+  root: string;
+  documentPaths: readonly string[];
+}): Promise<string[]> {
+  await Promise.all(input.documentPaths.map((candidate) => assertTestOwnedPath(input.root, candidate)));
+  const output = await runPowerShell(recentShortcutScript(input, false));
+  return output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean);
+}
+
+/**
+ * Removes only `.lnk` records that both resolve to one of the exact test
+ * documents and live under the isolated profile's Recent directory. It never
+ * clears the shell's whole Recent list or touches an unrelated target.
+ */
+export async function cleanupTestOwnedRecentShortcuts(input: {
+  appData: string;
+  root: string;
+  documentPaths: readonly string[];
+}): Promise<string[]> {
+  await Promise.all(input.documentPaths.map((candidate) => assertTestOwnedPath(input.root, candidate)));
+  const output = await runPowerShell(recentShortcutScript(input, true));
+  return output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean);
+}
+
+function recentShortcutScript(input: { appData: string; root: string; documentPaths: readonly string[] }, remove: boolean): string {
+  const targets = input.documentPaths.map((candidate) => path.resolve(candidate));
+  const removal = remove ? "Remove-Item -LiteralPath $_.FullName -Force; " : "";
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$appData = '${ps(input.appData)}'`,
+    `$root = '${ps(input.root)}'`,
+    `$targets = @(${targets.map((target) => `'${ps(target)}'`).join(",")})`,
+    "$recent = Join-Path $appData 'Microsoft\\Windows\\Recent'",
+    "if (-not (Test-Path -LiteralPath $recent)) { return }",
+    "$shell = New-Object -ComObject WScript.Shell",
+    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath); $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { ${removal}Write-Output $_.FullName } }`
+  ].join("; ");
+  return script;
 }
 
 export async function assertExactPackagedProcess(executablePath: string, expectedPid: number): Promise<void> {

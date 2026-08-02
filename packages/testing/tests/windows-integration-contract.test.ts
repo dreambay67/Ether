@@ -9,10 +9,13 @@ import {
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
   ETHER_EXTENSION_KEY,
+  SHELL_UI_APPROVAL,
+  SHELL_UI_APPROVAL_VALUE,
   createWindowsIntegrationRoot,
   isAssociationMutationApproved,
   removeTestOwnedDisposableRoots,
-  requireAssociationMutationApproval
+  requireAssociationMutationApproval,
+  requireShellUiApproval
 } from "../recovery/windowsIntegration.js";
 
 describe("A02 Windows integration harness contracts", () => {
@@ -30,6 +33,11 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => requireAssociationMutationApproval({})).toThrow(/dry-run only/u);
     expect(isAssociationMutationApproved({ [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE })).toBe(true);
     expect(() => requireAssociationMutationApproval({ [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE })).not.toThrow();
+  });
+
+  it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {
+    expect(() => requireShellUiApproval({})).toThrow(/shell interaction is disabled/u);
+    expect(() => requireShellUiApproval({ [SHELL_UI_APPROVAL]: SHELL_UI_APPROVAL_VALUE })).not.toThrow();
   });
 
   it("deletes only named disposable roots below a driver-created test root", async () => {

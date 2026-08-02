@@ -19,7 +19,8 @@ export const testSuites = {
     "tests/renderer-channel-registry.test.ts",
     "tests/recovery-journey-driver.test.ts",
     "tests/renderer-url.test.ts",
-    "tests/schema-4.0.test.ts"
+    "tests/schema-4.0.test.ts",
+    "tests/windows-integration-contract.test.ts"
   ],
   integration: [
     "tests/application-vertical-slice.test.ts",
@@ -97,6 +98,9 @@ export const testSuites = {
     "tests/desktop/drawing-edit.spec.ts"
   ],
   recoveryBaseline: ["tests/recovery/authoring-baseline.spec.ts"],
+  recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
+  recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],
+  recoveryWindowsIntegration: ["tests/recovery/document-windows-integration.spec.ts"],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
   packaged: ["tests/desktop/document-lifecycle.packaged.ts", "tests/packaged-electron.packaged.ts"]
 } as const;
