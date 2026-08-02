@@ -123,10 +123,12 @@ test("records a blank-UI authored document through save, document actions, close
     );
     await reopened.input.screenshot("03-reopened-ui-authored-document.png", reopened.evidence, "Capture the exact reopened document", "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.");
     reopened.input.observe(
-      "Clean close limitation",
-      "A real native Alt+F4 close is required before AC-A02-005/009 can receive packaged evidence.",
-      "The recovery driver has not yet proved native-window close input; session cleanup is used only to continue the non-substituting reopen check."
+      "Windows accessibility close",
+      "A Windows UI Automation close action drains the Saved document without an unsaved-changes prompt.",
+      "The exact owned Ether window will be closed through its UI Automation WindowPattern."
     );
+    await closeWithWindowsAccessibility(mode, reopened, journeyRoot);
+    await expect.poll(() => reopened?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     expect(reopened.recorder.snapshot().errors).toEqual([]);
     await reopened.close("passed");
     reopened = null;
@@ -220,6 +222,25 @@ function journeyProcessIdentity(mode: JourneyMode, session: RecoveryJourneySessi
       : path.join(workspaceRoot, "node_modules", "electron", "dist", "electron.exe"),
     marker: mode === "packaged" ? session.profile.userData : fixtureRoot
   };
+}
+
+async function closeWithWindowsAccessibility(mode: JourneyMode, session: RecoveryJourneySession, fixtureRoot: string): Promise<void> {
+  const { executable, marker } = journeyProcessIdentity(mode, session, fixtureRoot);
+  const escapedExecutable = executable.replaceAll("'", "''");
+  const escapedMarker = marker.replaceAll("'", "''");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$processes = Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' }`,
+    "if ($processes.Count -eq 0) { throw 'No exact journey process was found for accessibility close.' }",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$processes[0].ProcessId)",
+    "$windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)",
+    "if ($windows.Count -ne 1) { throw ('Expected one exact journey top-level window; found ' + $windows.Count) }",
+    "$pattern = $windows[0].GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)",
+    "if ($null -eq $pattern) { throw 'The exact journey window has no UI Automation WindowPattern.' }",
+    "$pattern.Close()"
+  ].join("; ");
+  await execFileAsync("powershell.exe", ["-NoProfile", "-Sta", "-Command", script], { windowsHide: true });
 }
 
 async function sendNativeKeys(keys: readonly string[]): Promise<void> {
