@@ -192,6 +192,9 @@ function runSelfTest() {
   const ledger = loadLedger();
   const baseline = validateObject(ledger, { mode: 'baseline' });
   if (baseline.errors.length) throw new Error(`Self-test baseline fixture failed: ${baseline.errors.join(' | ')}`);
+  if (ledger.requirements.filter((item) => item.baselineChecked).length !== 14) throw new Error('Self-test historical checkbox count is not 14.');
+  if (ledger.requirements.some((item) => item.baselineChecked && item.status.startsWith('VERIFIED'))) throw new Error('Self-test found a historical item incorrectly marked VERIFIED.');
+  if (ledger.requirements.some((item) => item.requiredEvidence.includes('M') && item.ownerRoutes.length === 0)) throw new Error('Self-test found an M-evidence owner-route gap.');
   const duplicate = structuredClone(ledger);
   duplicate.requirements.push(structuredClone(duplicate.requirements[0]));
   const duplicateResult = validateObject(duplicate, { mode: 'baseline' });
