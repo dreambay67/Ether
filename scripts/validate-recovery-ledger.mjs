@@ -167,6 +167,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
         if (source.evidence.join('+') !== item.requiredEvidence.join('+')) push(errors, `${item.id} required evidence differs from recovery acceptance.`);
       }
       if (EXPECTED_RX_STATUS[item.id] && item.status !== EXPECTED_RX_STATUS[item.id]) push(errors, `${item.id} status ${item.status} does not match the evidence-based baseline classification (${EXPECTED_RX_STATUS[item.id]}).`);
+      if (recoveryMap?.[item.id]?.reason && item.classificationReason !== recoveryMap[item.id].reason) push(errors, `${item.id} classificationReason does not match classification.recoveryMap.`);
     }
     for (const source of sources.recoveries) if (!recoveries.some((item) => item.id === source.id)) push(errors, `${source.id} is missing from ledger.`);
   }
