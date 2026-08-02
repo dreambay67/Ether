@@ -17,7 +17,11 @@ import {
   packagedJourneyConfig,
   type RecoveryJourneySession
 } from "../../recovery/journeyDriver.js";
-import { completeNativeFileDialogWithUia, findExactPackagedProcessId } from "../../recovery/windowsIntegration.js";
+import {
+  completeNativeFileDialogWithUia,
+  findExactPackagedProcessId,
+  readAndCloseExactOwnedNativeDialogWithUia
+} from "../../recovery/windowsIntegration.js";
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl5oKAAAAAASUVORK5CYII=", "base64");
@@ -82,7 +86,7 @@ test("keeps a deliberately corrupted metadata copy unchanged while the packaged 
     const damagedHash = await sha256(corruptPath);
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Open", exact: true }), "Open corrupt metadata copy", "The visible packaged Open command sends the copied corrupt document to the native picker.");
     await completeNativeFileDialogWithUia(ownerPid, corruptPath);
-    const nativeError = await readNativeErrorDialog(profile);
+    const nativeError = await readAndCloseExactOwnedNativeDialogWithUia(ownerPid);
     expect(nativeError).toMatch(/unsupported|not an Ether|application/i);
     baseline.input.observe("Native unsupported metadata error", "The exact packaged browser process presents a clear native unsupported-document error for the corrupt copy.", nativeError);
     await baseline.input.screenshot("corrupt-metadata-unsupported.png", baseline.evidence, "Capture unsupported corrupt metadata", "The packaged app keeps the valid active baseline after the native unsupported-document error.");
@@ -264,30 +268,4 @@ async function isFile(filePath: string): Promise<boolean> {
 
 async function sha256(filePath: string): Promise<string> {
   return createHash("sha256").update(await readFile(filePath)).digest("hex");
-}
-
-async function readNativeErrorDialog(profile: RecoveryJourneySession["profile"]): Promise<string> {
-  const { execFile } = await import("node:child_process");
-  const executable = path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe").replaceAll("'", "''");
-  const marker = profile.userData.replaceAll("'", "''");
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "Add-Type -AssemblyName UIAutomationClient",
-    "$all = @(Get-CimInstance Win32_Process)",
-    `$roots = @($all | Where-Object { [string]::Equals($_.ExecutablePath, '${executable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${marker}*' -and $_.CommandLine -notmatch '(?:^|\\s)--type(?:=|\\s)' })`,
-    "if ($roots.Count -ne 1) { throw ('Expected one exact packaged browser process; found ' + $roots.Count) }",
-    "$byProcess = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$roots[0].ProcessId)",
-    "$byDialog = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, '#32770')",
-    "$condition = New-Object System.Windows.Automation.AndCondition($byProcess, $byDialog)",
-    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
-    "$dialog = $null",
-    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $dialogs = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition); if ($dialogs.Count -eq 1) { $dialog = $dialogs[0]; break }; Start-Sleep -Milliseconds 150 }",
-    "if ($null -eq $dialog) { throw 'Exact packaged native error dialog did not appear within 15 seconds.' }",
-    "$text = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join ' '",
-    "$ok = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'OK')))",
-    "if ($null -eq $ok) { throw 'Native error dialog has no OK button.' }",
-    "([System.Windows.Automation.InvokePattern]$ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()",
-    "$text"
-  ].join("; ");
-  return await new Promise<string>((resolve, reject) => execFile("powershell.exe", ["-NoProfile", "-Sta", "-Command", script], { windowsHide: true }, (error, stdout) => error === null ? resolve(stdout.trim()) : reject(error)));
 }

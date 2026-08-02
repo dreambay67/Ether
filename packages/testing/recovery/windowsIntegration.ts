@@ -399,28 +399,29 @@ export async function completeNativeFileDialogWithUia(ownerPid: number, filePath
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; public static class EtherA02DialogOwner { public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern IntPtr GetWindow(IntPtr hWnd, uint command); [DllImport(\"user32.dll\")] public static extern bool IsWindowEnabled(IntPtr hWnd); [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam); public static IntPtr[] OwnedWindows(IntPtr owner) { var windows = new List<IntPtr>(); EnumWindows((hWnd, lParam) => { if (hWnd != owner && GetWindow(hWnd, 4) == owner) windows.Add(hWnd); return true; }, IntPtr.Zero); return windows.ToArray(); } public static void TypeExact(IntPtr edit, string text) { SendMessage(edit, 0x00B1, IntPtr.Zero, new IntPtr(-1)); foreach (var character in text) SendMessage(edit, 0x0102, new IntPtr(character), IntPtr.Zero); } public static void ClickExact(IntPtr button) { SendMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero); } }' -ErrorAction SilentlyContinue",
+    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; public static class EtherA02DialogOwner { public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern IntPtr GetWindow(IntPtr hWnd, uint command); [DllImport(\"user32.dll\")] public static extern bool IsWindowEnabled(IntPtr hWnd); [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] private static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam); [DllImport(\"user32.dll\")] private static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam); public static IntPtr[] OwnedWindows(IntPtr owner) { var windows = new List<IntPtr>(); EnumWindows((hWnd, lParam) => { if (hWnd != owner && GetWindow(hWnd, 4) == owner) windows.Add(hWnd); return true; }, IntPtr.Zero); return windows.ToArray(); } public static void TypeExact(IntPtr edit, string text) { SendMessage(edit, 0x00B1, IntPtr.Zero, new IntPtr(-1)); foreach (var character in text) SendMessage(edit, 0x0102, new IntPtr(character), IntPtr.Zero); } public static void ClickExact(IntPtr button) { if (!PostMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero)) throw new InvalidOperationException(\"Could not post exact native file-dialog click.\"); } }' -ErrorAction SilentlyContinue",
     `$ownerPid = ${ownerPid}`,
     `$filePath = '${ps(filePath)}'`,
     "$byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid)",
     "$ownerWindows = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | Where-Object { $_.Current.ClassName -ne '#32770' -and $_.Current.NativeWindowHandle -ne 0 })",
     "if ($ownerWindows.Count -ne 1) { throw ('Expected one exact Ether owner window; found ' + $ownerWindows.Count) }",
     "$ownerHwnd = [intptr]$ownerWindows[0].Current.NativeWindowHandle",
-    "$fileNameCondition = New-Object System.Windows.Automation.AndCondition((New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')), (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, '1001')))",
+    "$fileNameClassCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')",
     "$dialogButtonCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Button')",
     "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
     "$dialog = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) {",
     "  $topWindows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)",
     "  $candidateHandles = @(@($topWindows | Where-Object { $hwnd = [intptr]$_.Current.NativeWindowHandle; $hwnd -ne $ownerHwnd -and ($_.Current.ProcessId -eq $ownerPid -or [EtherA02DialogOwner]::GetWindow($hwnd, 4) -eq $ownerHwnd) } | ForEach-Object { [intptr]$_.Current.NativeWindowHandle }) + @([EtherA02DialogOwner]::OwnedWindows($ownerHwnd)) | Select-Object -Unique)",
-    "  $matches = @($candidateHandles | ForEach-Object { $element = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$_); $hasFileName = $element.FindAll([System.Windows.Automation.TreeScope]::Descendants, $fileNameCondition).Count -gt 0; $hasConfirm = @($element.FindAll([System.Windows.Automation.TreeScope]::Descendants, $dialogButtonCondition) | Where-Object { $_.Current.Name -in @('Open', 'Save') }).Count -gt 0; if ($hasFileName -and $hasConfirm) { $element } })",
+    "  $matches = @($candidateHandles | ForEach-Object { $element = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$_); $fileNameCandidates = @($element.FindAll([System.Windows.Automation.TreeScope]::Descendants, $fileNameClassCondition) | Where-Object { $_.Current.AutomationId -in @('1001', '1148') }); $hasConfirm = @($element.FindAll([System.Windows.Automation.TreeScope]::Descendants, $dialogButtonCondition) | Where-Object { $_.Current.Name -in @('Open', 'Save') }).Count -gt 0; if ($fileNameCandidates.Count -eq 1 -and $hasConfirm) { $element } })",
     "  if ($matches.Count -gt 1) { throw ('Expected at most one exact Ether-owned file dialog; found ' + $matches.Count) }",
     "  if ($matches.Count -eq 1) { $dialog = $matches[0] }",
     "  if ($null -eq $dialog) { Start-Sleep -Milliseconds 150 }",
     "}",
-    "if ($null -eq $dialog) { $rawElements = @([EtherA02DialogOwner]::OwnedWindows($ownerHwnd) | ForEach-Object { [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$_) }); $rawOwned = @($rawElements | ForEach-Object { 'name=' + $_.Current.Name + ',class=' + $_.Current.ClassName + ',pid=' + $_.Current.ProcessId + ',hwnd=' + $_.Current.NativeWindowHandle }) -join '; '; $rawDescendants = @($rawElements | Where-Object { $_.Current.ClassName -eq '#32770' } | ForEach-Object { $_.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) } | ForEach-Object { 'name=' + $_.Current.Name + ',type=' + $_.Current.ControlType.ProgrammaticName + ',class=' + $_.Current.ClassName + ',id=' + $_.Current.AutomationId }) -join '; '; if ([string]::IsNullOrWhiteSpace($rawOwned)) { $rawOwned = '(none)' }; if ([string]::IsNullOrWhiteSpace($rawDescendants)) { $rawDescendants = '(none)' }; throw ('Exact Ether-owned native file dialog was not found. Owner enabled=' + [EtherA02DialogOwner]::IsWindowEnabled($ownerHwnd) + '. Raw owned windows: ' + $rawOwned + '. Dialog descendants: ' + $rawDescendants) }",
-    "$fileName = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $fileNameCondition)",
-    "if ($null -eq $fileName) { throw 'Native file dialog exposed no exact File name control' }",
+    "if ($null -eq $dialog) { $rawElements = @([EtherA02DialogOwner]::OwnedWindows($ownerHwnd) | ForEach-Object { [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$_) }); $rawOwned = @($rawElements | ForEach-Object { 'name=' + $_.Current.Name + ',class=' + $_.Current.ClassName + ',pid=' + $_.Current.ProcessId + ',hwnd=' + $_.Current.NativeWindowHandle }) -join '; '; $rawDescendants = @($rawElements | Where-Object { $_.Current.ClassName -eq '#32770' } | ForEach-Object { $_.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) } | Where-Object { $_.Current.ClassName -in @('Edit', 'Button') } | ForEach-Object { 'name=' + $_.Current.Name + ',class=' + $_.Current.ClassName + ',id=' + $_.Current.AutomationId }) -join '; '; if ([string]::IsNullOrWhiteSpace($rawOwned)) { $rawOwned = '(none)' }; if ([string]::IsNullOrWhiteSpace($rawDescendants)) { $rawDescendants = '(none)' }; throw ('Exact Ether-owned native file dialog was not found. Owner enabled=' + [EtherA02DialogOwner]::IsWindowEnabled($ownerHwnd) + '. Raw owned windows: ' + $rawOwned + '. Relevant descendants: ' + $rawDescendants) }",
+    "$fileNames = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $fileNameClassCondition) | Where-Object { $_.Current.AutomationId -in @('1001', '1148') })",
+    "if ($fileNames.Count -ne 1) { throw ('Native file dialog exposed ' + $fileNames.Count + ' exact File name controls') }",
+    "$fileName = $fileNames[0]",
     "$fileNameHwnd = [intptr]$fileName.Current.NativeWindowHandle",
     "if ($fileNameHwnd -eq [intptr]::Zero) { throw 'Native file dialog File name control has no native handle' }",
     "[EtherA02DialogOwner]::TypeExact($fileNameHwnd, $filePath)",
@@ -431,6 +432,32 @@ export async function completeNativeFileDialogWithUia(ownerPid: number, filePath
     "if ($confirmHwnd -eq [intptr]::Zero) { throw 'Native file dialog confirmation button has no native handle' }",
     "[EtherA02DialogOwner]::ClickExact($confirmHwnd)",
     "Write-Output ('uia-file-dialog ownerPid=' + $ownerPid + ' path=' + $filePath)"
+  ].join("; ");
+  return runPowerShell(script);
+}
+
+/** Reads and closes one native modal owned by the exact Ether window. */
+export async function readAndCloseExactOwnedNativeDialogWithUia(ownerPid: number): Promise<string> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; public static class EtherA02OwnedDialog { public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern IntPtr GetWindow(IntPtr hWnd, uint command); [DllImport(\"user32.dll\")] private static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam); public static IntPtr[] OwnedWindows(IntPtr owner) { var windows = new List<IntPtr>(); EnumWindows((hWnd, lParam) => { if (hWnd != owner && GetWindow(hWnd, 4) == owner) windows.Add(hWnd); return true; }, IntPtr.Zero); return windows.ToArray(); } public static void ClickExact(IntPtr button) { SendMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero); } }' -ErrorAction SilentlyContinue",
+    `$ownerPid = ${ownerPid}`,
+    "$byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid)",
+    "$ownerWindows = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | Where-Object { $_.Current.ClassName -ne '#32770' -and $_.Current.NativeWindowHandle -ne 0 })",
+    "if ($ownerWindows.Count -ne 1) { throw ('Expected one exact Ether owner window; found ' + $ownerWindows.Count) }",
+    "$ownerHwnd = [intptr]$ownerWindows[0].Current.NativeWindowHandle",
+    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
+    "$dialog = $null",
+    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $matches = @([EtherA02OwnedDialog]::OwnedWindows($ownerHwnd) | ForEach-Object { [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$_) } | Where-Object { $_.Current.ClassName -eq '#32770' }); if ($matches.Count -gt 1) { throw ('Expected at most one exact Ether-owned native dialog; found ' + $matches.Count) }; if ($matches.Count -eq 1) { $dialog = $matches[0] } else { Start-Sleep -Milliseconds 150 } }",
+    "if ($null -eq $dialog) { throw 'Exact Ether-owned native dialog did not appear within 15 seconds.' }",
+    "$text = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join ' '",
+    "$buttons = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Button'))) | Where-Object { $_.Current.Name -in @('OK', 'Close') })",
+    "if ($buttons.Count -ne 1) { throw ('Exact Ether-owned native dialog exposed ' + $buttons.Count + ' safe close buttons') }",
+    "$button = $buttons[0]; $invoke = $null",
+    "try { $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern) } catch { $invoke = $null }",
+    "if ($null -ne $invoke) { ([System.Windows.Automation.InvokePattern]$invoke).Invoke() } else { $buttonHwnd = [intptr]$button.Current.NativeWindowHandle; if ($buttonHwnd -eq [intptr]::Zero) { throw 'Exact native dialog button has neither InvokePattern nor HWND' }; [EtherA02OwnedDialog]::ClickExact($buttonHwnd) }",
+    "Write-Output $text"
   ].join("; ");
   return runPowerShell(script);
 }

@@ -595,12 +595,14 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
 }
 
 function repairReportForRenderer(report: {
+  destinationPath?: string;
   losses: Array<{ entityId: string; reason: string; type: string }>;
   recovered: { artifacts: number; blobs: number; graphs: number; references: number };
   statement: "logical-row-repair-only";
 }) {
+  const { destinationPath: _destinationPath, ...publicReport } = report;
   return {
-    ...report,
+    ...publicReport,
     losses: report.losses.map((loss) => ({
       ...loss,
       reason: normalizeDesktopError(Object.assign(new Error(loss.reason), { category: "document" })).message
