@@ -56,6 +56,7 @@ import {
   drainLifecycleSteps,
   startContainedLifecycle
 } from "./lifecycle.js";
+import { resolveRecoveryShellIdentity } from "./recoveryShellIdentity.js";
 import {
   createCredentialWindowOptions,
   createMainWindowOptions,
@@ -87,6 +88,12 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
 }> {
   const launchArgv = options.initialArgv ?? process.argv.slice(1);
   const credentialOnly = launchArgv.includes("--connect-gemini");
+  const recoveryShell = resolveRecoveryShellIdentity({
+    appData: process.env.APPDATA,
+    argv: launchArgv,
+    userData: app.getPath("userData")
+  });
+  if (recoveryShell?.cleanupOnly) throw new Error("Recovery shell cleanup must run through the bootstrap cleanup route.");
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     throw Object.assign(new Error("Another Ether instance owns the application lock."), {
@@ -95,7 +102,10 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   }
 
   await app.whenReady();
-  app.setAppUserModelId("com.dreambay.ether");
+  app.setAppUserModelId(recoveryShell?.appUserModelId ?? "com.dreambay.ether");
+  if (recoveryShell !== null) {
+    app.setName(recoveryShell.taskbarName);
+  }
   const appVersion = app.getVersion();
   const appDataRoot = path.join(app.getPath("userData"), "4.0");
   const diagnosticLogger = options.diagnosticLogger ?? new LocalDiagnosticLogger({
@@ -122,6 +132,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   const mainWindow = new BrowserWindow(credentialOnly
     ? createCredentialWindowOptions(preloadPath)
     : createMainWindowOptions(preloadPath));
+  if (recoveryShell !== null) mainWindow.setTitle(recoveryShell.taskbarName);
   mainWindow.once("ready-to-show", () => {
     if (credentialOnly) {
       mainWindow.center();
@@ -560,7 +571,8 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     return { mainWindow, service, providerService, mcpBridge };
   }
   rendererLoaded = true;
-  if (!credentialOnly) app.setJumpList([{ type: "recent" }]);
+  if (recoveryShell !== null) mainWindow.setTitle(recoveryShell.taskbarName);
+  if (!credentialOnly && recoveryShell === null) app.setJumpList([{ type: "recent" }]);
   if (!credentialOnly && rememberAfterRendererLoad) {
     rememberWhenRendererLoaded();
   }

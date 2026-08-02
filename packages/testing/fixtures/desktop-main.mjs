@@ -22,7 +22,8 @@ async function runFixture() {
   const fixtureRoot = path.resolve(rootArgument.slice("--fixture-root=".length));
   const documentsRoot = path.join(fixtureRoot, "documents");
   await mkdir(documentsRoot, { recursive: true });
-  app.setPath("userData", path.join(fixtureRoot, "user-data"));
+  const recoveryShellArgument = process.argv.find((argument) => argument.startsWith("--ether-recovery-shell-identity="));
+  if (recoveryShellArgument === undefined) app.setPath("userData", path.join(fixtureRoot, "user-data"));
 
   const campaignPath = path.join(documentsRoot, "Campaign with spaces.ether");
   const renamedPath = path.join(documentsRoot, "Kampa\u0148 \u03a9.ether");
@@ -39,7 +40,10 @@ async function runFixture() {
 
   const started = await startEtherDesktop({
     rendererUrl: pathToFileURL(path.join(repositoryRoot, "apps", "desktop", "dist", "index.html")).href,
-    initialArgv: initialDocument === null ? [] : [initialDocument],
+    initialArgv: [
+      ...(recoveryShellArgument === undefined ? [] : [recoveryShellArgument]),
+      ...(initialDocument === null ? [] : [initialDocument])
+    ],
     simulationMode: !process.argv.includes("--production-controls"),
     locationCapability: process.argv.includes("--read-only-location")
       ? {

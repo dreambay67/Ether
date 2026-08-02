@@ -1,9 +1,11 @@
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { access, mkdir, realpath, rm } from "node:fs/promises";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { access, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+
+import { removeRecoveryShellAutomaticDestinations } from "./windowsShellDestinations.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +17,8 @@ export const SHELL_UI_APPROVAL_VALUE = "approved-by-main";
 export const TEST_ROOT_PREFIX = "ether-a02-windows-integration-";
 export const ASSOCIATION_ROOT = "HKCU\\Software\\Classes";
 export const ETHER_EXTENSION_KEY = `${ASSOCIATION_ROOT}\\.ether`;
+export const RECOVERY_SHELL_IDENTITY_ARGUMENT = "--ether-recovery-shell-identity=";
+export const RECOVERY_SHELL_CLEANUP_ARGUMENT = "--ether-recovery-shell-cleanup=";
 
 /**
  * This is deliberately a declared slice, not a claim of completed evidence.
@@ -42,8 +46,8 @@ export const A02_WINDOWS_INTEGRATION_COVERAGE = Object.freeze({
     "AC-A02-022", "AC-A02-023", "AC-A02-024", "AC-A02-025"
   ],
   knownPackagedGaps: [
-    "AC-A02-012 Explorer drag/drop is not automated: safely targeting the exact Ether window while avoiding the user's Explorer session remains unresolved.",
-    "AC-A02-016 Jump List needs a stable clean-profile Windows shell route; this harness does not claim it.",
+    "AC-A02-012 Explorer drag/drop remains unproven until the approval-gated exact-new-HWND packaged route passes.",
+    "AC-A02-016 Jump List remains unproven until the approval-gated unique-AUMID packaged route passes and restores shell state.",
     "AC-A02-017 removable-drive and cloud-sync variants require controlled host fixtures; Unicode/spaces are the representative packaged route."
   ]
 });
@@ -52,9 +56,17 @@ export type AssociationSnapshot = {
   root: string;
   extensionExisted: boolean;
   extensionBackup: string | null;
+  extensionDefault: RegistryDefaultSnapshot;
   originalProgId: string | null;
   originalProgIdExisted: boolean;
   originalProgIdBackup: string | null;
+  effectiveOpenCommand: string | null;
+};
+
+export type RegistryDefaultSnapshot = {
+  exists: boolean;
+  kind: "String" | "ExpandString" | null;
+  rawValue: string | null;
 };
 
 export type ReversibleAssociationPlan = {
@@ -64,7 +76,20 @@ export type ReversibleAssociationPlan = {
   testProgId: string;
   extensionKey: string;
   testProgIdKey: string;
+  testOpenCommand: string;
   snapshot: AssociationSnapshot;
+};
+
+export type WindowsShellStateSnapshot = {
+  roots: Array<{ appData: string; files: Array<{ path: string; sha256: string; size: number }> }>;
+};
+
+export type AssociationRestorationWatchdog = {
+  child: ChildProcess;
+  completePath: string;
+  disarmPath: string;
+  failurePath: string;
+  triggerPath: string;
 };
 
 export function isAssociationMutationApproved(environment: NodeJS.ProcessEnv = process.env): boolean {
@@ -83,6 +108,76 @@ export function requireShellUiApproval(environment: NodeJS.ProcessEnv = process.
   if (environment[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE) {
     throw new Error(`Windows shell interaction is disabled. Main must explicitly set ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`);
   }
+}
+
+export function createRecoveryShellToken(): string {
+  return randomUUID().replaceAll("-", "");
+}
+
+export function recoveryShellIdentityArgument(token: string): string {
+  assertRecoveryShellToken(token);
+  return `${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`;
+}
+
+export function recoveryShellTaskbarName(token: string): string {
+  assertRecoveryShellToken(token);
+  return `Ether Recovery ${token.slice(0, 8)}`;
+}
+
+/** Snapshot real and isolated Windows Recent/Jump List files without mutating either root. */
+export async function snapshotWindowsShellState(isolatedAppData: string): Promise<WindowsShellStateSnapshot> {
+  const actualAppData = process.env.APPDATA;
+  if (actualAppData === undefined) throw new Error("Windows shell-state verification requires the real APPDATA path.");
+  const roots = [...new Set([path.resolve(actualAppData), path.resolve(isolatedAppData)].map((candidate) => candidate.toLocaleLowerCase("en-US")))]
+    .map((normalized) => normalized === path.resolve(actualAppData).toLocaleLowerCase("en-US") ? path.resolve(actualAppData) : path.resolve(isolatedAppData));
+  return {
+    roots: await Promise.all(roots.map(async (appData) => ({
+      appData,
+      files: await snapshotTree(path.join(appData, "Microsoft", "Windows", "Recent"))
+    })))
+  };
+}
+
+export async function assertWindowsShellStateRestored(before: WindowsShellStateSnapshot): Promise<void> {
+  const after: WindowsShellStateSnapshot = {
+    roots: await Promise.all(before.roots.map(async ({ appData }) => ({
+      appData,
+      files: await snapshotTree(path.join(appData, "Microsoft", "Windows", "Recent"))
+    })))
+  };
+  if (JSON.stringify(after) !== JSON.stringify(before)) {
+    const changes = before.roots.flatMap((root, index) => {
+      const next = after.roots[index]!;
+      const priorMap = new Map(root.files.map((file) => [file.path, `${file.size}:${file.sha256}`]));
+      const nextMap = new Map(next.files.map((file) => [file.path, `${file.size}:${file.sha256}`]));
+      return [...new Set([...priorMap.keys(), ...nextMap.keys()])]
+        .filter((file) => priorMap.get(file) !== nextMap.get(file))
+        .map((file) => `${root.appData}:${file}`);
+    });
+    throw new Error(`Windows Recent/Jump List state was not restored exactly: ${changes.join(", ")}`);
+  }
+}
+
+/** Runs the packaged cleanup-only route for one unique recovery AUMID. */
+export async function cleanupRecoveryShellIdentity(input: {
+  executablePath: string;
+  profile: { appData: string; localAppData: string; root: string; userData: string };
+  token: string;
+}): Promise<string> {
+  assertRecoveryShellToken(input.token);
+  await assertDisposableRecoveryProfile(input.profile);
+  const environment = Object.fromEntries(Object.entries({
+    ...process.env,
+    APPDATA: input.profile.appData,
+    LOCALAPPDATA: input.profile.localAppData
+  }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  const { stdout, stderr } = await execFileAsync(input.executablePath, [
+    `--user-data-dir=${input.profile.userData}`,
+    `${RECOVERY_SHELL_CLEANUP_ARGUMENT}${input.token}`,
+    "--disable-gpu"
+  ], { env: environment, timeout: 30_000, windowsHide: true });
+  await removeRecoveryShellAutomaticDestinations(input.token);
+  return `cleanup-only token=${input.token.slice(0, 8)} stdout=${stdout.trim()} stderr=${stderr.trim()}`;
 }
 
 export async function createWindowsIntegrationRoot(): Promise<string> {
@@ -130,6 +225,8 @@ export async function createAssociationDryRunPlan(input: {
   documentPath: string;
   root: string;
   nonce?: string;
+  recoveryShellToken?: string;
+  userData?: string;
 }): Promise<ReversibleAssociationPlan> {
   await assertTestOwnedPath(input.root, input.documentPath);
   const nonce = (input.nonce ?? randomUUID()).replaceAll(/[^a-zA-Z0-9]/gu, "");
@@ -137,13 +234,25 @@ export async function createAssociationDryRunPlan(input: {
   const registryRoot = path.join(input.root, "registry");
   await mkdir(registryRoot, { recursive: true });
   const extensionBackup = path.join(registryRoot, "extension-before.reg");
-  const originalProgId = await readRegistryDefault(ETHER_EXTENSION_KEY);
-  const originalProgIdBackup = originalProgId === null ? null : path.join(registryRoot, "original-progid-before.reg");
   const extensionExisted = await registryKeyExists(ETHER_EXTENSION_KEY);
+  const extensionDefault = await readRegistryDefaultSnapshot(ETHER_EXTENSION_KEY);
+  const originalProgId = extensionDefault.exists && extensionDefault.rawValue !== "" ? extensionDefault.rawValue : null;
+  const originalProgIdBackup = originalProgId === null ? null : path.join(registryRoot, "original-progid-before.reg");
   const originalProgIdKey = originalProgId === null ? null : `${ASSOCIATION_ROOT}\\${originalProgId}`;
   const originalProgIdExisted = originalProgIdKey === null ? false : await registryKeyExists(originalProgIdKey);
+  const effectiveOpenCommand = await readEffectiveAssociationCommand();
   if (extensionExisted) await exportRegistryKey(ETHER_EXTENSION_KEY, extensionBackup);
   if (originalProgIdKey !== null && originalProgIdExisted && originalProgIdBackup !== null) await exportRegistryKey(originalProgIdKey, originalProgIdBackup);
+  if ((input.recoveryShellToken === undefined) !== (input.userData === undefined)) {
+    throw new Error("A mutable association plan requires both the recovery shell token and isolated userData path.");
+  }
+  const launchArguments = input.recoveryShellToken === undefined
+    ? []
+    : [
+        `--user-data-dir=${path.resolve(input.userData!)}`,
+        recoveryShellIdentityArgument(input.recoveryShellToken)
+      ];
+  const testOpenCommand = [quoteWindowsArgument(path.resolve(input.executablePath)), ...launchArguments.map(quoteWindowsArgument), '"%1"'].join(" ");
   return {
     executablePath: path.resolve(input.executablePath),
     documentPath: path.resolve(input.documentPath),
@@ -151,7 +260,8 @@ export async function createAssociationDryRunPlan(input: {
     testProgId,
     extensionKey: ETHER_EXTENSION_KEY,
     testProgIdKey: `${ASSOCIATION_ROOT}\\${testProgId}`,
-    snapshot: { root: registryRoot, extensionExisted, extensionBackup: extensionExisted ? extensionBackup : null, originalProgId, originalProgIdExisted, originalProgIdBackup }
+    testOpenCommand,
+    snapshot: { root: registryRoot, extensionExisted, extensionBackup: extensionExisted ? extensionBackup : null, extensionDefault, originalProgId, originalProgIdExisted, originalProgIdBackup, effectiveOpenCommand }
   };
 }
 
@@ -162,19 +272,86 @@ export async function createAssociationDryRunPlan(input: {
  */
 export async function applyReversibleAssociation(plan: ReversibleAssociationPlan): Promise<void> {
   requireAssociationMutationApproval();
+  if (!plan.testOpenCommand.includes(RECOVERY_SHELL_IDENTITY_ARGUMENT) || !plan.testOpenCommand.includes("--user-data-dir=")) {
+    throw new Error("Refusing association mutation without an isolated recovery shell command.");
+  }
+  await assertAssociationStillOriginal(plan);
   await execReg(["add", plan.testProgIdKey, "/ve", "/d", "Ether recovery test document", "/f"]);
   await execReg(["add", `${plan.testProgIdKey}\\DefaultIcon`, "/ve", "/d", `${plan.executablePath},0`, "/f"]);
-  await execReg(["add", `${plan.testProgIdKey}\\shell\\open\\command`, "/ve", "/d", `"${plan.executablePath}" "%1"`, "/f"]);
+  await execReg(["add", `${plan.testProgIdKey}\\shell\\open\\command`, "/ve", "/d", plan.testOpenCommand, "/f"]);
   await execReg(["add", plan.extensionKey, "/ve", "/d", plan.testProgId, "/f"]);
+  await notifyAssociationChanged();
+  await expectEffectiveAssociationCommand(plan.testOpenCommand);
 }
 
 export async function restoreReversibleAssociation(plan: ReversibleAssociationPlan): Promise<void> {
   // Do not require approval here: cleanup must be available after a partial failure.
-  await deleteRegistryTree(plan.extensionKey);
-  if (plan.snapshot.extensionExisted && plan.snapshot.extensionBackup !== null) await importRegistryFile(plan.snapshot.extensionBackup);
+  const extensionState = await classifyCurrentAssociationState(plan);
+  if (extensionState === "applied") {
+    await restoreRegistryDefaultValue(plan.extensionKey, plan.snapshot.extensionDefault);
+    if (!plan.snapshot.extensionExisted) await deleteRegistryTreeIfEmpty(plan.extensionKey);
+  }
   await deleteRegistryTree(plan.testProgIdKey);
   // The original ProgID is snapshotted for auditability only. It is never
   // mutated by this journey, so importing it could overwrite a user change.
+  await notifyAssociationChanged();
+  await assertAssociationSnapshotRestored(plan);
+}
+
+/**
+ * A detached watchdog retains the exported registry backup and restores it if
+ * the Playwright worker disappears before it can complete its own finally.
+ */
+export async function startAssociationRestorationWatchdog(plan: ReversibleAssociationPlan): Promise<AssociationRestorationWatchdog> {
+  const disarmPath = path.join(plan.root, "association-watchdog.disarm");
+  const triggerPath = path.join(plan.root, "association-watchdog.restore-now");
+  const completePath = path.join(plan.root, "association-watchdog.restored");
+  const failurePath = path.join(plan.root, "association-watchdog.failed");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$parentPid = ${process.pid}`,
+    `$disarm = '${ps(disarmPath)}'`,
+    `$trigger = '${ps(triggerPath)}'`,
+    `$complete = '${ps(completePath)}'`,
+    `$failure = '${ps(failurePath)}'`,
+    `$extensionKey = '${ps(plan.extensionKey)}'`,
+    `$extensionPath = 'Registry::HKEY_CURRENT_USER\\Software\\Classes\\.ether'`,
+    `$testProgIdKey = '${ps(plan.testProgIdKey)}'`,
+    `$testProgId = '${ps(plan.testProgId)}'`,
+    `$extensionExisted = ${plan.snapshot.extensionExisted ? "$true" : "$false"}`,
+    `$originalHadDefault = ${plan.snapshot.extensionDefault.exists ? "$true" : "$false"}`,
+    `$originalDefaultKind = '${ps(plan.snapshot.extensionDefault.kind ?? "String")}'`,
+    `$originalDefault = '${ps(plan.snapshot.extensionDefault.rawValue ?? "")}'`,
+    "while ((Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $disarm) -and -not (Test-Path -LiteralPath $trigger)) { Start-Sleep -Milliseconds 200 }",
+    "if (Test-Path -LiteralPath $disarm) { exit 0 }",
+    "try { $currentExists = Test-Path -LiteralPath $extensionPath; $currentItem = if ($currentExists) { Get-Item -LiteralPath $extensionPath } else { $null }; $currentHasDefault = $null -ne $currentItem -and $currentItem.GetValueNames() -contains ''; $currentDefault = if ($currentHasDefault) { $currentItem.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { $null }; $currentKind = if ($currentHasDefault) { [string]$currentItem.GetValueKind('') } else { $null }; $isApplied = $currentHasDefault -and $currentKind -eq 'String' -and [string]::Equals([string]$currentDefault, $testProgId, [System.StringComparison]::Ordinal); $isOriginal = if ($originalHadDefault) { $currentHasDefault -and $currentKind -eq $originalDefaultKind -and [string]::Equals([string]$currentDefault, $originalDefault, [System.StringComparison]::Ordinal) } else { -not $currentHasDefault }; if ($isApplied) { if ($originalHadDefault) { $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\\Classes\\.ether'); try { $kind = [Microsoft.Win32.RegistryValueKind]$originalDefaultKind; $key.SetValue('', $originalDefault, $kind) } finally { $key.Close() } } else { reg.exe delete $extensionKey /ve /f | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Watchdog could not remove the temporary extension default.' } } } elseif (-not $isOriginal) { throw 'Watchdog refused to overwrite a concurrently changed extension default.' }; if (-not $extensionExisted -and (Test-Path -LiteralPath $extensionPath)) { $item = Get-Item -LiteralPath $extensionPath; if ($item.GetValueNames().Count -eq 0 -and $item.GetSubKeyNames().Count -eq 0) { Remove-Item -LiteralPath $extensionPath -Force } }; reg.exe query $testProgIdKey *> $null; if ($LASTEXITCODE -eq 0) { reg.exe delete $testProgIdKey /f | Out-Null; if ($LASTEXITCODE -ne 0) { throw 'Watchdog could not delete the temporary ProgID tree.' } }; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02AssociationWatchdog { [DllImport(\"shell32.dll\")] public static extern void SHChangeNotify(uint eventId, uint flags, IntPtr item1, IntPtr item2); }' -ErrorAction SilentlyContinue; [EtherA02AssociationWatchdog]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero); Set-Content -LiteralPath $complete -Value 'restored' -Encoding Ascii } catch { Set-Content -LiteralPath $failure -Value $_.Exception.Message -Encoding UTF8; exit 1 }"
+  ].join("; ");
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  child.unref();
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    child.once("error", onError);
+    child.once("spawn", () => { child.off("error", onError); resolve(); });
+  });
+  return { child, completePath, disarmPath, failurePath, triggerPath };
+}
+
+export async function disarmAssociationRestorationWatchdog(watchdog: AssociationRestorationWatchdog): Promise<void> {
+  await writeFile(watchdog.disarmPath, "verified\n", "utf8");
+  await waitForChildExit(watchdog.child, 15_000);
+  if (await isFile(watchdog.failurePath)) throw new Error(`Association watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
+}
+
+export async function triggerAssociationRestorationWatchdog(watchdog: AssociationRestorationWatchdog): Promise<void> {
+  await writeFile(watchdog.triggerPath, "restore\n", "utf8");
+  await waitForChildExit(watchdog.child, 30_000);
+  if (await isFile(watchdog.failurePath)) throw new Error(`Association watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
+  if (!await isFile(watchdog.completePath)) throw new Error("Association watchdog exited without recording restoration.");
 }
 
 /** Uses Windows Explorer plus UI Automation InvokePattern; it never shells the document directly. */
@@ -186,21 +363,24 @@ export async function invokeDocumentFromExplorerWithUia(documentPath: string): P
     "$folder = Split-Path -LiteralPath $document -Parent",
     "$itemName = [System.IO.Path]::GetFileName($document)",
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); }' -ErrorAction SilentlyContinue",
-    "Start-Process explorer.exe -ArgumentList $folder | Out-Null",
-    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
     "$shell = New-Object -ComObject Shell.Application",
+    "$existingHwnd = @{}; foreach ($window in @($shell.Windows())) { try { $existingHwnd[[string]$window.HWND] = $true } catch {} }",
+    "Start-Process explorer.exe -ArgumentList ('/n,/select,\"' + $document + '\"') | Out-Null",
+    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
     "$explorerPid = $null",
     "$matchedWindow = $null",
     "$item = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) {",
-    "  foreach ($window in @($shell.Windows())) { try { if ([string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$nativePid = 0; [EtherA02Native]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$nativePid) | Out-Null; $explorerPid = [int]$nativePid; $matchedWindow = $window; break } } catch {} }",
+    "  foreach ($window in @($shell.Windows())) { try { if (-not $existingHwnd.ContainsKey([string]$window.HWND) -and [string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$nativePid = 0; [EtherA02Native]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$nativePid) | Out-Null; $explorerPid = [int]$nativePid; $matchedWindow = $window; break } } catch {} }",
     "  if ($null -eq $explorerPid) { Start-Sleep -Milliseconds 150; continue }",
     "  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName)",
-    "  $candidates = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)",
-    "  foreach ($candidate in $candidates) { if ($candidate.Current.ProcessId -eq $explorerPid) { $item = $candidate; break } }",
+    "  $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND)",
+    "  $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)",
+    "  if ($candidates.Count -gt 1) { throw ('Exact new Explorer window exposed multiple items named ' + $itemName) }",
+    "  if ($candidates.Count -eq 1) { $item = $candidates[0] }",
     "  if ($null -eq $item) { Start-Sleep -Milliseconds 150 }",
     "}",
-    "if ($null -eq $item) { throw ('Explorer UIA did not expose exact test-owned item ' + $itemName) }",
+    "if ($null -eq $item) { if ($null -ne $matchedWindow) { $matchedWindow.Quit() }; throw ('A newly created Explorer HWND did not expose exact test-owned item ' + $itemName) }",
     "$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
     "if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern' }",
     "try { ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); Write-Output ('uia-invoked explorerPid=' + $explorerPid + ' folder=' + $folder + ' item=' + $itemName) } finally { if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }"
@@ -232,19 +412,20 @@ export async function dragDocumentFromExplorerWithNativePointer(input: {
     `$etherPid = ${input.etherPid}`,
     `$targetX = ${Math.round(input.target.x)}`,
     `$targetY = ${Math.round(input.target.y)}`,
-    "Start-Process explorer.exe -ArgumentList $folder | Out-Null",
+    "$shell = New-Object -ComObject Shell.Application; $existingHwnd = @{}; foreach ($window in @($shell.Windows())) { try { $existingHwnd[[string]$window.HWND] = $true } catch {} }",
+    "Start-Process explorer.exe -ArgumentList ('/n,/select,\"' + $document + '\"') | Out-Null",
     "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
-    "$shell = New-Object -ComObject Shell.Application; $matchedWindow = $null; $explorerPid = $null; $item = $null",
+    "$matchedWindow = $null; $explorerPid = $null; $item = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) {",
-    "  foreach ($window in @($shell.Windows())) { try { if ([string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$pid = 0; [EtherA02Pointer]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$pid) | Out-Null; $explorerPid = [int]$pid; $matchedWindow = $window; break } } catch {} }",
+    "  foreach ($window in @($shell.Windows())) { try { if (-not $existingHwnd.ContainsKey([string]$window.HWND) -and [string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$pid = 0; [EtherA02Pointer]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$pid) | Out-Null; $explorerPid = [int]$pid; $matchedWindow = $window; break } } catch {} }",
     "  if ($null -eq $explorerPid) { Start-Sleep -Milliseconds 150; continue }",
     "  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName)",
-    "  foreach ($candidate in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) { if ($candidate.Current.ProcessId -eq $explorerPid) { $item = $candidate; break } }",
+    "  $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND); $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -gt 1) { throw ('Exact new Explorer window exposed multiple drag sources named ' + $itemName) }; if ($candidates.Count -eq 1) { $item = $candidates[0] }",
     "  if ($null -eq $item) { Start-Sleep -Milliseconds 150 }",
     "}",
     "if ($null -eq $item) { if ($null -ne $matchedWindow) { $matchedWindow.Quit() }; throw ('Explorer UIA did not expose exact drag source ' + $itemName) }",
     "$down = $false",
-    "try { $etherCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $etherPid); $etherWindows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $etherCondition); if ($etherWindows.Count -ne 1) { throw ('Expected one exact Ether drag target window; found ' + $etherWindows.Count) }; $targetWindow = $etherWindows[0].Current.BoundingRectangle; if ($targetX -lt $targetWindow.Left -or $targetX -gt $targetWindow.Right -or $targetY -lt $targetWindow.Top -or $targetY -gt $targetWindow.Bottom) { throw 'Requested drop point is outside the exact Ether window' }; $moveX = if ($targetX -gt 520) { 0 } else { [int]([System.Windows.SystemParameters]::PrimaryScreenWidth - 460) }; [EtherA02Pointer]::SetWindowPos([intptr]$matchedWindow.HWND, [intptr]::Zero, $moveX, 0, 440, 520, 0x0040) | Out-Null; Start-Sleep -Milliseconds 300; $explorerBounds = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND).Current.BoundingRectangle; if ($targetX -ge $explorerBounds.Left -and $targetX -le $explorerBounds.Right -and $targetY -ge $explorerBounds.Top -and $targetY -le $explorerBounds.Bottom) { throw 'Exact Explorer window still covers the requested Ether drop target' }; $item = $null; $deadline = [DateTime]::UtcNow.AddSeconds(10); while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName); foreach ($candidate in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) { if ($candidate.Current.ProcessId -eq $explorerPid) { $item = $candidate; break } }; if ($null -eq $item) { Start-Sleep -Milliseconds 150 } }; if ($null -eq $item) { throw 'Exact Explorer source disappeared after arranging its matched window' }; $source = $item.Current.BoundingRectangle; if ($source.Width -le 0 -or $source.Height -le 0) { throw 'Exact Explorer source has no usable screen bounds after arranging window' }; if ($targetX -ge $source.Left -and $targetX -le $source.Right -and $targetY -ge $source.Top -and $targetY -le $source.Bottom) { throw 'Explorer source and Ether target rectangles overlap' }; $sourceX = [int][Math]::Round($source.Left + ($source.Width / 2)); $sourceY = [int][Math]::Round($source.Top + ($source.Height / 2)); [EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null; Start-Sleep -Milliseconds 100; [EtherA02Pointer]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); $down = $true; for ($step = 1; $step -le 12; $step++) { [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)), [int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null; Start-Sleep -Milliseconds 25 }; [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); $down = $false; Write-Output ('native-explorer-drag explorerPid=' + $explorerPid + ' etherPid=' + $etherPid + ' source=(' + $sourceX + ',' + $sourceY + ') target=(' + $targetX + ',' + $targetY + ')') } finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }"
+    "try { $etherCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $etherPid); $etherWindows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $etherCondition); if ($etherWindows.Count -ne 1) { throw ('Expected one exact Ether drag target window; found ' + $etherWindows.Count) }; $targetWindow = $etherWindows[0].Current.BoundingRectangle; if ($targetX -lt $targetWindow.Left -or $targetX -gt $targetWindow.Right -or $targetY -lt $targetWindow.Top -or $targetY -gt $targetWindow.Bottom) { throw 'Requested drop point is outside the exact Ether window' }; $moveX = if ($targetX -gt 520) { 0 } else { [int]([System.Windows.SystemParameters]::PrimaryScreenWidth - 460) }; [EtherA02Pointer]::SetWindowPos([intptr]$matchedWindow.HWND, [intptr]::Zero, $moveX, 0, 440, 520, 0x0040) | Out-Null; Start-Sleep -Milliseconds 300; $explorerRoot = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND); $explorerBounds = $explorerRoot.Current.BoundingRectangle; if ($targetX -ge $explorerBounds.Left -and $targetX -le $explorerBounds.Right -and $targetY -ge $explorerBounds.Top -and $targetY -le $explorerBounds.Bottom) { throw 'Exact Explorer window still covers the requested Ether drop target' }; $item = $null; $deadline = [DateTime]::UtcNow.AddSeconds(10); while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName); $candidates = $explorerRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -gt 1) { throw ('Exact Explorer HWND exposed multiple drag sources named ' + $itemName) }; if ($candidates.Count -eq 1) { $item = $candidates[0] }; if ($null -eq $item) { Start-Sleep -Milliseconds 150 } }; if ($null -eq $item) { throw 'Exact Explorer source disappeared after arranging its matched window' }; $source = $item.Current.BoundingRectangle; if ($source.Width -le 0 -or $source.Height -le 0) { throw 'Exact Explorer source has no usable screen bounds after arranging window' }; if ($targetX -ge $source.Left -and $targetX -le $source.Right -and $targetY -ge $source.Top -and $targetY -le $source.Bottom) { throw 'Explorer source and Ether target rectangles overlap' }; $sourceX = [int][Math]::Round($source.Left + ($source.Width / 2)); $sourceY = [int][Math]::Round($source.Top + ($source.Height / 2)); [EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null; Start-Sleep -Milliseconds 100; [EtherA02Pointer]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); $down = $true; for ($step = 1; $step -le 12; $step++) { [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)), [int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null; Start-Sleep -Milliseconds 25 }; [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); $down = $false; Write-Output ('native-explorer-drag explorerPid=' + $explorerPid + ' explorerHwnd=' + $matchedWindow.HWND + ' etherPid=' + $etherPid + ' source=(' + $sourceX + ',' + $sourceY + ') target=(' + $targetX + ',' + $targetY + ')') } finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }"
   ].join("; ");
   return runPowerShell(script);
 }
@@ -257,22 +438,27 @@ export async function dragDocumentFromExplorerWithNativePointer(input: {
 export async function invokeJumpListRecentDocumentWithUia(input: {
   documentPath: string;
   etherPid: number;
-  taskbarAppName?: string;
+  taskbarAppName: string;
 }): Promise<string> {
   requireShellUiApproval();
+  if (!/^Ether Recovery [a-f0-9]{8}$/u.test(input.taskbarAppName)) {
+    throw new Error("Jump List interaction requires a unique recovery taskbar identity.");
+  }
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02JumpList { [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra); }'",
     `$itemName = '${ps(path.basename(input.documentPath))}'`,
     `$etherPid = ${input.etherPid}`,
-    `$appName = '${ps(input.taskbarAppName ?? "Ether")}'`,
+    `$appName = '${ps(input.taskbarAppName)}'`,
     "$root = [System.Windows.Automation.AutomationElement]::RootElement; $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $appName)",
-    "$taskbarCandidates = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $nameCondition) | Where-Object { $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 })",
+    "$pidCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $etherPid); $etherWindows = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $pidCondition) | Where-Object { $_.Current.NativeWindowHandle -ne 0 }); if ($etherWindows.Count -ne 1 -or $etherWindows[0].Current.Name -ne $appName) { throw ('JUMP_LIST_UNAVAILABLE: exact recovery Ether window/title mismatch for PID ' + $etherPid) }",
+    "$taskbarCandidates = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $nameCondition) | Where-Object { $_.Current.ProcessId -ne $etherPid -and $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 })",
     "if ($taskbarCandidates.Count -ne 1) { throw ('JUMP_LIST_UNAVAILABLE: expected one exact visible taskbar item named ' + $appName + '; found ' + $taskbarCandidates.Count + '. Refusing ambiguous shell interaction.') }",
+    "$itemCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName); $priorItems = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition) | Where-Object { $_.Current.ProcessId -ne $etherPid -and $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 }); if ($priorItems.Count -ne 0) { throw ('JUMP_LIST_UNAVAILABLE: unique recent item was already visible in the shell before opening the exact recovery taskbar item: ' + $itemName) }",
     "$taskbar = $taskbarCandidates[0]; $bounds = $taskbar.Current.BoundingRectangle; $x = [int][Math]::Round($bounds.Left + ($bounds.Width / 2)); $y = [int][Math]::Round($bounds.Top + ($bounds.Height / 2))",
     "[EtherA02JumpList]::SetCursorPos($x, $y) | Out-Null; [EtherA02JumpList]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero); [EtherA02JumpList]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 500",
-    "try { $itemCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName); $recentItems = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition) | Where-Object { $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 }); if ($recentItems.Count -ne 1) { throw ('JUMP_LIST_UNAVAILABLE: expected one exact visible recent item ' + $itemName + '; found ' + $recentItems.Count + '. The host did not expose a safe exact Jump List target.') }; $invoke = $recentItems[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $invoke) { throw 'JUMP_LIST_UNAVAILABLE: exact recent item has no InvokePattern' }; ([System.Windows.Automation.InvokePattern]$invoke).Invoke(); Write-Output ('uia-jumplist-invoked etherPid=' + $etherPid + ' item=' + $itemName + ' taskbar=(' + $x + ',' + $y + ')') } finally { [EtherA02JumpList]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [EtherA02JumpList]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero) }"
+    "try { $recentItems = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition) | Where-Object { $_.Current.ProcessId -ne $etherPid -and $_.Current.BoundingRectangle.Width -gt 0 -and $_.Current.BoundingRectangle.Height -gt 0 }); if ($recentItems.Count -ne 1) { throw ('JUMP_LIST_UNAVAILABLE: expected one exact newly visible recent item ' + $itemName + '; found ' + $recentItems.Count + '. The host did not expose a safe exact Jump List target.') }; $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker; $popup = $recentItems[0]; $parent = $walker.GetParent($popup); while ($null -ne $parent -and $parent.Current.NativeWindowHandle -eq 0) { $popup = $parent; $parent = $walker.GetParent($popup) }; if ($popup.Current.ProcessId -eq $etherPid) { throw 'JUMP_LIST_UNAVAILABLE: recent target resolved inside Ether rather than the Windows shell popup' }; $invoke = $recentItems[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $invoke) { throw 'JUMP_LIST_UNAVAILABLE: exact recent item has no InvokePattern' }; ([System.Windows.Automation.InvokePattern]$invoke).Invoke(); Write-Output ('uia-jumplist-invoked etherPid=' + $etherPid + ' item=' + $itemName + ' taskbar=(' + $x + ',' + $y + ') popupHwnd=' + $popup.Current.NativeWindowHandle) } finally { [EtherA02JumpList]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [EtherA02JumpList]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero) }"
   ].join("; ");
   return runPowerShell(script);
 }
@@ -312,12 +498,19 @@ export async function snapshotTestOwnedRecentShortcuts(input: {
  */
 export async function cleanupTestOwnedRecentShortcuts(input: {
   appData: string;
+  additionalAppData?: readonly string[];
   root: string;
   documentPaths: readonly string[];
 }): Promise<string[]> {
   await Promise.all(input.documentPaths.map((candidate) => assertTestOwnedPath(input.root, candidate)));
-  const output = await runPowerShell(recentShortcutScript(input, true));
-  return output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean);
+  const appDataRoots = [...new Set([input.appData, ...(input.additionalAppData ?? [])].map((candidate) => path.resolve(candidate).toLocaleLowerCase("en-US")))];
+  const removed: string[] = [];
+  for (const normalized of appDataRoots) {
+    const appData = [input.appData, ...(input.additionalAppData ?? [])].find((candidate) => path.resolve(candidate).toLocaleLowerCase("en-US") === normalized)!;
+    const output = await runPowerShell(recentShortcutScript({ ...input, appData }, true));
+    if (output.length > 0) removed.push(...output.split(/\r?\n/u).filter(Boolean));
+  }
+  return removed;
 }
 
 function recentShortcutScript(input: { appData: string; root: string; documentPaths: readonly string[] }, remove: boolean): string {
@@ -331,7 +524,7 @@ function recentShortcutScript(input: { appData: string; root: string; documentPa
     "$recent = Join-Path $appData 'Microsoft\\Windows\\Recent'",
     "if (-not (Test-Path -LiteralPath $recent)) { return }",
     "$shell = New-Object -ComObject WScript.Shell",
-    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath); $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { ${removal}Write-Output $_.FullName } }`
+    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { try { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath); $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { ${removal}Write-Output $_.FullName } } catch {} }`
   ].join("; ");
   return script;
 }
@@ -343,7 +536,9 @@ export async function assertExactPackagedProcess(executablePath: string, expecte
     `$expectedPid = ${expectedPid}`,
     "$process = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $expectedPid)",
     "if ($null -eq $process) { throw ('Exact Ether process was not found: ' + $expectedPid) }",
-    "if (-not [string]::Equals($process.ExecutablePath, $expectedPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('PID/executable mismatch: ' + $process.ExecutablePath) }"
+    "if (-not [string]::Equals($process.ExecutablePath, $expectedPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('PID/executable mismatch: ' + $process.ExecutablePath) }",
+    "$roots = @(Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, $expectedPath, [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -notmatch '(?:^|\\s)--type(?:=|\\s)' })",
+    "if ($roots.Count -ne 1 -or [int]$roots[0].ProcessId -ne $expectedPid) { throw ('Expected only exact packaged root PID ' + $expectedPid + '; found ' + (($roots | ForEach-Object ProcessId) -join ',')) }"
   ].join("; ");
   await runPowerShell(script);
 }
@@ -541,6 +736,183 @@ async function assertTestOwnedPath(root: string, candidate: string): Promise<voi
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Expected a test-owned path below ${root}: ${candidate}`);
 }
 
+async function assertDisposableRecoveryProfile(profile: { appData: string; localAppData: string; root: string; userData: string }): Promise<void> {
+  const [tempRoot, root, appData, localAppData, userData] = await Promise.all([
+    realpath(os.tmpdir()),
+    realpath(profile.root),
+    realpath(profile.appData),
+    realpath(profile.localAppData),
+    realpath(profile.userData)
+  ]);
+  const relativeRoot = path.relative(tempRoot, root);
+  if (relativeRoot === "" || relativeRoot.startsWith("..") || path.isAbsolute(relativeRoot) || !path.basename(root).startsWith("ether-recovery-journey-")) {
+    throw new Error("Recovery shell cleanup refused a non-disposable profile root.");
+  }
+  for (const candidate of [appData, localAppData, userData]) {
+    const relative = path.relative(root, candidate);
+    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("Recovery shell cleanup refused a profile path outside its disposable root.");
+    }
+  }
+}
+
+async function snapshotTree(root: string): Promise<Array<{ path: string; sha256: string; size: number }>> {
+  if (!await isDirectory(root)) return [];
+  const files: Array<{ path: string; sha256: string; size: number }> = [];
+  const visit = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (entry.isFile()) {
+        const bytes = await readFile(absolute);
+        files.push({
+          path: path.relative(root, absolute).replaceAll("\\", "/"),
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+          size: bytes.length
+        });
+      }
+    }
+  };
+  await visit(root);
+  return files.sort((left, right) => left.path.localeCompare(right.path, "en-US"));
+}
+
+async function assertAssociationStillOriginal(plan: ReversibleAssociationPlan): Promise<void> {
+  if (await registryKeyExists(plan.testProgIdKey)) throw new Error("The unique recovery ProgID unexpectedly existed before mutation.");
+  if (!plan.snapshot.extensionExisted) {
+    if (await registryKeyExists(plan.extensionKey)) throw new Error("The .ether association appeared after planning; refusing to overwrite a concurrent change.");
+  } else {
+    if (plan.snapshot.extensionBackup === null || !await registryKeyExists(plan.extensionKey)) {
+      throw new Error("The original .ether association disappeared after planning; refusing mutation.");
+    }
+    const current = path.join(plan.snapshot.root, "extension-before-apply.reg");
+    await exportRegistryKey(plan.extensionKey, current);
+    await assertFilesEqual(plan.snapshot.extensionBackup, current, "pre-apply .ether association tree");
+  }
+  await expectEffectiveAssociationCommand(plan.snapshot.effectiveOpenCommand);
+}
+
+async function classifyCurrentAssociationState(plan: ReversibleAssociationPlan): Promise<"applied" | "original"> {
+  const currentDefault = await readRegistryDefaultSnapshot(plan.extensionKey);
+  if (currentDefault.exists && currentDefault.kind === "String" && currentDefault.rawValue === plan.testProgId) return "applied";
+  if (sameRegistryDefaultSnapshot(currentDefault, plan.snapshot.extensionDefault)) return "original";
+  throw new Error("Refusing to overwrite a concurrently changed .ether association default value.");
+}
+
+async function assertAssociationSnapshotRestored(plan: ReversibleAssociationPlan): Promise<void> {
+  if (await registryKeyExists(plan.testProgIdKey)) throw new Error("Temporary Ether recovery ProgID remained after restoration.");
+  if (plan.snapshot.extensionExisted) {
+    if (plan.snapshot.extensionBackup === null || !await registryKeyExists(plan.extensionKey)) {
+      throw new Error("Original .ether association tree was not restored.");
+    }
+    const after = path.join(plan.snapshot.root, "extension-after.reg");
+    await exportRegistryKey(plan.extensionKey, after);
+    await assertFilesEqual(plan.snapshot.extensionBackup, after, ".ether association tree");
+  } else if (await registryKeyExists(plan.extensionKey)) {
+    throw new Error("A previously absent .ether association tree remained after restoration.");
+  }
+  if (plan.snapshot.originalProgId !== null && plan.snapshot.originalProgIdExisted) {
+    if (plan.snapshot.originalProgIdBackup === null) throw new Error("Original ProgID backup metadata is incomplete.");
+    const originalKey = `${ASSOCIATION_ROOT}\\${plan.snapshot.originalProgId}`;
+    if (!await registryKeyExists(originalKey)) throw new Error("Original ProgID disappeared during association restoration.");
+    const after = path.join(plan.snapshot.root, "original-progid-after.reg");
+    await exportRegistryKey(originalKey, after);
+    await assertFilesEqual(plan.snapshot.originalProgIdBackup, after, "original ProgID tree");
+  }
+  await expectEffectiveAssociationCommand(plan.snapshot.effectiveOpenCommand);
+}
+
+async function assertFilesEqual(expectedPath: string, actualPath: string, label: string): Promise<void> {
+  const [expected, actual] = await Promise.all([readFile(expectedPath), readFile(actualPath)]);
+  if (!expected.equals(actual)) throw new Error(`${label} did not restore byte-for-byte from its exported registry snapshot.`);
+}
+
+async function notifyAssociationChanged(): Promise<void> {
+  await runPowerShell([
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02AssociationChange { [DllImport(\"shell32.dll\")] public static extern void SHChangeNotify(uint eventId, uint flags, IntPtr item1, IntPtr item2); }' -ErrorAction SilentlyContinue",
+    "[EtherA02AssociationChange]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)"
+  ].join("; "));
+}
+
+async function readEffectiveAssociationCommand(): Promise<string | null> {
+  try {
+    const result = await runPowerShell([
+      "$ErrorActionPreference = 'Stop'",
+      "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; using System.Text; public static class EtherA02AssocQuery { [DllImport(\"Shlwapi.dll\", CharSet=CharSet.Unicode)] public static extern uint AssocQueryString(uint flags, uint query, string association, string extra, StringBuilder output, ref uint length); }' -ErrorAction SilentlyContinue",
+      "[uint32]$length = 0",
+      "[EtherA02AssocQuery]::AssocQueryString(0, 1, '.ether', 'open', $null, [ref]$length) | Out-Null",
+      "if ($length -eq 0) { exit 2 }",
+      "$builder = New-Object System.Text.StringBuilder([int]$length)",
+      "$status = [EtherA02AssocQuery]::AssocQueryString(0, 1, '.ether', 'open', $builder, [ref]$length)",
+      "if ($status -ne 0) { throw ('AssocQueryString failed with status ' + $status) }",
+      "Write-Output $builder.ToString()"
+    ].join("; "));
+    return result.length === 0 ? null : result;
+  } catch {
+    return null;
+  }
+}
+
+async function expectEffectiveAssociationCommand(expected: string | null): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  let actual = await readEffectiveAssociationCommand();
+  do {
+    if (normalizeAssociationCommand(actual) === normalizeAssociationCommand(expected)) return;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    actual = await readEffectiveAssociationCommand();
+  } while (Date.now() < deadline);
+  throw new Error(`Effective .ether handler mismatch. Expected ${expected ?? "<none>"}; observed ${actual ?? "<none>"}.`);
+}
+
+function normalizeAssociationCommand(command: string | null): string | null {
+  return command?.trim().replaceAll(/\s+/gu, " ").toLocaleLowerCase("en-US") ?? null;
+}
+
+function quoteWindowsArgument(argument: string): string {
+  if (/["\r\n]/u.test(argument)) throw new Error("Recovery association arguments cannot contain quotes or line breaks.");
+  return `"${argument}"`;
+}
+
+function assertRecoveryShellToken(token: string): void {
+  if (!/^[a-f0-9]{32}$/u.test(token)) throw new Error("Recovery shell token must be 32 lowercase hexadecimal characters.");
+}
+
+async function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null) {
+    if (child.exitCode !== 0) throw new Error(`Association watchdog exited with code ${child.exitCode}.`);
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Association watchdog did not exit within ${timeoutMs}ms.`));
+    }, timeoutMs);
+    const onExit = (code: number | null) => {
+      cleanup();
+      if (code === 0) resolve();
+      else reject(new Error(`Association watchdog exited with code ${code ?? "unknown"}.`));
+    };
+    const onError = (error: Error) => { cleanup(); reject(error); };
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off("exit", onExit);
+      child.off("error", onError);
+    };
+    child.once("exit", onExit);
+    child.once("error", onError);
+  });
+}
+
+async function isFile(candidate: string): Promise<boolean> {
+  try { return (await stat(candidate)).isFile(); } catch { return false; }
+}
+
+async function isDirectory(candidate: string): Promise<boolean> {
+  try { return (await stat(candidate)).isDirectory(); } catch { return false; }
+}
+
 async function mkdtempInTemp(prefix: string): Promise<string> {
   const { mkdtemp } = await import("node:fs/promises");
   return mkdtemp(path.join(os.tmpdir(), prefix));
@@ -550,24 +922,67 @@ async function registryKeyExists(key: string): Promise<boolean> {
   try { await execReg(["query", key]); return true; } catch { return false; }
 }
 
-async function readRegistryDefault(key: string): Promise<string | null> {
-  try {
-    const { stdout } = await execReg(["query", key, "/ve"]);
-    const match = stdout.match(/REG_\w+\s+(.+)\s*$/mu);
-    return match?.[1]?.trim() || null;
-  } catch { return null; }
+async function readRegistryDefaultSnapshot(key: string): Promise<RegistryDefaultSnapshot> {
+  const relativeKey = key.replace(/^HKCU\\/u, "");
+  const serialized = await runPowerShell([
+    "$ErrorActionPreference = 'Stop'",
+    `$relativeKey = '${ps(relativeKey)}'`,
+    "$key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($relativeKey)",
+    "if ($null -eq $key) { Write-Output '{\"exists\":false,\"kind\":null,\"rawValue\":null}'; return }",
+    "try { $exists = $key.GetValueNames() -contains ''; if (-not $exists) { Write-Output '{\"exists\":false,\"kind\":null,\"rawValue\":null}'; return }; $kind = [string]$key.GetValueKind(''); if ($kind -notin @('String', 'ExpandString')) { throw ('Unsupported .ether default registry kind: ' + $kind) }; $raw = $key.GetValue('', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); if ($raw -isnot [string]) { throw 'The .ether default registry value is not a string.' }; [pscustomobject]@{ exists = $true; kind = $kind; rawValue = [string]$raw } | ConvertTo-Json -Compress } finally { $key.Close() }"
+  ].join("; "));
+  return JSON.parse(serialized) as RegistryDefaultSnapshot;
 }
 
 async function exportRegistryKey(key: string, destination: string): Promise<void> {
   await execReg(["export", key, destination, "/y"]);
 }
 
-async function importRegistryFile(filePath: string): Promise<void> {
-  await execReg(["import", filePath]);
+async function deleteRegistryTree(key: string): Promise<void> {
+  if (!await registryKeyExists(key)) return;
+  await execReg(["delete", key, "/f"]);
+  if (await registryKeyExists(key)) throw new Error(`Registry tree remained after exact delete: ${key}`);
 }
 
-async function deleteRegistryTree(key: string): Promise<void> {
-  await execReg(["delete", key, "/f"]).catch(() => undefined);
+async function deleteRegistryDefaultValue(key: string): Promise<void> {
+  await execReg(["delete", key, "/ve", "/f"]);
+  if ((await readRegistryDefaultSnapshot(key)).exists) throw new Error(`Registry default value remained after exact delete: ${key}`);
+}
+
+async function restoreRegistryDefaultValue(key: string, snapshot: RegistryDefaultSnapshot): Promise<void> {
+  if (!snapshot.exists) {
+    await deleteRegistryDefaultValue(key);
+    return;
+  }
+  if (snapshot.kind === null || snapshot.rawValue === null) throw new Error("Original registry default metadata is incomplete.");
+  const relativeKey = key.replace(/^HKCU\\/u, "");
+  await runPowerShell([
+    "$ErrorActionPreference = 'Stop'",
+    `$relativeKey = '${ps(relativeKey)}'`,
+    `$kindName = '${ps(snapshot.kind)}'`,
+    `$rawValue = '${ps(snapshot.rawValue)}'`,
+    "$key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($relativeKey)",
+    "try { $kind = [Microsoft.Win32.RegistryValueKind]$kindName; $key.SetValue('', $rawValue, $kind) } finally { $key.Close() }"
+  ].join("; "));
+  const restored = await readRegistryDefaultSnapshot(key);
+  if (!sameRegistryDefaultSnapshot(restored, snapshot)) throw new Error(`Registry default value did not restore exactly: ${key}`);
+}
+
+function sameRegistryDefaultSnapshot(left: RegistryDefaultSnapshot, right: RegistryDefaultSnapshot): boolean {
+  return left.exists === right.exists && left.kind === right.kind && left.rawValue === right.rawValue;
+}
+
+async function deleteRegistryTreeIfEmpty(key: string): Promise<void> {
+  const providerPath = key.replace(/^HKCU\\/u, "Registry::HKEY_CURRENT_USER\\");
+  await runPowerShell([
+    "$ErrorActionPreference = 'Stop'",
+    `$key = '${ps(providerPath)}'`,
+    "if (-not (Test-Path -LiteralPath $key)) { return }",
+    "$item = Get-Item -LiteralPath $key",
+    "if ($item.GetValueNames().Count -ne 0 -or $item.GetSubKeyNames().Count -ne 0) { throw 'Refusing to delete a non-empty registry tree created concurrently.' }",
+    "Remove-Item -LiteralPath $key -Force",
+    "if (Test-Path -LiteralPath $key) { throw 'Empty registry tree remained after exact delete.' }"
+  ].join("; "));
 }
 
 async function execReg(args: string[]): Promise<{ stdout: string; stderr: string }> {
