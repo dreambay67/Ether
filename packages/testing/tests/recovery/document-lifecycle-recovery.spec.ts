@@ -121,10 +121,11 @@ test("records a blank-UI authored document through save, document actions, close
     await expect(reopened.page.getByTestId("project-header")).toContainText("UI authored renamed.ether");
     await expect(reopened.page.locator(".react-flow__node")).toHaveCount(2);
     await expect(reopened.page.getByText("Saved", { exact: true })).toBeVisible();
+    await expectWritableDocument(reopened);
     reopened.input.observe(
-      "Close/reopen recovery check",
-      "A cleanly closed UI-authored .ether reopens writable without a stale recovery warning.",
-      "The exact Save As destination reopened with both UI-authored nodes and Saved state."
+      "Hard-kill recovery reopen",
+      "The hard-killed UI-authored .ether reclaims its dead same-machine writer lease and reopens writable without a stale recovery warning.",
+      "The exact Save As destination reopened writable with both UI-authored nodes and Saved state."
     );
     await reopened.input.screenshot("03-reopened-ui-authored-document.png", reopened.evidence, "Capture the exact reopened document", "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.");
     reopened.input.observe(
@@ -141,6 +142,7 @@ test("records a blank-UI authored document through save, document actions, close
     cleanReopened = await launch(mode, "document-lifecycle-clean-reopen", journeyRoot, renamedPath, recoveryProfile, true);
     await expect(cleanReopened.page.getByTestId("project-header")).toContainText("UI authored renamed.ether");
     await expect(cleanReopened.page.locator(".react-flow__node")).toHaveCount(2);
+    await expectWritableDocument(cleanReopened);
     await cleanReopened.input.screenshot("04-clean-close-reopen.png", cleanReopened.evidence, "Capture the clean-close reopen", "The same user-saved document remains writable after an exact Windows UI Automation close.");
     await cleanReopened.close("passed");
     cleanReopened = null;
@@ -274,6 +276,12 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<boolean
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return isFile(filePath);
+}
+
+async function expectWritableDocument(session: RecoveryJourneySession): Promise<void> {
+  await expect(session.page.getByTestId("project-header")).not.toContainText("Read-only:");
+  await expect(session.page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(session.page.getByText("Local document", { exact: true })).toBeVisible();
 }
 
 async function assertLifecycleSpecIsSafe(): Promise<void> {

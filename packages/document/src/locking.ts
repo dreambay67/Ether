@@ -443,7 +443,11 @@ export class WriterLease {
         const existing = existingRead.record;
         const heartbeatFresh = runtime.now() - existing.heartbeatAt <= runtime.staleMs;
         const ownerAlive = runtime.processIsAlive(existing.pid, existing.machineId);
-        if (heartbeatFresh || ownerAlive) {
+        // A local owner proven dead may have left a fresh heartbeat behind after a
+        // crash. Reclaim it only through the SQLite probe below. A foreign owner
+        // cannot be probed for liveness locally, so retain its fresh heartbeat
+        // fail-closed until it is stale.
+        if (ownerAlive || (existing.machineId !== runtime.machineId && heartbeatFresh)) {
           return { reason: "writer-active" };
         }
         if (!probeAvailable(staleReclaimProbe)) {
@@ -456,13 +460,25 @@ export class WriterLease {
         const current = currentRead.record;
         const refreshedHeartbeatFresh = runtime.now() - current.heartbeatAt <= runtime.staleMs;
         const refreshedOwnerAlive = runtime.processIsAlive(current.pid, current.machineId);
+        const currentForeign = current.machineId !== runtime.machineId;
+        const currentHeartbeatChanged = current.heartbeatAt !== existing.heartbeatAt;
         const finalRead = readLease(targetPath);
+        const finalOwnerAlive = finalRead.kind === "valid" && runtime.processIsAlive(finalRead.record.pid, finalRead.record.machineId);
+        const finalForeignWithFreshHeartbeat =
+          finalRead.kind === "valid" &&
+          finalRead.record.machineId !== runtime.machineId &&
+          runtime.now() - finalRead.record.heartbeatAt <= runtime.staleMs;
+        const finalHeartbeatChanged =
+          finalRead.kind === "valid" && finalRead.record.heartbeatAt !== existing.heartbeatAt;
         if (
-          refreshedHeartbeatFresh ||
+          (currentForeign && refreshedHeartbeatFresh) ||
           refreshedOwnerAlive ||
+          currentHeartbeatChanged ||
           finalRead.kind !== "valid" ||
           finalRead.record.ownerToken !== current.ownerToken ||
-          runtime.now() - finalRead.record.heartbeatAt <= runtime.staleMs
+          finalOwnerAlive ||
+          finalForeignWithFreshHeartbeat ||
+          finalHeartbeatChanged
         ) {
           return { reason: "writer-active" };
         }

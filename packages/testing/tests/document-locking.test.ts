@@ -354,7 +354,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(leaseRecordPaths(leaseRoot)).toEqual([]);
   });
 
-  it("keeps a stale-heartbeat lease when its PID is live and reclaims a dead owner only after a SQLite probe", async () => {
+  it("retains live and fresh foreign leases while reclaiming a fresh dead same-machine owner through SQLite", async () => {
     let now = 100_000;
     const writerEnvironment = environment(leaseRoot, "writer", {
       heartbeatMs: 60_000,
@@ -368,14 +368,11 @@ describe("Ether document writer leases and backup lifecycle", () => {
       title: "Reclaim"
     });
     const leasePath = onlyLeasePath(leaseRoot);
-    const staleLive = { ...readLease(leaseRoot), heartbeatAt: 1 };
-    writeFileSync(leasePath, JSON.stringify(staleLive));
-    now = 200_000;
+    const freshLive = readLease(leaseRoot);
 
     const liveCompetitor = await storeClass().open(sourcePath, {
       access: "prefer-write",
       environment: environment(leaseRoot, "live-competitor", {
-        now: () => now,
         processIsAlive: (pid) => pid === process.pid
       })
     });
@@ -383,9 +380,10 @@ describe("Ether document writer leases and backup lifecycle", () => {
     await liveCompetitor.close();
     await writer.close();
 
+    now = 200_000;
     writeFileSync(
       leasePath,
-      JSON.stringify({ ...staleLive, heartbeatAt: 1, ownerToken: randomUUID(), pid: 999_999 })
+      JSON.stringify({ ...freshLive, heartbeatAt: now, ownerToken: randomUUID(), pid: 999_999 })
     );
     const reclaimed = await storeClass().open(sourcePath, {
       access: "require-write",
@@ -397,6 +395,27 @@ describe("Ether document writer leases and backup lifecycle", () => {
     expect(reclaimed.mode).toEqual({ kind: "writable" });
     expect(readLease(leaseRoot).appInstanceId).toBe("reclaimer");
     await reclaimed.close();
+
+    writeFileSync(
+      leasePath,
+      JSON.stringify({
+        ...freshLive,
+        machineId: "foreign-machine",
+        heartbeatAt: now,
+        ownerToken: randomUUID(),
+        pid: 999_999
+      })
+    );
+    const foreignCompetitor = await storeClass().open(sourcePath, {
+      access: "prefer-write",
+      environment: environment(leaseRoot, "foreign-competitor", {
+        now: () => now,
+        processIsAlive: () => false
+      })
+    });
+    expect(foreignCompetitor.mode).toEqual({ kind: "read-only", reason: "writer-active" });
+    await foreignCompetitor.close();
+    rmSync(leasePath);
   });
 
   it("rereads freshness and liveness after the SQLite reclaim probe", async () => {
@@ -465,7 +484,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
               access: "prefer-write",
               environment: environment(leaseRoot, "reclaimer-two", {
                 now: () => 100_000,
-                processIsAlive: () => false
+                processIsAlive: (pid) => pid === process.pid
               })
             });
           }
@@ -1277,7 +1296,7 @@ describe("Ether document writer leases and backup lifecycle", () => {
       access: "prefer-write",
       environment: environment(leaseRoot, "held-source-competitor", {
         now: () => now,
-        processIsAlive: () => false,
+        processIsAlive: (pid) => pid === process.pid,
         staleMs: 1
       })
     });
