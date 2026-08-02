@@ -128,6 +128,7 @@ export interface ReadDocumentRepositories {
     | "getDocumentRevision"
     | "getOperations"
     | "head"
+    | "listHistory"
     | "listMilestones"
   >;
   settings: Pick<SettingsRepository, "getHeader" | "getLiveOutput">;
@@ -190,7 +191,9 @@ export interface DocumentRepositories extends ReadDocumentRepositories {
     | "getDocumentRevision"
     | "getOperations"
     | "head"
+    | "listHistory"
     | "listMilestones"
+    | "recordRecovery"
     | "redo"
     | "undo"
   >;
@@ -1035,6 +1038,7 @@ export class DocumentStore {
             invoke(() => repositories.revisions.getDocumentRevision(id)),
           getOperations: (id) => invoke(() => repositories.revisions.getOperations(id)),
           head: () => invoke(() => repositories.revisions.head()),
+          listHistory: () => invoke(() => repositories.revisions.listHistory()),
           listMilestones: () => invoke(() => repositories.revisions.listMilestones())
         },
         settings: {
@@ -1174,7 +1178,9 @@ export class DocumentStore {
           invoke(() => repositories.revisions.getDocumentRevision(id)),
         getOperations: (id) => invoke(() => repositories.revisions.getOperations(id)),
         head: () => invoke(() => repositories.revisions.head()),
+        listHistory: () => invoke(() => repositories.revisions.listHistory()),
         listMilestones: () => invoke(() => repositories.revisions.listMilestones()),
+        recordRecovery: (input) => invoke(() => repositories.revisions.recordRecovery(input)),
         redo: () => invoke(() => repositories.revisions.redo()),
         undo: () => invoke(() => repositories.revisions.undo())
       },

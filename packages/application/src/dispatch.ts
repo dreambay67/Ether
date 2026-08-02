@@ -544,6 +544,11 @@ export async function executeApplicationQuery(
       const head = await store.read(({ revisions }) => revisions.head());
       return queryResponse(query, { dirty: store.dirty, documentRevisionId: head.documentRevisionId });
     }
+    case "document.history":
+      return queryResponse(query, {
+        revisions: await store.read(({ revisions }) => revisions.listHistory()),
+        recovery: app.recoveryStatus()
+      });
     case "graph.snapshot": {
       const snapshot = await store.read(({ graphs, revisions }) => ({
         graph: graphs.get(query.payload.graphId),

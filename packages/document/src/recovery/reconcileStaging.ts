@@ -207,6 +207,12 @@ export async function reconcileStaging(
             metadata: completion.metadata ?? {}
           });
         });
+        await store.transaction(({ revisions }) => {
+          revisions.recordRecovery({
+            recoveryId: entry.id,
+            title: "Recovered provider output — review required"
+          });
+        });
         removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
         removeRecoveryJournal(journalPath, roots.appDataRoot);
         result.recovered.push(entry.id);
@@ -249,7 +255,12 @@ export async function reconcileStaging(
         },
         { appDataRoot: roots.appDataRoot }
       );
-      await store[DOCUMENT_STORE_INTERNAL]("write", ({ revisions }) => revisions.markDirty());
+      await store.transaction(({ revisions }) => {
+        revisions.recordRecovery({
+          recoveryId: entry.id,
+          title: "Recovered artifact — review required"
+        });
+      });
       removeOwnedStagingPath(entry.stagedPath, roots.appDataRoot);
       removeRecoveryJournal(journalPath, roots.appDataRoot);
       result.recovered.push(entry.id);

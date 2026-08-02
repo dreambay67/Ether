@@ -40,6 +40,21 @@ export interface CommitResult extends RevisionHead {
   graphRevisionsCreated: Array<{ graphId: string; revisionId: string }>;
 }
 
+export interface DocumentHistoryEntry {
+  createdAt: string;
+  id: string;
+  isHead: boolean;
+  kind: DocumentRevisionKind | "recovery";
+  milestones: Array<{
+    createdAt: string;
+    id: string;
+    kind: "autosave" | "manual";
+    name: string;
+  }>;
+  recovery: { id: string; reviewRequired: true; state: "recovered" } | null;
+  title: string;
+}
+
 interface DocumentRevisionRow {
   actor: RevisionActor;
   created_at: string;
@@ -62,6 +77,22 @@ interface RevisionSnapshotRow {
 interface HistoryRow {
   document_revision_id: string;
   history_order: number;
+}
+
+interface HistoryRevisionRow {
+  created_at: string;
+  document_revision_id: string;
+  kind: DocumentRevisionKind;
+  metadata_json: string;
+  title: string;
+}
+
+interface MilestoneRow {
+  created_at: string;
+  document_revision_id: string;
+  kind: "autosave" | "manual";
+  milestone_id: string;
+  name: string;
 }
 
 interface StoredOperationRow {
@@ -93,6 +124,22 @@ function normalizeUpdatedAt(
     ...actual,
     updatedAt: expected.updatedAt
   });
+}
+
+function recoveryMetadata(value: string): DocumentHistoryEntry["recovery"] {
+  try {
+    const metadata = JSON.parse(value) as { recovery?: unknown };
+    const recovery = metadata.recovery;
+    if (typeof recovery !== "object" || recovery === null) return null;
+    const id = Reflect.get(recovery, "id");
+    const reviewRequired = Reflect.get(recovery, "reviewRequired");
+    const state = Reflect.get(recovery, "state");
+    return typeof id === "string" && id.length > 0 && reviewRequired === true && state === "recovered"
+      ? { id, reviewRequired: true, state: "recovered" }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export class RevisionRepository {
@@ -474,6 +521,75 @@ export class RevisionRepository {
         .all(row.milestone_id) as unknown as MemberRow[];
       return { id: row.milestone_id, kind: row.kind, name: row.name, members: record(members) };
     });
+  }
+
+  listHistory(): DocumentHistoryEntry[] {
+    const head = this.head().documentRevisionId;
+    const milestones = this.context.database
+      .prepare(
+        `SELECT milestone_id, document_revision_id, kind, name, created_at
+         FROM revision_milestones ORDER BY rowid DESC`
+      )
+      .all() as unknown as MilestoneRow[];
+    const milestonesByRevision = new Map<string, DocumentHistoryEntry["milestones"]>();
+    for (const milestone of milestones) {
+      const entries = milestonesByRevision.get(milestone.document_revision_id) ?? [];
+      entries.push({
+        id: milestone.milestone_id,
+        kind: milestone.kind,
+        name: milestone.name,
+        createdAt: milestone.created_at
+      });
+      milestonesByRevision.set(milestone.document_revision_id, entries);
+    }
+    const revisions = this.context.database
+      .prepare(
+        `SELECT document_revision_id, title, created_at, kind, metadata_json
+         FROM document_revisions ORDER BY revision_order DESC`
+      )
+      .all() as unknown as HistoryRevisionRow[];
+    return revisions.map((revision) => {
+      const recovery = recoveryMetadata(revision.metadata_json);
+      return {
+        id: revision.document_revision_id,
+        kind: recovery === null ? revision.kind : "recovery",
+        title: revision.title,
+        createdAt: revision.created_at,
+        isHead: revision.document_revision_id === head,
+        milestones: milestonesByRevision.get(revision.document_revision_id) ?? [],
+        recovery
+      };
+    });
+  }
+
+  recordRecovery(input: { recoveryId: string; title: string }): CommitResult {
+    const current = this.head();
+    const documentRevisionId = this.context.createId("document-revision");
+    const createdAt = this.context.now();
+    this.context.database
+      .prepare(
+        `INSERT INTO document_revisions (
+           document_revision_id, parent_document_revision_id, actor, title, created_at,
+           metadata_json, kind, transaction_id, revision_order
+         ) VALUES (?, ?, 'system', ?, ?, ?, 'edit', ?, ?)`
+      )
+      .run(
+        documentRevisionId,
+        current.documentRevisionId,
+        input.title,
+        createdAt,
+        JSON.stringify({
+          recovery: { id: input.recoveryId, reviewRequired: true, state: "recovered" }
+        }),
+        `recovery:${input.recoveryId}`,
+        this.nextRevisionOrder()
+      );
+    for (const [graphId, graphRevisionId] of Object.entries(current.graphRevisions)) {
+      this.insertMember(documentRevisionId, graphId, graphRevisionId);
+    }
+    this.setDocumentHead(documentRevisionId);
+    this.markDirty();
+    return this.result(documentRevisionId, "edit", []);
   }
 
   private applyHistory(targetDocumentRevisionId: string, kind: "undo" | "redo"): CommitResult {

@@ -90,6 +90,7 @@ export const testSuites = {
     "tests/desktop/gemini-credential-setup.spec.ts",
     "tests/desktop/canvas.spec.ts",
     "tests/desktop/recipe-gallery.spec.ts",
+    "tests/desktop/document-history.spec.ts",
     "tests/desktop/inspectors.spec.ts",
     "tests/desktop/references-batches-runs.spec.ts",
     "tests/desktop/artifacts-review.spec.ts",

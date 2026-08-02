@@ -10,6 +10,7 @@ import type {
   ReferenceAction
 } from "../shared/ipc/contracts";
 import { ProjectHeader } from "./project/ProjectHeader";
+import { DocumentHistoryDialog } from "./project/DocumentHistoryDialog";
 import { shouldSaveDocumentFromShortcut } from "./project/documentShortcuts";
 import { ProviderStatusPanel } from "./project/ProviderStatusPanel";
 import {
@@ -46,6 +47,7 @@ export function App() {
   const [recipeCatalogError, setRecipeCatalogError] = useState<string | null>(null);
   const [providerHealthOpen, setProviderHealthOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [interfacePreferences, setInterfacePreferences] = useDesktopSettings(
     "ether.desktop.interface.v1",
     defaultInterfacePreferences,
@@ -54,12 +56,17 @@ export function App() {
   const canvasRef = useRef<EtherCanvasHandle>(null);
   const recipesButtonRef = useRef<HTMLButtonElement>(null);
   const recipesDialogRef = useRef<HTMLElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
   const applicationAvailable = typeof window.ether.application?.onEvent === "function";
   const closeRecipes = useCallback(() => {
     setRecipesOpen(false);
     globalThis.requestAnimationFrame(() => recipesButtonRef.current?.focus());
+  }, []);
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    globalThis.requestAnimationFrame(() => historyButtonRef.current?.focus());
   }, []);
   const keepRecipeFocus = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== "Tab") return;
@@ -287,6 +294,9 @@ export function App() {
           onToggleArtifacts={toggleArtifacts}
           onProviderHealth={() => setProviderHealthOpen(true)}
           onSettings={() => setSettingsOpen(true)}
+          historyOpen={historyOpen}
+          historyButtonRef={historyButtonRef}
+          onHistory={() => setHistoryOpen(true)}
         />
       )}
       tools={(
@@ -326,6 +336,12 @@ export function App() {
         documentId={document.documentId}
         open={providerHealthOpen}
         onClose={() => setProviderHealthOpen(false)}
+      />
+      <DocumentHistoryDialog
+        documentId={document.documentId}
+        open={historyOpen}
+        readOnly={document.mode === "read-only"}
+        onClose={closeHistory}
       />
       <SettingsPanel
         documentId={document.documentId}

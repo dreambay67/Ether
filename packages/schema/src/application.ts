@@ -129,6 +129,7 @@ export type ApplicationCommandName = z.infer<typeof ApplicationCommandNameSchema
 export const applicationQueryNames = [
   "document.summary",
   "document.dirtyState",
+  "document.history",
   "graph.snapshot",
   "graph.catalog",
   "graph.selectionDetails",
@@ -396,6 +397,7 @@ export const applicationCommandPayloadSchemas = {
 export const applicationQueryPayloadSchemas = {
   "document.summary": StrictEmptyPayloadSchema,
   "document.dirtyState": StrictEmptyPayloadSchema,
+  "document.history": StrictEmptyPayloadSchema,
   "graph.snapshot": graphIdPayloadSchema,
   "graph.catalog": StrictEmptyPayloadSchema,
   "graph.selectionDetails": z
@@ -745,6 +747,7 @@ export type ApplicationCommand = z.infer<typeof ApplicationCommandSchema>;
 export const ApplicationQuerySchema = z.discriminatedUnion("name", [
   queryMessage("document.summary", applicationQueryPayloadSchemas["document.summary"]),
   queryMessage("document.dirtyState", applicationQueryPayloadSchemas["document.dirtyState"]),
+  queryMessage("document.history", applicationQueryPayloadSchemas["document.history"]),
   queryMessage("graph.snapshot", applicationQueryPayloadSchemas["graph.snapshot"]),
   queryMessage("graph.catalog", applicationQueryPayloadSchemas["graph.catalog"]),
   queryMessage("graph.selectionDetails", applicationQueryPayloadSchemas["graph.selectionDetails"]),
@@ -1079,6 +1082,34 @@ const recoveryStatusResponseSchema = z
     message: z.string().nullable()
   })
   .strict();
+const documentHistoryMilestoneSchema = z
+  .object({
+    id: idSchema,
+    kind: z.enum(["autosave", "manual"]),
+    name: z.string().min(1),
+    createdAt: TimestampSchema
+  })
+  .strict();
+const documentHistoryRecoverySchema = z
+  .object({ id: idSchema, reviewRequired: z.literal(true), state: z.literal("recovered") })
+  .strict();
+const documentHistoryEntrySchema = z
+  .object({
+    id: idSchema,
+    kind: z.enum(["genesis", "edit", "undo", "redo", "recovery"]),
+    title: z.string().min(1),
+    createdAt: TimestampSchema,
+    isHead: z.boolean(),
+    milestones: z.array(documentHistoryMilestoneSchema),
+    recovery: documentHistoryRecoverySchema.nullable()
+  })
+  .strict();
+const documentHistoryResponseSchema = z
+  .object({
+    revisions: z.array(documentHistoryEntrySchema),
+    recovery: recoveryStatusResponseSchema
+  })
+  .strict();
 const storageStatusResponseSchema = z
   .object({
     documentBytes: z.number().int().nonnegative(),
@@ -1156,6 +1187,7 @@ export const applicationResponsePayloadSchemas = {
   "liveOutput.removeMirrorFiles": liveOutputOperationResponseSchema,
   "document.summary": documentSummaryResponseSchema,
   "document.dirtyState": documentDirtyStateResponseSchema,
+  "document.history": documentHistoryResponseSchema,
   "graph.snapshot": graphSnapshotResponseSchema,
   "graph.catalog": graphCatalogResponseSchema,
   "graph.selectionDetails": graphSelectionResponseSchema,
@@ -1351,6 +1383,7 @@ export const ApplicationCommandResponseSchema = z.discriminatedUnion("name", [
 export const ApplicationQueryResponseSchema = z.discriminatedUnion("name", [
   responseMessage("document.summary", applicationResponsePayloadSchemas["document.summary"]),
   responseMessage("document.dirtyState", applicationResponsePayloadSchemas["document.dirtyState"]),
+  responseMessage("document.history", applicationResponsePayloadSchemas["document.history"]),
   responseMessage("graph.snapshot", applicationResponsePayloadSchemas["graph.snapshot"]),
   responseMessage("graph.catalog", applicationResponsePayloadSchemas["graph.catalog"]),
   responseMessage(

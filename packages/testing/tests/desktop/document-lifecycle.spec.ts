@@ -341,6 +341,20 @@ describe("desktop document lifecycle", () => {
     const saved = await service.save(untitled.documentId);
     expect(saved).toMatchObject({ displayName: "Campaign with space.ether", named: true });
     expect((await stat(campaignPath)).isFile()).toBe(true);
+    const history = await service.executeApplicationQuery({
+      kind: "query",
+      id: "document-history-after-manual-save",
+      correlationId: "document-history-after-manual-save",
+      documentId: saved.documentId,
+      name: "document.history",
+      payload: {}
+    });
+    if (history.name !== "document.history") throw new Error("Expected document history response.");
+    expect(history.payload.recovery.state).toBe("healthy");
+    expect(history.payload.revisions).toContainEqual(expect.objectContaining({
+      isHead: true,
+      milestones: [expect.objectContaining({ kind: "manual", name: "Manual save" })]
+    }));
 
     const renamed = await service.saveAs(saved.documentId);
     expect(renamed.displayName).toBe("Kampaň Ω.ether");

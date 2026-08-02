@@ -34,7 +34,15 @@ interface Task6Store {
     artifacts: { get(id: string): Artifact | undefined };
     blobs: { get(contentKey: string): unknown };
     graphs: { list(): EtherGraph[] };
-    revisions: { head(): { documentRevisionId: string; graphRevisions: Record<string, string> } };
+    revisions: {
+      head(): { documentRevisionId: string; graphRevisions: Record<string, string> };
+      listHistory(): Array<{
+        isHead: boolean;
+        kind: "genesis" | "edit" | "undo" | "redo" | "recovery";
+        recovery: { id: string; reviewRequired: true; state: "recovered" } | null;
+        title: string;
+      }>;
+    };
   }) => T): Promise<T>;
   transaction<T>(callback: (repositories: {
     outputs: { insert(version: NodeOutputVersion, payloads: PayloadEnvelope[]): void };
@@ -266,6 +274,14 @@ describe("Ether AppData recovery and logical repair", () => {
         }
       }
     });
+    await expect(store.read(({ revisions }) => revisions.listHistory())).resolves.toContainEqual(
+      expect.objectContaining({
+        isHead: true,
+        kind: "recovery",
+        title: "Recovered artifact — review required",
+        recovery: { id: "provider-attempt-1", reviewRequired: true, state: "recovered" }
+      })
+    );
     expect(second).toEqual({ attention: [], recovered: [], quarantined: [], removed: [] });
     await store.manualSave("Reviewed recovery");
     expect(store.dirty).toBe(false);

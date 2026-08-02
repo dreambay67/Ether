@@ -4,13 +4,14 @@ import {
   FilePlus2,
   FolderOpen,
   HeartPulse,
+  History,
   Images,
   PackageCheck,
   Save,
   SaveAll,
   Settings2
 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import etherLogo from "../../../../../packages/brand/src/assets/Ether_logo.png";
@@ -27,7 +28,10 @@ export function ProjectHeader({
   onMakePortable,
   onToggleArtifacts,
   onProviderHealth,
-  onSettings
+  onSettings,
+  historyOpen,
+  historyButtonRef,
+  onHistory
 }: {
   document: DocumentDescriptor;
   artifactsOpen: boolean;
@@ -41,6 +45,9 @@ export function ProjectHeader({
   onToggleArtifacts(): void;
   onProviderHealth(): void;
   onSettings(): void;
+  historyOpen: boolean;
+  historyButtonRef: RefObject<HTMLButtonElement | null>;
+  onHistory(): void;
 }) {
   return (
     <header className="project-header task-nine-header" data-testid="project-header">
@@ -64,6 +71,9 @@ export function ProjectHeader({
         <IconCommand label="Save a copy" icon={<Copy size={16} />} onClick={onSaveCopy} disabled={!document.commands.saveCopy} />
         <IconCommand label="Compact document" icon={<ArchiveRestore size={16} />} onClick={onCompact} disabled={!document.commands.compact} />
         <IconCommand label="Make document portable" icon={<PackageCheck size={16} />} onClick={onMakePortable} disabled={!document.commands.makePortable} />
+        <button ref={historyButtonRef} type="button" title="Document History" aria-label="Document History" aria-haspopup="dialog" aria-expanded={historyOpen} onClick={onHistory}>
+          <History size={16} aria-hidden="true" />
+        </button>
         <button type="button" className={artifactsOpen ? "is-active" : ""} onClick={onToggleArtifacts} aria-pressed={artifactsOpen}>
           <Images size={16} aria-hidden="true" />
           Artifacts
