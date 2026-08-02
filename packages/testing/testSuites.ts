@@ -16,6 +16,7 @@ export const testSuites = {
     "tests/no-legacy-4.0.test.ts",
     "tests/plugin-4.0.test.ts",
     "tests/renderer-channel-registry.test.ts",
+    "tests/recovery-journey-driver.test.ts",
     "tests/renderer-url.test.ts",
     "tests/schema-4.0.test.ts"
   ],
