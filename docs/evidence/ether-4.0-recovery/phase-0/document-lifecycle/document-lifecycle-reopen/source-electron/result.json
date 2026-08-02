@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "document-lifecycle-reopen",
+  "mode": "source-electron",
+  "startedAt": "2026-08-02T19:32:37.474Z",
+  "finishedAt": "2026-08-02T19:32:39.486Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "df561277d893e3c544696f85cd0d995e306e70a4",
+    "mode": "source-electron",
+    "artifacts": [
+      {
+        "path": "apps/desktop/dist/index.html",
+        "sha256": "7f5fb899294ddbaa630fa4821f5be3474a30aa72e1a2061395656b25d71e8639"
+      },
+      {
+        "path": "apps/desktop/dist-electron/main/bootstrap.js",
+        "sha256": "15c36bf7beb643ea7abdb8384d179420adfa9637fb105705de014b6c5a749aa3"
+      },
+      {
+        "path": "apps/desktop/dist-electron/preload/preload.cjs",
+        "sha256": "2d0df031b5236237200d9b4ca168417132134b2c6263bb12af08449826d9e6bf"
+      },
+      {
+        "path": "node_modules/electron/dist/electron.exe",
+        "sha256": "12b61e817329db7db8e74d99a42e552e1a1f68db7ba3d4c2d4fb6441a3b07d26"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Close/reopen recovery check",
+      "expected": "A cleanly closed UI-authored .ether reopens writable without a stale recovery warning.",
+      "actual": "The exact Save As destination reopened with both UI-authored nodes and Saved state.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "screenshot",
+      "label": "Capture the exact reopened document",
+      "expected": "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 237,
+      "screenshotPath": "screenshots/03-reopened-ui-authored-document.png"
+    },
+    {
+      "sequence": 3,
+      "kind": "observation",
+      "label": "Clean close limitation",
+      "expected": "A real native Alt+F4 close is required before AC-A02-005/009 can receive packaged evidence.",
+      "actual": "The recovery driver has not yet proved native-window close input; session cleanup is used only to continue the non-substituting reopen check.",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}
