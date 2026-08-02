@@ -214,9 +214,16 @@ async function hardKillLaunchedJourney(mode: JourneyMode, session: RecoveryJourn
   const escapedMarker = marker.replaceAll("'", "''");
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    `$processes = Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' }`,
-    "if ($processes.Count -eq 0) { throw 'No exact journey process was found for termination.' }",
-    "$processes | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    "$all = @(Get-CimInstance Win32_Process)",
+    `$roots = @($all | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' })`,
+    "if ($roots.Count -ne 1) { throw ('Expected one exact journey root process for termination; found ' + $roots.Count) }",
+    "$targetIds = [System.Collections.Generic.HashSet[int]]::new()",
+    "function Add-JourneyProcessTree([int]$processId) { if (-not $targetIds.Add($processId)) { return }; foreach ($child in @($all | Where-Object { $_.ParentProcessId -eq $processId })) { Add-JourneyProcessTree ([int]$child.ProcessId) } }",
+    "Add-JourneyProcessTree ([int]$roots[0].ProcessId)",
+    "$targetIds | Sort-Object -Descending | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }",
+    "Start-Sleep -Milliseconds 250",
+    "$remaining = @(Get-CimInstance Win32_Process | Where-Object { $targetIds.Contains([int]$_.ProcessId) })",
+    "if ($remaining.Count -ne 0) { throw ('Exact journey process tree did not exit: ' + ($remaining.ProcessId -join ',')) }"
   ].join("; ");
   await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true });
   await session.page.waitForTimeout(500).catch(() => undefined);
