@@ -29,6 +29,10 @@ const CANONICAL_JOURNEYS = {
   J09: { name: 'Durability', startState: 'Saved working document', endState: 'Close, reopen, recover interruption, continue', requiredEvidence: ['P', 'M'], owner: 'T03, T27', owners: ['T03', 'T27'] },
   J10: { name: 'Plugin co-producer', startState: 'Blank document with Edit Permit', endState: 'Tailored graph applied; run remains separately permitted', requiredEvidence: ['P', 'M'], owner: 'T21, T27', owners: ['T21', 'T27'] },
 };
+const EXPECTED_EVIDENCE_OVERRIDES = {
+  'AC-A03-001': ['A'], 'AC-A03-002': ['A'], 'AC-A03-003': ['A'], 'AC-A03-004': ['A'], 'AC-A03-005': ['A'], 'AC-A03-006': ['A'],
+  'AC-A03-007': ['A', 'P'], 'AC-A03-008': ['A', 'P'], 'AC-A03-009': ['A'], 'AC-A03-010': ['A', 'P'], 'AC-A03-011': ['A', 'P'],
+};
 
 const areaBySection = new Map([
   ['1', 'A01'], ['2', 'A02'], ['2.1', 'A02'], ['2.2', 'A02'], ['2.3', 'A02'], ['2.4', 'A02'], ['3', 'A03'], ['4.1', 'A04'], ['4.2', 'A05'], ['4.3', 'A06'], ['4.4', 'A07'], ['5', 'A08'],
@@ -90,6 +94,13 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
   if (ledger.schemaVersion !== 'ether-4.0-recovery-ledger@1') push(errors, 'schemaVersion must be ether-4.0-recovery-ledger@1.');
   if (!SHA_RE.test(ledger.baselineCommit || '')) push(errors, 'baselineCommit must be a 40-character SHA-1.');
   if (!SHA_RE.test(ledger.recoveryPlanBaselineCommit || '')) push(errors, 'recoveryPlanBaselineCommit must be a 40-character SHA-1.');
+  const actualEvidenceOverrideKeys = Object.keys(ledger.evidenceMapOverrides || {}).sort();
+  const expectedEvidenceOverrideKeys = Object.keys(EXPECTED_EVIDENCE_OVERRIDES).sort();
+  if (actualEvidenceOverrideKeys.join(',') !== expectedEvidenceOverrideKeys.join(',')) push(errors, 'evidenceMapOverrides must cover exactly AC-A03-001..AC-A03-011.');
+  for (const [id, expectedEvidence] of Object.entries(EXPECTED_EVIDENCE_OVERRIDES)) {
+    const actualEvidence = ledger.evidenceMapOverrides?.[id];
+    if (JSON.stringify(actualEvidence) !== JSON.stringify(expectedEvidence)) push(errors, `${id} evidence mapping is not the normative deterministic/visible split.`);
+  }
   if (!['baseline', 'candidate', 'gate'].includes(mode)) push(errors, `Unknown validation mode ${mode}.`);
   if (mode !== 'baseline') {
     if (!SHA_RE.test(candidateCommit || '')) push(errors, `${mode} validation requires --candidate-commit=<40-char SHA-1>.`);
@@ -116,6 +127,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
     for (const field of required) if (!(field in item)) push(errors, `${item.id || '<unknown>'} is missing required field ${field}.`);
     if (!VALID_STATUSES.has(item.status)) push(errors, `${item.id || '<unknown>'} has invalid status ${item.status}.`);
     if (!Array.isArray(item.requiredEvidence) || item.requiredEvidence.length === 0 || item.requiredEvidence.some((code) => !VALID_EVIDENCE.has(code))) push(errors, `${item.id || '<unknown>'} has invalid requiredEvidence.`);
+    if (EXPECTED_EVIDENCE_OVERRIDES[item.id] && JSON.stringify(item.requiredEvidence) !== JSON.stringify(EXPECTED_EVIDENCE_OVERRIDES[item.id])) push(errors, `${item.id} requiredEvidence does not match evidenceMapOverrides.`);
     if (!Array.isArray(item.ownerTasks) || item.ownerTasks.length === 0) push(errors, `${item.id || '<unknown>'} must name at least one owner task.`);
     if (typeof item.releaseBlocker !== 'boolean') push(errors, `${item.id || '<unknown>'} releaseBlocker must be boolean.`);
     if (!Array.isArray(item.ownerRoutes) || item.ownerRoutes.some((route) => !JOURNEY_IDS.has(route))) push(errors, `${item.id || '<unknown>'} has an invalid owner route.`);
@@ -253,7 +265,15 @@ function runSelfTest() {
   wrongJourneyEvidence.journeys.find((journey) => journey.id === 'J06').requiredEvidence = ['P', 'M'];
   const wrongJourneyEvidenceResult = validateObject(wrongJourneyEvidence, { mode: 'baseline' });
   if (!wrongJourneyEvidenceResult.errors.some((error) => /J06 does not exactly match/.test(error))) throw new Error('Self-test did not reject wrong journey evidence contract.');
-  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status, RX-classification, and journey-contract fixtures).');
+  const broadCrashEvidence = structuredClone(ledger);
+  broadCrashEvidence.requirements.find((item) => item.id === 'AC-A03-001').requiredEvidence = ['A', 'P'];
+  const broadCrashResult = validateObject(broadCrashEvidence, { mode: 'baseline' });
+  if (!broadCrashResult.errors.some((error) => /AC-A03-001 requiredEvidence does not match/.test(error))) throw new Error('Self-test did not reject a broad A+P crash evidence default.');
+  const wrongCrashMap = structuredClone(ledger);
+  wrongCrashMap.evidenceMapOverrides['AC-A03-009'] = ['A', 'P'];
+  const wrongCrashMapResult = validateObject(wrongCrashMap, { mode: 'baseline' });
+  if (!wrongCrashMapResult.errors.some((error) => /AC-A03-009 evidence mapping is not/.test(error))) throw new Error('Self-test did not reject wrong deterministic crash evidence map.');
+  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status, RX-classification, journey-contract, and crash-evidence-map fixtures).');
 }
 
 const args = process.argv.slice(2);

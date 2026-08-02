@@ -30,6 +30,45 @@
     "V": "Visual",
     "R": "Runtime/provider"
   },
+  "evidenceMapOverrides": {
+    "AC-A03-001": [
+      "A"
+    ],
+    "AC-A03-002": [
+      "A"
+    ],
+    "AC-A03-003": [
+      "A"
+    ],
+    "AC-A03-004": [
+      "A"
+    ],
+    "AC-A03-005": [
+      "A"
+    ],
+    "AC-A03-006": [
+      "A"
+    ],
+    "AC-A03-007": [
+      "A",
+      "P"
+    ],
+    "AC-A03-008": [
+      "A",
+      "P"
+    ],
+    "AC-A03-009": [
+      "A"
+    ],
+    "AC-A03-010": [
+      "A",
+      "P"
+    ],
+    "AC-A03-011": [
+      "A",
+      "P"
+    ]
+  },
   "requirements": [
     {
       "id": "AC-A01-001",
@@ -954,8 +993,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"
@@ -981,8 +1019,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"
@@ -1008,8 +1045,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"
@@ -1035,8 +1071,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"
@@ -1062,8 +1097,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"
@@ -1089,8 +1123,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"
@@ -1170,8 +1203,7 @@
       "baselineChecked": false,
       "status": "PRESENT-UNPROVEN",
       "requiredEvidence": [
-        "A",
-        "P"
+        "A"
       ],
       "ownerTasks": [
         "T03"

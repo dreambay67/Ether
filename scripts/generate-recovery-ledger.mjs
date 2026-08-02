@@ -32,6 +32,23 @@ const areaMeta = {
   A19: { area: 'Documentation and release', owners: ['T25', 'T28'], evidence: ['A', 'P', 'M'], routes: ['J01', 'J09'] },
 };
 
+// Crash/recovery evidence is intentionally not one blanket area default. The
+// deterministic kill/corruption checks use A; the visible recovery outcomes
+// use A+P, matching recovery acceptance §4.
+const evidenceMapOverrides = {
+  'AC-A03-001': ['A'],
+  'AC-A03-002': ['A'],
+  'AC-A03-003': ['A'],
+  'AC-A03-004': ['A'],
+  'AC-A03-005': ['A'],
+  'AC-A03-006': ['A'],
+  'AC-A03-007': ['A', 'P'],
+  'AC-A03-008': ['A', 'P'],
+  'AC-A03-009': ['A'],
+  'AC-A03-010': ['A', 'P'],
+  'AC-A03-011': ['A', 'P'],
+};
+
 const subsectionToArea = {
   '1': 'A01', '2': 'A02', '2.1': 'A02', '2.2': 'A02', '2.3': 'A02', '2.4': 'A02', '3': 'A03',
   '4.1': 'A04', '4.2': 'A05', '4.3': 'A06', '4.4': 'A07',
@@ -195,12 +212,13 @@ const requirements = originals.map((item) => {
   areaCounters[item.areaCode] += 1;
   const id = `AC-${item.areaCode}-${String(areaCounters[item.areaCode]).padStart(3, '0')}`;
   const status = classify(item);
+  const requiredEvidence = evidenceMapOverrides[id] || meta.evidence;
   const classificationReason = item.historicalChecked ? 'Historical checkbox was checked, but recovery requires rerunning affected evidence; current status remains PRESENT-UNPROVEN.' : status === 'FAIL' ? 'Rejected-candidate audit identifies a user-visible failure at baseline; fresh evidence is required after repair.' : 'Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.';
   return {
     id, kind: item.kind, ordinal: item.ordinal, source: 'docs/product/ether-4.0-acceptance.md', sourceLine: item.sourceLine,
     section: item.section, areaCode: item.areaCode, area: meta.area, text: item.text,
-    baselineChecked: item.historicalChecked, status, requiredEvidence: [...meta.evidence], ownerTasks: [...meta.owners], releaseBlocker: true,
-    ownerRoutes: meta.evidence.includes('M') ? [...meta.routes] : [], evidence: [],
+    baselineChecked: item.historicalChecked, status, requiredEvidence: [...requiredEvidence], ownerTasks: [...meta.owners], releaseBlocker: true,
+    ownerRoutes: requiredEvidence.includes('M') ? [...meta.routes] : [], evidence: [],
     priorEvidence: item.historicalChecked ? { source: 'docs/product/ether-4.0-release-audit.md', note: 'Historical checked state retained for traceability only; it is not current candidate evidence.' } : null,
     baselineCommit: recoveryPlanBaselineCommit,
     classificationReason, notes: classificationReason
@@ -232,6 +250,7 @@ const ledger = {
   candidate: { commit: null, packageHash: null, installerHash: null, validatedAt: null },
   statusModel: ['OPEN', 'FAIL', 'MISSING', 'PRESENT-UNPROVEN', 'BLOCKED', 'VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED'],
   evidenceClasses: { A: 'Automated', P: 'Packaged journey', M: 'Manual owner', V: 'Visual', R: 'Runtime/provider' },
+  evidenceMapOverrides,
   requirements,
   journeys,
   classification: { method: 'T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit rejected-candidate failures are FAIL; each RX item follows the evidence-based recoveryClassification map below; remaining unproven implementation is PRESENT-UNPROVEN.', historicalCheckedCount: originals.filter((item) => item.historicalChecked).length, recoveryMap: recoveryClassification },
