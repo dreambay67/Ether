@@ -26,6 +26,9 @@
     "manual:capture": "node docs/manual/capture-release.mjs",
     "manual:build": "node docs/manual/build-pdf.mjs",
     "manual:verify": "python docs/manual/verify-manual.py",
+    "evidence:generate": "node scripts/generate-recovery-ledger.mjs",
+    "evidence:validate": "node scripts/validate-recovery-ledger.mjs",
+    "evidence:validate:self-test": "node scripts/validate-recovery-ledger.mjs --self-test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --max-warnings=0"
   },
