@@ -1,6 +1,8 @@
 # Ether 4.0.0 Release Audit
 
-Status: **release gate complete; exact product commit published and hosted verification green**
+> **REJECTED RELEASE CANDIDATE (2026-08-02):** A product-owner audit found that blank-canvas authoring exposes only Prompt and Image, while core selection, direct editing, graph commands, and module workflows remain incomplete. The historical green verdict below is retained as audit evidence but is withdrawn. Follow `ether-4.0-recovery-design-spec.md` and `ether-4.0-recovery-acceptance.md`.
+
+Historical status: **release gate was incorrectly declared complete**
 
 Audit date: 2026-07-31
 Audited product release commit: `e881471e467ed52b3848e57540ea9c28f55c14f4`

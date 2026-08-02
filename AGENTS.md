@@ -2,6 +2,12 @@
 
 Ether is a Windows-first, local-first desktop creative system. Ether 4.0 is the active product architecture.
 
+The 2026-07-31 release candidate was rejected after a product-owner audit. Recovery documents are normative for all new work:
+
+- `docs/product/ether-4.0-recovery-design-spec.md`
+- `docs/product/ether-4.0-recovery-acceptance.md`
+- `docs/superpowers/plans/2026-08-02-ether-4.0-recovery-implementation-plan.md`
+
 Read these normative documents before changing product behavior:
 
 - `docs/product/ether-4.0-design-spec.md`
@@ -9,9 +15,9 @@ Read these normative documents before changing product behavior:
 - `docs/product/ether-4.0-acceptance.md`
 - `docs/product/visual-system.md`
 
-Follow the active implementation plan:
+The former implementation plan is historical. Follow the active recovery plan:
 
-`docs/superpowers/plans/2026-07-16-ether-4.0-implementation-plan.md`
+`docs/superpowers/plans/2026-08-02-ether-4.0-recovery-implementation-plan.md`
 
 Non-negotiables:
 

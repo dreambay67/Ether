@@ -2,6 +2,8 @@
 
 **Version 4.0.0 | Windows | DreamBay**
 
+> **Historical rejected-candidate manual:** This manual describes capabilities that the 2026-08-02 product-owner audit found were not all reachable through the shipped interface. Do not use it as current acceptance evidence. It will be regenerated from the recovered packaged application.
+
 Ether is a local-first creative production canvas. An Ether project is one portable `.ether` document containing its graphs, revisions, embedded media, runs, collections, and review decisions. It is designed around a simple visible model: a **node** does work, a **channel** carries a kind of payload, and a **role** tells the receiving node how to use it.
 
 > Release-candidate images are inserted only by `docs/manual/capture-release.mjs`, which launches the installed Ether executable under a disposable Windows profile. This source manual deliberately contains no substitute development-renderer captures.
