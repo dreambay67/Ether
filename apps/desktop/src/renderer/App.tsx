@@ -147,7 +147,7 @@ export function App() {
     });
   }, [document, loadGraph]);
 
-  const runDocumentCommand = async (command: (id: string) => Promise<unknown>) => {
+  const runDocumentCommand = useCallback(async (command: (id: string) => Promise<unknown>) => {
     if (document === null) return;
     try {
       await command(document.documentId);
@@ -155,7 +155,19 @@ export function App() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The document command failed.");
     }
-  };
+  }, [document]);
+
+  useEffect(() => {
+    const saveWithKeyboard = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.shiftKey || event.key.toLocaleLowerCase() !== "s") return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.matches("input, textarea, select, [contenteditable=true]") || target?.closest("[contenteditable=true]")) return;
+      event.preventDefault();
+      void runDocumentCommand((id) => window.ether.document.save(id));
+    };
+    globalThis.addEventListener("keydown", saveWithKeyboard);
+    return () => globalThis.removeEventListener("keydown", saveWithKeyboard);
+  }, [runDocumentCommand]);
 
 
   const actOnReference = async (referenceId: string, action: ReferenceAction) => {

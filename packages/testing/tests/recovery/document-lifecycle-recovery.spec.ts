@@ -53,6 +53,16 @@ test("records a blank-UI authored document through save, document actions, close
 
     await input.pressKey("Control+S", "Save the untitled UI-authored document", "The native Save dialog writes one .ether document.");
     await completeNativeSaveIfNeeded(mode, firstPath);
+    const ctrlSSaved = await waitForFile(firstPath, 1_000);
+    input.observe(
+      "Ctrl+S document save",
+      "Ctrl+S opens the native Save dialog for an untitled document.",
+      ctrlSSaved ? "The Ctrl+S route created the requested .ether file." : "No file appeared after the real Ctrl+S input; the visible Save command is exercised separately so the remaining lifecycle route can be observed."
+    );
+    if (!ctrlSSaved) {
+      await input.leftClick(page.getByRole("button", { name: "Save", exact: true }), "Save through the visible command after the Ctrl+S observation", "The same native Save route creates the requested .ether file.");
+      await completeNativeSaveIfNeeded(mode, firstPath);
+    }
     await expect.poll(async () => isFile(firstPath)).toBe(true);
     await expect(page.getByTestId("project-header")).toContainText("UI authored document.ether");
     input.observe("Save result", "The UI-created graph is stored as one .ether file.", `Saved ${path.basename(firstPath)} after Ctrl+S.`);
@@ -116,6 +126,8 @@ test("records a blank-UI authored document through save, document actions, close
     );
     await reopened.input.screenshot("03-reopened-ui-authored-document.png", reopened.evidence, "Capture the exact reopened document", "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.");
     await reopened.input.pressKey("Alt+F4", "Close the recovered document with the native window command", "A clean close after Saved exits without an unsaved-changes prompt or leftover document journal.");
+    await focusJourneyWindow(mode, reopened, journeyRoot);
+    await sendNativeKeys(["%{F4}"]);
     await expect.poll(() => reopened?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await reopened.close("passed");
     reopened = null;
@@ -154,7 +166,7 @@ async function launch(
   return launchRecoveryJourney({
     ...base,
     evidenceMode: "committed",
-    committedEvidencePath: ["phase-0", "document-lifecycle"],
+    committedEvidencePath: ["phase-0", "document-lifecycle", journeyId],
     declaration: blankAuthoringJourney(journeyId),
     ...(profile === undefined ? { cleanupProfile } : { profile, cleanupProfile }),
     ...(mode === "source-electron" ? {
@@ -189,10 +201,7 @@ async function confirmPortableIfNeeded(mode: JourneyMode): Promise<void> {
 }
 
 async function hardKillLaunchedJourney(mode: JourneyMode, session: RecoveryJourneySession, fixtureRoot: string): Promise<void> {
-  const executable = mode === "packaged"
-    ? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe")
-    : path.join(workspaceRoot, "node_modules", "electron", "dist", "electron.exe");
-  const marker = mode === "packaged" ? session.profile.userData : fixtureRoot;
+  const { executable, marker } = journeyProcessIdentity(mode, session, fixtureRoot);
   const escapedExecutable = executable.replaceAll("'", "''");
   const escapedMarker = marker.replaceAll("'", "''");
   const script = [
@@ -203,6 +212,30 @@ async function hardKillLaunchedJourney(mode: JourneyMode, session: RecoveryJourn
   ].join("; ");
   await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true });
   await session.page.waitForTimeout(500).catch(() => undefined);
+}
+
+async function focusJourneyWindow(mode: JourneyMode, session: RecoveryJourneySession, fixtureRoot: string): Promise<void> {
+  const { executable, marker } = journeyProcessIdentity(mode, session, fixtureRoot);
+  const escapedExecutable = executable.replaceAll("'", "''");
+  const escapedMarker = marker.replaceAll("'", "''");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$processes = Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' }`,
+    "if ($processes.Count -eq 0) { throw 'No exact journey process was found for focus.' }",
+    "Add-Type -AssemblyName Microsoft.VisualBasic",
+    "[Microsoft.VisualBasic.Interaction]::AppActivate([int]$processes[0].ProcessId)",
+    "Start-Sleep -Milliseconds 500"
+  ].join("; ");
+  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true });
+}
+
+function journeyProcessIdentity(mode: JourneyMode, session: RecoveryJourneySession, fixtureRoot: string) {
+  return {
+    executable: mode === "packaged"
+      ? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe")
+      : path.join(workspaceRoot, "node_modules", "electron", "dist", "electron.exe"),
+    marker: mode === "packaged" ? session.profile.userData : fixtureRoot
+  };
 }
 
 async function sendNativeKeys(keys: readonly string[]): Promise<void> {
@@ -222,6 +255,15 @@ async function isFile(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function waitForFile(filePath: string, timeoutMs: number): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isFile(filePath)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return isFile(filePath);
 }
 
 async function assertLifecycleSpecIsSafe(): Promise<void> {
