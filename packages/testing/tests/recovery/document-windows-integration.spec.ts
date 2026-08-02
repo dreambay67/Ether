@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -208,17 +207,23 @@ async function assertIsolatedLeasePlacement(
 ): Promise<void> {
   const applicationRoot = path.join(profile.userData, "4.0");
   const leaseRoot = path.join(applicationRoot, "leases");
-  const destinationLease = path.join(leaseRoot, `${documentPathHash(destinationPath)}.json`);
-  const sourceLease = path.join(leaseRoot, `${documentPathHash(sourcePath)}.json`);
-  const [documentEntries, leaseText, sourceLeaseExists] = await Promise.all([
+  const [documentEntries, leaseEntries] = await Promise.all([
     directoryEntries(documentRoot),
-    readFile(destinationLease, "utf8"),
-    exists(sourceLease)
+    directoryEntries(leaseRoot)
   ]);
-  const lease = JSON.parse(leaseText) as { pathHash?: unknown };
+  const leaseRecords = await Promise.all(leaseEntries
+    .filter((entry) => entry.endsWith(".json"))
+    .map(async (entry) => JSON.parse(await readFile(path.join(leaseRoot, entry), "utf8")) as {
+      documentId?: unknown;
+      pathHash?: unknown;
+    }));
+  const sourceDocumentId = inspectEtherDocument(sourcePath).document.documentId;
+  const destinationDocumentId = inspectEtherDocument(destinationPath).document.documentId;
   expect(documentEntries.some((entry) => /lease|recovery|journal/iu.test(entry))).toBe(false);
-  expect(lease.pathHash).toBe(documentPathHash(destinationPath));
-  expect(sourceLeaseExists).toBe(false);
+  expect(leaseRecords).toHaveLength(1);
+  expect(leaseRecords[0]).toMatchObject({ documentId: destinationDocumentId });
+  expect(leaseRecords[0]?.pathHash).toMatch(/^[a-f0-9]{64}$/u);
+  expect(leaseRecords.some((lease) => lease.documentId === sourceDocumentId)).toBe(false);
 }
 
 async function createActualTestOwnedDisposableRoots(profile: RecoveryJourneySession["profile"]): Promise<string[]> {
@@ -252,9 +257,4 @@ async function isFile(candidate: string): Promise<boolean> {
 
 async function exists(candidate: string): Promise<boolean> {
   try { await stat(candidate); return true; } catch { return false; }
-}
-
-function documentPathHash(filePath: string): string {
-  const canonical = path.resolve(filePath).toLocaleLowerCase("en-US");
-  return createHash("sha256").update(canonical).digest("hex");
 }
