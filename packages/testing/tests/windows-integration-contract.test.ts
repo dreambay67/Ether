@@ -39,7 +39,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(main).not.toContain("clearRecentDocuments");
     expect(cleanup).toMatch(/12337d35-94c6-48a0-bce7-6a9c69d4d600/iu);
     expect(cleanup).toMatch(/86c14003-4d6b-4ef3-a7b4-0506663b2e68/iu);
-    expect(cleanup).toMatch(/SetAppID\(\$appId\).*RemoveAllDestinations/su);
+    expect(cleanup).toMatch(/SetAppID\(appId\).*RemoveAllDestinations/su);
     expect(cleanup).not.toMatch(/SHAddToRecentDocs|setJumpList/u);
   });
 

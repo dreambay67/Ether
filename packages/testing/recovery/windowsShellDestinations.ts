@@ -26,16 +26,30 @@ export async function removeRecoveryShellAutomaticDestinations(token: string): P
     "    [PreserveSig] int RemoveDestination([MarshalAs(UnmanagedType.IUnknown)] object destination);",
     "    [PreserveSig] int RemoveAllDestinations();",
     "  }",
+    "  public static class ApplicationDestinationsCleaner {",
+    "    [DllImport(\"ole32.dll\", ExactSpelling = true)]",
+    "    private static extern int CoCreateInstance(ref Guid classId, IntPtr outer, uint context, ref Guid interfaceId, [MarshalAs(UnmanagedType.Interface)] out IApplicationDestinations destinations);",
+    "    public static void RemoveAll(string appId) {",
+    "      Guid classId = new Guid(\"86c14003-4d6b-4ef3-a7b4-0506663b2e68\");",
+    "      Guid interfaceId = new Guid(\"12337d35-94c6-48a0-bce7-6a9c69d4d600\");",
+    "      IApplicationDestinations destinations = null;",
+    "      int result = CoCreateInstance(ref classId, IntPtr.Zero, 1, ref interfaceId, out destinations);",
+    "      Marshal.ThrowExceptionForHR(result);",
+    "      try {",
+    "        Marshal.ThrowExceptionForHR(destinations.SetAppID(appId));",
+    "        Marshal.ThrowExceptionForHR(destinations.RemoveAllDestinations());",
+    "      } finally {",
+    "        if (destinations != null) Marshal.FinalReleaseComObject(destinations);",
+    "      }",
+    "    }",
+    "  }",
     "}"
   ].join(" ");
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `Add-Type -TypeDefinition '${escapePowerShellLiteral(source)}' -ErrorAction Stop`,
     `$appId = '${escapePowerShellLiteral(appUserModelId)}'`,
-    "$classId = [Guid]'86c14003-4d6b-4ef3-a7b4-0506663b2e68'",
-    "$comObject = [Activator]::CreateInstance([Type]::GetTypeFromCLSID($classId, $true))",
-    "$destinations = [EtherRecoveryShell.IApplicationDestinations]$comObject",
-    "try { $hr = $destinations.SetAppID($appId); [Runtime.InteropServices.Marshal]::ThrowExceptionForHR($hr); $hr = $destinations.RemoveAllDestinations(); [Runtime.InteropServices.Marshal]::ThrowExceptionForHR($hr) } finally { if ($null -ne $comObject) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($comObject) } }"
+    "[EtherRecoveryShell.ApplicationDestinationsCleaner]::RemoveAll($appId)"
   ].join("; ");
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], {
