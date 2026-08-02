@@ -9,7 +9,7 @@ import { expect, test } from "@playwright/test";
 import { FakeImageProvider } from "@ether/providers";
 
 import { DesktopApplicationService } from "../../../../apps/desktop/src/main/services/applicationService.js";
-import { writeRecoveryJournal } from "@ether/document";
+import { DocumentStore, writeRecoveryJournal } from "@ether/document";
 import {
   blankAuthoringJourney,
   cleanupIsolatedJourneyProfile,
@@ -42,7 +42,7 @@ test("shows a staged fake-provider completion as a review-required Recovery revi
     await baseline.close("passed");
 
     await stageProviderRecoveryFixture(documentPath, baseline.profile.userData);
-    recovered = await launchPackaged("visible-recovery-provider", documentPath, recoveryProfile);
+    recovered = await launchPackaged("visible-recovery-provider", documentPath, recoveryProfile, true);
     baseline = null;
     await expect(recovered.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await recovered.input.leftClick(recovered.page.getByRole("button", { name: "Document History", exact: true }), "Inspect recovered revision", "Recovery is visibly reviewable rather than silently applied.");
@@ -89,7 +89,6 @@ test("keeps a deliberately corrupted metadata copy unchanged while the packaged 
     await expect(baseline.page.getByTestId("project-header")).toContainText("UI-authored metadata baseline.ether");
     await baseline.close("passed");
     baseline = null;
-    profile = undefined;
   } finally {
     if (baseline !== null) await baseline.close("failed");
     if (profile !== undefined) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
@@ -103,6 +102,7 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
   const damagedPath = path.join(root, "UI-authored media corrupt.ether");
   const repairedPath = path.join(root, "UI-authored media repaired.ether");
   let baseline: RecoveryJourneySession | null = null;
+  let artifactPreview: RecoveryJourneySession | null = null;
   let repair: RecoveryJourneySession | null = null;
   let profile: RecoveryJourneySession["profile"] | undefined;
   try {
@@ -115,13 +115,20 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
     await expect.poll(async () => isFile(baselinePath)).toBe(true);
     await baseline.close("passed");
     baseline = null;
+    const contentKey = await createFakeArtifactFixture(baselinePath, profile.userData);
+    artifactPreview = await launchPackaged("visible-recovery-artifact-baseline", baselinePath, profile, false);
+    await expect(artifactPreview.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
+    await artifactPreview.input.leftClick(artifactPreview.page.getByRole("button", { name: "Artifacts", exact: true }), "Open visible artifact baseline", "The packaged UI visibly opens the artifact-bearing baseline before a copied fixture is corrupted.");
+    await expect(artifactPreview.page.getByTestId("artifact-card")).toHaveCount(1);
+    await artifactPreview.input.screenshot("artifact-bearing-baseline.png", artifactPreview.evidence, "Capture artifact-bearing baseline", "A fake-provider artifact is visibly present in the valid packaged baseline.");
+    await artifactPreview.close("passed");
+    artifactPreview = null;
     await copyFile(baselinePath, damagedPath);
-    const contentKey = await createFakeArtifactFixture(damagedPath, profile.userData);
     const corrupt = new DatabaseSync(damagedPath);
     try { corrupt.prepare("UPDATE blob_chunks SET data = ? WHERE content_key = ? AND chunk_index = 0").run(Buffer.from("corrupt-media"), contentKey); } finally { corrupt.close(); }
     const damagedHash = await sha256(damagedPath);
 
-    repair = await launchPackaged("visible-recovery-media-repair", damagedPath, profile);
+    repair = await launchPackaged("visible-recovery-media-repair", undefined, profile, true);
     await expect(repair.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await repair.input.leftClick(repair.page.getByRole("button", { name: "Repair damaged document", exact: true }), "Begin repair", "The persistent Repair command opens native source and destination selection for the damaged copied document.");
     const executable = path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
@@ -138,23 +145,33 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
     await repair.input.screenshot("media-repair-completed.png", repair.evidence, "Capture completed repair report", "The completed path-free report confirms a new repaired document and an unchanged damaged source.");
     expect(await sha256(damagedPath)).toBe(damagedHash);
     expect(await isFile(repairedPath)).toBe(true);
+    const [damaged, repaired] = await Promise.all([
+      DocumentStore.open(damagedPath, { access: "read-only" }),
+      DocumentStore.open(repairedPath, { access: "read-only" })
+    ]);
+    try {
+      expect(repaired.documentId).not.toBe(damaged.documentId);
+    } finally {
+      await Promise.all([damaged.close(), repaired.close()]);
+    }
     await repair.close("passed");
     repair = null;
     profile = undefined;
   } finally {
     if (baseline !== null) await baseline.close("failed");
+    if (artifactPreview !== null) await artifactPreview.close("failed");
     if (repair !== null) await repair.close("failed");
     if (profile !== undefined) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
   }
 });
 
-async function launchPackaged(journeyId: string, documentPath?: string, profile?: RecoveryJourneySession["profile"]): Promise<RecoveryJourneySession> {
+async function launchPackaged(journeyId: string, documentPath?: string, profile?: RecoveryJourneySession["profile"], cleanupProfile = false): Promise<RecoveryJourneySession> {
   return launchRecoveryJourney({
     ...packagedJourneyConfig(workspaceRoot, journeyId),
     evidenceMode: "ephemeral",
     declaration: blankAuthoringJourney(journeyId),
-    ...(profile === undefined ? { cleanupProfile: false } : { profile, cleanupProfile: true }),
+    ...(profile === undefined ? { cleanupProfile } : { profile, cleanupProfile }),
     packagedArgs: () => documentPath === undefined ? [] : [documentPath]
   });
 }
