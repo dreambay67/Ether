@@ -105,6 +105,7 @@ export type SourceElectronJourneyConfig = {
   evidenceMode?: EvidenceMode;
   committedEvidencePath?: readonly string[];
   sourceEntrypoint?: string;
+  sourceArgs?: (profile: JourneyProfile) => readonly string[];
   electronExecutable?: string;
   viewport?: { width: number; height: number };
 };
@@ -558,7 +559,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       await requireFile(electronExecutable, "Electron executable");
       sourceApp = await electron.launch({
         executablePath: electronExecutable,
-        args: [sourceEntrypoint, `--user-data-dir=${profile.userData}`, "--disable-gpu"],
+        args: [sourceEntrypoint, ...(config.sourceArgs?.(profile) ?? []), `--user-data-dir=${profile.userData}`, "--disable-gpu"],
         env: environment
       });
       processOutput = captureProcessOutput(sourceApp.process());
@@ -598,7 +599,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         if (closed) return evidence;
         closed = true;
         try {
-          if (sourceApp !== null) await sourceApp.close();
+          if (sourceApp !== null) await closeSourceElectron(sourceApp);
           if (packagedBrowser !== null) await packagedBrowser.close();
           if (packagedProcess !== null && packagedProcess.exitCode === null) {
             await stopNewPackagedProcesses(config.mode === "packaged"
@@ -615,7 +616,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       }
     };
   } catch (error) {
-    await sourceApp?.close().catch(() => undefined);
+    if (sourceApp !== null) await closeSourceElectron(sourceApp).catch(() => undefined);
     await packagedBrowser?.close().catch(() => undefined);
     if (packagedProcess !== null && packagedProcess.exitCode === null) packagedProcess.kill();
     await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
@@ -625,6 +626,25 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
 
 async function requireFile(filePath: string, label: string): Promise<void> {
   if (!await hashIfFile(filePath)) throw new Error(`${label} is missing at ${filePath}.`);
+}
+
+async function closeSourceElectron(sourceApp: ElectronApplication): Promise<void> {
+  const process = sourceApp.process();
+  if (process.exitCode !== null) return;
+  const exited = new Promise<void>((resolve) => process.once("exit", () => resolve()));
+  await Promise.race([sourceApp.close().catch(() => undefined), delay(5_000)]);
+  if (process.exitCode === null) {
+    await sourceApp.evaluate(({ app }) => app.exit(0)).catch(() => undefined);
+    await Promise.race([exited, delay(5_000)]);
+  }
+  if (process.exitCode === null) {
+    process.kill();
+    await Promise.race([exited, delay(5_000)]);
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function captureProcessOutput(process: ChildProcess): () => string {

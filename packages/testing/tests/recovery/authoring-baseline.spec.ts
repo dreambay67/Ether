@@ -38,7 +38,11 @@ test("records the rejected blank-document authoring baseline through real UI inp
     ...base,
     evidenceMode: "committed",
     committedEvidencePath: ["phase-0", "authoring-baseline"],
-    declaration: blankAuthoringJourney("authoring-baseline")
+    declaration: blankAuthoringJourney("authoring-baseline"),
+    ...(mode === "source-electron" ? {
+      sourceEntrypoint: path.join(workspaceRoot, "packages", "testing", "fixtures", "desktop-main.mjs"),
+      sourceArgs: (profile) => [`--fixture-root=${profile.root}`]
+    } : {})
   });
   let closed = false;
   const observations: AuthoringBaselineObservation[] = [];
