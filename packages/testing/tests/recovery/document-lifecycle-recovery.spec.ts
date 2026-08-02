@@ -141,7 +141,7 @@ test("records a blank-UI authored document through save, document actions, close
     cleanReopened = await launch(mode, "document-lifecycle-clean-reopen", journeyRoot, renamedPath, recoveryProfile, true);
     await expect(cleanReopened.page.getByTestId("project-header")).toContainText("UI authored renamed.ether");
     await expect(cleanReopened.page.locator(".react-flow__node")).toHaveCount(2);
-    await cleanReopened.input.screenshot("04-clean-close-reopen.png", cleanReopened.evidence, "Capture the clean-close reopen", "The same user-saved document remains writable after a real Alt+F4 close.");
+    await cleanReopened.input.screenshot("04-clean-close-reopen.png", cleanReopened.evidence, "Capture the clean-close reopen", "The same user-saved document remains writable after an exact Windows UI Automation close.");
     await cleanReopened.close("passed");
     cleanReopened = null;
 
