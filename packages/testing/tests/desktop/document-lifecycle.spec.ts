@@ -432,6 +432,36 @@ describe("desktop document lifecycle", () => {
     await reopened.close();
   });
 
+  it("keeps an untitled document unnamed and creates no manual milestone when Save is cancelled", async () => {
+    const root = await tempRoot("ether-desktop-save-cancelled-");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => null }),
+      provider: new FakeImageProvider()
+    });
+    const untitled = await service.bootstrap();
+
+    await expect(service.save(untitled.documentId)).resolves.toMatchObject({
+      displayName: "Untitled",
+      named: false,
+      saveState: "saved"
+    });
+    const history = await service.executeApplicationQuery({
+      kind: "query",
+      id: "document-history-after-cancelled-save",
+      correlationId: "document-history-after-cancelled-save",
+      documentId: untitled.documentId,
+      name: "document.history",
+      payload: {}
+    });
+    if (history.name !== "document.history") throw new Error("Expected document history response.");
+    expect(history.payload.revisions.flatMap((revision) => revision.milestones)).not.toContainEqual(
+      expect.objectContaining({ kind: "manual", name: "Manual save" })
+    );
+    await service.close();
+  });
+
   it("closes cleanly, then reconciles a stale journal before a writable reopen", async () => {
     const root = await tempRoot("ether-desktop-clean-reopen-");
     const appDataRoot = path.join(root, "appdata");
@@ -1712,6 +1742,23 @@ describe("reference action capabilities", () => {
 });
 
 describe("autosave and event ordering", () => {
+  it("reports Saving as soon as an edit becomes dirty and Saved after persistence", async () => {
+    vi.useFakeTimers();
+    const states: string[] = [];
+    const coordinator = new AutosaveCoordinator(
+      async () => undefined,
+      ({ saveState }) => { states.push(saveState); }
+    );
+
+    coordinator.markDirty();
+    expect(coordinator.state()).toEqual({ dirty: true, saveState: "saving" });
+    expect(states).toEqual(["saving"]);
+
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(coordinator.state()).toEqual({ dirty: false, saveState: "saved" });
+    expect(states).toContain("saved");
+  });
+
   it("starts after 1.5 seconds idle, caps first-dirty age at 10 seconds, and serializes saves", async () => {
     vi.useFakeTimers();
     const calls: number[] = [];

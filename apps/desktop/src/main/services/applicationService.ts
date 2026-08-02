@@ -123,6 +123,7 @@ export class AutosaveCoordinator {
     if (this.disposed) return;
     this.dirty = true;
     this.generation += 1;
+    if (this.lastError === undefined) this.saveState = "saving";
     const now = Date.now();
     this.lastDirtyAt = now;
     if (this.firstDirtyAt === null) {
@@ -898,6 +899,7 @@ export class DesktopApplicationService {
     this.assertScope(documentId);
     if (this.untitled) {
       const saved = await this.saveAsNow(documentId);
+      if (this.untitled) return saved;
       await this.requireApplication().saveDocument({ commandId: randomUUID() });
       return this.refresh("state", "saved", saved.displayName);
     }

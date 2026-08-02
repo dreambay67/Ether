@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,8 @@ import {
 } from "../../recovery/journeyDriver.js";
 import {
   completeNativeFileDialogWithUia,
-  findExactPackagedProcessId
+  findExactPackagedProcessId,
+  invokeExactOwnedNativeButtonWithUia
 } from "../../recovery/windowsIntegration.js";
 
 const execFileAsync = promisify(execFile);
@@ -43,6 +44,7 @@ test("records a blank-UI authored document through save, document actions, close
 
   try {
     first = await launch(mode, "document-lifecycle", journeyRoot, undefined);
+    recoveryProfile = first.profile;
     const { page, input, evidence } = first;
     await expect(page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".react-flow__node")).toHaveCount(0);
@@ -55,7 +57,7 @@ test("records a blank-UI authored document through save, document actions, close
     await expect(page.locator(".react-flow__node")).toHaveCount(1);
     await input.screenshot("01-blank-ui-node.png", evidence, "Capture the UI-authored graph", "The first node is visibly authored from a blank document.");
 
-    await input.pressKey("Control+S", "Save the untitled UI-authored document", "The native Save dialog writes one .ether document.");
+    await input.pressKey("Control+s", "Save the untitled UI-authored document", "The native Save dialog writes one .ether document.");
     await completeNativeSaveIfNeeded(mode, first, firstPath);
     const ctrlSSaved = await waitForFile(firstPath, 1_000);
     input.observe(
@@ -92,7 +94,19 @@ test("records a blank-UI authored document through save, document actions, close
     await input.screenshot("02-saved-compact-portable.png", evidence, "Capture completed document actions", "Save As, Copy, Compact, and Portable actions have completed on the UI-authored document.");
 
     if (mode === "packaged") {
-      contender = await launch(mode, "document-lifecycle-writer-lock", journeyRoot, renamedPath, undefined, true);
+      const leaseRoot = path.join(first.profile.userData, "4.0", "leases");
+      const leaseFiles = (await readdir(leaseRoot)).filter((name) => name.endsWith(".json"));
+      expect(leaseFiles).toHaveLength(1);
+      const leaseRecord = JSON.parse(await readFile(path.join(leaseRoot, leaseFiles[0]!), "utf8")) as { pid?: unknown; pathHash?: unknown };
+      input.observe("Writer lease before contender", "The Save As destination retains one AppData writer lease before the competing process opens it.", `Observed one lease for PID ${String(leaseRecord.pid)} and path hash ${String(leaseRecord.pathHash)}.`);
+      const contenderUserData = path.join(first.profile.root, "contender-user-data");
+      const contenderAppData = path.join(contenderUserData, "4.0");
+      await mkdir(contenderAppData, { recursive: true });
+      await symlink(leaseRoot, path.join(contenderAppData, "leases"), "junction");
+      contender = await launch(mode, "document-lifecycle-writer-lock", journeyRoot, renamedPath, {
+        ...first.profile,
+        userData: contenderUserData
+      });
       await expect(contender.page.getByTestId("project-header")).toContainText("Read-only: another Ether window is editing this document");
       await expect(contender.page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
       contender.input.observe("Competing writer", "A second process opens the exact document read-only while the first process retains the writer lease.", "The competing Ether.exe displayed the writer-active read-only explanation and disabled Save.");
@@ -117,7 +131,6 @@ test("records a blank-UI authored document through save, document actions, close
       "The exact journey process exits without a clean close, leaving normal AppData recovery state for the next launch.",
       "The journey process was terminated only after the visible two-node graph returned to Saved."
     );
-    recoveryProfile = first.profile;
     await first.close("passed");
     first = null;
     await expect.poll(async () => isFile(renamedPath)).toBe(true);
@@ -212,23 +225,7 @@ async function completeNativeSaveIfNeeded(mode: JourneyMode, session: RecoveryJo
 
 async function confirmPortableIfNeeded(mode: JourneyMode, session: RecoveryJourneySession): Promise<void> {
   if (mode === "source-electron") return;
-  const ownerPid = await packagedProcessId(session);
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "Add-Type -AssemblyName UIAutomationClient",
-    `$ownerPid = ${ownerPid}`,
-    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
-    "$dialog = $null",
-    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid); $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid); foreach ($window in $windows) { if ($window.Current.ClassName -eq '#32770') { $dialog = $window; break } }; if ($null -eq $dialog) { Start-Sleep -Milliseconds 150 } }",
-    "if ($null -eq $dialog) { throw 'Exact Ether-owned portable confirmation was not found' }",
-    "$button = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Make Portable')))",
-    "if ($null -eq $button) { throw 'Portable confirmation exposed no Make Portable button' }",
-    "$invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
-    "if ($null -eq $invoke) { throw 'Make Portable button has no InvokePattern' }",
-    "([System.Windows.Automation.InvokePattern]$invoke).Invoke()"
-  ].join("; ");
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], { windowsHide: true });
+  await invokeExactOwnedNativeButtonWithUia(await packagedProcessId(session), "Make Portable");
 }
 
 async function hardKillLaunchedJourney(mode: JourneyMode, session: RecoveryJourneySession, fixtureRoot: string): Promise<void> {

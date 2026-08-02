@@ -66,7 +66,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     const primaryPid = await findExactPackagedProcessId(executable, primary.profile.userData);
     await expect(primary.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await primary.input.leftClick(primary.page.getByRole("button", { name: "Prompt", exact: true }), "Create a document through visible UI", "The blank canvas has one UI-authored node before native Save.");
-    await primary.input.pressKey("Control+S", "Save through the native Windows picker", "The exact Ether-owned native Save dialog receives the Unicode/spaces path through UI Automation.");
+    await primary.input.pressKey("Control+s", "Save through the native Windows picker", "The exact Ether-owned native Save dialog receives the Unicode/spaces path through UI Automation.");
     await completeNativeFileDialogWithUia(primaryPid, documentPath);
     await expect.poll(() => isFile(documentPath)).toBe(true);
     await assertOneFileDocument(root, documentPath);
@@ -150,7 +150,7 @@ test("runs the separately approved reversible Explorer association route", async
     const primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create a test-owned association document", "A visible blank-UI node is saved before Explorer invokes the association.");
-    await session.input.pressKey("Control+S", "Save association document through native picker", "The association target is a unique test-owned .ether document.");
+    await session.input.pressKey("Control+s", "Save association document through native picker", "The association target is a unique test-owned .ether document.");
     await completeNativeFileDialogWithUia(primaryPid, documentPath);
     await expect.poll(() => isFile(documentPath)).toBe(true);
     plan = await createAssociationDryRunPlan({ executablePath: executable, documentPath, root });
@@ -196,14 +196,14 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     const primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create the Explorer drag source through visible UI", "The source .ether document has a real graph authored through the canvas UI.");
-    await session.input.pressKey("Control+S", "Save unique Explorer drag source", "The native picker saves the test-owned drag source.");
+    await session.input.pressKey("Control+s", "Save unique Explorer drag source", "The native picker saves the test-owned drag source.");
     await completeNativeFileDialogWithUia(primaryPid, sourcePath);
     await expect.poll(() => isFile(sourcePath)).toBe(true);
     await session.input.leftClick(session.page.getByRole("button", { name: "New", exact: true }), "Create a visibly different active drag target", "The target begins as a new blank document while the saved Explorer source remains unchanged.");
     await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Add first target node", "The active target graph differs from the saved one-node source.");
     await session.input.leftClick(session.page.getByRole("button", { name: "Image", exact: true }), "Add second target node", "The active target visibly has two nodes before the Explorer drop.");
     await expect(session.page.locator(".react-flow__node")).toHaveCount(2);
-    await session.input.pressKey("Control+S", "Save distinct active drag target", "The native picker saves the two-node target separately from the source.");
+    await session.input.pressKey("Control+s", "Save distinct active drag target", "The native picker saves the two-node target separately from the source.");
     await completeNativeFileDialogWithUia(primaryPid, targetPath);
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(targetPath));
     const target = await nativeScreenPointForCanvas(session);
@@ -240,7 +240,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     const primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create unique Jump List document", "Saving it lets Ether register the unique target with app.addRecentDocument and its recent Jump List category.");
-    await session.input.pressKey("Control+S", "Save unique Jump List target", "The native picker saves the exact test-owned recent document.");
+    await session.input.pressKey("Control+s", "Save unique Jump List target", "The native picker saves the exact test-owned recent document.");
     await completeNativeFileDialogWithUia(primaryPid, documentPath);
     await expect.poll(() => isFile(documentPath)).toBe(true);
     await session.page.waitForTimeout(1_000);

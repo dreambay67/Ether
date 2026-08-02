@@ -36,7 +36,7 @@ test("shows a staged fake-provider completion as a review-required Recovery revi
     recoveryProfile = baseline.profile;
     await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create baseline graph", "The recovery document starts as a blank graph authored through packaged UI.");
-    await baseline.input.pressKey("Control+S", "Save packaged recovery baseline", "The Windows Save dialog persists the UI-authored `.ether` baseline.");
+    await baseline.input.pressKey("Control+s", "Save packaged recovery baseline", "The Windows Save dialog persists the UI-authored `.ether` baseline.");
     await completeNativeFileDialogWithUia(await exactPackagedPid(baseline), documentPath);
     await expect.poll(async () => isFile(documentPath)).toBe(true);
     await baseline.close("passed");
@@ -72,7 +72,7 @@ test("keeps a deliberately corrupted metadata copy unchanged while the packaged 
     profile = baseline.profile;
     await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create metadata baseline", "The corrupt-metadata fixture begins with a packaged UI-authored document.");
-    await baseline.input.pressKey("Control+S", "Save metadata baseline", "The Windows Save dialog persists the baseline before the copied fixture is corrupted.");
+    await baseline.input.pressKey("Control+s", "Save metadata baseline", "The Windows Save dialog persists the baseline before the copied fixture is corrupted.");
     const ownerPid = await exactPackagedPid(baseline);
     await completeNativeFileDialogWithUia(ownerPid, baselinePath);
     await expect.poll(async () => isFile(baselinePath)).toBe(true);
@@ -111,7 +111,7 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
     profile = baseline.profile;
     await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create media baseline", "The media-repair fixture begins with a packaged UI-authored graph.");
-    await baseline.input.pressKey("Control+S", "Save media baseline", "The Windows Save dialog persists the visible baseline before its copied fixture is damaged.");
+    await baseline.input.pressKey("Control+s", "Save media baseline", "The Windows Save dialog persists the visible baseline before its copied fixture is damaged.");
     await completeNativeFileDialogWithUia(await exactPackagedPid(baseline), baselinePath);
     await expect.poll(async () => isFile(baselinePath)).toBe(true);
     await baseline.close("passed");
