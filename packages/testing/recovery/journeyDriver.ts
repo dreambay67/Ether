@@ -171,9 +171,10 @@ export function assertAuthoringJourneyDeclaration(declaration: AuthoringJourneyD
 /** Static companion for journey specs. Keep this narrow so fake provider adapters remain valid. */
 export function assertAuthoringJourneySourceSafety(source: string, label: string): void {
   const prohibited: Array<[string, RegExp]> = [
-    ["pre-seeded graph", /\b(?:initialGraph|preseed(?:ed)?Graph|graphFixture)\b/iu],
+    ["pre-seeded graph", /\b(?:initialGraph|pre[- ]?seed(?:ed)?Graph|graphFixture)\b/iu],
     ["fixture injection", /(?:page\.)?addInitScript\s*\(/u],
     ["direct bridge graph mutation", /window\s*\.\s*ether\s*\.\s*graph\s*\.\s*(?:apply|applyTransaction)\s*\(/u],
+    ["direct bridge application command", /window\s*\.\s*ether\s*\.\s*application\s*\.\s*command\s*\(/u],
     ["database edit", /\b(?:sqlite|database)\s*\.(?:exec|run|prepare|write)\s*\(/iu],
     ["service fixture creation", /(?:createDocumentFixture|DesktopApplicationService)\s*\(/u]
   ];

@@ -113,6 +113,8 @@ describe("Ether recovery journey driver", () => {
     })).toThrow(/database/u);
     expect(() => assertAuthoringJourneySourceSafety("window.ether.graph.applyTransaction(documentId, transaction)", "fixture"))
       .toThrow(/direct bridge graph mutation/u);
+    expect(() => assertAuthoringJourneySourceSafety("window.ether.application.command({ name: 'graph.applyTransaction' })", "fixture"))
+      .toThrow(/direct bridge application command/u);
     expect(() => assertAuthoringJourneySourceSafety("page.addInitScript(() => fixtureGraph)", "fixture"))
       .toThrow(/fixture injection/u);
     expect(() => assertAuthoringJourneySourceSafety("database.exec('update graph')", "fixture"))
