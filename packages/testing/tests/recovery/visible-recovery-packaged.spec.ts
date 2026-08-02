@@ -119,6 +119,9 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
     artifactPreview = await launchPackaged("visible-recovery-artifact-baseline", baselinePath, profile, false);
     await expect(artifactPreview.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await artifactPreview.input.leftClick(artifactPreview.page.getByRole("button", { name: "Artifacts", exact: true }), "Open visible artifact baseline", "The packaged UI visibly opens the artifact-bearing baseline before a copied fixture is corrupted.");
+    await expect(artifactPreview.page.getByRole("region", { name: "Reference Desk" })).toBeVisible();
+    await artifactPreview.input.leftClick(artifactPreview.page.getByRole("button", { name: "Review", exact: true }), "Open artifact review", "The visible Review workspace exposes the embedded fake-provider artifact.");
+    await expect(artifactPreview.page.getByTestId("artifact-observatory")).toBeVisible();
     await expect(artifactPreview.page.getByTestId("artifact-card")).toHaveCount(1);
     await artifactPreview.input.screenshot("artifact-bearing-baseline.png", artifactPreview.evidence, "Capture artifact-bearing baseline", "A fake-provider artifact is visibly present in the valid packaged baseline.");
     await artifactPreview.close("passed");
