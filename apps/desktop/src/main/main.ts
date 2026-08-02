@@ -288,7 +288,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     await openController.request("drop", documentPath);
     return service.snapshot();
   };
-  let initialDocumentStartup: Promise<boolean> | null = null;
+  let initialDocumentStartup: Promise<void> | null = null;
   let providerPolicyUpdate: Promise<void> = Promise.resolve();
 
   const disposeDocumentHandlers = registerDocumentHandlers({
@@ -483,10 +483,10 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
 
   const initialDocument = findEtherArgument(launchArgv);
   initialDocumentStartup = credentialOnly
-    ? Promise.resolve(null)
+    ? Promise.resolve()
     : initialDocument !== null
-      ? openController.request("argv", initialDocument)
-      : service.bootstrap();
+      ? openController.request("argv", initialDocument).then(() => undefined)
+      : service.bootstrap().then(() => undefined);
   const rendererStartup = mainWindow.loadURL(rendererUrl);
   await Promise.all([initialDocumentStartup, rendererStartup]);
   initialDocumentStartup = null;
