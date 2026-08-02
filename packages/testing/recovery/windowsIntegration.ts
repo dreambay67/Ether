@@ -414,6 +414,25 @@ export async function openExactWindowWithNativeKeyboard(ownerPid: number): Promi
   return runPowerShell(script);
 }
 
+/** Sends Alt+F4 to the exact foregrounded Ether window through native keyboard input. */
+export async function closeExactWindowWithNativeKeyboard(ownerPid: number): Promise<string> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02CloseKeyboard { [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra); }' -ErrorAction SilentlyContinue",
+    `$ownerPid = ${ownerPid}`,
+    "$byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid)",
+    "$ownerWindows = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | Where-Object { $_.Current.ClassName -ne '#32770' -and $_.Current.NativeWindowHandle -ne 0 })",
+    "if ($ownerWindows.Count -ne 1) { throw ('Expected one exact Ether owner window; found ' + $ownerWindows.Count) }",
+    "$ownerHwnd = [intptr]$ownerWindows[0].Current.NativeWindowHandle",
+    "[EtherA02CloseKeyboard]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [EtherA02CloseKeyboard]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero); try { $ownerWindows[0].SetFocus() } catch {}; [EtherA02CloseKeyboard]::SetForegroundWindow($ownerHwnd) | Out-Null; Start-Sleep -Milliseconds 150",
+    "if ([EtherA02CloseKeyboard]::GetForegroundWindow() -ne $ownerHwnd) { throw 'Exact Ether window is not foreground for Alt+F4' }",
+    "[EtherA02CloseKeyboard]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [EtherA02CloseKeyboard]::keybd_event(0x73, 0, 0, [UIntPtr]::Zero); [EtherA02CloseKeyboard]::keybd_event(0x73, 0, 2, [UIntPtr]::Zero); [EtherA02CloseKeyboard]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)",
+    "Write-Output ('native-keyboard ownerPid=' + $ownerPid + ' shortcut=Alt+F4')"
+  ].join("; ");
+  return runPowerShell(script);
+}
+
 export async function completeNativeFileDialogWithUia(ownerPid: number, filePath: string): Promise<string> {
   const script = [
     "$ErrorActionPreference = 'Stop'",

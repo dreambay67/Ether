@@ -26,6 +26,7 @@ import {
   assertExactWindowForegroundWithUia,
   applyReversibleAssociation,
   cleanupWindowsIntegrationRoot,
+  closeExactWindowWithNativeKeyboard,
   completeNativeFileDialogWithUia,
   createAssociationDryRunPlan,
   createWindowsIntegrationRoot,
@@ -104,7 +105,8 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     primary.input.observe("Second-instance focus", "A separate exact Ether.exe request exits through the single-instance lock and focuses the already-attached primary window for the requested document.", secondInstance);
 
     const disposableRoots = await createActualTestOwnedDisposableRoots(primary.profile);
-    await primary.input.pressKey("Alt+F4", "Clean close after disposable-root cleanup", "A Saved document closes without an unsaved-changes prompt before reopen validation.");
+    const primaryClose = await closeExactWindowWithNativeKeyboard(primaryPid);
+    primary.input.observe("Clean close after disposable-root cleanup", "A native Alt+F4 sent to the exact packaged Ether window closes the Saved document without an unsaved-changes prompt before reopen validation.", primaryClose);
     await expect.poll(() => primary?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await primary.close("passed");
     primary = null;
@@ -121,7 +123,9 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
 
     const associationPlan = await createAssociationDryRunPlan({ executablePath: executable, documentPath, root });
     reopened.input.observe("Association dry run", "The exact HKCU .ether key and original ProgID state are snapshotted before any future optional mutation.", `Dry-run plan uses unique ${associationPlan.testProgId}; this harness does not mutate the registry or invoke Explorer.`);
-    await reopened.input.pressKey("Alt+F4", "Clean close through keyboard", "A Saved document closes without an unsaved-changes prompt.");
+    const reopenedPid = await findExactPackagedProcessId(executable, reopened.profile.userData);
+    const reopenedClose = await closeExactWindowWithNativeKeyboard(reopenedPid);
+    reopened.input.observe("Clean close through keyboard", "A native Alt+F4 sent to the exact packaged Ether window closes the Saved document without an unsaved-changes prompt.", reopenedClose);
     await expect.poll(() => reopened?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await reopened.close("passed");
     reopened = null;
