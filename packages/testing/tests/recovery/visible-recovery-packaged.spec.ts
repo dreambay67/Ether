@@ -173,7 +173,8 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
 async function launchPackaged(journeyId: string, documentPath?: string, profile?: RecoveryJourneySession["profile"], cleanupProfile = false): Promise<RecoveryJourneySession> {
   return launchRecoveryJourney({
     ...packagedJourneyConfig(workspaceRoot, journeyId),
-    evidenceMode: "ephemeral",
+    evidenceMode: "committed",
+    committedEvidencePath: ["phase-0", "visible-recovery", journeyId],
     declaration: blankAuthoringJourney(journeyId),
     ...(profile === undefined ? { cleanupProfile } : { profile, cleanupProfile }),
     packagedArgs: () => documentPath === undefined ? [] : [documentPath]
