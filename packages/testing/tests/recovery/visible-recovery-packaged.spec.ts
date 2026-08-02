@@ -17,6 +17,7 @@ import {
   packagedJourneyConfig,
   type RecoveryJourneySession
 } from "../../recovery/journeyDriver.js";
+import { completeNativeFileDialogWithUia, findExactPackagedProcessId } from "../../recovery/windowsIntegration.js";
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl5oKAAAAAASUVORK5CYII=", "base64");
@@ -96,6 +97,58 @@ test("keeps a deliberately corrupted metadata copy unchanged while the packaged 
   }
 });
 
+test("repairs a copied media-corrupt document through the visible packaged lossy-repair flow", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "ether-visible-media-repair-"));
+  const baselinePath = path.join(root, "UI-authored artifact baseline.ether");
+  const damagedPath = path.join(root, "UI-authored media corrupt.ether");
+  const repairedPath = path.join(root, "UI-authored media repaired.ether");
+  let baseline: RecoveryJourneySession | null = null;
+  let repair: RecoveryJourneySession | null = null;
+  let profile: RecoveryJourneySession["profile"] | undefined;
+  try {
+    baseline = await launchPackaged("visible-recovery-media-baseline");
+    profile = baseline.profile;
+    await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
+    await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create media baseline", "The media-repair fixture begins with a packaged UI-authored graph.");
+    await baseline.input.pressKey("Control+S", "Save media baseline", "The Windows Save dialog persists the visible baseline before its copied fixture is damaged.");
+    await sendNativeSavePath(baselinePath);
+    await expect.poll(async () => isFile(baselinePath)).toBe(true);
+    await baseline.close("passed");
+    baseline = null;
+    await copyFile(baselinePath, damagedPath);
+    const contentKey = await createFakeArtifactFixture(damagedPath, profile.userData);
+    const corrupt = new DatabaseSync(damagedPath);
+    try { corrupt.prepare("UPDATE blob_chunks SET data = ? WHERE content_key = ? AND chunk_index = 0").run(Buffer.from("corrupt-media"), contentKey); } finally { corrupt.close(); }
+    const damagedHash = await sha256(damagedPath);
+
+    repair = await launchPackaged("visible-recovery-media-repair", damagedPath, profile);
+    await expect(repair.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
+    await repair.input.leftClick(repair.page.getByRole("button", { name: "Repair damaged document", exact: true }), "Begin repair", "The persistent Repair command opens native source and destination selection for the damaged copied document.");
+    const executable = path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
+    const ownerPid = await findExactPackagedProcessId(executable, profile.userData);
+    await completeNativeFileDialogWithUia(ownerPid, damagedPath);
+    await completeNativeFileDialogWithUia(ownerPid, repairedPath);
+    await expect(repair.page.getByRole("dialog", { name: "Review repair losses" })).toBeVisible({ timeout: 30_000 });
+    await expect(repair.page.getByRole("heading", { name: "Media and artifact losses" })).toBeVisible();
+    await expect(repair.page.getByRole("heading", { name: "Graph losses" })).toBeVisible();
+    await repair.input.screenshot("media-repair-preview.png", repair.evidence, "Capture distinct repair loss classes", "The strict preview names media/artifact losses separately from graph losses before any lossy output is created.");
+    await repair.input.leftClick(repair.page.getByRole("button", { name: "Create partial repaired copy", exact: true }), "Confirm lossy repair", "The user explicitly confirms the reviewable lossy repair.");
+    await expect(repair.page.getByRole("dialog", { name: "Repair report" })).toBeVisible({ timeout: 30_000 });
+    await expect(repair.page.getByText("Ether created a new repaired document. The damaged source was left unchanged.", { exact: true })).toBeVisible();
+    await repair.input.screenshot("media-repair-completed.png", repair.evidence, "Capture completed repair report", "The completed path-free report confirms a new repaired document and an unchanged damaged source.");
+    expect(await sha256(damagedPath)).toBe(damagedHash);
+    expect(await isFile(repairedPath)).toBe(true);
+    await repair.close("passed");
+    repair = null;
+    profile = undefined;
+  } finally {
+    if (baseline !== null) await baseline.close("failed");
+    if (repair !== null) await repair.close("failed");
+    if (profile !== undefined) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
+    await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+  }
+});
+
 async function launchPackaged(journeyId: string, documentPath?: string, profile?: RecoveryJourneySession["profile"]): Promise<RecoveryJourneySession> {
   return launchRecoveryJourney({
     ...packagedJourneyConfig(workspaceRoot, journeyId),
@@ -157,6 +210,25 @@ async function stageProviderRecoveryFixture(documentPath: string, userData: stri
   }
 }
 
+async function createFakeArtifactFixture(documentPath: string, userData: string): Promise<string> {
+  const service = new DesktopApplicationService({
+    appDataRoot: path.join(userData, "4.0"),
+    appVersion: "4.0.0-visible-repair-fixture",
+    dialogs: { openDocument: async () => null, saveDocument: async () => null, locateReference: async () => null, searchReferenceFolder: async () => null, confirmPortable: async () => true },
+    provider: new FakeImageProvider(),
+    simulationMode: true
+  });
+  try {
+    const opened = await service.openPath(documentPath);
+    await service.generateFakeArtifact(opened.documentId);
+    const artifact = (await service.searchArtifacts(opened.documentId, ""))[0];
+    if (artifact === undefined) throw new Error("Fake provider fixture did not create an artifact to corrupt.");
+    return artifact.contentKey;
+  } finally {
+    await service.close();
+  }
+}
+
 async function sendNativeSavePath(destination: string): Promise<void> {
   const { execFile } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => execFile("powershell.exe", ["-NoProfile", "-Sta", "-Command", `Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 500; [System.Windows.Forms.SendKeys]::SendWait('^a'); [System.Windows.Forms.SendKeys]::SendWait('${destination.replaceAll("'", "''")}'); [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')`], { windowsHide: true }, (error) => error === null ? resolve() : reject(error)));
@@ -183,10 +255,10 @@ async function readNativeErrorDialog(profile: RecoveryJourneySession["profile"])
     "$byProcess = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$roots[0].ProcessId)",
     "$byDialog = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, '#32770')",
     "$condition = New-Object System.Windows.Automation.AndCondition($byProcess, $byDialog)",
-    "Start-Sleep -Milliseconds 500",
-    "$dialogs = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)",
-    "if ($dialogs.Count -ne 1) { throw ('Expected one exact packaged native error dialog; found ' + $dialogs.Count) }",
-    "$dialog = $dialogs[0]",
+    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
+    "$dialog = $null",
+    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $dialogs = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition); if ($dialogs.Count -eq 1) { $dialog = $dialogs[0]; break }; Start-Sleep -Milliseconds 150 }",
+    "if ($null -eq $dialog) { throw 'Exact packaged native error dialog did not appear within 15 seconds.' }",
     "$text = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join ' '",
     "$ok = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'OK')))",
     "if ($null -eq $ok) { throw 'Native error dialog has no OK button.' }",
