@@ -90,14 +90,16 @@ const failPatterns = [
 function parseOriginal() {
   const lines = fs.readFileSync(originalPath, 'utf8').split(/\r?\n/);
   let major = null;
+  let majorTitle = null;
   let subsection = null;
+  let subsectionTitle = null;
   const out = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const majorMatch = line.match(/^## (\d+)\.\s*(.+)$/);
-    if (majorMatch) { major = majorMatch[1]; subsection = null; }
+    if (majorMatch) { major = majorMatch[1]; majorTitle = majorMatch[2]; subsection = null; subsectionTitle = null; }
     const subMatch = line.match(/^### (\d+\.\d+)\s*(.+)$/);
-    if (subMatch) subsection = subMatch[1];
+    if (subMatch) { subsection = subMatch[1]; subsectionTitle = subMatch[2]; }
     const checkbox = line.match(/^- \[([ xX])\] (.+)$/);
     if (!checkbox || !major || major === '15') continue;
     const key = subsectionToArea[subsection || major];
@@ -108,7 +110,7 @@ function parseOriginal() {
       ordinal: out.length + 1,
       sourceLine: index + 1,
       section: subsection ? `${major}.${subsection.split('.')[1]}` : major,
-      sectionTitle: subsection || `${major}. ${line}`,
+      sectionTitle: subsectionTitle || majorTitle,
       text: checkbox[2],
       historicalChecked: checkbox[1].toLowerCase() === 'x',
       areaCode: key,

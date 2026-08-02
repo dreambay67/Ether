@@ -49,6 +49,24 @@ function parseSources() {
 
 function push(errors, message) { errors.push(message); }
 
+function inspectActionLog(errors, actionLog, label, sourceRoot, required) {
+  if (typeof actionLog !== 'string' || actionLog.length === 0) {
+    if (required) push(errors, `${label} is missing an action log.`);
+    return;
+  }
+  const resolved = path.resolve(sourceRoot, actionLog);
+  if (!fs.existsSync(resolved)) {
+    if (required) push(errors, `${label} action log does not exist: ${actionLog}.`);
+    return;
+  }
+  try {
+    const contents = fs.readFileSync(resolved, 'utf8');
+    if (INJECTION_RE.test(contents)) push(errors, `${label} action log contains a manual fixture/state-injection indicator.`);
+  } catch (error) {
+    push(errors, `${label} action log could not be read: ${error.message}`);
+  }
+}
+
 function validateObject(ledger, { mode = 'baseline', candidateCommit = null, candidateHash = null, sourceRoot = repo } = {}) {
   const errors = [];
   let sources;
@@ -102,6 +120,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
       if (!HASH_RE.test(record.packageHash || '')) push(errors, `${item.id} evidence must include a 64-character packageHash.`);
       const encoded = JSON.stringify({ actionLog: record.actionLog, captureCommand: record.captureCommand, notes: record.notes, fixture: record.fixture });
       if (INJECTION_RE.test(encoded)) push(errors, `${item.id} evidence contains a manual fixture/state-injection indicator.`);
+      if (mode !== 'baseline') inspectActionLog(errors, record.actionLog, `${item.id} evidence`, sourceRoot, false);
       if (mode !== 'baseline' && candidateCommit && record.commit !== candidateCommit) push(errors, `${item.id} evidence commit ${record.commit} is stale; expected ${candidateCommit}.`);
       if (mode !== 'baseline' && candidateHash && record.packageHash !== candidateHash) push(errors, `${item.id} evidence package hash is stale; expected ${candidateHash}.`);
     }
@@ -129,10 +148,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
   if (journeys.length !== 10 || journeyIds.size !== 10 || [...JOURNEY_IDS].some((id) => !journeyIds.has(id))) push(errors, 'journeys must contain exactly J01-J10 with no duplicates.');
   for (const journey of journeys) {
     if (!journey.id || !journey.name || !journey.owner || !Array.isArray(journey.requiredEvidence)) push(errors, `${journey.id || '<unknown>'} is missing required journey fields.`);
-    if (mode === 'gate') {
-      if (!journey.actionLog || typeof journey.actionLog !== 'string') push(errors, `${journey.id} is missing a primary-journey action log.`);
-      else if (!fs.existsSync(path.resolve(sourceRoot, journey.actionLog))) push(errors, `${journey.id} action log does not exist: ${journey.actionLog}.`);
-    }
+    if (mode !== 'baseline') inspectActionLog(errors, journey.actionLog, `${journey.id} primary journey`, sourceRoot, true);
   }
 
   const counts = Object.fromEntries([...new Set(requirements.map((item) => item.status))].sort().map((status) => [status, requirements.filter((item) => item.status === status).length]));
