@@ -8,9 +8,14 @@ This is a Phase 0 triage report. It does not approve a phase gate or release.
 
 | Status | Count |
 | --- | ---: |
+| BLOCKED | 0 |
 | FAIL | 9 |
 | MISSING | 30 |
+| OPEN | 0 |
+| OWNER-ACCEPTED | 0 |
 | PRESENT-UNPROVEN | 211 |
+| VERIFIED-AUTO | 0 |
+| VERIFIED-PACKAGED | 0 |
 | **Total** | **250** |
 
 ## Counts by area

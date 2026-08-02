@@ -151,7 +151,8 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
     if (mode !== 'baseline') inspectActionLog(errors, journey.actionLog, `${journey.id} primary journey`, sourceRoot, true);
   }
 
-  const counts = Object.fromEntries([...new Set(requirements.map((item) => item.status))].sort().map((status) => [status, requirements.filter((item) => item.status === status).length]));
+  const knownStatuses = Array.isArray(ledger.statusModel) ? ledger.statusModel : [...VALID_STATUSES];
+  const counts = Object.fromEntries([...new Set(knownStatuses)].map((status) => [status, requirements.filter((item) => item.status === status).length]));
   if (mode === 'gate') {
     const terminal = new Set(['VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED']);
     for (const item of requirements) if (item.releaseBlocker && !terminal.has(item.status)) push(errors, `${item.id} is an open release blocker (${item.status}).`);
