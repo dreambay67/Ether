@@ -14,6 +14,30 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const fixtureMain = path.join(root, "packages", "testing", "fixtures", "desktop-main.mjs");
 const electronPath = path.join(root, "node_modules", "electron", "dist", "electron.exe");
 
+test("real Electron argv launch returns a document descriptor without a renderer schema error", async () => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-argv-bootstrap-"));
+  const documentPath = path.join(fixtureRoot, "argv launch.ether");
+  await createDocumentFixture(fixtureRoot, documentPath);
+  const electronApp = await launchFixture(fixtureRoot, [`--open-document=${documentPath}`]);
+  const pageErrors: string[] = [];
+  electronApp.on("window", (page) => page.on("pageerror", (error) => pageErrors.push(error.message)));
+
+  try {
+    const page = await electronApp.firstWindow();
+    await expect(page.getByTestId("document-canvas")).toBeVisible();
+    await expect(page.getByTestId("project-header")).toContainText("argv launch.ether");
+    await expect(page.locator(".react-flow__node")).toHaveCount(1);
+    expect(await page.evaluate(() => window.ether.document.bootstrap())).toMatchObject({
+      displayName: "argv launch.ether",
+      named: true
+    });
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await electronApp.close();
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("real Electron persists canvas edits and serves embedded artifacts through the secure protocol", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-lifecycle-"));
   const electronApp = await launchFixture(fixtureRoot, ["--force-device-scale-factor=2"]);

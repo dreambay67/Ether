@@ -63,6 +63,11 @@ test("records a blank-UI authored document through save, document actions, close
     await expect.poll(async () => isFile(firstPath)).toBe(true);
     await expect(page.getByTestId("project-header")).toContainText("UI authored document.ether");
     input.observe("Save result", "The UI-created graph is stored as one .ether file.", `Saved ${path.basename(firstPath)} after Ctrl+S.`);
+    await input.leftClick(page.getByRole("button", { name: "Document History", exact: true }), "Inspect the manual save milestone", "Document History shows the Ctrl+S manual milestone as a reviewable record.");
+    await expect(page.getByRole("dialog", { name: "Document History" })).toBeVisible();
+    await expect(page.getByText("Manual milestone: Manual save", { exact: true })).toBeVisible();
+    await input.screenshot("manual-save-history.png", evidence, "Capture the visible manual milestone", "The document history names the manual Ctrl+S milestone.");
+    await input.leftClick(page.getByRole("button", { name: "Close Document History", exact: true }), "Close Document History", "The history review returns to the document canvas.");
 
     await input.leftClick(page.getByRole("button", { name: "Save as", exact: true }), "Save As to a second path", "The active document switches only after the new destination is complete.");
     await completeNativeSaveIfNeeded(mode, renamedPath);
