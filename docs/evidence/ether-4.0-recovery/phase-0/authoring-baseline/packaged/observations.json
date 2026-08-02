@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "mode": "packaged",
+  "observations": [
+    {
+      "code": "BL-01-node-library",
+      "expectedRejectedBehavior": "A blank document exposes only Prompt and Image authoring tools rather than the 17-node Node Library.",
+      "actual": "Visible tool rail: Prompt, Image, Refresh, Recipes.",
+      "matchesRejectedCandidate": true,
+      "hesitationOrWorkaround": "No searchable Node Library route was available; the only visible creation controls were inspected first."
+    },
+    {
+      "code": "BL-02-marquee-pointer",
+      "expectedRejectedBehavior": "Ordinary marquee/pointer ownership is unreliable; Shift marquee does not reliably add to the current selection.",
+      "actual": "Left marquee selected 1; Shift marquee selected 2.",
+      "matchesRejectedCandidate": false,
+      "hesitationOrWorkaround": "Nodes were manually separated before testing because the two visible creation buttons place them in overlapping positions."
+    },
+    {
+      "code": "BL-03-graph-shortcuts",
+      "expectedRejectedBehavior": "Ctrl+D, clipboard, Delete, and undo do not provide graph-aware commands when canvas input owns the interaction.",
+      "actual": "Node counts before/after Ctrl+D/Ctrl+V/Delete/Ctrl+Z: 2/2/2/2/2.",
+      "matchesRejectedCandidate": true,
+      "hesitationOrWorkaround": "No command palette or graph shortcut hint appeared, so each documented shortcut was attempted directly after a real canvas interaction."
+    },
+    {
+      "code": "BL-04-primary-inline-edit",
+      "expectedRejectedBehavior": "Double-clicking primary node content does not expose a direct canvas editor.",
+      "actual": "No inline editor appeared for primary content after the real double click.",
+      "matchesRejectedCandidate": true,
+      "hesitationOrWorkaround": "The visible node title can be renamed separately, but the primary preview was targeted to avoid substituting title editing for authored content editing."
+    },
+    {
+      "code": "BL-05-groups-modules",
+      "expectedRejectedBehavior": "Visual Group remains alongside Module, while the Module surface lacks a locked-by-default organization journey.",
+      "actual": "Group command visible=true; module cards created=0; visible lock controls=0.",
+      "matchesRejectedCandidate": true,
+      "hesitationOrWorkaround": "The Group command was tried before Module because both organizational concepts remain exposed; no lock control or replacement route was discoverable."
+    }
+  ]
+}
