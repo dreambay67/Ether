@@ -538,6 +538,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   let sourceApp: ElectronApplication | null = null;
   let packagedBrowser: Browser | null = null;
   let packagedProcess: ChildProcess | null = null;
+  let packagedExecutablePath = "";
   let existingPackagedProcesses = new Set<number>();
   let processOutput: () => string = () => "";
 
@@ -565,10 +566,10 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       processOutput = captureProcessOutput(sourceApp.process());
       page = await sourceApp.firstWindow();
     } else {
-      const executablePath = config.executablePath ?? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
-      await requireFile(executablePath, "Packaged Ether.exe");
-      existingPackagedProcesses = await packagedProcessIds(executablePath);
-      packagedProcess = spawn(executablePath, [
+      packagedExecutablePath = config.executablePath ?? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
+      await requireFile(packagedExecutablePath, "Packaged Ether.exe");
+      existingPackagedProcesses = await packagedProcessIds(packagedExecutablePath);
+      packagedProcess = spawn(packagedExecutablePath, [
         "--remote-debugging-port=0",
         `--user-data-dir=${profile.userData}`,
         "--disable-gpu"
@@ -602,9 +603,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
           if (sourceApp !== null) await closeSourceElectron(sourceApp);
           if (packagedBrowser !== null) await packagedBrowser.close();
           if (packagedProcess !== null && packagedProcess.exitCode === null) {
-            await stopNewPackagedProcesses(config.mode === "packaged"
-              ? config.executablePath ?? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe")
-              : "", existingPackagedProcesses);
+            await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses);
           }
         } finally {
           recorder.captureMainProcessOutput(processOutput());
@@ -618,7 +617,10 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   } catch (error) {
     if (sourceApp !== null) await closeSourceElectron(sourceApp).catch(() => undefined);
     await packagedBrowser?.close().catch(() => undefined);
-    if (packagedProcess !== null && packagedProcess.exitCode === null) packagedProcess.kill();
+    if (packagedProcess !== null && packagedProcess.exitCode === null) {
+      await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses).catch(() => undefined);
+      if (packagedProcess.exitCode === null) packagedProcess.kill();
+    }
     await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
     throw error;
   }
