@@ -127,6 +127,7 @@ test("records a blank-UI authored document through save, document actions, close
       "A real native Alt+F4 close is required before AC-A02-005/009 can receive packaged evidence.",
       "The recovery driver has not yet proved native-window close input; session cleanup is used only to continue the non-substituting reopen check."
     );
+    expect(reopened.recorder.snapshot().errors).toEqual([]);
     await reopened.close("passed");
     reopened = null;
 
