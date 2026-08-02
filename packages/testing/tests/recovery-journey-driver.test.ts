@@ -124,8 +124,16 @@ describe("Ether recovery journey driver", () => {
 
   it("keeps committed evidence deterministic and raw traces under ignored test results", () => {
     const committed = journeyEvidencePaths(workspaceRoot, "phase-0", "source-electron", "committed");
+    const nestedCommitted = journeyEvidencePaths(
+      workspaceRoot,
+      "phase-0",
+      "packaged",
+      "committed",
+      ["phase-0", "authoring-baseline"]
+    );
     const ephemeral = journeyEvidencePaths(workspaceRoot, "phase-0", "packaged", "ephemeral");
     expect(committed.root.replaceAll("\\", "/")).toContain("docs/evidence/ether-4.0-recovery/phase-0/source-electron");
+    expect(nestedCommitted.root.replaceAll("\\", "/")).toContain("phase-0/authoring-baseline/packaged");
     expect(ephemeral.root.replaceAll("\\", "/")).toContain("test-results/recovery/phase-0/packaged/");
   });
 });

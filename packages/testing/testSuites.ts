@@ -94,6 +94,7 @@ export const testSuites = {
     "tests/desktop/artifacts-review.spec.ts",
     "tests/desktop/drawing-edit.spec.ts"
   ],
+  recoveryBaseline: ["tests/recovery/authoring-baseline.spec.ts"],
   desktop: ["tests/desktop/document-lifecycle.electron.spec.ts"],
   packaged: ["tests/desktop/document-lifecycle.packaged.ts", "tests/packaged-electron.packaged.ts"]
 } as const;

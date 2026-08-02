@@ -103,6 +103,7 @@ export type SourceElectronJourneyConfig = {
   journeyId: string;
   declaration: AuthoringJourneyDeclaration;
   evidenceMode?: EvidenceMode;
+  committedEvidencePath?: readonly string[];
   sourceEntrypoint?: string;
   electronExecutable?: string;
   viewport?: { width: number; height: number };
@@ -114,6 +115,7 @@ export type PackagedJourneyConfig = {
   journeyId: string;
   declaration: AuthoringJourneyDeclaration;
   evidenceMode?: EvidenceMode;
+  committedEvidencePath?: readonly string[];
   executablePath?: string;
   viewport?: { width: number; height: number };
 };
@@ -344,11 +346,19 @@ export function journeyEvidencePaths(
   workspaceRoot: string,
   journeyId: string,
   mode: JourneyMode,
-  evidenceMode: EvidenceMode
+  evidenceMode: EvidenceMode,
+  committedEvidencePath?: readonly string[]
 ): JourneyEvidencePaths {
   if (!/^[a-z0-9][a-z0-9-]*$/iu.test(journeyId)) throw new Error(`Unsafe journey identifier ${journeyId}.`);
+  const safeCommittedPath = committedEvidencePath === undefined
+    ? [journeyId]
+    : committedEvidencePath.map((segment) => {
+      if (!/^[a-z0-9][a-z0-9-]*$/iu.test(segment)) throw new Error(`Unsafe committed evidence path segment ${segment}.`);
+      return segment;
+    });
+  if (safeCommittedPath.length === 0) throw new Error("Committed evidence requires at least one path segment.");
   const root = evidenceMode === "committed"
-    ? path.join(workspaceRoot, "docs", "evidence", "ether-4.0-recovery", journeyId, mode)
+    ? path.join(workspaceRoot, "docs", "evidence", "ether-4.0-recovery", ...safeCommittedPath, mode)
     : path.join(workspaceRoot, "test-results", "recovery", journeyId, mode, `${Date.now()}-${process.pid}`);
   return {
     root,
@@ -516,7 +526,13 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   assertAuthoringJourneyDeclaration(config.declaration);
   const workspaceRoot = path.resolve(config.workspaceRoot);
   const profile = await createIsolatedJourneyProfile();
-  const evidence = journeyEvidencePaths(workspaceRoot, config.journeyId, config.mode, config.evidenceMode ?? "ephemeral");
+  const evidence = journeyEvidencePaths(
+    workspaceRoot,
+    config.journeyId,
+    config.mode,
+    config.evidenceMode ?? "ephemeral",
+    config.committedEvidencePath
+  );
   const viewport = config.viewport ?? DEFAULT_VIEWPORT;
   let sourceApp: ElectronApplication | null = null;
   let packagedBrowser: Browser | null = null;

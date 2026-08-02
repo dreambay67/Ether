@@ -23,6 +23,8 @@
     "test:conformance:antigravity": "cross-env ETHER_TEST_SUITE=conformance:antigravity vitest run --config vitest.integration.config.ts",
     "test:smoke": "playwright test --config playwright.config.ts",
     "test:recovery-driver": "vitest run --config vitest.config.ts tests/recovery-journey-driver.test.ts",
+    "test:recovery-baseline:source": "cross-env ETHER_RECOVERY_BASELINE_MODE=source-electron playwright test --config playwright.recovery-baseline.config.ts",
+    "test:recovery-baseline:packaged": "cross-env ETHER_RECOVERY_BASELINE_MODE=packaged playwright test --config playwright.recovery-baseline.config.ts",
     "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
     "test:acceptance": "pnpm --workspace-root test:acceptance"
