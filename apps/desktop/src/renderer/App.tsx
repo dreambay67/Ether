@@ -7,6 +7,7 @@ import type {
   DesktopReference,
   DocumentCommandResult,
   DocumentDescriptor,
+  RepairResult,
   ReferenceAction
 } from "../shared/ipc/contracts";
 import { ProjectHeader } from "./project/ProjectHeader";
@@ -18,7 +19,7 @@ import {
   normalizeInterfacePreferences,
   SettingsPanel
 } from "./project/SettingsPanel";
-import { StartScreen } from "./project/StartScreen";
+import { DocumentRepairDialog, StartScreen } from "./project/StartScreen";
 import { useDesktopSettings } from "./project/useDesktopSettings";
 import { useProjectHealth } from "./project/useProjectHealth";
 import { useProjectSession } from "./project/useProjectSession";
@@ -39,6 +40,7 @@ export function App() {
   const { state, document } = useProjectSession();
   const [graph, setGraph] = useState<EtherGraph | null>(null);
   const [message, setMessage] = useState("Preparing an untitled document...");
+  const [repair, setRepair] = useState<RepairResult | null>(null);
   const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
   const [inspectorContext, setInspectorContext] = useState<InspectorContext | null>(null);
@@ -206,6 +208,21 @@ export function App() {
     }
   };
 
+  const runRepair = async (allowLossy = false, confirmationId?: string) => {
+    try {
+      const result = await window.ether.document.repair(allowLossy, confirmationId);
+      setRepair(result.kind === "cancelled" ? null : result);
+      if (result.kind === "cancelled") setMessage("Repair cancelled.");
+    } catch (error) {
+      setRepair(null);
+      setMessage(error instanceof Error ? error.message : "The document could not be repaired.");
+    }
+  };
+  const closeRepair = () => {
+    setRepair(null);
+    void window.ether.document.cancelRepair().catch(() => undefined);
+  };
+
   const makePortable = async (documentId: string) => {
     try {
       const result = await window.ether.document.makePortable(documentId);
@@ -252,13 +269,17 @@ export function App() {
     return (
       <StartScreen
         message={state.error ?? message}
+        repair={repair}
         onNew={() => void window.ether.document.new()}
         onOpen={() => void window.ether.document.open()}
+        onRepair={(allowLossy) => void runRepair(allowLossy, repair?.kind === "needs-confirmation" ? repair.confirmationId : undefined)}
+        onCloseRepair={closeRepair}
       />
     );
   }
 
   return (
+    <>
     <EtherShell
       documentId={document.documentId}
       references={references}
@@ -291,6 +312,7 @@ export function App() {
           onSaveCopy={() => void runDocumentCommand((id) => window.ether.document.saveCopy(id))}
           onCompact={() => void compact(document.documentId)}
           onMakePortable={() => void makePortable(document.documentId)}
+          onRepair={() => void runRepair()}
           onToggleArtifacts={toggleArtifacts}
           onProviderHealth={() => setProviderHealthOpen(true)}
           onSettings={() => setSettingsOpen(true)}
@@ -391,6 +413,14 @@ export function App() {
         </section>
       ) : null}
     </EtherShell>
+    {repair === null || repair.kind === "cancelled" ? null : (
+      <DocumentRepairDialog
+        repair={repair}
+        onConfirm={() => void runRepair(true, repair.kind === "needs-confirmation" ? repair.confirmationId : undefined)}
+        onClose={closeRepair}
+      />
+    )}
+    </>
   );
 }
 const referenceActions = [

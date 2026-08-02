@@ -2659,6 +2659,8 @@ describe("document IPC lifecycle", () => {
       rendererUrl: "http://127.0.0.1:5173/",
       service,
       openDocument: () => service.open(),
+      repairDocument: async () => ({ kind: "cancelled" as const }),
+      cancelRepair: () => undefined,
       openPath: (filePath) => service.openPath(filePath)
     });
     const event = { sender: webContents, senderFrame: mainFrame };

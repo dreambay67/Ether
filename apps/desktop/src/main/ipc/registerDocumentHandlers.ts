@@ -26,6 +26,8 @@ export function registerDocumentHandlers(options: {
   }>;
   bootstrapDocument?: () => Promise<unknown>;
   openDocument(): Promise<unknown>;
+  repairDocument(allowLossy: boolean, confirmationId?: string): Promise<unknown>;
+  cancelRepair(): void;
   openPath(filePath: string): Promise<unknown>;
 }): () => void {
   const { appVersion, ipcMain, mainWindow, rendererUrl, service, openDocument, openPath, providerService } = options;
@@ -33,6 +35,11 @@ export function registerDocumentHandlers(options: {
     [desktopIpcChannels.document.bootstrap, () => options.bootstrapDocument?.() ?? service.bootstrap()],
     [desktopIpcChannels.document.new, () => service.newDocument()],
     [desktopIpcChannels.document.open, () => openDocument()],
+    [desktopIpcChannels.document.repair, (request) => {
+      const repair = request as { allowLossy: boolean; confirmationId?: string };
+      return options.repairDocument(repair.allowLossy, repair.confirmationId);
+    }],
+    [desktopIpcChannels.document.cancelRepair, () => options.cancelRepair()],
     [desktopIpcChannels.document.openDropped, (request) => {
       const dropped = request as { documentId: string; pathGrantId: string };
       return openPath(service.consumeDroppedDocumentGrant(dropped.documentId, dropped.pathGrantId));

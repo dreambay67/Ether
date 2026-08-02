@@ -9,7 +9,8 @@ import {
   PackageCheck,
   Save,
   SaveAll,
-  Settings2
+  Settings2,
+  Wrench
 } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 
@@ -26,6 +27,7 @@ export function ProjectHeader({
   onSaveCopy,
   onCompact,
   onMakePortable,
+  onRepair,
   onToggleArtifacts,
   onProviderHealth,
   onSettings,
@@ -42,6 +44,7 @@ export function ProjectHeader({
   onSaveCopy(): void;
   onCompact(): void;
   onMakePortable(): void;
+  onRepair(): void;
   onToggleArtifacts(): void;
   onProviderHealth(): void;
   onSettings(): void;
@@ -71,6 +74,7 @@ export function ProjectHeader({
         <IconCommand label="Save a copy" icon={<Copy size={16} />} onClick={onSaveCopy} disabled={!document.commands.saveCopy} />
         <IconCommand label="Compact document" icon={<ArchiveRestore size={16} />} onClick={onCompact} disabled={!document.commands.compact} />
         <IconCommand label="Make document portable" icon={<PackageCheck size={16} />} onClick={onMakePortable} disabled={!document.commands.makePortable} />
+        <IconCommand label="Repair damaged document" icon={<Wrench size={16} />} onClick={onRepair} />
         <button ref={historyButtonRef} type="button" title="Document History" aria-label="Document History" aria-haspopup="dialog" aria-expanded={historyOpen} onClick={onHistory}>
           <History size={16} aria-hidden="true" />
         </button>

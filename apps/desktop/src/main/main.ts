@@ -13,6 +13,7 @@ import {
   type MenuItemConstructorOptions
 } from "electron";
 import { FakeImageProvider, UnavailableImageProvider } from "@ether/providers";
+import { RepairDocumentError, repairDocument as repairEtherDocument } from "@ether/document";
 import {
   startEtherMcpApplicationBridge,
   type EtherMcpApplicationBridge,
@@ -20,6 +21,7 @@ import {
 } from "@ether/mcp-server/bridge";
 
 import { registerDocumentHandlers } from "./ipc/registerDocumentHandlers.js";
+import { normalizeDesktopError } from "../shared/ipc/contracts.js";
 import { registerGraphHandlers } from "./ipc/registerGraphHandlers.js";
 import { registerApplicationHandlers } from "./ipc/registerApplicationHandlers.js";
 import {
@@ -284,6 +286,50 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     await openController.request("picker");
     return service.snapshot();
   };
+  let pendingRepair: { confirmationId: string; createdAt: number; sourcePath: string; destinationPath: string } | null = null;
+  const cancelRepair = () => { pendingRepair = null; };
+  const repairDocument = async (allowLossy: boolean, confirmationId?: string) => {
+    if (!allowLossy) {
+      cancelRepair();
+      const sourcePath = await dialogs.openDocument();
+      if (sourcePath === null) return { kind: "cancelled" as const };
+      const destinationPath = await (dialogs.saveRepairDocument?.() ?? dialogs.saveDocument("save-as"));
+      if (destinationPath === null) return { kind: "cancelled" as const };
+      pendingRepair = { confirmationId: randomUUID(), createdAt: Date.now(), sourcePath, destinationPath };
+    }
+    if (
+      pendingRepair === null ||
+      (allowLossy && (confirmationId !== pendingRepair.confirmationId || Date.now() - pendingRepair.createdAt > 5 * 60_000))
+    ) {
+      cancelRepair();
+      throw Object.assign(new Error("Start repair again to choose the damaged document and a new destination."), {
+        code: "REPAIR_CONFIRMATION_EXPIRED",
+        category: "document"
+      });
+    }
+    const repairSelection = pendingRepair;
+    try {
+      const report = await repairEtherDocument(repairSelection.sourcePath, repairSelection.destinationPath, {
+        allowLossy,
+        appDataRoot
+      });
+      pendingRepair = null;
+      return {
+        kind: "completed" as const,
+        report: repairReportForRenderer(report)
+      };
+    } catch (error) {
+      if (error instanceof RepairDocumentError && error.code === "LOSSY_REPAIR_REQUIRES_OPT_IN" && error.preview !== undefined) {
+        return {
+          kind: "needs-confirmation" as const,
+          confirmationId: repairSelection.confirmationId,
+          report: repairReportForRenderer(error.preview)
+        };
+      }
+      pendingRepair = null;
+      throw error;
+    }
+  };
   const openPath = async (documentPath: string) => {
     await openController.request("drop", documentPath);
     return service.snapshot();
@@ -326,6 +372,8 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
       return service.snapshot();
     },
     openDocument,
+    repairDocument,
+    cancelRepair,
     openPath
   });
   const disposeGraphHandlers = registerGraphHandlers({
@@ -546,6 +594,20 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   return { mainWindow, service, providerService, mcpBridge };
 }
 
+function repairReportForRenderer(report: {
+  losses: Array<{ entityId: string; reason: string; type: string }>;
+  recovered: { artifacts: number; blobs: number; graphs: number; references: number };
+  statement: "logical-row-repair-only";
+}) {
+  return {
+    ...report,
+    losses: report.losses.map((loss) => ({
+      ...loss,
+      reason: normalizeDesktopError(Object.assign(new Error(loss.reason), { category: "document" })).message
+    }))
+  };
+}
+
 function resolveRendererUrl(): string {
   const developmentUrl = process.env.ETHER_RENDERER_URL;
   if (isLocalDevelopmentRendererUrl(developmentUrl, !app.isPackaged)) return developmentUrl!;
@@ -572,6 +634,14 @@ function createNativeDialogPort(getWindow: () => BrowserWindow): NativeDialogPor
       const result = await dialog.showSaveDialog(getWindow(), {
         title: kind === "save-copy" ? "Save a Copy" : "Save Ether Document",
         defaultPath: kind === "save-copy" ? "Untitled copy.ether" : "Untitled.ether",
+        filters: [{ name: "Ether Documents", extensions: ["ether"] }]
+      });
+      return result.canceled ? null : result.filePath ?? null;
+    },
+    saveRepairDocument: async () => {
+      const result = await dialog.showSaveDialog(getWindow(), {
+        title: "Save Repaired Ether Document",
+        defaultPath: "Recovered copy.ether",
         filters: [{ name: "Ether Documents", extensions: ["ether"] }]
       });
       return result.canceled ? null : result.filePath ?? null;

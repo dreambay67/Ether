@@ -67,6 +67,7 @@ import {
 
 export interface NativeDialogPort {
   openDocument(): Promise<string | null>;
+  saveRepairDocument?(): Promise<string | null>;
   saveDocument(kind?: "save-as" | "save-copy"): Promise<string | null>;
   locateReference(referenceId: string): Promise<string | null>;
   searchReferenceFolder(referenceId: string): Promise<string | null>;

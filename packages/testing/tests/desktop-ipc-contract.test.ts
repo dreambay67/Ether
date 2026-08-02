@@ -84,6 +84,42 @@ describe("desktop IPC contract", () => {
     ).toBe(true);
   });
 
+  it("keeps repair selection and its lossy confirmation path-free", async () => {
+    const repair = desktopIpcContracts[desktopIpcChannels.document.repair];
+    expect(repair.request.safeParse({ allowLossy: false }).success).toBe(true);
+    expect(repair.request.safeParse({ allowLossy: true, confirmationId: "repair-confirmation-1" }).success).toBe(true);
+    expect(repair.request.safeParse({ allowLossy: false, sourcePath: "C:\\private\\damaged.ether" }).success).toBe(false);
+    expect(repair.request.safeParse({ allowLossy: true, destinationPath: "C:\\private\\repaired.ether" }).success).toBe(false);
+    expect(repair.response.safeParse({
+      ok: true,
+      value: {
+        kind: "needs-confirmation",
+        confirmationId: "repair-confirmation-1",
+        report: {
+          losses: [{ entityId: "blob-1", type: "blob", reason: "Embedded media could not be recovered." }],
+          recovered: { artifacts: 0, blobs: 0, graphs: 1, references: 0 },
+          statement: "logical-row-repair-only"
+        }
+      }
+    }).success).toBe(true);
+
+    const invocations: Array<{ channel: string; request: unknown }> = [];
+    const bridge = createEtherBridge({
+      invoke: async (channel, request) => {
+        invocations.push({ channel, request });
+        return { ok: true, value: { kind: "cancelled" } };
+      },
+      subscribe: () => () => undefined,
+      openDroppedDocument: async () => ({ ok: true, value: undefined })
+    });
+    await bridge.document.repair(true, "repair-confirmation-1");
+    await bridge.document.cancelRepair();
+    expect(invocations).toEqual([
+      { channel: desktopIpcChannels.document.repair, request: { allowLossy: true, confirmationId: "repair-confirmation-1" } },
+      { channel: desktopIpcChannels.document.cancelRepair, request: {} }
+    ]);
+  });
+
   it("keeps generic mutation policy exhaustive and desktop lifecycle-owned", () => {
     expect(Object.keys(applicationCommandMutationPolicy).sort()).toEqual([...applicationCommandNames].sort());
     for (const name of applicationCommandNames.filter((candidate) => candidate.startsWith("document."))) {
@@ -494,6 +530,7 @@ describe("desktop IPC contract", () => {
     ]);
     expect(Object.keys(bridge.document).sort()).toEqual([
       "bootstrap",
+      "cancelRepair",
       "close",
       "compact",
       "makePortable",
@@ -501,6 +538,7 @@ describe("desktop IPC contract", () => {
       "onEvent",
       "open",
       "openDropped",
+      "repair",
       "save",
       "saveAs",
       "saveCopy"

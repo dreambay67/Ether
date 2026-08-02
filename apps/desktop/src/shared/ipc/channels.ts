@@ -3,6 +3,8 @@ export const desktopIpcChannels = {
     bootstrap: "ether:document:bootstrap",
     new: "ether:document:new",
     open: "ether:document:open",
+    repair: "ether:document:repair",
+    cancelRepair: "ether:document:cancel-repair",
     openDropped: "ether:document:open-dropped",
     save: "ether:document:save",
     saveAs: "ether:document:save-as",

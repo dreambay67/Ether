@@ -51,11 +51,17 @@ export interface RepairLoss {
 
 export class RepairDocumentError extends Error {
   readonly code: string;
+  readonly preview: Omit<RepairReport, "destinationPath"> | undefined;
 
-  constructor(code: string, message: string) {
+  constructor(
+    code: string,
+    message: string,
+    preview?: Omit<RepairReport, "destinationPath">
+  ) {
     super(message);
     this.name = "RepairDocumentError";
     this.code = code;
+    this.preview = preview;
   }
 }
 
@@ -338,6 +344,12 @@ export async function repairDocument(
 ): Promise<RepairReport> {
   const absoluteSource = path.resolve(sourcePath);
   const absoluteDestination = path.resolve(destinationPath);
+  if (path.extname(absoluteSource).toLocaleLowerCase() !== ".ether") {
+    throw new RepairDocumentError("INVALID_REPAIR_SOURCE", "Choose an Ether document to repair.");
+  }
+  if (path.extname(absoluteDestination).toLocaleLowerCase() !== ".ether") {
+    throw new RepairDocumentError("INVALID_REPAIR_DESTINATION", "Repair destination must be an Ether document.");
+  }
   if (absoluteSource === absoluteDestination) {
     throw new RepairDocumentError("INVALID_REPAIR_DESTINATION", "Repair requires a new file path.");
   }
@@ -671,7 +683,8 @@ export async function repairDocument(
     if (losses.length > 0 && options.allowLossy !== true) {
       throw new RepairDocumentError(
         "LOSSY_REPAIR_REQUIRES_OPT_IN",
-        `Repair found ${losses.length} logical row loss(es); pass allowLossy to create a partial copy.`
+        `Repair found ${losses.length} recoverability issue(s). Review the report before creating a partial copy.`,
+        { losses, recovered, statement: "logical-row-repair-only" }
       );
     }
     await destination[DOCUMENT_STORE_INTERNAL]("write", ({ revisions }) =>

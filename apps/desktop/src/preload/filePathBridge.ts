@@ -7,6 +7,7 @@ import type {
   DocumentDescriptor,
   NormalizedResult,
   PortableResult,
+  RepairResult,
   ReferenceFileSelectionResult
 } from "../shared/ipc/contracts";
 import type { GraphTransaction } from "@ether/schema";
@@ -48,6 +49,11 @@ export function createEtherBridge(transport: BridgeTransport) {
       bootstrap: () => unwrap<DocumentDescriptor>(transport.invoke(desktopIpcChannels.document.bootstrap, {})),
       new: () => unwrap<DocumentDescriptor>(transport.invoke(desktopIpcChannels.document.new, {})),
       open: () => unwrap<DocumentDescriptor>(transport.invoke(desktopIpcChannels.document.open, {})),
+      repair: (allowLossy = false, confirmationId?: string) => unwrap<RepairResult>(transport.invoke(
+        desktopIpcChannels.document.repair,
+        { allowLossy, ...(confirmationId === undefined ? {} : { confirmationId }) }
+      )),
+      cancelRepair: () => unwrap<null>(transport.invoke(desktopIpcChannels.document.cancelRepair, {})),
       openDropped: (file: File, documentId: string) =>
         unwrap<DocumentDescriptor>(transport.openDroppedDocument(file, documentId)),
       save: (documentId: string) => scoped<DocumentDescriptor>(desktopIpcChannels.document.save, documentId),

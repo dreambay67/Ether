@@ -1063,7 +1063,16 @@ describe("Ether AppData recovery and logical repair", () => {
     await expect(repairDocument(sourcePath, refusedPath, {
       appDataRoot,
       environment: environment(appDataRoot)
-    })).rejects.toMatchObject({ code: "LOSSY_REPAIR_REQUIRES_OPT_IN" });
+    })).rejects.toMatchObject({
+      code: "LOSSY_REPAIR_REQUIRES_OPT_IN",
+      preview: expect.objectContaining({
+        losses: expect.arrayContaining([
+          expect.objectContaining({ type: "blob", entityId: bad.contentKey }),
+          expect.objectContaining({ type: "artifact", entityId: "artifact-bad" })
+        ]),
+        statement: "logical-row-repair-only"
+      })
+    });
     expect(existsSync(refusedPath)).toBe(false);
 
     const destinationPath = path.join(root, "Repaired.ether");

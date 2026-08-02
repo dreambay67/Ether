@@ -558,6 +558,8 @@ describe("desktop security boundaries", () => {
       rendererUrl: "http://127.0.0.1:5173/",
       service,
       openDocument: async () => active,
+      repairDocument: async () => ({ kind: "cancelled" as const }),
+      cancelRepair: () => undefined,
       openPath: async (filePath) => { openedPath = filePath; return active; }
     });
     const trustedEvent = {

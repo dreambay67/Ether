@@ -89,6 +89,31 @@ export const PortableResultSchema = z
   })
   .strict();
 export type PortableResult = z.infer<typeof PortableResultSchema>;
+const RepairLossSchema = z.object({
+  entityId: id,
+  reason: z.string().min(1),
+  type: z.enum([
+    "artifact", "blob", "collection", "collection-membership", "export-record", "graph",
+    "lineage", "provenance", "rating", "reference", "tag"
+  ])
+}).strict();
+export const RepairReportSchema = z.object({
+  losses: z.array(RepairLossSchema),
+  recovered: z.object({
+    artifacts: z.number().int().nonnegative(),
+    blobs: z.number().int().nonnegative(),
+    graphs: z.number().int().nonnegative(),
+    references: z.number().int().nonnegative()
+  }).strict(),
+  statement: z.literal("logical-row-repair-only")
+}).strict();
+export type RepairReport = z.infer<typeof RepairReportSchema>;
+export const RepairResultSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("cancelled") }).strict(),
+  z.object({ kind: z.literal("needs-confirmation"), confirmationId: id, report: RepairReportSchema }).strict(),
+  z.object({ kind: z.literal("completed"), report: RepairReportSchema }).strict()
+]);
+export type RepairResult = z.infer<typeof RepairResultSchema>;
 export const DocumentCommandResultSchema = z.discriminatedUnion("kind", [
   CompactResultSchema.extend({ kind: z.literal("compact") }).strict(),
   PortableResultSchema.extend({ kind: z.literal("portable") }).strict()
@@ -147,6 +172,11 @@ export const desktopIpcContracts = {
   [desktopIpcChannels.document.bootstrap]: { request: empty, response: resultSchema(DocumentDescriptorSchema) },
   [desktopIpcChannels.document.new]: { request: empty, response: resultSchema(DocumentDescriptorSchema) },
   [desktopIpcChannels.document.open]: { request: empty, response: resultSchema(DocumentDescriptorSchema) },
+  [desktopIpcChannels.document.repair]: {
+    request: z.object({ allowLossy: z.boolean(), confirmationId: id.optional() }).strict(),
+    response: resultSchema(RepairResultSchema)
+  },
+  [desktopIpcChannels.document.cancelRepair]: { request: empty, response: resultSchema(z.null()) },
   [desktopIpcChannels.document.openDropped]: {
     request: z.object({ documentId: id, pathGrantId: id }).strict(),
     response: resultSchema(DocumentDescriptorSchema)
