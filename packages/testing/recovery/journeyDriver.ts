@@ -559,7 +559,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       await requireFile(electronExecutable, "Electron executable");
       sourceApp = await electron.launch({
         executablePath: electronExecutable,
-        args: [sourceEntrypoint, ...(config.sourceArgs?.(profile) ?? []), `--user-data-dir=${profile.userData}`, "--disable-gpu"],
+        args: [sourceEntrypoint, ...(config.sourceArgs?.(profile) ?? [])],
         env: environment
       });
       processOutput = captureProcessOutput(sourceApp.process());
