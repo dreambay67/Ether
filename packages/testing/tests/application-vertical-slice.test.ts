@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -182,8 +182,40 @@ describe("Ether application vertical slice", () => {
     await expect(application.readArtifactBytes(artifact.id)).resolves.toEqual(
       expect.objectContaining({ 0: 0x89, 1: 0x50, 2: 0x4e, 3: 0x47 })
     );
+
+    const compactBefore = {
+      graph: await application.queryGraph("graph-root"),
+      artifacts: await application.searchArtifacts({ text: "" }),
+      lineage: await application.queryArtifactLineage(artifact.id),
+      job: await application.queryJob(started.id),
+      plan: await application.queryPlan(preview.id),
+      hashes: { planContentHash: preview.contentHash, artifactContentKey: artifact.contentKey }
+    };
+    await expect(application.compactDocument()).resolves.toEqual(expect.objectContaining({
+      beforeBytes: expect.any(Number),
+      afterBytes: expect.any(Number)
+    }));
+    expect({
+      graph: await application.queryGraph("graph-root"),
+      artifacts: await application.searchArtifacts({ text: "" }),
+      lineage: await application.queryArtifactLineage(artifact.id),
+      job: await application.queryJob(started.id),
+      plan: await application.queryPlan(preview.id),
+      hashes: { planContentHash: preview.contentHash, artifactContentKey: artifact.contentKey }
+    }).toEqual(compactBefore);
+
+    const disposableRoots = [
+      path.join(appDataRoot, "cache"),
+      path.join(appDataRoot, "staging"),
+      path.join(documentsRoot, "Live Output")
+    ];
+    await Promise.all(disposableRoots.map(async (disposableRoot) => {
+      await mkdir(disposableRoot, { recursive: true });
+      await writeFile(path.join(disposableRoot, "disposable-sentinel"), "safe to delete", "utf8");
+    }));
     await application.saveDocument({ commandId: "command-save" });
     await application.closeDocument();
+    await Promise.all(disposableRoots.map((disposableRoot) => rm(disposableRoot, { recursive: true, force: true })));
 
     const reopened = new EtherApplication({
       appDataRoot,

@@ -139,6 +139,24 @@ test("real Electron persists canvas edits and serves embedded artifacts through 
   }
 });
 
+test("real Electron quits after a successful autosave without a false unsaved-changes prompt", async () => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-clean-quit-"));
+  const electronApp = await launchFixture(fixtureRoot);
+  const electronProcess = electronApp.process();
+  try {
+    const page = await electronApp.firstWindow();
+    await expect(page.getByTestId("document-canvas")).toBeVisible();
+    await page.getByRole("button", { name: "Prompt", exact: true }).click();
+    await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await electronApp.evaluate(({ app }) => app.quit());
+    await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+    expect(page.isClosed()).toBe(true);
+  } finally {
+    if (electronProcess.exitCode === null) await forceExit(electronApp);
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("real Electron delivers autosave failure details and ignores a stale snapshot", async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "ether-electron-autosave-"));
   const electronApp = await launchFixture(fixtureRoot, ["--autosave-failure", "--stale-event"]);

@@ -244,6 +244,56 @@ describe("desktop document lifecycle", () => {
     await service.close();
   });
 
+  it("creates New without invoking a parent picker or save dialog", async () => {
+    const root = await tempRoot("ether-desktop-new-no-picker-");
+    let openCalls = 0;
+    let saveCalls = 0;
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({
+        openDocument: async () => { openCalls += 1; return null; },
+        saveDocument: async () => { saveCalls += 1; return null; }
+      }),
+      provider: new FakeImageProvider()
+    });
+
+    await service.bootstrap();
+    const created = await service.newDocument();
+
+    expect(created).toMatchObject({ displayName: "Untitled", named: false, mode: "writable" });
+    expect(created).not.toHaveProperty("path");
+    expect(openCalls).toBe(0);
+    expect(saveCalls).toBe(0);
+    await service.close();
+  });
+
+  it("keeps leases and recovery metadata under AppData, never beside the Ether file", async () => {
+    const root = await tempRoot("ether-desktop-metadata-roots-");
+    const appDataRoot = path.join(root, "appdata");
+    const documentPath = path.join(root, "Metadata placement.ether");
+    const service = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => documentPath }),
+      provider: new FakeImageProvider()
+    });
+
+    try {
+      const untitled = await service.bootstrap();
+      await service.save(untitled.documentId);
+
+      expect((await readdir(root)).sort()).toEqual(["Metadata placement.ether", "appdata"]);
+      const leaseEntries = await readdir(path.join(appDataRoot, "leases"));
+      expect(leaseEntries.length).toBeGreaterThan(0);
+      expect(leaseEntries.some((entry) => entry.endsWith(".json"))).toBe(true);
+      expect((await readdir(path.dirname(documentPath))).filter((name) => name !== "appdata" && name !== path.basename(documentPath)))
+        .toEqual([]);
+    } finally {
+      await service.close();
+    }
+  });
+
   it("uses a desktop-only path grant to add an embedded reference and forwards its scoped event", async () => {
     const root = await tempRoot("ether-desktop-reference-picker-");
     const referencePath = path.join(root, "selected-reference.png");
@@ -379,6 +429,40 @@ describe("desktop document lifecycle", () => {
       displayName: "Kampaň Ω.ether",
       named: true
     });
+    await reopened.close();
+  });
+
+  it("closes cleanly, then reconciles a stale journal before a writable reopen", async () => {
+    const root = await tempRoot("ether-desktop-clean-reopen-");
+    const appDataRoot = path.join(root, "appdata");
+    const documentPath = path.join(root, "Clean close.ether");
+    const creator = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => documentPath }),
+      provider: new FakeImageProvider()
+    });
+    const initial = await creator.bootstrap();
+    await creator.save(initial.documentId);
+    await creator.close();
+
+    expect((await readdir(root)).sort()).toEqual(["Clean close.ether", "appdata"]);
+    const recoveryPaths = await stagePendingCompactRecovery(documentPath, path.join(appDataRoot, "recovery"));
+    const reopened = new DesktopApplicationService({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    await expect(reopened.openPath(documentPath)).resolves.toMatchObject({
+      displayName: "Clean close.ether",
+      mode: "writable",
+      readOnlyReason: null
+    });
+    for (const recoveryPath of recoveryPaths) {
+      await expect(stat(recoveryPath).then(() => true, () => false)).resolves.toBe(false);
+    }
+    expect((await readdir(root)).sort()).toEqual(["Clean close.ether", "appdata"]);
     await reopened.close();
   });
 
@@ -795,6 +879,22 @@ describe("desktop document lifecycle", () => {
 
     expect(opened).toHaveLength(1);
     expect(focused).toBe(4);
+  });
+
+  it("reports a missing recent or Jump List target through the main open route", async () => {
+    const root = await tempRoot("ether-open-missing-target-");
+    const missingPath = path.join(root, "Missing recent.ether");
+    let opened = 0;
+    const controller = new OpenDocumentController(
+      new OpenDocumentCoordinator({
+        focus: () => undefined,
+        open: async () => { opened += 1; }
+      }),
+      async () => missingPath
+    );
+
+    await expect(controller.request("argv", missingPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(opened).toBe(0);
   });
 
   it("keeps a fake-provider PNG embedded after save, close, and reopen", async () => {
@@ -2294,6 +2394,36 @@ describe("Windows writable location classification", () => {
       const classification = capability.classify("D:\\Campaign.ether");
       await vi.advanceTimersByTimeAsync(9_000);
       await expect(classification).resolves.toBe("local-fixed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("enforces the normative 12-second default native probe bound", async () => {
+    vi.useFakeTimers();
+    let aborted = false;
+    const create = Reflect.get(applicationServiceModule, "createWindowsLocationCapability") as (
+      port: { inspect(filePath: string, signal: AbortSignal): Promise<never> }
+    ) => { classify(filePath: string): Promise<string> };
+    const capability = create({
+      inspect: async (_filePath, signal) => new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(Object.assign(new Error("probe aborted"), { code: "ABORT_ERR" }));
+        }, { once: true });
+      })
+    });
+    try {
+      let settled = false;
+      const classification = capability.classify("Z:\\default-bound.ether").then((value) => {
+        settled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(11_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(classification).resolves.toBe("unknown");
+      expect(aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }
