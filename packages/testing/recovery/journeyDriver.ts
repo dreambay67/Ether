@@ -692,7 +692,15 @@ async function requireFile(filePath: string, label: string): Promise<void> {
 }
 
 async function closeSourceElectron(sourceApp: ElectronApplication): Promise<void> {
-  const process = sourceApp.process();
+  // Playwright invalidates the ElectronApplication handle when the test has
+  // deliberately killed its browser process tree. Cleanup must remain
+  // idempotent so a completed crash journey can write its evidence.
+  let process: ChildProcess;
+  try {
+    process = sourceApp.process();
+  } catch {
+    return;
+  }
   if (process.exitCode !== null) return;
   const exited = new Promise<void>((resolve) => process.once("exit", () => resolve()));
   await Promise.race([sourceApp.close().catch(() => undefined), delay(5_000)]);
