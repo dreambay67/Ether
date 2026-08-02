@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "document-lifecycle-reopen",
   "mode": "source-electron",
-  "startedAt": "2026-08-02T19:53:28.502Z",
-  "finishedAt": "2026-08-02T19:53:31.053Z",
+  "startedAt": "2026-08-02T20:14:26.869Z",
+  "finishedAt": "2026-08-02T20:14:29.652Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,12 +17,12 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "21f1294a9d15a278f2339449fafdbb53403131b9",
+    "gitCommit": "a824e697b733dc1f82e569fcca6182e1cbe4db34",
     "mode": "source-electron",
     "artifacts": [
       {
         "path": "apps/desktop/dist/index.html",
-        "sha256": "2e576efa0c60ca5da7e764498b319a165358c392a4f1a70cf18b5733f0a72d9f"
+        "sha256": "bfe6e6f2e88ac676609a90fad830627cffa464b4edc8eb808d57b931659d5d96"
       },
       {
         "path": "apps/desktop/dist-electron/main/bootstrap.js",
@@ -30,7 +30,7 @@
       },
       {
         "path": "apps/desktop/dist-electron/preload/preload.cjs",
-        "sha256": "2d0df031b5236237200d9b4ca168417132134b2c6263bb12af08449826d9e6bf"
+        "sha256": "55129d69d37a552ec4c4767db952fab28911ba029a38da8de75d54001e988d7b"
       },
       {
         "path": "node_modules/electron/dist/electron.exe",
@@ -42,9 +42,9 @@
     {
       "sequence": 1,
       "kind": "observation",
-      "label": "Close/reopen recovery check",
-      "expected": "A cleanly closed UI-authored .ether reopens writable without a stale recovery warning.",
-      "actual": "The exact Save As destination reopened with both UI-authored nodes and Saved state.",
+      "label": "Hard-kill recovery reopen",
+      "expected": "The hard-killed UI-authored .ether reclaims its dead same-machine writer lease and reopens writable without a stale recovery warning.",
+      "actual": "The exact Save As destination reopened writable with both UI-authored nodes and Saved state.",
       "durationMs": 0
     },
     {
@@ -53,7 +53,7 @@
       "label": "Capture the exact reopened document",
       "expected": "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 275,
+      "durationMs": 354,
       "screenshotPath": "screenshots/03-reopened-ui-authored-document.png"
     },
     {
