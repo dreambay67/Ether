@@ -215,7 +215,7 @@ async function hardKillLaunchedJourney(mode: JourneyMode, session: RecoveryJourn
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "$all = @(Get-CimInstance Win32_Process)",
-    `$roots = @($all | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' })`,
+    `$roots = @($all | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' -and $_.CommandLine -notmatch '(?:^|\\s)--type(?:=|\\s)' })`,
     "if ($roots.Count -ne 1) { throw ('Expected one exact journey root process for termination; found ' + $roots.Count) }",
     "$targetIds = [System.Collections.Generic.HashSet[int]]::new()",
     "function Add-JourneyProcessTree([int]$processId) { if (-not $targetIds.Add($processId)) { return }; foreach ($child in @($all | Where-Object { $_.ParentProcessId -eq $processId })) { Add-JourneyProcessTree ([int]$child.ProcessId) } }",
