@@ -4,7 +4,7 @@ This ledger records delegated implementation and independent-review work. A row 
 
 | ID | Model | Effort | Assignment | Commit | Findings | Disposition |
 | --- | --- | --- | --- | --- | --- | --- |
-| T01-ledger | Luna | high | Build the 250-item machine-readable acceptance ledger, baseline classification, deterministic validator, status report, and owner-route mappings. No product behavior edits. | pending | Pending focused validation at baseline. | Implemented in fixer worktree; main worker review required. |
+| T01-ledger | Luna | xhigh | Build the 250-item machine-readable acceptance ledger, explicit RX baseline classification, deterministic validator, status report, and owner-route mappings. No product behavior edits. | `1e6879f..dd213ef` plus review-correction commit | 250/250 source records; historical 14 remain PRESENT-UNPROVEN; baseline validator and self-test pass; candidate/gate checks enforce hashes, journeys, and fixture indicators. Main review identified RX triage and journey-contract corrections, applied in the follow-up commit. | Accepted by main worker after the review corrections in the current commit; Phase 0 independent review remains separate and pending. |
 | PH0-review | Sol | high | Independent Phase 0 reviewer: operate the relevant application/evidence workflow first, then inspect T01 ledger, validator, and baseline report. | pending | Pending independent review. | Must review before Phase 0 gate decision; cannot self-approve. |
 
 ## Contract

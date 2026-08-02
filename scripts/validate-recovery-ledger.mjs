@@ -14,6 +14,21 @@ const JOURNEY_IDS = new Set(Array.from({ length: 10 }, (_, index) => `J${String(
 const SHA_RE = /^[0-9a-f]{40}$/i;
 const HASH_RE = /^[0-9a-f]{64}$/i;
 const INJECTION_RE = /(?:state\s*injection|inject(?:ed|ing)?\s+state|pre[-\s]?seed(?:ed)?\s+graph|direct\s+(?:database|db)\s+edit|database\s+edit|seeded\s+graph)/i;
+const EXPECTED_RX_STATUS = {
+  'RX-001': 'PRESENT-UNPROVEN', 'RX-002': 'FAIL', 'RX-003': 'FAIL', 'RX-004': 'MISSING', 'RX-005': 'MISSING', 'RX-006': 'FAIL', 'RX-007': 'MISSING', 'RX-008': 'MISSING', 'RX-009': 'FAIL', 'RX-010': 'FAIL', 'RX-011': 'FAIL', 'RX-012': 'PRESENT-UNPROVEN', 'RX-013': 'MISSING', 'RX-014': 'MISSING', 'RX-015': 'PRESENT-UNPROVEN', 'RX-016': 'MISSING', 'RX-017': 'FAIL', 'RX-018': 'FAIL', 'RX-019': 'MISSING', 'RX-020': 'FAIL', 'RX-021': 'PRESENT-UNPROVEN', 'RX-022': 'PRESENT-UNPROVEN', 'RX-023': 'PRESENT-UNPROVEN', 'RX-024': 'PRESENT-UNPROVEN', 'RX-025': 'PRESENT-UNPROVEN', 'RX-026': 'PRESENT-UNPROVEN', 'RX-027': 'PRESENT-UNPROVEN', 'RX-028': 'MISSING', 'RX-029': 'FAIL', 'RX-030': 'PRESENT-UNPROVEN',
+};
+const CANONICAL_JOURNEYS = {
+  J01: { name: 'First image', startState: 'New blank document', endState: 'Saved generated image visible in Artifacts', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T16, T19, T27', owners: ['T13', 'T16', 'T19', 'T27'] },
+  J02: { name: 'Node catalog', startState: 'New blank document', endState: 'All 17 nodes created, configured, saved, reopened', requiredEvidence: ['P', 'M'], owner: 'T05, T12, T27', owners: ['T05', 'T12', 'T27'] },
+  J03: { name: 'Canvas editing', startState: 'New blank document', endState: 'Select, marquee, move, edit, duplicate, clipboard, delete, undo/redo', requiredEvidence: ['P', 'M'], owner: 'T06-T08, T27', owners: ['T06-T08', 'T27'] },
+  J04: { name: 'Connections', startState: 'Representative six-channel graph', endState: 'Multi-lanes, role edit, lane delete, adapter preview', requiredEvidence: ['P', 'M'], owner: 'T10-T11, T27', owners: ['T10-T11', 'T27'] },
+  J05: { name: 'Module', startState: 'Multi-node selection', endState: 'Locked styled module, enter/edit/exit/collapse/dissolve/undo', requiredEvidence: ['P', 'M'], owner: 'T09, T27', owners: ['T09', 'T27'] },
+  J06: { name: 'Intelligent chain', startState: 'Prompt -> Worker -> Worker -> Image', endState: 'Approved transformed prompt and correct lineage', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T14, T16, T27', owners: ['T13', 'T14', 'T16', 'T27'] },
+  J07: { name: 'References and batch', startState: 'Multiple local references', endState: 'Controlled batch with visible jobs and accepted artifacts', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T15, T18, T19, T27', owners: ['T13', 'T15', 'T18', 'T19', 'T27'] },
+  J08: { name: 'Review and delivery', startState: 'Multiple artifacts', endState: 'Compare, evaluate, filter, collect, export', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T17, T19, T27', owners: ['T13', 'T17', 'T19', 'T27'] },
+  J09: { name: 'Durability', startState: 'Saved working document', endState: 'Close, reopen, recover interruption, continue', requiredEvidence: ['P', 'M'], owner: 'T03, T27', owners: ['T03', 'T27'] },
+  J10: { name: 'Plugin co-producer', startState: 'Blank document with Edit Permit', endState: 'Tailored graph applied; run remains separately permitted', requiredEvidence: ['P', 'M'], owner: 'T21, T27', owners: ['T21', 'T27'] },
+};
 
 const areaBySection = new Map([
   ['1', 'A01'], ['2', 'A02'], ['2.1', 'A02'], ['2.2', 'A02'], ['2.3', 'A02'], ['2.4', 'A02'], ['3', 'A03'], ['4.1', 'A04'], ['4.2', 'A05'], ['4.3', 'A06'], ['4.4', 'A07'], ['5', 'A08'],
@@ -97,7 +112,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
     if (!item || typeof item !== 'object') { push(errors, 'Requirement entries must be objects.'); continue; }
     if (ids.has(item.id)) push(errors, `Duplicate requirement id: ${item.id}.`);
     ids.add(item.id);
-    const required = ['id', 'kind', 'source', 'sourceLine', 'section', 'text', 'status', 'requiredEvidence', 'ownerTasks', 'releaseBlocker', 'ownerRoutes', 'evidence', 'baselineCommit', 'notes'];
+    const required = ['id', 'kind', 'source', 'sourceLine', 'section', 'text', 'status', 'requiredEvidence', 'ownerTasks', 'releaseBlocker', 'ownerRoutes', 'evidence', 'baselineCommit', 'classificationReason', 'notes'];
     for (const field of required) if (!(field in item)) push(errors, `${item.id || '<unknown>'} is missing required field ${field}.`);
     if (!VALID_STATUSES.has(item.status)) push(errors, `${item.id || '<unknown>'} has invalid status ${item.status}.`);
     if (!Array.isArray(item.requiredEvidence) || item.requiredEvidence.length === 0 || item.requiredEvidence.some((code) => !VALID_EVIDENCE.has(code))) push(errors, `${item.id || '<unknown>'} has invalid requiredEvidence.`);
@@ -106,6 +121,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
     if (!Array.isArray(item.ownerRoutes) || item.ownerRoutes.some((route) => !JOURNEY_IDS.has(route))) push(errors, `${item.id || '<unknown>'} has an invalid owner route.`);
     if (!Array.isArray(item.evidence)) push(errors, `${item.id || '<unknown>'} evidence must be an array.`);
     if (!SHA_RE.test(item.baselineCommit || '')) push(errors, `${item.id || '<unknown>'} baselineCommit must be a 40-character SHA-1.`);
+    if (typeof item.classificationReason !== 'string' || item.classificationReason.trim().length < 10) push(errors, `${item.id || '<unknown>'} must include a concrete classificationReason.`);
     if (SHA_RE.test(ledger.recoveryPlanBaselineCommit || '') && item.baselineCommit !== ledger.recoveryPlanBaselineCommit) push(errors, `${item.id || '<unknown>'} baselineCommit does not match recoveryPlanBaselineCommit.`);
     if (Array.isArray(item.requiredEvidence) && item.requiredEvidence.includes('M') && item.ownerRoutes.length === 0) push(errors, `${item.id || '<unknown>'} requires M evidence but has no J01-J10 owner route.`);
     if (['VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED'].includes(item.status)) {
@@ -131,6 +147,17 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
     for (const item of originalTexts) if (!sourceIdSet.has(`${item.sourceLine}:${item.text}`)) push(errors, `${item.id} is orphaned or its wording/source line differs from the original acceptance document.`);
   }
   const expectedRx = new Map(sources.recoveries.map((item) => [item.id, item]));
+  const recoveryMap = ledger.classification?.recoveryMap;
+  if (!recoveryMap || typeof recoveryMap !== 'object') push(errors, 'classification.recoveryMap is required for explicit RX triage.');
+  else {
+    const actualKeys = Object.keys(recoveryMap).sort();
+    const expectedKeys = Object.keys(EXPECTED_RX_STATUS).sort();
+    if (actualKeys.join(',') !== expectedKeys.join(',')) push(errors, 'classification.recoveryMap must cover exactly RX-001..RX-030.');
+    for (const [id, expectedStatus] of Object.entries(EXPECTED_RX_STATUS)) {
+      const mapped = recoveryMap[id];
+      if (!mapped || mapped.status !== expectedStatus || typeof mapped.reason !== 'string' || mapped.reason.trim().length < 10) push(errors, `${id} has an incomplete or incorrect recovery classification map entry.`);
+    }
+  }
   if (recoveries.length === 30) {
     for (const item of recoveries) {
       const source = expectedRx.get(item.id);
@@ -139,6 +166,7 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
         if (source.text !== item.text) push(errors, `${item.id} wording differs from recovery acceptance.`);
         if (source.evidence.join('+') !== item.requiredEvidence.join('+')) push(errors, `${item.id} required evidence differs from recovery acceptance.`);
       }
+      if (EXPECTED_RX_STATUS[item.id] && item.status !== EXPECTED_RX_STATUS[item.id]) push(errors, `${item.id} status ${item.status} does not match the evidence-based baseline classification (${EXPECTED_RX_STATUS[item.id]}).`);
     }
     for (const source of sources.recoveries) if (!recoveries.some((item) => item.id === source.id)) push(errors, `${source.id} is missing from ledger.`);
   }
@@ -147,7 +175,11 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
   const journeyIds = new Set(journeys.map((journey) => journey.id));
   if (journeys.length !== 10 || journeyIds.size !== 10 || [...JOURNEY_IDS].some((id) => !journeyIds.has(id))) push(errors, 'journeys must contain exactly J01-J10 with no duplicates.');
   for (const journey of journeys) {
-    if (!journey.id || !journey.name || !journey.owner || !Array.isArray(journey.requiredEvidence)) push(errors, `${journey.id || '<unknown>'} is missing required journey fields.`);
+    const canonical = CANONICAL_JOURNEYS[journey.id];
+    if (!journey.id || !journey.name || !journey.owner || !Array.isArray(journey.owners) || !Array.isArray(journey.requiredEvidence) || !journey.startState || !journey.endState) push(errors, `${journey.id || '<unknown>'} is missing required journey fields.`);
+    if (canonical) {
+      if (journey.name !== canonical.name || journey.startState !== canonical.startState || journey.endState !== canonical.endState || journey.owner !== canonical.owner || JSON.stringify(journey.owners) !== JSON.stringify(canonical.owners) || JSON.stringify(journey.requiredEvidence) !== JSON.stringify(canonical.requiredEvidence)) push(errors, `${journey.id} does not exactly match the recovery acceptance journey contract.`);
+    }
     if (mode !== 'baseline') inspectActionLog(errors, journey.actionLog, `${journey.id} primary journey`, sourceRoot, true);
   }
 
@@ -204,7 +236,23 @@ function runSelfTest() {
   invalidStatus.requirements[0].status = 'NOPE';
   const invalidResult = validateObject(invalidStatus, { mode: 'baseline' });
   if (!invalidResult.errors.some((error) => /invalid status/.test(error))) throw new Error('Self-test did not reject invalid status fixture.');
-  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status fixtures).');
+  const wrongRxClassification = structuredClone(ledger);
+  wrongRxClassification.requirements.find((item) => item.id === 'RX-002').status = 'MISSING';
+  const wrongRxResult = validateObject(wrongRxClassification, { mode: 'baseline' });
+  if (!wrongRxResult.errors.some((error) => /RX-002 status .*evidence-based baseline classification/.test(error))) throw new Error('Self-test did not reject wrong RX classification.');
+  const incompleteRxMap = structuredClone(ledger);
+  delete incompleteRxMap.classification.recoveryMap['RX-030'];
+  const incompleteMapResult = validateObject(incompleteRxMap, { mode: 'baseline' });
+  if (!incompleteMapResult.errors.some((error) => /recoveryMap must cover exactly/.test(error))) throw new Error('Self-test did not reject incomplete RX classification map.');
+  const wrongJourney = structuredClone(ledger);
+  wrongJourney.journeys.find((journey) => journey.id === 'J01').startState = null;
+  const wrongJourneyResult = validateObject(wrongJourney, { mode: 'baseline' });
+  if (!wrongJourneyResult.errors.some((error) => /J01 is missing required journey fields/.test(error))) throw new Error('Self-test did not reject incomplete journey contract.');
+  const wrongJourneyEvidence = structuredClone(ledger);
+  wrongJourneyEvidence.journeys.find((journey) => journey.id === 'J06').requiredEvidence = ['P', 'M'];
+  const wrongJourneyEvidenceResult = validateObject(wrongJourneyEvidence, { mode: 'baseline' });
+  if (!wrongJourneyEvidenceResult.errors.some((error) => /J06 does not exactly match/.test(error))) throw new Error('Self-test did not reject wrong journey evidence contract.');
+  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status, RX-classification, and journey-contract fixtures).');
 }
 
 const args = process.argv.slice(2);

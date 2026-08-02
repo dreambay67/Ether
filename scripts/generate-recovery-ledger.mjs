@@ -73,6 +73,52 @@ const recoveryMeta = {
   'RX-030': { owners: ['T26', 'T27', 'T28'], routes: ['J01', 'J09'] },
 };
 
+const recoveryClassification = {
+  'RX-001': { status: 'PRESENT-UNPROVEN', reason: 'Recovery acceptance and design documents now identify the candidate as unreleased; candidate evidence does not yet exist.' },
+  'RX-002': { status: 'FAIL', reason: 'The rejected-candidate audit states blank-canvas authoring exposes only Prompt and Image, so the all-17-node library journey is broken.' },
+  'RX-003': { status: 'FAIL', reason: 'The rejected authoring surface does not expose a complete registry-driven library, so clicking every canonical item cannot currently be completed.' },
+  'RX-004': { status: 'MISSING', reason: 'The recovery design requires drag-from-library creation, but no usable blank-canvas drag journey is evidenced at baseline.' },
+  'RX-005': { status: 'MISSING', reason: 'The searchable quick-add palette and keyboard insertion route are specified recovery behavior with no usable baseline surface.' },
+  'RX-006': { status: 'FAIL', reason: 'The partial blank-canvas catalog does not create and validate every canonical registry default as required.' },
+  'RX-007': { status: 'MISSING', reason: 'Search across family, purpose, channel, synonym, favorites, and recent is specified but not available as a usable complete catalog surface.' },
+  'RX-008': { status: 'MISSING', reason: 'Per-item purpose, channel, example, and hover/focus help are recovery requirements without a complete baseline library surface.' },
+  'RX-009': { status: 'FAIL', reason: 'The recovery audit identifies direct editing as incomplete; titles and primary content are not reliably editable on-canvas.' },
+  'RX-010': { status: 'FAIL', reason: 'The recovery design records unreliable marquee/pointer behavior and the baseline renderer can fail during marquee interaction.' },
+  'RX-011': { status: 'FAIL', reason: 'Selection ownership and group movement are called out as unreliable in the rejected candidate.' },
+  'RX-012': { status: 'PRESENT-UNPROVEN', reason: 'Right-drag pan is specified in the interaction model, but no qualifying packaged proof exists at baseline.' },
+  'RX-013': { status: 'MISSING', reason: 'Complete-selection duplicate with stable connections and undo is specified recovery behavior without a usable baseline journey.' },
+  'RX-014': { status: 'MISSING', reason: 'Graph-aware clipboard behavior is specified recovery behavior without a usable canvas-owned clipboard journey at baseline.' },
+  'RX-015': { status: 'PRESENT-UNPROVEN', reason: 'Deletion and impact-aware confirmation have implementation scope in the recovery model, but packaged proof is absent at baseline.' },
+  'RX-016': { status: 'MISSING', reason: 'Command Palette graph commands and disabled-state reasons are specified but the complete authoring command surface is not available at baseline.' },
+  'RX-017': { status: 'FAIL', reason: 'The recovery design explicitly retires Visual Group as a separate concept; the rejected candidate still has incomplete group/module ownership.' },
+  'RX-018': { status: 'FAIL', reason: 'The recovery audit identifies modules as incomplete without coherent locking/editing ownership, so default locked membership is broken at baseline.' },
+  'RX-019': { status: 'MISSING', reason: 'The full styled Module control surface is specified but no usable baseline journey exposes rename, description, accent, lock, collapse, and parameters together.' },
+  'RX-020': { status: 'FAIL', reason: 'The recovery design identifies groups/modules as separate incomplete concepts, so enter/exit/conversion/dissolution semantics are broken at baseline.' },
+  'RX-021': { status: 'PRESENT-UNPROVEN', reason: 'Channel-dot visibility behavior is specified in the renderer model, but qualifying packaged and visual proof is absent at baseline.' },
+  'RX-022': { status: 'PRESENT-UNPROVEN', reason: 'Multi-lane channel/role/selector semantics are present in the recovery contract, but no packaged proof covers them at baseline.' },
+  'RX-023': { status: 'PRESENT-UNPROVEN', reason: 'Role badges and endpoint Inspector agreement are specified interaction behavior, but no qualifying packaged/visual evidence exists at baseline.' },
+  'RX-024': { status: 'PRESENT-UNPROVEN', reason: 'Edge-only lane deletion is specified in the interaction contract, but no packaged proof demonstrates it at baseline.' },
+  'RX-025': { status: 'PRESENT-UNPROVEN', reason: 'Versioned outputs and authored-config isolation are required by the technical model, but no qualifying run journey proves them at baseline.' },
+  'RX-026': { status: 'PRESENT-UNPROVEN', reason: 'Prompt/Worker lineage rules are specified in the connection contract, but no packaged lineage evidence exists at baseline.' },
+  'RX-027': { status: 'PRESENT-UNPROVEN', reason: 'Node runtime state requirements are specified by the recovery design, but no packaged status-duration/actionability evidence exists at baseline.' },
+  'RX-028': { status: 'MISSING', reason: 'Recipe acceptance explicitly requires starting from a new document; no complete blank-document recipe journey exists at baseline.' },
+  'RX-029': { status: 'FAIL', reason: 'The rejected-candidate manual/screenshot evidence did not prove blank-canvas authoring from a relevant starting state and substituted the claimed authoring state.' },
+  'RX-030': { status: 'PRESENT-UNPROVEN', reason: 'The application-first independent-review control is specified and queued, but final journey logs and explicit owner acceptance cannot exist at baseline.' },
+};
+
+const canonicalJourneys = [
+  { id: 'J01', name: 'First image', startState: 'New blank document', endState: 'Saved generated image visible in Artifacts', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T16, T19, T27', owners: ['T13', 'T16', 'T19', 'T27'] },
+  { id: 'J02', name: 'Node catalog', startState: 'New blank document', endState: 'All 17 nodes created, configured, saved, reopened', requiredEvidence: ['P', 'M'], owner: 'T05, T12, T27', owners: ['T05', 'T12', 'T27'] },
+  { id: 'J03', name: 'Canvas editing', startState: 'New blank document', endState: 'Select, marquee, move, edit, duplicate, clipboard, delete, undo/redo', requiredEvidence: ['P', 'M'], owner: 'T06-T08, T27', owners: ['T06-T08', 'T27'] },
+  { id: 'J04', name: 'Connections', startState: 'Representative six-channel graph', endState: 'Multi-lanes, role edit, lane delete, adapter preview', requiredEvidence: ['P', 'M'], owner: 'T10-T11, T27', owners: ['T10-T11', 'T27'] },
+  { id: 'J05', name: 'Module', startState: 'Multi-node selection', endState: 'Locked styled module, enter/edit/exit/collapse/dissolve/undo', requiredEvidence: ['P', 'M'], owner: 'T09, T27', owners: ['T09', 'T27'] },
+  { id: 'J06', name: 'Intelligent chain', startState: 'Prompt -> Worker -> Worker -> Image', endState: 'Approved transformed prompt and correct lineage', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T14, T16, T27', owners: ['T13', 'T14', 'T16', 'T27'] },
+  { id: 'J07', name: 'References and batch', startState: 'Multiple local references', endState: 'Controlled batch with visible jobs and accepted artifacts', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T15, T18, T19, T27', owners: ['T13', 'T15', 'T18', 'T19', 'T27'] },
+  { id: 'J08', name: 'Review and delivery', startState: 'Multiple artifacts', endState: 'Compare, evaluate, filter, collect, export', requiredEvidence: ['P', 'M', 'R'], owner: 'T13, T17, T19, T27', owners: ['T13', 'T17', 'T19', 'T27'] },
+  { id: 'J09', name: 'Durability', startState: 'Saved working document', endState: 'Close, reopen, recover interruption, continue', requiredEvidence: ['P', 'M'], owner: 'T03, T27', owners: ['T03', 'T27'] },
+  { id: 'J10', name: 'Plugin co-producer', startState: 'Blank document with Edit Permit', endState: 'Tailored graph applied; run remains separately permitted', requiredEvidence: ['P', 'M'], owner: 'T21, T27', owners: ['T21', 'T27'] },
+];
+
 const failPatterns = [
   /blank\s*(?:or\s*black)?\s*canvas/i,
   /black-screen/i,
@@ -133,7 +179,7 @@ function parseRecovery() {
 
 function classify(item) {
   if (item.historicalChecked) return 'PRESENT-UNPROVEN';
-  if (item.kind === 'recovery') return 'MISSING';
+  if (item.kind === 'recovery') return recoveryClassification[item.id]?.status || 'OPEN';
   if (failPatterns.some((pattern) => pattern.test(item.text))) return 'FAIL';
   return 'PRESENT-UNPROVEN';
 }
@@ -149,6 +195,7 @@ const requirements = originals.map((item) => {
   areaCounters[item.areaCode] += 1;
   const id = `AC-${item.areaCode}-${String(areaCounters[item.areaCode]).padStart(3, '0')}`;
   const status = classify(item);
+  const classificationReason = item.historicalChecked ? 'Historical checkbox was checked, but recovery requires rerunning affected evidence; current status remains PRESENT-UNPROVEN.' : status === 'FAIL' ? 'Rejected-candidate audit identifies a user-visible failure at baseline; fresh evidence is required after repair.' : 'Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.';
   return {
     id, kind: item.kind, ordinal: item.ordinal, source: 'docs/product/ether-4.0-acceptance.md', sourceLine: item.sourceLine,
     section: item.section, areaCode: item.areaCode, area: meta.area, text: item.text,
@@ -156,7 +203,7 @@ const requirements = originals.map((item) => {
     ownerRoutes: meta.evidence.includes('M') ? [...meta.routes] : [], evidence: [],
     priorEvidence: item.historicalChecked ? { source: 'docs/product/ether-4.0-release-audit.md', note: 'Historical checked state retained for traceability only; it is not current candidate evidence.' } : null,
     baselineCommit: recoveryPlanBaselineCommit,
-    notes: item.historicalChecked ? 'Historical checkbox was checked, but recovery requires rerunning affected evidence; current status remains PRESENT-UNPROVEN.' : status === 'FAIL' ? 'Rejected-candidate audit identifies a user-visible failure at baseline; fresh evidence is required after repair.' : 'Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.'
+    classificationReason, notes: classificationReason
   };
 });
 
@@ -169,14 +216,12 @@ for (const item of recoveries) {
     baselineChecked: item.historicalChecked, status: classify(item), requiredEvidence: item.requiredEvidence,
     ownerTasks: [...rxMeta.owners], releaseBlocker: true, ownerRoutes: item.requiredEvidence.includes('M') ? [...rxMeta.routes] : [], evidence: [],
     priorEvidence: null, baselineCommit: recoveryPlanBaselineCommit,
-    notes: 'Recovery requirement added by the product-owner audit; no qualifying baseline evidence exists.'
+    classificationReason: recoveryClassification[item.id].reason,
+    notes: recoveryClassification[item.id].reason
   });
 }
 
-const journeys = [
-  ['J01', 'First image', 'T13, T16, T19, T27'], ['J02', 'Node catalog', 'T05, T12, T27'], ['J03', 'Canvas editing', 'T06-T08, T27'], ['J04', 'Connections', 'T10-T11, T27'], ['J05', 'Module', 'T09, T27'],
-  ['J06', 'Intelligent chain', 'T13, T14, T16, T27'], ['J07', 'References and batch', 'T13, T15, T18, T19, T27'], ['J08', 'Review and delivery', 'T13, T17, T19, T27'], ['J09', 'Durability', 'T03, T27'], ['J10', 'Plugin co-producer', 'T21, T27'],
-].map(([id, name, owner]) => ({ id, name, owner, startState: null, endState: null, requiredEvidence: ['P', 'M'], actionLog: null, screenshots: [], status: 'PENDING' }));
+const journeys = canonicalJourneys.map((journey) => ({ ...journey, actionLog: null, screenshots: [], status: 'PENDING' }));
 
 const ledger = {
   schemaVersion: 'ether-4.0-recovery-ledger@1',
@@ -189,7 +234,7 @@ const ledger = {
   evidenceClasses: { A: 'Automated', P: 'Packaged journey', M: 'Manual owner', V: 'Visual', R: 'Runtime/provider' },
   requirements,
   journeys,
-  classification: { method: 'T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit rejected-candidate interaction failures are FAIL; recovery additions are MISSING; all other unproven implementation is PRESENT-UNPROVEN.', historicalCheckedCount: originals.filter((item) => item.historicalChecked).length },
+  classification: { method: 'T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit rejected-candidate failures are FAIL; each RX item follows the evidence-based recoveryClassification map below; remaining unproven implementation is PRESENT-UNPROVEN.', historicalCheckedCount: originals.filter((item) => item.historicalChecked).length, recoveryMap: recoveryClassification },
 };
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });

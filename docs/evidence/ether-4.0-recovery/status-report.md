@@ -9,11 +9,11 @@ This is a Phase 0 triage report. It does not approve a phase gate or release.
 | Status | Count |
 | --- | ---: |
 | BLOCKED | 0 |
-| FAIL | 9 |
-| MISSING | 30 |
+| FAIL | 19 |
+| MISSING | 9 |
 | OPEN | 0 |
 | OWNER-ACCEPTED | 0 |
-| PRESENT-UNPROVEN | 211 |
+| PRESENT-UNPROVEN | 222 |
 | VERIFIED-AUTO | 0 |
 | VERIFIED-PACKAGED | 0 |
 | **Total** | **250** |
@@ -43,11 +43,11 @@ Release-blocker records: 250; unresolved at baseline: 250.
 | Performance | 9 | PRESENT-UNPROVEN: 9 |
 | Security and packaging | 12 | PRESENT-UNPROVEN: 12 |
 | Documentation and release | 8 | PRESENT-UNPROVEN: 8 |
-| Recovery-specific | 30 | MISSING: 30 |
+| Recovery-specific | 30 | PRESENT-UNPROVEN: 11; FAIL: 10; MISSING: 9 |
 
 ## Classification method
 
-T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit rejected-candidate interaction failures are FAIL; recovery additions are MISSING; all other unproven implementation is PRESENT-UNPROVEN.
+T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit rejected-candidate failures are FAIL; each RX item follows the evidence-based recoveryClassification map below; remaining unproven implementation is PRESENT-UNPROVEN.
 
 Historical checked items are retained in `priorEvidence` only and remain PRESENT-UNPROVEN until candidate evidence is rerun. Every requirement carries required evidence classes, owners, release-blocker state, and (for M requirements) J01-J10 owner routes.
 
