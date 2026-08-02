@@ -20,6 +20,7 @@ import {
 import {
   completeNativeFileDialogWithUia,
   findExactPackagedProcessId,
+  openExactWindowWithNativeKeyboard,
   readAndCloseExactOwnedNativeDialogWithUia
 } from "../../recovery/windowsIntegration.js";
 
@@ -84,7 +85,8 @@ test("keeps a deliberately corrupted metadata copy unchanged while the packaged 
     const database = new DatabaseSync(corruptPath);
     try { database.exec("PRAGMA application_id = 1234"); } finally { database.close(); }
     const damagedHash = await sha256(corruptPath);
-    await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Open", exact: true }), "Open corrupt metadata copy", "The visible packaged Open command sends the copied corrupt document to the native picker.");
+    const openAction = await openExactWindowWithNativeKeyboard(ownerPid);
+    baseline.input.observe("Open corrupt metadata copy", "A native Ctrl+O sent to the exact packaged Ether window opens the document picker.", openAction);
     await completeNativeFileDialogWithUia(ownerPid, corruptPath);
     const nativeError = await readAndCloseExactOwnedNativeDialogWithUia(ownerPid);
     expect(nativeError).toMatch(/unsupported|not an Ether|application/i);

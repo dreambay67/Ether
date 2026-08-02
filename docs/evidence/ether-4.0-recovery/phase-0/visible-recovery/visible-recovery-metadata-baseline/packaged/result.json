@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "visible-recovery-metadata-baseline",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T22:45:25.722Z",
+  "finishedAt": "2026-08-02T22:45:36.523Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "d9fb92a62d5c6ce541025546f4fdc5c35e0999b5",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "07f6adabbb296b387899919536a0af3cd36eed84ef7bfe05973b0133259c071d"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "edf009fd0d2cf03b6719c67789bf42381410d16514e5f9a306d24c69dea8b814"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Create metadata baseline",
+      "expected": "The corrupt-metadata fixture begins with a packaged UI-authored document.",
+      "actual": "Left click at (91, 313).",
+      "durationMs": 56
+    },
+    {
+      "sequence": 2,
+      "kind": "keyboard-command",
+      "label": "Save metadata baseline",
+      "expected": "The Windows Save dialog persists the baseline before the copied fixture is corrupted.",
+      "actual": "Pressed Control+s.",
+      "durationMs": 27
+    },
+    {
+      "sequence": 3,
+      "kind": "observation",
+      "label": "Open corrupt metadata copy",
+      "expected": "A native Ctrl+O sent to the exact packaged Ether window opens the document picker.",
+      "actual": "native-keyboard ownerPid=37720 shortcut=Ctrl+O",
+      "durationMs": 0
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Native unsupported metadata error",
+      "expected": "The exact packaged browser process presents a clear native unsupported-document error for the corrupt copy.",
+      "actual": "MainInstructionIcon SQLite application ID 1234 is not an Ether application ID. OK",
+      "durationMs": 0
+    },
+    {
+      "sequence": 5,
+      "kind": "screenshot",
+      "label": "Capture unsupported corrupt metadata",
+      "expected": "The packaged app keeps the valid active baseline after the native unsupported-document error.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 110,
+      "screenshotPath": "screenshots/corrupt-metadata-unsupported.png"
+    }
+  ],
+  "errors": []
+}

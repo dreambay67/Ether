@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "visible-recovery-provider-baseline",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T22:45:15.303Z",
+  "finishedAt": "2026-08-02T22:45:21.571Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "d9fb92a62d5c6ce541025546f4fdc5c35e0999b5",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "07f6adabbb296b387899919536a0af3cd36eed84ef7bfe05973b0133259c071d"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "edf009fd0d2cf03b6719c67789bf42381410d16514e5f9a306d24c69dea8b814"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Create baseline graph",
+      "expected": "The recovery document starts as a blank graph authored through packaged UI.",
+      "actual": "Left click at (91, 313).",
+      "durationMs": 62
+    },
+    {
+      "sequence": 2,
+      "kind": "keyboard-command",
+      "label": "Save packaged recovery baseline",
+      "expected": "The Windows Save dialog persists the UI-authored `.ether` baseline.",
+      "actual": "Pressed Control+s.",
+      "durationMs": 32
+    }
+  ],
+  "errors": []
+}

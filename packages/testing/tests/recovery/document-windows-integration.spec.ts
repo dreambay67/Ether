@@ -34,6 +34,7 @@ import {
   invokeDocumentFromExplorerWithUia,
   invokeJumpListRecentDocumentWithUia,
   minimizeExactWindowWithUia,
+  openExactWindowWithNativeKeyboard,
   removeTestOwnedDisposableRoots,
   readAndCloseExactNativeErrorDialog,
   cleanupTestOwnedRecentShortcuts,
@@ -88,7 +89,8 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     await assertDocumentIdentity(copyPath);
     primary.input.observe("Save a Copy result", "Save a Copy creates a valid second .ether file while the active document remains the Save As destination.", `Validated ${path.basename(copyPath)} and retained ${path.basename(renamedPath)} as the active title.`);
 
-    await primary.input.leftClick(primary.page.getByRole("button", { name: "Open", exact: true }), "File > Open through native picker", "The exact Ether-owned native Open dialog receives the saved source path through UI Automation.");
+    const openAction = await openExactWindowWithNativeKeyboard(primaryPid);
+    primary.input.observe("File > Open through native picker", "A native Ctrl+O sent to the exact packaged Ether window opens its native picker.", openAction);
     await completeNativeFileDialogWithUia(primaryPid, documentPath);
     await expect(primary.page.getByTestId("project-header")).toContainText(path.basename(documentPath));
     await primary.input.screenshot("01-native-open-unicode.png", primary.evidence, "Capture File > Open result", "File > Open shows the original Unicode/spaces document.");

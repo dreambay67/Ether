@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "visible-recovery-artifact-baseline",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T22:45:44.015Z",
+  "finishedAt": "2026-08-02T22:45:47.402Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "d9fb92a62d5c6ce541025546f4fdc5c35e0999b5",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "07f6adabbb296b387899919536a0af3cd36eed84ef7bfe05973b0133259c071d"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "edf009fd0d2cf03b6719c67789bf42381410d16514e5f9a306d24c69dea8b814"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Open visible artifact baseline",
+      "expected": "The packaged UI visibly opens the artifact-bearing baseline before a copied fixture is corrupted.",
+      "actual": "Left click at (1144, 34).",
+      "durationMs": 43
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Open artifact review",
+      "expected": "The visible Review workspace exposes the embedded fake-provider artifact.",
+      "actual": "Left click at (228, 89).",
+      "durationMs": 36
+    },
+    {
+      "sequence": 3,
+      "kind": "screenshot",
+      "label": "Capture artifact-bearing baseline",
+      "expected": "A fake-provider artifact is visibly present in the valid packaged baseline.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 151,
+      "screenshotPath": "screenshots/artifact-bearing-baseline.png"
+    }
+  ],
+  "errors": []
+}

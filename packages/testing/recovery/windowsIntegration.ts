@@ -395,6 +395,25 @@ export async function findExactPackagedProcessId(executablePath: string, profile
   return result;
 }
 
+/** Sends Ctrl+O to the exact foregrounded Ether window through native keyboard input. */
+export async function openExactWindowWithNativeKeyboard(ownerPid: number): Promise<string> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02RendererKeyboard { [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra); }' -ErrorAction SilentlyContinue",
+    `$ownerPid = ${ownerPid}`,
+    "$byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid)",
+    "$ownerWindows = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | Where-Object { $_.Current.ClassName -ne '#32770' -and $_.Current.NativeWindowHandle -ne 0 })",
+    "if ($ownerWindows.Count -ne 1) { throw ('Expected one exact Ether owner window; found ' + $ownerWindows.Count) }",
+    "$ownerHwnd = [intptr]$ownerWindows[0].Current.NativeWindowHandle",
+    "[EtherA02RendererKeyboard]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [EtherA02RendererKeyboard]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero); try { $ownerWindows[0].SetFocus() } catch {}; [EtherA02RendererKeyboard]::SetForegroundWindow($ownerHwnd) | Out-Null; Start-Sleep -Milliseconds 150",
+    "if ([EtherA02RendererKeyboard]::GetForegroundWindow() -ne $ownerHwnd) { throw 'Exact Ether window is not foreground for Ctrl+O' }",
+    "[EtherA02RendererKeyboard]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); [EtherA02RendererKeyboard]::keybd_event(0x4F, 0, 0, [UIntPtr]::Zero); [EtherA02RendererKeyboard]::keybd_event(0x4F, 0, 2, [UIntPtr]::Zero); [EtherA02RendererKeyboard]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)",
+    "Write-Output ('native-keyboard ownerPid=' + $ownerPid + ' shortcut=Ctrl+O')"
+  ].join("; ");
+  return runPowerShell(script);
+}
+
 export async function completeNativeFileDialogWithUia(ownerPid: number, filePath: string): Promise<string> {
   const script = [
     "$ErrorActionPreference = 'Stop'",
@@ -441,7 +460,7 @@ export async function readAndCloseExactOwnedNativeDialogWithUia(ownerPid: number
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; public static class EtherA02OwnedDialog { public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern IntPtr GetWindow(IntPtr hWnd, uint command); [DllImport(\"user32.dll\")] private static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam); public static IntPtr[] OwnedWindows(IntPtr owner) { var windows = new List<IntPtr>(); EnumWindows((hWnd, lParam) => { if (hWnd != owner && GetWindow(hWnd, 4) == owner) windows.Add(hWnd); return true; }, IntPtr.Zero); return windows.ToArray(); } public static void ClickExact(IntPtr button) { SendMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero); } }' -ErrorAction SilentlyContinue",
+    "Add-Type -TypeDefinition 'using System; using System.Collections.Generic; using System.Runtime.InteropServices; public static class EtherA02OwnedDialog { public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam); [DllImport(\"user32.dll\")] public static extern IntPtr GetWindow(IntPtr hWnd, uint command); [DllImport(\"user32.dll\")] public static extern bool IsWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool IsWindowEnabled(IntPtr hWnd); [DllImport(\"user32.dll\")] private static extern bool PostMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam); public static IntPtr[] OwnedWindows(IntPtr owner) { var windows = new List<IntPtr>(); EnumWindows((hWnd, lParam) => { if (hWnd != owner && GetWindow(hWnd, 4) == owner) windows.Add(hWnd); return true; }, IntPtr.Zero); return windows.ToArray(); } public static void ClickExact(IntPtr button) { if (!PostMessage(button, 0x00F5, IntPtr.Zero, IntPtr.Zero)) throw new InvalidOperationException(\"Could not post exact native dialog click.\"); } }' -ErrorAction SilentlyContinue",
     `$ownerPid = ${ownerPid}`,
     "$byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid)",
     "$ownerWindows = @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | Where-Object { $_.Current.ClassName -ne '#32770' -and $_.Current.NativeWindowHandle -ne 0 })",
@@ -451,12 +470,18 @@ export async function readAndCloseExactOwnedNativeDialogWithUia(ownerPid: number
     "$dialog = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $matches = @([EtherA02OwnedDialog]::OwnedWindows($ownerHwnd) | ForEach-Object { [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$_) } | Where-Object { $_.Current.ClassName -eq '#32770' }); if ($matches.Count -gt 1) { throw ('Expected at most one exact Ether-owned native dialog; found ' + $matches.Count) }; if ($matches.Count -eq 1) { $dialog = $matches[0] } else { Start-Sleep -Milliseconds 150 } }",
     "if ($null -eq $dialog) { throw 'Exact Ether-owned native dialog did not appear within 15 seconds.' }",
+    "$dialogHwnd = [intptr]$dialog.Current.NativeWindowHandle",
+    "if ($dialogHwnd -eq [intptr]::Zero) { throw 'Exact Ether-owned native dialog has no HWND' }",
     "$text = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join ' '",
-    "$buttons = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Button'))) | Where-Object { $_.Current.Name -in @('OK', 'Close') })",
-    "if ($buttons.Count -ne 1) { throw ('Exact Ether-owned native dialog exposed ' + $buttons.Count + ' safe close buttons') }",
-    "$button = $buttons[0]; $invoke = $null",
-    "try { $invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern) } catch { $invoke = $null }",
-    "if ($null -ne $invoke) { ([System.Windows.Automation.InvokePattern]$invoke).Invoke() } else { $buttonHwnd = [intptr]$button.Current.NativeWindowHandle; if ($buttonHwnd -eq [intptr]::Zero) { throw 'Exact native dialog button has neither InvokePattern nor HWND' }; [EtherA02OwnedDialog]::ClickExact($buttonHwnd) }",
+    "$dialogDescendants = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)",
+    "$buttons = @($dialogDescendants | Where-Object { $_.Current.ClassName -in @('Button', 'CCPushButton') -and $_.Current.Name -in @('OK', 'Close') })",
+    "if ($buttons.Count -ne 1) { $rawControls = @($dialogDescendants | ForEach-Object { 'name=' + $_.Current.Name + ',class=' + $_.Current.ClassName + ',id=' + $_.Current.AutomationId + ',type=' + $_.Current.ControlType.ProgrammaticName }) -join '; '; throw ('Exact Ether-owned native dialog exposed ' + $buttons.Count + ' safe close buttons. Controls: ' + $rawControls) }",
+    "$buttonHwnd = [intptr]$buttons[0].Current.NativeWindowHandle",
+    "if ($buttonHwnd -eq [intptr]::Zero) { throw 'Exact native dialog button has no HWND' }",
+    "[EtherA02OwnedDialog]::ClickExact($buttonHwnd)",
+    "$closeDeadline = [DateTime]::UtcNow.AddSeconds(15)",
+    "while ([DateTime]::UtcNow -lt $closeDeadline -and ([EtherA02OwnedDialog]::IsWindow($dialogHwnd) -or -not [EtherA02OwnedDialog]::IsWindowEnabled($ownerHwnd))) { Start-Sleep -Milliseconds 100 }",
+    "if ([EtherA02OwnedDialog]::IsWindow($dialogHwnd) -or -not [EtherA02OwnedDialog]::IsWindowEnabled($ownerHwnd)) { throw 'Exact Ether-owned native dialog did not close and re-enable its owner within 15 seconds' }",
     "Write-Output $text"
   ].join("; ");
   return runPowerShell(script);
