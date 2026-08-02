@@ -10,6 +10,7 @@ import type {
   ReferenceAction
 } from "../shared/ipc/contracts";
 import { ProjectHeader } from "./project/ProjectHeader";
+import { shouldSaveDocumentFromShortcut } from "./project/documentShortcuts";
 import { ProviderStatusPanel } from "./project/ProviderStatusPanel";
 import {
   defaultInterfacePreferences,
@@ -159,9 +160,7 @@ export function App() {
 
   useEffect(() => {
     const saveWithKeyboard = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.altKey || event.shiftKey || event.key.toLocaleLowerCase() !== "s") return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.matches("input, textarea, select, [contenteditable=true]") || target?.closest("[contenteditable=true]")) return;
+      if (!shouldSaveDocumentFromShortcut(event, event.target)) return;
       event.preventDefault();
       void runDocumentCommand((id) => window.ether.document.save(id));
     };

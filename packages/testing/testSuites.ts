@@ -8,6 +8,7 @@ export const testSuites = {
     "tests/desktop-ipc-contract.test.ts",
     "tests/desktop-window-options.test.ts",
     "tests/document-operation-replay.test.ts",
+    "tests/document-shortcuts.test.ts",
     "tests/graph-kernel.test.ts",
     "tests/gemini-live-conformance-contract.test.ts",
     "tests/intelligence-context.test.ts",
