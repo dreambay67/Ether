@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "document-lifecycle-writer-lock",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T21:44:52.761Z",
+  "finishedAt": "2026-08-02T21:44:55.717Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "73186a641cf418a18354104819630de47d564734",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "69091bcfc673a1cfbc92fcf9bf0e1c93c1d380131adb334f441d31bcd2dab339"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "837b2acfe5d5d4355f1c4c79d36162b68a2f07cbebfd3edcc0766b164452fa25"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Competing writer",
+      "expected": "A second process opens the exact document read-only while the first process retains the writer lease.",
+      "actual": "The competing Ether.exe displayed the writer-active read-only explanation and disabled Save.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "screenshot",
+      "label": "Capture the competing writer lock",
+      "expected": "The second process cannot acquire writable access.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 102,
+      "screenshotPath": "screenshots/writer-lock-read-only.png"
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "document-lifecycle",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T21:44:39.382Z",
+  "finishedAt": "2026-08-02T21:44:58.346Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "73186a641cf418a18354104819630de47d564734",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "69091bcfc673a1cfbc92fcf9bf0e1c93c1d380131adb334f441d31bcd2dab339"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "837b2acfe5d5d4355f1c4c79d36162b68a2f07cbebfd3edcc0766b164452fa25"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Create the first graph node on the blank canvas",
+      "expected": "A Prompt node is created only through the visible authoring UI.",
+      "actual": "Left click at (91, 313).",
+      "durationMs": 72
+    },
+    {
+      "sequence": 2,
+      "kind": "screenshot",
+      "label": "Capture the UI-authored graph",
+      "expected": "The first node is visibly authored from a blank document.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 100,
+      "screenshotPath": "screenshots/01-blank-ui-node.png"
+    },
+    {
+      "sequence": 3,
+      "kind": "keyboard-command",
+      "label": "Save the untitled UI-authored document",
+      "expected": "The native Save dialog writes one .ether document.",
+      "actual": "Pressed Control+s.",
+      "durationMs": 8
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Ctrl+S document save",
+      "expected": "Ctrl+S opens the native Save dialog for an untitled document.",
+      "actual": "The Ctrl+S route created the requested .ether file.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 5,
+      "kind": "observation",
+      "label": "Save result",
+      "expected": "The UI-created graph is stored as one .ether file.",
+      "actual": "Saved UI authored document.ether after Ctrl+S.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 6,
+      "kind": "left-click",
+      "label": "Inspect the manual save milestone",
+      "expected": "Document History shows the Ctrl+S manual milestone as a reviewable record.",
+      "actual": "Left click at (1079, 34).",
+      "durationMs": 16
+    },
+    {
+      "sequence": 7,
+      "kind": "screenshot",
+      "label": "Capture the visible manual milestone",
+      "expected": "The document history names the manual Ctrl+S milestone.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 103,
+      "screenshotPath": "screenshots/manual-save-history.png"
+    },
+    {
+      "sequence": 8,
+      "kind": "left-click",
+      "label": "Close Document History",
+      "expected": "The history review returns to the document canvas.",
+      "actual": "Left click at (964, 138).",
+      "durationMs": 12
+    },
+    {
+      "sequence": 9,
+      "kind": "left-click",
+      "label": "Save As to a second path",
+      "expected": "The active document switches only after the new destination is complete.",
+      "actual": "Left click at (884, 34).",
+      "durationMs": 12
+    },
+    {
+      "sequence": 10,
+      "kind": "left-click",
+      "label": "Save a copy without switching",
+      "expected": "A complete copy is created while the active title remains the Save As destination.",
+      "actual": "Left click at (923, 34).",
+      "durationMs": 10
+    },
+    {
+      "sequence": 11,
+      "kind": "left-click",
+      "label": "Compact the UI-authored document",
+      "expected": "Compaction reports actual before and after sizes without invalidating the document.",
+      "actual": "Left click at (962, 34).",
+      "durationMs": 13
+    },
+    {
+      "sequence": 12,
+      "kind": "left-click",
+      "label": "Make the UI-authored document portable",
+      "expected": "The native confirmation completes a zero-reference portability check honestly.",
+      "actual": "Left click at (1001, 34).",
+      "durationMs": 15
+    },
+    {
+      "sequence": 13,
+      "kind": "screenshot",
+      "label": "Capture completed document actions",
+      "expected": "Save As, Copy, Compact, and Portable actions have completed on the UI-authored document.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 95,
+      "screenshotPath": "screenshots/02-saved-compact-portable.png"
+    },
+    {
+      "sequence": 14,
+      "kind": "observation",
+      "label": "Writer lease before contender",
+      "expected": "The Save As destination retains one AppData writer lease before the competing process opens it.",
+      "actual": "Observed one lease for PID 3180 and path hash c774d03f5dfa8197b1989232f02a55e74b65095e59b6ddc2f128d9b5b2e3f239.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 15,
+      "kind": "left-click",
+      "label": "Edit the saved document through the visible UI before a recovery restart",
+      "expected": "A second node is committed and autosaved before the deliberate process kill.",
+      "actual": "Left click at (91, 354).",
+      "durationMs": 13
+    },
+    {
+      "sequence": 16,
+      "kind": "observation",
+      "label": "Visible autosave transition",
+      "expected": "The ordinary graph edit visibly transitions through Saving to Saved.",
+      "actual": "Observed Saved -> Saving -> Saved.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 17,
+      "kind": "observation",
+      "label": "Hard-kill after UI edit/autosave",
+      "expected": "The exact journey process exits without a clean close, leaving normal AppData recovery state for the next launch.",
+      "actual": "The journey process was terminated only after the visible two-node graph returned to Saved.",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}

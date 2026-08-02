@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "document-lifecycle-reopen",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T21:44:58.617Z",
+  "finishedAt": "2026-08-02T21:45:02.008Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "73186a641cf418a18354104819630de47d564734",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "69091bcfc673a1cfbc92fcf9bf0e1c93c1d380131adb334f441d31bcd2dab339"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "837b2acfe5d5d4355f1c4c79d36162b68a2f07cbebfd3edcc0766b164452fa25"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Hard-kill recovery reopen",
+      "expected": "The hard-killed UI-authored .ether reclaims its dead same-machine writer lease and reopens writable without a stale recovery warning.",
+      "actual": "The exact Save As destination reopened writable with both UI-authored nodes and Saved state.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "screenshot",
+      "label": "Capture the exact reopened document",
+      "expected": "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 100,
+      "screenshotPath": "screenshots/03-reopened-ui-authored-document.png"
+    },
+    {
+      "sequence": 3,
+      "kind": "observation",
+      "label": "Windows accessibility close",
+      "expected": "A Windows UI Automation close action drains the Saved document without an unsaved-changes prompt.",
+      "actual": "The exact owned Ether window will be closed through its UI Automation WindowPattern.",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "document-lifecycle-clean-reopen",
+  "mode": "packaged",
+  "startedAt": "2026-08-02T21:45:02.283Z",
+  "finishedAt": "2026-08-02T21:45:05.093Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "73186a641cf418a18354104819630de47d564734",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "69091bcfc673a1cfbc92fcf9bf0e1c93c1d380131adb334f441d31bcd2dab339"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "837b2acfe5d5d4355f1c4c79d36162b68a2f07cbebfd3edcc0766b164452fa25"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "screenshot",
+      "label": "Capture the clean-close reopen",
+      "expected": "The same user-saved document remains writable after an exact Windows UI Automation close.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 105,
+      "screenshotPath": "screenshots/04-clean-close-reopen.png"
+    }
+  ],
+  "errors": []
+}
