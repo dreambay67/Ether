@@ -18,9 +18,9 @@ import {
 describe("A02 Windows integration harness contracts", () => {
   it("declares only representative packaged coverage and names the remaining Windows gaps", () => {
     expect(A02_WINDOWS_INTEGRATION_COVERAGE.packagedRepresentatives).toEqual(expect.arrayContaining([
-      "AC-A02-010", "AC-A02-011", "AC-A02-013", "AC-A02-018", "AC-A02-020", "AC-A02-026"
+      "AC-A02-010", "AC-A02-011", "AC-A02-013", "AC-A02-017", "AC-A02-019", "AC-A02-020", "AC-A02-026"
     ]));
-    expect(A02_WINDOWS_INTEGRATION_COVERAGE.focusedAutomation).toHaveLength(15);
+    expect(A02_WINDOWS_INTEGRATION_COVERAGE.focusedAutomation).toHaveLength(14);
     expect(A02_WINDOWS_INTEGRATION_COVERAGE.knownPackagedGaps.join("\n")).toMatch(/drag\/drop|Jump List|removable-drive/iu);
     expect(ETHER_EXTENSION_KEY).toBe("HKCU\\Software\\Classes\\.ether");
   });

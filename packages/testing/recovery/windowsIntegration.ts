@@ -28,20 +28,21 @@ export const A02_WINDOWS_INTEGRATION_COVERAGE = Object.freeze({
     "AC-A02-010", // File > Open/native picker
     "AC-A02-011", // Explorer association (approval-gated)
     "AC-A02-013", // already-open document focus
-    "AC-A02-018", // Unicode/spaces path
-    "AC-A02-019", // Save As completion/switch
-    "AC-A02-020", // Save As lease rebinding
+    "AC-A02-017", // Unicode/spaces path
+    "AC-A02-018", // Save As completion/switch
+    "AC-A02-019", // Save As lease rebinding
+    "AC-A02-020", // Save a Copy
     "AC-A02-026" // cache/staging/live-output deletion and reopen
   ],
   focusedAutomation: [
     "AC-A02-001", "AC-A02-005", "AC-A02-006", "AC-A02-007", "AC-A02-008",
-    "AC-A02-012", "AC-A02-014", "AC-A02-015", "AC-A02-016", "AC-A02-017",
-    "AC-A02-021", "AC-A02-022", "AC-A02-023", "AC-A02-024", "AC-A02-025"
+    "AC-A02-012", "AC-A02-014", "AC-A02-015", "AC-A02-016", "AC-A02-021",
+    "AC-A02-022", "AC-A02-023", "AC-A02-024", "AC-A02-025"
   ],
   knownPackagedGaps: [
     "AC-A02-012 Explorer drag/drop is not automated: safely targeting the exact Ether window while avoiding the user's Explorer session remains unresolved.",
     "AC-A02-016 Jump List needs a stable clean-profile Windows shell route; this harness does not claim it.",
-    "AC-A02-018 removable-drive and cloud-sync variants require controlled host fixtures; Unicode/spaces are the representative packaged route."
+    "AC-A02-017 removable-drive and cloud-sync variants require controlled host fixtures; Unicode/spaces are the representative packaged route."
   ]
 });
 
@@ -99,7 +100,7 @@ export async function removeTestOwnedDisposableRoots(root: string, candidates: r
       throw new Error(`Refusing to remove a path outside the test-owned root: ${candidate}`);
     }
     const base = path.basename(resolvedCandidate).toLocaleLowerCase("en-US");
-    if (!new Set(["cache", "provider-staging", "live-output"]).has(base)) {
+    if (!new Set(["cache", "staging", "provider-staging", "live-output"]).has(base)) {
       throw new Error(`Refusing to remove non-disposable test path: ${candidate}`);
     }
     await rm(resolvedCandidate, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
@@ -164,10 +165,8 @@ export async function restoreReversibleAssociation(plan: ReversibleAssociationPl
   await deleteRegistryTree(plan.extensionKey);
   if (plan.snapshot.extensionExisted && plan.snapshot.extensionBackup !== null) await importRegistryFile(plan.snapshot.extensionBackup);
   await deleteRegistryTree(plan.testProgIdKey);
-  // The original ProgID is snapshotted for auditability, but this journey never mutates it.
-  if (plan.snapshot.originalProgIdExisted && plan.snapshot.originalProgIdBackup !== null) {
-    await importRegistryFile(plan.snapshot.originalProgIdBackup);
-  }
+  // The original ProgID is snapshotted for auditability only. It is never
+  // mutated by this journey, so importing it could overwrite a user change.
 }
 
 /** Uses Windows Explorer plus UI Automation InvokePattern; it never shells the document directly. */
@@ -176,26 +175,32 @@ export async function invokeDocumentFromExplorerWithUia(documentPath: string): P
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
     `$document = '${ps(documentPath)}'`,
+    "$folder = Split-Path -LiteralPath $document -Parent",
     "$itemName = [System.IO.Path]::GetFileName($document)",
-    "$explorer = Start-Process explorer.exe -ArgumentList @('/select,' + $document) -PassThru",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); }' -ErrorAction SilentlyContinue",
+    "Start-Process explorer.exe -ArgumentList $folder | Out-Null",
     "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
+    "$shell = New-Object -ComObject Shell.Application",
+    "$explorerPid = $null",
+    "$matchedWindow = $null",
     "$item = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) {",
+    "  foreach ($window in @($shell.Windows())) { try { if ([string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$nativePid = 0; [EtherA02Native]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$nativePid) | Out-Null; $explorerPid = [int]$nativePid; $matchedWindow = $window; break } } catch {} }",
+    "  if ($null -eq $explorerPid) { Start-Sleep -Milliseconds 150; continue }",
     "  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $itemName)",
     "  $candidates = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)",
-    "  foreach ($candidate in $candidates) { if ($candidate.Current.ProcessId -eq $explorer.Id) { $item = $candidate; break } }",
+    "  foreach ($candidate in $candidates) { if ($candidate.Current.ProcessId -eq $explorerPid) { $item = $candidate; break } }",
     "  if ($null -eq $item) { Start-Sleep -Milliseconds 150 }",
     "}",
     "if ($null -eq $item) { throw ('Explorer UIA did not expose exact test-owned item ' + $itemName) }",
     "$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
     "if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern' }",
-    "([System.Windows.Automation.InvokePattern]$pattern).Invoke()",
-    "Write-Output ('uia-invoked explorerPid=' + $explorer.Id + ' item=' + $itemName)"
+    "try { ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); Write-Output ('uia-invoked explorerPid=' + $explorerPid + ' folder=' + $folder + ' item=' + $itemName) } finally { if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }"
   ].join("; ");
   return runPowerShell(script);
 }
 
-export async function assertExactProcessForPath(executablePath: string, expectedPid: number): Promise<void> {
+export async function assertExactPackagedProcess(executablePath: string, expectedPid: number): Promise<void> {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$expectedPath = '${ps(executablePath)}'`,
@@ -203,6 +208,38 @@ export async function assertExactProcessForPath(executablePath: string, expected
     "$process = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $expectedPid)",
     "if ($null -eq $process) { throw ('Exact Ether process was not found: ' + $expectedPid) }",
     "if (-not [string]::Equals($process.ExecutablePath, $expectedPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('PID/executable mismatch: ' + $process.ExecutablePath) }"
+  ].join("; ");
+  await runPowerShell(script);
+}
+
+/** Deliberately minimizes only the exact test-owned Ether window before a second-instance focus check. */
+export async function minimizeExactWindowWithUia(expectedPid: number): Promise<void> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    `$expectedPid = ${expectedPid}`,
+    "$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $expectedPid)",
+    "$windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)",
+    "if ($windows.Count -ne 1) { throw ('Expected one exact Ether window to minimize; found ' + $windows.Count) }",
+    "$pattern = $windows[0].GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)",
+    "if ($null -eq $pattern) { throw 'Exact Ether window has no UI Automation WindowPattern' }",
+    "([System.Windows.Automation.WindowPattern]$pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Minimized)",
+    "Write-Output ('uia-minimized etherPid=' + $expectedPid)"
+  ].join("; ");
+  await runPowerShell(script);
+}
+
+/** Verifies foreground activation belongs to the exact packaged primary process. */
+export async function assertExactWindowForegroundWithUia(expectedPid: number): Promise<void> {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Foreground { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); }'",
+    `$expectedPid = ${expectedPid}`,
+    "[uint32]$foregroundPid = 0",
+    "$foreground = [EtherA02Foreground]::GetForegroundWindow()",
+    "[EtherA02Foreground]::GetWindowThreadProcessId($foreground, [ref]$foregroundPid) | Out-Null",
+    "if ([int]$foregroundPid -ne $expectedPid) { throw ('Exact Ether process did not regain foreground activation; observed PID ' + $foregroundPid) }",
+    "Write-Output ('win32-foreground etherPid=' + $expectedPid)"
   ].join("; ");
   await runPowerShell(script);
 }
