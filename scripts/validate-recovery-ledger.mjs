@@ -177,6 +177,7 @@ function renderReport(ledger, result) {
     '## Counts by current status', '', '| Status | Count |', '| --- | ---: |',
     ...statuses.map(([status, count]) => `| ${status} | ${count} |`),
     `| **Total** | **${ledger.requirements.length}** |`, '',
+    `Release-blocker records: ${ledger.requirements.filter((item) => item.releaseBlocker).length}; unresolved at baseline: ${ledger.requirements.filter((item) => item.releaseBlocker && !['VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED'].includes(item.status)).length}.`, '',
     '## Counts by area', '', '| Area | Total | Status breakdown |', '| --- | ---: | --- |',
     ...[...areaCounts.entries()].map(([area, entry]) => `| ${area} | ${entry.total} | ${Object.entries(entry.statuses).map(([status, count]) => `${status}: ${count}`).join('; ')} |`),
     '', '## Classification method', '', ledger.classification.method, '',

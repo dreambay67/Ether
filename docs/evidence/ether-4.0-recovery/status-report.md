@@ -18,6 +18,8 @@ This is a Phase 0 triage report. It does not approve a phase gate or release.
 | VERIFIED-PACKAGED | 0 |
 | **Total** | **250** |
 
+Release-blocker records: 250; unresolved at baseline: 250.
+
 ## Counts by area
 
 | Area | Total | Status breakdown |
