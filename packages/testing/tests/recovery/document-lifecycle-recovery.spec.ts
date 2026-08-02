@@ -17,6 +17,10 @@ import {
   type JourneyMode,
   type RecoveryJourneySession
 } from "../../recovery/journeyDriver.js";
+import {
+  completeNativeFileDialogWithUia,
+  findExactPackagedProcessId
+} from "../../recovery/windowsIntegration.js";
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -52,7 +56,7 @@ test("records a blank-UI authored document through save, document actions, close
     await input.screenshot("01-blank-ui-node.png", evidence, "Capture the UI-authored graph", "The first node is visibly authored from a blank document.");
 
     await input.pressKey("Control+S", "Save the untitled UI-authored document", "The native Save dialog writes one .ether document.");
-    await completeNativeSaveIfNeeded(mode, firstPath);
+    await completeNativeSaveIfNeeded(mode, first, firstPath);
     const ctrlSSaved = await waitForFile(firstPath, 1_000);
     input.observe(
       "Ctrl+S document save",
@@ -70,12 +74,12 @@ test("records a blank-UI authored document through save, document actions, close
     await input.leftClick(page.getByRole("button", { name: "Close Document History", exact: true }), "Close Document History", "The history review returns to the document canvas.");
 
     await input.leftClick(page.getByRole("button", { name: "Save as", exact: true }), "Save As to a second path", "The active document switches only after the new destination is complete.");
-    await completeNativeSaveIfNeeded(mode, renamedPath);
+    await completeNativeSaveIfNeeded(mode, first, renamedPath);
     await expect.poll(async () => isFile(renamedPath)).toBe(true);
     await expect(page.getByTestId("project-header")).toContainText("UI authored renamed.ether");
 
     await input.leftClick(page.getByRole("button", { name: "Save a copy", exact: true }), "Save a copy without switching", "A complete copy is created while the active title remains the Save As destination.");
-    await completeNativeSaveIfNeeded(mode, copyPath);
+    await completeNativeSaveIfNeeded(mode, first, copyPath);
     await expect.poll(async () => isFile(copyPath)).toBe(true);
     await expect(page.getByTestId("project-header")).toContainText("UI authored renamed.ether");
 
@@ -83,7 +87,7 @@ test("records a blank-UI authored document through save, document actions, close
     await expect(page.getByText(/Compacted document: .* before, .* after; reclaimed/)).toBeVisible({ timeout: 15_000 });
 
     await input.leftClick(page.getByRole("button", { name: "Make document portable", exact: true }), "Make the UI-authored document portable", "The native confirmation completes a zero-reference portability check honestly.");
-    await confirmPortableIfNeeded(mode);
+    await confirmPortableIfNeeded(mode, first);
     await expect(page.getByText(/Made portable: embedded 0 references \(0 B\); no missing references/)).toBeVisible({ timeout: 15_000 });
     await input.screenshot("02-saved-compact-portable.png", evidence, "Capture completed document actions", "Save As, Copy, Compact, and Portable actions have completed on the UI-authored document.");
 
@@ -198,14 +202,30 @@ function journeyMode(): JourneyMode {
   throw new Error("Set ETHER_DOCUMENT_LIFECYCLE_MODE to source-electron or packaged.");
 }
 
-async function completeNativeSaveIfNeeded(mode: JourneyMode, destination: string): Promise<void> {
+async function completeNativeSaveIfNeeded(mode: JourneyMode, session: RecoveryJourneySession, destination: string): Promise<void> {
   if (mode === "source-electron") return;
-  await sendNativeKeys(["^a", destination, "{ENTER}"]);
+  await completeNativeFileDialogWithUia(await packagedProcessId(session), destination);
 }
 
-async function confirmPortableIfNeeded(mode: JourneyMode): Promise<void> {
+async function confirmPortableIfNeeded(mode: JourneyMode, session: RecoveryJourneySession): Promise<void> {
   if (mode === "source-electron") return;
-  await sendNativeKeys(["{ENTER}"]);
+  const ownerPid = await packagedProcessId(session);
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Add-Type -AssemblyName UIAutomationClient",
+    `$ownerPid = ${ownerPid}`,
+    "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
+    "$dialog = $null",
+    "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $dialog) { $byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $ownerPid); $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid); foreach ($window in $windows) { if ($window.Current.ClassName -eq '#32770') { $dialog = $window; break } }; if ($null -eq $dialog) { Start-Sleep -Milliseconds 150 } }",
+    "if ($null -eq $dialog) { throw 'Exact Ether-owned portable confirmation was not found' }",
+    "$button = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Make Portable')))",
+    "if ($null -eq $button) { throw 'Portable confirmation exposed no Make Portable button' }",
+    "$invoke = $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
+    "if ($null -eq $invoke) { throw 'Make Portable button has no InvokePattern' }",
+    "([System.Windows.Automation.InvokePattern]$invoke).Invoke()"
+  ].join("; ");
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], { windowsHide: true });
 }
 
 async function hardKillLaunchedJourney(mode: JourneyMode, session: RecoveryJourneySession, fixtureRoot: string): Promise<void> {
@@ -244,8 +264,8 @@ async function closeWithWindowsAccessibility(mode: JourneyMode, session: Recover
   const escapedMarker = marker.replaceAll("'", "''");
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    `$processes = Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' }`,
-    "if ($processes.Count -eq 0) { throw 'No exact journey process was found for accessibility close.' }",
+    `$processes = @(Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedExecutable}', [System.StringComparison]::OrdinalIgnoreCase) -and $_.CommandLine -like '*${escapedMarker}*' -and $_.CommandLine -notmatch '(?:^|\\s)--type(?:=|\\s)' })`,
+    "if ($processes.Count -ne 1) { throw ('Expected one exact journey root for accessibility close; found ' + $processes.Count) }",
     "Add-Type -AssemblyName UIAutomationClient",
     "$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$processes[0].ProcessId)",
     "$windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)",
@@ -257,15 +277,11 @@ async function closeWithWindowsAccessibility(mode: JourneyMode, session: Recover
   await execFileAsync("powershell.exe", ["-NoProfile", "-Sta", "-Command", script], { windowsHide: true });
 }
 
-async function sendNativeKeys(keys: readonly string[]): Promise<void> {
-  const commands = keys.map((keysToSend) => `[System.Windows.Forms.SendKeys]::SendWait('${escapeSendKeys(keysToSend)}')`).join("; ");
-  const script = `Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 500; ${commands}`;
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  await execFileAsync("powershell.exe", ["-NoProfile", "-Sta", "-EncodedCommand", encoded], { windowsHide: true });
-}
-
-function escapeSendKeys(value: string): string {
-  return value.replaceAll("'", "''");
+async function packagedProcessId(session: RecoveryJourneySession): Promise<number> {
+  return findExactPackagedProcessId(
+    path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe"),
+    session.profile.userData
+  );
 }
 
 async function isFile(filePath: string): Promise<boolean> {
