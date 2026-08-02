@@ -224,6 +224,7 @@ export async function dragDocumentFromExplorerWithNativePointer(input: {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
+    "Add-Type -AssemblyName PresentationFramework",
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Pointer { [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int X, int Y, int cx, int cy, uint flags); }'",
     `$document = '${ps(input.documentPath)}'`,
     "$folder = Split-Path -LiteralPath $document -Parent",
