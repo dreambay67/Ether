@@ -27,7 +27,8 @@ async function runFixture() {
   const campaignPath = path.join(documentsRoot, "Campaign with spaces.ether");
   const renamedPath = path.join(documentsRoot, "Kampa\u0148 \u03a9.ether");
   const copyPath = path.join(documentsRoot, "Campaign copy.ether");
-  const saveQueue = [campaignPath, renamedPath, copyPath];
+  const configuredSavePaths = argumentValues("--save-path=");
+  const saveQueue = configuredSavePaths.length === 0 ? [campaignPath, renamedPath, copyPath] : configuredSavePaths;
   const initialDocument = argumentValue("--open-document=");
   const referenceFixture = process.argv.includes("--reference-capabilities");
   const autosaveGate = argumentValue("--autosave-gate=");
@@ -115,6 +116,12 @@ async function waitForGate(gatePath) {
 function argumentValue(prefix) {
   const argument = process.argv.find((candidate) => candidate.startsWith(prefix));
   return argument === undefined ? null : path.resolve(argument.slice(prefix.length));
+}
+
+function argumentValues(prefix) {
+  return process.argv
+    .filter((argument) => argument.startsWith(prefix))
+    .map((argument) => path.resolve(argument.slice(prefix.length)));
 }
 
 function createFixtureService(options, { mutationGate, referenceFixture }) {

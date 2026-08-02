@@ -25,6 +25,8 @@
     "test:recovery-driver": "vitest run --config vitest.config.ts tests/recovery-journey-driver.test.ts",
     "test:recovery-baseline:source": "cross-env ETHER_RECOVERY_BASELINE_MODE=source-electron playwright test --config playwright.recovery-baseline.config.ts",
     "test:recovery-baseline:packaged": "cross-env ETHER_RECOVERY_BASELINE_MODE=packaged playwright test --config playwright.recovery-baseline.config.ts",
+    "test:document-lifecycle-recovery:source": "cross-env ETHER_DOCUMENT_LIFECYCLE_MODE=source-electron playwright test --config playwright.document-lifecycle-recovery.config.ts",
+    "test:document-lifecycle-recovery:packaged": "cross-env ETHER_DOCUMENT_LIFECYCLE_MODE=packaged playwright test --config playwright.document-lifecycle-recovery.config.ts",
     "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
     "test:acceptance": "pnpm --workspace-root test:acceptance"

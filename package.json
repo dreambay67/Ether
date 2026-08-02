@@ -19,6 +19,8 @@
     "test:recovery-driver": "pnpm --filter @ether/testing test:recovery-driver",
     "test:recovery-baseline:source": "pnpm --filter @ether/testing test:recovery-baseline:source",
     "test:recovery-baseline:packaged": "pnpm --filter @ether/testing test:recovery-baseline:packaged",
+    "test:document-lifecycle-recovery:source": "pnpm --filter @ether/testing test:document-lifecycle-recovery:source",
+    "test:document-lifecycle-recovery:packaged": "pnpm --filter @ether/testing test:document-lifecycle-recovery:packaged",
     "test:desktop": "pnpm --filter @ether/testing test:desktop",
     "acceptance:smoke": "pnpm run test:acceptance",
     "test:acceptance": "pnpm run desktop:package:win && pnpm run test:smoke && pnpm run test:desktop && pnpm run test:packaged",

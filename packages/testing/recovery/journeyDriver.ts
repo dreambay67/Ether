@@ -97,7 +97,14 @@ export type JourneyEvidencePaths = {
   screenshots: string;
 };
 
-export type SourceElectronJourneyConfig = {
+export type JourneyProfileReuse = {
+  /** Reuse a driver-created profile only for a deliberate restart/recovery journey. */
+  profile?: JourneyProfile;
+  /** Caller-provided profiles are retained unless this explicit cleanup is requested. */
+  cleanupProfile?: boolean;
+};
+
+export type SourceElectronJourneyConfig = JourneyProfileReuse & {
   mode: "source-electron";
   workspaceRoot: string;
   journeyId: string;
@@ -110,7 +117,7 @@ export type SourceElectronJourneyConfig = {
   viewport?: { width: number; height: number };
 };
 
-export type PackagedJourneyConfig = {
+export type PackagedJourneyConfig = JourneyProfileReuse & {
   mode: "packaged";
   workspaceRoot: string;
   journeyId: string;
@@ -118,6 +125,12 @@ export type PackagedJourneyConfig = {
   evidenceMode?: EvidenceMode;
   committedEvidencePath?: readonly string[];
   executablePath?: string;
+  /**
+   * Optional product command-line arguments for a packaged journey, such as
+   * the exact user-authored document to reopen. Isolation flags remain owned
+   * by the driver and cannot be overridden by callers.
+   */
+  packagedArgs?: (profile: JourneyProfile) => readonly string[];
   viewport?: { width: number; height: number };
 };
 
@@ -203,6 +216,31 @@ export async function cleanupIsolatedJourneyProfile(profile: JourneyProfile): Pr
     throw new Error(`Refusing to remove a journey profile outside the scoped temp root: ${profile.root}`);
   }
   await rm(profileRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+}
+
+export function journeyProfileCleanupPolicy(profileSupplied: boolean, explicitCleanup: boolean | undefined): boolean {
+  return explicitCleanup ?? !profileSupplied;
+}
+
+export async function assertReusableJourneyProfile(profile: JourneyProfile): Promise<void> {
+  if (profile.kind !== "fresh-isolated") throw new Error("Only a driver-created isolated profile can be reused.");
+  const [tempRoot, profileRoot, appData, localAppData, userData] = await Promise.all([
+    realpath(os.tmpdir()),
+    realpath(profile.root),
+    realpath(profile.appData),
+    realpath(profile.localAppData),
+    realpath(profile.userData)
+  ]);
+  const relative = path.relative(tempRoot, profileRoot);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative) || !path.basename(profileRoot).startsWith(PROFILE_PREFIX)) {
+    throw new Error(`Refusing to reuse a profile outside the scoped temp root: ${profile.root}`);
+  }
+  for (const [label, candidate] of [["APPDATA", appData], ["LOCALAPPDATA", localAppData], ["user-data", userData]] as const) {
+    const relativeCandidate = path.relative(profileRoot, candidate);
+    if (relativeCandidate === "" || relativeCandidate.startsWith("..") || path.isAbsolute(relativeCandidate)) {
+      throw new Error(`Refusing to reuse a profile with ${label} outside its scoped root.`);
+    }
+  }
 }
 
 export async function sha256File(filePath: string): Promise<string> {
@@ -526,7 +564,10 @@ export type RecoveryJourneySession = {
 export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Promise<RecoveryJourneySession> {
   assertAuthoringJourneyDeclaration(config.declaration);
   const workspaceRoot = path.resolve(config.workspaceRoot);
-  const profile = await createIsolatedJourneyProfile();
+  const ownsProfile = config.profile === undefined;
+  const profile = config.profile ?? await createIsolatedJourneyProfile();
+  if (!ownsProfile) await assertReusableJourneyProfile(profile);
+  const cleanupProfile = journeyProfileCleanupPolicy(!ownsProfile, config.cleanupProfile);
   const evidence = journeyEvidencePaths(
     workspaceRoot,
     config.journeyId,
@@ -569,10 +610,13 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       packagedExecutablePath = config.executablePath ?? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
       await requireFile(packagedExecutablePath, "Packaged Ether.exe");
       existingPackagedProcesses = await packagedProcessIds(packagedExecutablePath);
+      const packagedArgs = config.packagedArgs?.(profile) ?? [];
+      assertPackagedJourneyArgs(packagedArgs);
       packagedProcess = spawn(packagedExecutablePath, [
         "--remote-debugging-port=0",
         `--user-data-dir=${profile.userData}`,
-        "--disable-gpu"
+        "--disable-gpu",
+        ...packagedArgs
       ], { env: environment, stdio: "pipe", windowsHide: true });
       processOutput = captureProcessOutput(packagedProcess);
       packagedBrowser = await connectToPackagedApp(profile.userData, packagedProcess, processOutput);
@@ -609,7 +653,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
           recorder.captureMainProcessOutput(processOutput());
           recorder.finish(outcome);
           await recorder.write(evidence);
-          await cleanupIsolatedJourneyProfile(profile);
+          if (cleanupProfile) await cleanupIsolatedJourneyProfile(profile);
         }
         return evidence;
       }
@@ -621,8 +665,25 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses).catch(() => undefined);
       if (packagedProcess.exitCode === null) packagedProcess.kill();
     }
-    await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
+    if (cleanupProfile) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
     throw error;
+  }
+}
+
+export function assertPackagedJourneyArgs(argumentsToValidate: readonly string[]): void {
+  for (const argument of argumentsToValidate) {
+    if (typeof argument !== "string" || argument.length === 0) {
+      throw new Error("Packaged journey arguments must be non-empty strings.");
+    }
+    const normalized = argument.toLowerCase();
+    if (
+      normalized === "--remote-debugging-port" ||
+      normalized.startsWith("--remote-debugging-port=") ||
+      normalized === "--user-data-dir" ||
+      normalized.startsWith("--user-data-dir=")
+    ) {
+      throw new Error(`Packaged journey argument ${argument} would override driver-owned isolation.`);
+    }
   }
 }
 

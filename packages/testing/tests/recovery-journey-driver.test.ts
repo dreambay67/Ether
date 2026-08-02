@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 import {
   JourneyActionRecorder,
   RealPageInput,
+  assertPackagedJourneyArgs,
+  assertReusableJourneyProfile,
+  createIsolatedJourneyProfile,
+  journeyProfileCleanupPolicy,
   assertAuthoringJourneyDeclaration,
   assertAuthoringJourneySourceSafety,
   blankAuthoringJourney,
@@ -120,6 +124,43 @@ describe("Ether recovery journey driver", () => {
     expect(() => assertAuthoringJourneySourceSafety("database.exec('update graph')", "fixture"))
       .toThrow(/database edit/u);
     expect(() => assertAuthoringJourneyDeclaration(blankAuthoringJourney("fake-provider", "fake"))).not.toThrow();
+  });
+
+  it("accepts a document reopen argument but retains driver ownership of isolated packaged flags", () => {
+    expect(() => assertPackagedJourneyArgs(["C:\\journeys\\UI-authored.ether"])).not.toThrow();
+    for (const argument of [
+      "--user-data-dir=C:\\unsafe",
+      "--user-data-dir",
+      "--remote-debugging-port=9222",
+      "--remote-debugging-port"
+    ]) {
+      expect(() => assertPackagedJourneyArgs([argument])).toThrow(/driver-owned isolation/u);
+    }
+  });
+
+  it("preserves a supplied recovery profile by default, cleans it only when requested, and rejects outside roots", async () => {
+    const profile = await createIsolatedJourneyProfile();
+    const outside = await mkdtemp(path.join(os.tmpdir(), "ether-untrusted-profile-"));
+    try {
+      expect(journeyProfileCleanupPolicy(false, undefined)).toBe(true);
+      expect(journeyProfileCleanupPolicy(true, undefined)).toBe(false);
+      expect(journeyProfileCleanupPolicy(true, true)).toBe(true);
+      expect(journeyProfileCleanupPolicy(true, false)).toBe(false);
+      await expect(assertReusableJourneyProfile(profile)).resolves.toBeUndefined();
+
+      const outsideProfile = {
+        ...profile,
+        root: outside,
+        appData: path.join(outside, "AppData"),
+        localAppData: path.join(outside, "LocalAppData"),
+        userData: path.join(outside, "LocalAppData", "Ether")
+      };
+      await Promise.all([mkdir(outsideProfile.appData, { recursive: true }), mkdir(outsideProfile.userData, { recursive: true })]);
+      await expect(assertReusableJourneyProfile(outsideProfile)).rejects.toThrow(/outside the scoped temp root/u);
+    } finally {
+      await rm(profile.root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("keeps committed evidence deterministic and raw traces under ignored test results", () => {
