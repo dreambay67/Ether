@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import {
   assertAuthoringJourneySourceSafety,
@@ -101,14 +101,16 @@ test("records a blank-UI authored document through save, document actions, close
       contender = null;
     }
 
+    const saveStateObservation = observeSavingThenSaved(page);
     await input.leftClick(
       page.getByRole("button", { name: "Image", exact: true }),
       "Edit the saved document through the visible UI before a recovery restart",
       "A second node is committed and autosaved before the deliberate process kill."
     );
     await expect(page.locator(".react-flow__node")).toHaveCount(2);
-    await page.waitForTimeout(2_000);
-    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+    const saveTransitions = await saveStateObservation;
+    expect(saveTransitions).toEqual(expect.arrayContaining(["Saving", "Saved"]));
+    input.observe("Visible autosave transition", "The ordinary graph edit visibly transitions through Saving to Saved.", `Observed ${saveTransitions.join(" -> ")}.`);
     await hardKillLaunchedJourney(mode, first, journeyRoot);
     input.observe(
       "Hard-kill after UI edit/autosave",
@@ -142,6 +144,7 @@ test("records a blank-UI authored document through save, document actions, close
     expect(reopened.recorder.snapshot().errors).toEqual([]);
     await reopened.close("passed");
     reopened = null;
+    await expect.poll(async () => hasSQLiteSidecar(renamedPath), { timeout: 15_000 }).toBe(false);
 
     cleanReopened = await launch(mode, "document-lifecycle-clean-reopen", journeyRoot, renamedPath, recoveryProfile, true);
     await expect(cleanReopened.page.getByTestId("project-header")).toContainText("UI authored renamed.ether");
@@ -299,6 +302,24 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<boolean
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return isFile(filePath);
+}
+
+async function hasSQLiteSidecar(documentPath: string): Promise<boolean> {
+  const sidecars = ["-journal", "-shm", "-wal"].map((suffix) => `${documentPath}${suffix}`);
+  return (await Promise.all(sidecars.map(isFile))).some(Boolean);
+}
+
+async function observeSavingThenSaved(page: Page): Promise<string[]> {
+  const indicator = page.locator(".document-save-state span");
+  const transitions: string[] = [];
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const value = (await indicator.textContent())?.trim();
+    if (value && transitions.at(-1) !== value) transitions.push(value);
+    if (transitions.includes("Saving") && value === "Saved") return transitions;
+    await page.waitForTimeout(25);
+  }
+  throw new Error(`Autosave did not visibly transition through Saving to Saved: ${transitions.join(" -> ") || "no states"}.`);
 }
 
 async function expectWritableDocument(session: RecoveryJourneySession): Promise<void> {
