@@ -37,7 +37,7 @@ test("shows a staged fake-provider completion as a review-required Recovery revi
     await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create baseline graph", "The recovery document starts as a blank graph authored through packaged UI.");
     await baseline.input.pressKey("Control+S", "Save packaged recovery baseline", "The Windows Save dialog persists the UI-authored `.ether` baseline.");
-    await sendNativeSavePath(documentPath);
+    await completeNativeFileDialogWithUia(await exactPackagedPid(baseline), documentPath);
     await expect.poll(async () => isFile(documentPath)).toBe(true);
     await baseline.close("passed");
 
@@ -73,14 +73,15 @@ test("keeps a deliberately corrupted metadata copy unchanged while the packaged 
     await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create metadata baseline", "The corrupt-metadata fixture begins with a packaged UI-authored document.");
     await baseline.input.pressKey("Control+S", "Save metadata baseline", "The Windows Save dialog persists the baseline before the copied fixture is corrupted.");
-    await sendNativeSavePath(baselinePath);
+    const ownerPid = await exactPackagedPid(baseline);
+    await completeNativeFileDialogWithUia(ownerPid, baselinePath);
     await expect.poll(async () => isFile(baselinePath)).toBe(true);
     await copyFile(baselinePath, corruptPath);
     const database = new DatabaseSync(corruptPath);
     try { database.exec("PRAGMA application_id = 1234"); } finally { database.close(); }
     const damagedHash = await sha256(corruptPath);
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Open", exact: true }), "Open corrupt metadata copy", "The visible packaged Open command sends the copied corrupt document to the native picker.");
-    await sendNativeSavePath(corruptPath);
+    await completeNativeFileDialogWithUia(ownerPid, corruptPath);
     const nativeError = await readNativeErrorDialog(profile);
     expect(nativeError).toMatch(/unsupported|not an Ether|application/i);
     baseline.input.observe("Native unsupported metadata error", "The exact packaged browser process presents a clear native unsupported-document error for the corrupt copy.", nativeError);
@@ -111,7 +112,7 @@ test("repairs a copied media-corrupt document through the visible packaged lossy
     await expect(baseline.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await baseline.input.leftClick(baseline.page.getByRole("button", { name: "Prompt", exact: true }), "Create media baseline", "The media-repair fixture begins with a packaged UI-authored graph.");
     await baseline.input.pressKey("Control+S", "Save media baseline", "The Windows Save dialog persists the visible baseline before its copied fixture is damaged.");
-    await sendNativeSavePath(baselinePath);
+    await completeNativeFileDialogWithUia(await exactPackagedPid(baseline), baselinePath);
     await expect.poll(async () => isFile(baselinePath)).toBe(true);
     await baseline.close("passed");
     baseline = null;
@@ -249,9 +250,11 @@ async function createFakeArtifactFixture(documentPath: string, userData: string)
   }
 }
 
-async function sendNativeSavePath(destination: string): Promise<void> {
-  const { execFile } = await import("node:child_process");
-  await new Promise<void>((resolve, reject) => execFile("powershell.exe", ["-NoProfile", "-Sta", "-Command", `Add-Type -AssemblyName System.Windows.Forms; Start-Sleep -Milliseconds 500; [System.Windows.Forms.SendKeys]::SendWait('^a'); [System.Windows.Forms.SendKeys]::SendWait('${destination.replaceAll("'", "''")}'); [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')`], { windowsHide: true }, (error) => error === null ? resolve() : reject(error)));
+async function exactPackagedPid(session: RecoveryJourneySession): Promise<number> {
+  return findExactPackagedProcessId(
+    path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe"),
+    session.profile.userData
+  );
 }
 
 async function isFile(filePath: string): Promise<boolean> {
