@@ -734,6 +734,9 @@ export async function cleanupTestOwnedRecentShortcuts(input: {
     const recentRoot = path.win32.join(appData, "Microsoft", "Windows", "Recent");
     const output = await runPowerShell(recentShortcutScript({ ...input, appData }));
     for (const candidatePath of output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean)) {
+      if (discovered.some(({ candidatePath: priorPath }) => sameWindowsPath(priorPath, candidatePath))) {
+        throw new Error(`Duplicate Recent deletion candidate was discovered: ${candidatePath}.`);
+      }
       discovered.push({ candidatePath, candidate: deriveWindowsShellDeletionCandidate({ appData, recentRoot, candidatePath }) });
     }
   }
@@ -746,7 +749,8 @@ export async function cleanupTestOwnedRecentShortcuts(input: {
     if (fields.length !== 4 || !sameWindowsPath(fields[0] ?? "", candidatePath)) {
       throw new Error(`Recent deletion proof did not return the exact candidate metadata: ${output || "(empty)"}.`);
     }
-    if (fields[1] === undefined || fields[2] === undefined || fields[3] === undefined || fields[1].length === 0 || fields[2].length !== 64 || fields[3].length === 0) {
+    const candidateSize = Number(fields[1]);
+    if (fields[1] === undefined || fields[2] === undefined || fields[3] === undefined || !Number.isSafeInteger(candidateSize) || candidateSize <= 0 || !/^[a-f0-9]{64}$/iu.test(fields[2]) || fields[3].length === 0) {
       throw new Error(`Recent deletion proof returned incomplete candidate metadata for ${candidate.appData}:${candidate.relativePath}.`);
     }
     removed.push(candidatePath);

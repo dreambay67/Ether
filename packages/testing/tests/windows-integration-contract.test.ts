@@ -66,6 +66,9 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256");
     expect(windowsIntegration).toContain("recentShortcutDeletionScript");
     expect(windowsIntegration).toContain("assertWindowsShellDeletionCandidatesAbsentAtS1(input.s1");
+    expect(windowsIntegration).toContain("Duplicate Recent deletion candidate was discovered");
+    expect(windowsIntegration).toContain("Number.isSafeInteger(candidateSize)");
+    expect(windowsIntegration).toContain("/^[a-f0-9]{64}$/iu");
     expect(windowsIntegration).not.toContain("$s1Paths");
     expect(windowsIntegration).not.toContain("s1Root.files.map((file) => file.path)");
     expect(driver).toContain("afterLaunchFailureApplicationExit");
