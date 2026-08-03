@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "a02-windows-primary",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T02:44:01.277Z",
+  "finishedAt": "2026-08-03T02:44:23.931Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "14dda6c0aa33398bfdb4424ad21580d67ffd44b1",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Create a document through visible UI",
+      "expected": "The blank canvas has one UI-authored node before native Save.",
+      "actual": "Left click at (91, 313).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 2,
+      "kind": "keyboard-command",
+      "label": "Save through the native Windows picker",
+      "expected": "The exact Ether-owned native Save dialog receives the Unicode/spaces path through UI Automation.",
+      "actual": "Pressed Control+s.",
+      "durationMs": 27
+    },
+    {
+      "sequence": 3,
+      "kind": "observation",
+      "label": "One-file format identity",
+      "expected": "The saved document is a single valid Ether document with format/application/schema identity.",
+      "actual": "Validated Unicode Žltý priestor.ether with inspectEtherDocument.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Recent shortcut snapshot",
+      "expected": "The pre-setup isolated-profile Recent links are diagnostic only; S1 becomes the first restoration checkpoint after native setup.",
+      "actual": "Found 0 pre-existing matching isolated-profile Recent shortcuts.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 5,
+      "kind": "left-click",
+      "label": "Save As through the native Windows picker",
+      "expected": "The UI switches only after the Unicode destination validates.",
+      "actual": "Left click at (884, 34).",
+      "durationMs": 11
+    },
+    {
+      "sequence": 6,
+      "kind": "observation",
+      "label": "Save As lease rebinding",
+      "expected": "The source writer lease is released and the destination lease is active under isolated AppData, never beside the document.",
+      "actual": "Enumerated the document directory and observed active lease root after the completed Save As; recovery remains unclaimed by this clean-save journey.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 7,
+      "kind": "left-click",
+      "label": "Save a Copy through the native Windows picker",
+      "expected": "A complete Unicode/spaces copy is saved without switching the active Save As document.",
+      "actual": "Left click at (923, 34).",
+      "durationMs": 12
+    },
+    {
+      "sequence": 8,
+      "kind": "observation",
+      "label": "Save a Copy result",
+      "expected": "Save a Copy creates a valid second .ether file while the active document remains the Save As destination.",
+      "actual": "Validated Copy Žltý priestor.ether and retained Save As Žltý priestor.ether as the active title.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 9,
+      "kind": "observation",
+      "label": "File > Open through native picker",
+      "expected": "A native Ctrl+O sent to the exact packaged Ether window opens its native picker.",
+      "actual": "native-keyboard ownerPid=43488 shortcut=Ctrl+O",
+      "durationMs": 0
+    },
+    {
+      "sequence": 10,
+      "kind": "observation",
+      "label": "Capture S1 after native primary setup",
+      "expected": "S0 is diagnostic; every S0→S1 shell delta from native Save, Save As, Copy, and Open is recorded as OS-native setup and is not restored.",
+      "actual": "S0→S1 OS-native setup delta (recorded without restoration claim): C:\\Users\\deny7\\AppData\\Roaming:CustomDestinations/590aee7bdd69b59b.customDestinations-ms",
+      "durationMs": 0
+    },
+    {
+      "sequence": 11,
+      "kind": "observation",
+      "label": "S1 exact target-link checkpoint",
+      "expected": "Both real and isolated S1 Recent roots contain zero links resolving to the exact random test documents.",
+      "actual": "S1 matching target links=0.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 12,
+      "kind": "screenshot",
+      "label": "Capture File > Open result",
+      "expected": "File > Open shows the original Unicode/spaces document.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 86,
+      "screenshotPath": "screenshots/01-native-open-unicode.png"
+    },
+    {
+      "sequence": 13,
+      "kind": "observation",
+      "label": "Second-instance focus",
+      "expected": "A separate exact Ether.exe request exits through the single-instance lock and focuses the already-attached primary window for the requested document.",
+      "actual": "Exact requester 39308 exited after routing Unicode Žltý priestor.ether to the existing primary window.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 14,
+      "kind": "observation",
+      "label": "Clean close after disposable-root cleanup",
+      "expected": "A native Alt+F4 sent to the exact packaged Ether window closes the Saved document without an unsaved-changes prompt before reopen validation.",
+      "actual": "native-keyboard ownerPid=43488 shortcut=Alt+F4",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,21 @@
+{
+  "attempts": [],
+  "durabilityFailureObserved": false,
+  "identity": {
+    "gitCommit": "14dda6c0aa33398bfdb4424ad21580d67ffd44b1",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "journeyId": "a02-windows-primary",
+  "route": "primary",
+  "schemaVersion": 1
+}

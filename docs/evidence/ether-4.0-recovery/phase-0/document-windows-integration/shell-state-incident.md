@@ -199,3 +199,36 @@ repair was attempted:
 The failed evidence and both disposable paths remain diagnostic only. The follow-up
 cleanup refactor removes full S1 path-set embedding from `-EncodedCommand`; it does
 not authorize a rerun or close the remaining Windows shell evidence gaps.
+
+## 2026-08-03 successful normal A02 packaged evidence
+
+Status: **passed and retained as bounded packaged evidence**. The normal A02 route
+completed at evidence identity commit `14dda6c0aa33398bfdb4424ad21580d67ffd44b1`.
+The three approval-gated routes (association, Explorer drag, and Jump List) were
+skipped; this record does not claim any of those routes ran or passed.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `release/windows/win-unpacked/Ether.exe` | `03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f` |
+| `release/windows/win-unpacked/resources/app.asar` | `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e` |
+
+The primary and reopen records use fresh isolated profiles at 1280x720/scale 1,
+each reports `outcome: passed` and `errors: []`, and read-only postcheck found an
+exact packaged-process count of zero. The retained normal-route records are
+[`a02-windows-primary`](a02-windows-primary/packaged/) and
+[`a02-windows-reopen-after-cleanup`](a02-windows-reopen-after-cleanup/packaged/).
+The primary screenshot visibly shows the Unicode/spaces document title in the
+installed Ether window with Saved status, the authored Prompt node, and the File >
+Open result state.
+
+The aggregate Recent snapshot contained 208 files before the route (digest
+`147b2c54...94c7`) and 208 after it (digest `3c270dcb...11e8`). The only recorded
+pre-existing opaque shell change was
+`CustomDestinations\\590aee7bdd69b59b.customDestinations-ms`, size 6233, from
+`d739c7...fec2` before the route to `0eee330...a6f` after it, last written at
+`2026-08-03T02:44:29.8032683Z`. It remains preserved in place: no restore, delete,
+overwrite, or timestamp repair was attempted.
+
+The normal-route finalization sidecar records one passed attempt with exact-process
+absence proof and `removed exact post-S1 target links=0`. This is diagnostic shell
+evidence only; approval routes, T03 acceptance, and Phase 0 acceptance remain open.

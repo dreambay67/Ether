@@ -99,6 +99,30 @@ cross-machine, long-path/removable/cloud, or owner-M requirements. See
 `packaged-coverage-plan.md` for requirement-level boundaries and retained evidence
 paths.
 
+## Normal A02 packaged evidence cross-reference
+
+The canonical normal A02 route was reconciled at evidence identity commit
+`14dda6c0aa33398bfdb4424ad21580d67ffd44b1` using `Ether.exe` SHA-256
+`03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f` and `app.asar`
+SHA-256 `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e`.
+The primary and reopen records under
+`phase-0/document-windows-integration/a02-windows-primary/packaged/` and
+`a02-windows-reopen-after-cleanup/packaged/` each passed with a fresh isolated
+profile, 1280x720/scale 1, and `errors: []`; read-only postflight found an exact
+packaged-process count of zero. The normal route is one passed route; association,
+Explorer drag, and Jump List approval routes were skipped. Its screenshot was
+visually inspected and shows the Unicode/spaces title, Saved state, authored Prompt
+node, and File > Open result.
+
+The aggregate Recent snapshot remained at 208 files (preflight digest
+`147b2c54...94c7`; postflight digest `3c270dcb...11e8`). The pre-existing opaque
+`CustomDestinations\\590aee7bdd69b59b.customDestinations-ms` changed from
+`d739c7...fec2` to `0eee330...a6f` at `2026-08-03T02:44:29.8032683Z`; no restore,
+delete, overwrite, or timestamp repair was attempted. The finalization attempt
+passed with exact-process proof and no links removed. This cross-reference adds
+supporting P evidence only; it intentionally does not change the A classifications,
+promote the T01 ledger, or claim T03/Phase 0 acceptance.
+
 ## Audit conclusion
 
 Automated coverage is strongest for deterministic storage, leases, publication
