@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { getViewportForBounds, ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
-import type { EtherGraph, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition } from "@ether/schema";
+import type { EtherGraph, EtherNode, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition } from "@ether/schema";
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import { CanvasSidePanels } from "./CanvasSidePanels";
 import { CanvasSurface } from "./CanvasSurface";
@@ -15,6 +15,7 @@ import { runPlanPresentation, type RunPlanPresentation } from "./inspector/runPl
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { centeredCanvasPosition, openCanvasPosition } from "./placement";
 import { addNodesToModuleOperations, createModuleOperations, moduleIsLocked, removeNodesFromModuleOperations } from "./modules/moduleModel";
+import { importReferenceFilesSequentially, type CanvasReferenceDropHandler } from "./commands/useDropCommands";
 
 export type EtherCanvasHandle = { addNode(definitionId: NodeDefinitionId): void; addPrompt(): void; addImage(): void; focusNode(nodeId: string): void; };
 export type EtherCanvasProps = { graph: EtherGraph; revisionSeed: GraphRevisionSeed; catalog: readonly NodeLibraryItem[]; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onStatus(message: string): void; onInspectorChange?(context: InspectorContext | null): void; };
@@ -219,6 +220,43 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
       return null;
     }
   }, [document.documentId, graph.id, onGraph, report]);
+  const dropReferences: CanvasReferenceDropHandler = useCallback(async (files, position, targetNodeId) => {
+    if (readOnly) {
+      report("This document is read-only.");
+      return;
+    }
+    let nodeId = graph.nodes.find((node) => node.id === targetNodeId && node.config.kind === "reference.set")?.id;
+    if (nodeId === undefined) {
+      const definition = catalog.find((item) => item.definitionId === "reference.set");
+      if (definition === undefined) {
+        report("The Reference Set definition is unavailable.");
+        return;
+      }
+      const ordinal = graph.nodes.filter((node) => node.definitionId === "reference.set").length + 1;
+      const node: EtherNode = {
+        id: crypto.randomUUID(),
+        definitionId: "reference.set",
+        title: `${definition.title} ${ordinal}`,
+        position,
+        size: { width: definition.presentation.width, height: definition.presentation.height },
+        config: structuredClone(definition.defaultConfig) as EtherNode["config"],
+        presentation: { collapsed: false, accent: "default", previewMode: definition.presentation.previewMode }
+      } as EtherNode;
+      if (!await applyTransaction([{ type: "addNode", graphId: graph.id, node }], "Add Reference Set")) return;
+      nodeId = node.id;
+      report("Created a Reference Set. Linking dropped files by default; use Reference Desk to embed copies.");
+    }
+    const results = await importReferenceFilesSequentially(files, (file) => window.ether.references.importDropped(file, {
+        documentId: document.documentId,
+        graphId: graph.id,
+        nodeId,
+        role: "general",
+        storage: "link"
+      }));
+    const imported = results.filter((result) => !result.cancelled).length;
+    await refreshGraph();
+    report(`${imported} dropped reference${imported === 1 ? "" : "s"} linked to the Reference Set.`);
+  }, [applyTransaction, catalog, document.documentId, graph.id, graph.nodes, readOnly, refreshGraph, report]);
   const insertionCenter = useCallback((definitionId: NodeDefinitionId): NodePosition => {
     const surface = globalThis.document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
     if (surface === null) return { x: 120 + graph.nodes.length * 28, y: 120 + graph.nodes.length * 20 };
@@ -477,5 +515,5 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     onStatus: report
   });
   const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
-  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); if (!additive) setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} /></div>;
+  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onReferenceDrop={dropReferences} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); if (!additive) setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} /></div>;
 });

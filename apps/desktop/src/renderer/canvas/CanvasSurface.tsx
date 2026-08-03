@@ -14,14 +14,15 @@ import { NODE_LIBRARY_DRAG_TYPE, QuickAddPalette } from "./library/NodeLibrary";
 import { commandIdForKeyboard, commandPreservesCanvasFocus, type GraphCommand } from "./commands/useGraphCommands";
 import type { CanvasEditorField } from "./commands/directEditing";
 import { moduleAccent, moduleIsLocked } from "./modules/moduleModel";
+import { classifyCanvasFileDrop, useDropCommands, type CanvasReferenceDropHandler } from "./commands/useDropCommands";
 
 function OverviewCluster({ data }: NodeProps & { data: { count: number; title: string } }) {
   return <article className="ether-node ether-node-overview ether-node-family-canvas" data-testid="ether-node" data-cluster-node-count={data.count} aria-label={`${data.count} nodes in this canvas region`}><header className="ether-node-header"><span className="ether-node-family">Overview</span></header><strong>{data.title}</strong><span>{data.count} nodes</span></article>;
 }
 const nodeTypes = { etherNode: EtherNode, overviewCluster: OverviewCluster, module: ModuleNode }; const edgeTypes = { etherEdge: EtherEdge };
 type ConnectionIntent = { nodeId: string; handleId: PayloadChannel; handleType: "source" | "target" };
-export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selectedIds, selectedEdgeId, selectedModuleId, activeEditor, commands, viewport, onAddNode, onMove, onMoveModule, onResize, onDelete, onEditRequest, onEditCommit, onEditCancel, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onEdgeSelected, onModuleSelected, onViewport, onCommandUnavailable }: {
-  graph: EtherGraph; catalog: readonly NodeLibraryItem[]; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; selectedIds: readonly string[]; selectedEdgeId: string | null; selectedModuleId: string | null; activeEditor: { nodeId: string; field: CanvasEditorField } | null; commands: readonly GraphCommand[]; viewport?: Viewport; onAddNode(definitionId: NodeDefinitionId, position: NodePosition): void; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onEditRequest(id: string, field: CanvasEditorField): void; onEditCommit(id: string, field: CanvasEditorField, value: string): Promise<boolean>; onEditCancel(): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onModuleSelected(id: string | null, additive?: boolean): void; onViewport(viewport: Viewport): void; onCommandUnavailable(message: string): void;
+export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selectedIds, selectedEdgeId, selectedModuleId, activeEditor, commands, viewport, onAddNode, onMove, onMoveModule, onResize, onDelete, onEditRequest, onEditCommit, onEditCancel, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onEdgeSelected, onModuleSelected, onViewport, onCommandUnavailable, onReferenceDrop }: {
+  graph: EtherGraph; catalog: readonly NodeLibraryItem[]; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; selectedIds: readonly string[]; selectedEdgeId: string | null; selectedModuleId: string | null; activeEditor: { nodeId: string; field: CanvasEditorField } | null; commands: readonly GraphCommand[]; viewport?: Viewport; onAddNode(definitionId: NodeDefinitionId, position: NodePosition): void; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onEditRequest(id: string, field: CanvasEditorField): void; onEditCommit(id: string, field: CanvasEditorField, value: string): Promise<boolean>; onEditCancel(): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onModuleSelected(id: string | null, additive?: boolean): void; onViewport(viewport: Viewport): void; onCommandUnavailable(message: string): void; onReferenceDrop?: CanvasReferenceDropHandler;
 }) {
   markPerformance("canvas:projection:start");
   const flow = useReactFlow();
@@ -37,6 +38,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const [placementPreview, setPlacementPreview] = useState<{ x: number; y: number; title: string } | null>(null);
   const [quickAdd, setQuickAdd] = useState<{ anchor: { x: number; y: number }; position: NodePosition } | null>(null);
   const [connectionIntent, setConnectionIntent] = useState<ConnectionIntent | null>(null);
+  const { onDrop: handleReferenceDrop } = useDropCommands(onCommandUnavailable, onReferenceDrop);
   const showSemanticOverview = largeGraph && semanticOverview;
   useEffect(() => {
     if (activeEditor !== null) beginInteractionEdit();
@@ -213,7 +215,15 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     return parsed.success ? parsed.data : null;
   }, []);
   const previewDraggedNode = useCallback((event: ReactDragEvent<HTMLElement>) => {
-    if (readOnly || !event.dataTransfer.types.includes(NODE_LIBRARY_DRAG_TYPE)) return;
+    if (readOnly) return;
+    if (event.dataTransfer.types.includes("Files")) {
+      if (classifyCanvasFileDrop(Array.from(event.dataTransfer.files)) === "reference" && onReferenceDrop !== undefined) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }
+      return;
+    }
+    if (!event.dataTransfer.types.includes(NODE_LIBRARY_DRAG_TYPE)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     const bounds = surfaceRef.current?.getBoundingClientRect();
@@ -221,14 +231,26 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     const definitionId = draggedDefinition(event);
     const item = catalog.find((candidate) => candidate.definitionId === definitionId);
     setPlacementPreview({ x: event.clientX - bounds.left, y: event.clientY - bounds.top, title: item?.title ?? "Place node" });
-  }, [catalog, draggedDefinition, readOnly]);
+  }, [catalog, draggedDefinition, onReferenceDrop, readOnly]);
   const dropNode = useCallback((event: ReactDragEvent<HTMLElement>) => {
+    if (event.dataTransfer.files.length > 0) {
+      if (classifyCanvasFileDrop(Array.from(event.dataTransfer.files)) === "reference" && onReferenceDrop !== undefined) {
+        const bounds = surfaceRef.current?.getBoundingClientRect();
+        if (bounds !== undefined) {
+          const targetElement = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(".react-flow__node[data-id]") : null;
+          const targetNodeId = targetElement?.dataset.id ?? null;
+          handleReferenceDrop(event, insertionAt(event.clientX, event.clientY), targetNodeId);
+        }
+        setPlacementPreview(null);
+        return;
+      }
+    }
     const definitionId = draggedDefinition(event);
     setPlacementPreview(null);
     if (readOnly || definitionId === null) return;
     event.preventDefault();
     onAddNode(definitionId, insertionAt(event.clientX, event.clientY));
-  }, [draggedDefinition, insertionAt, onAddNode, readOnly]);
+  }, [draggedDefinition, handleReferenceDrop, insertionAt, onAddNode, onReferenceDrop, readOnly]);
   const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
     if (readOnly) return;
     if (node.id.startsWith("module:")) { onMoveModule(node.id.slice("module:".length), node.position); interaction.settle(); return; }

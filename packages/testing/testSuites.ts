@@ -2,6 +2,7 @@ export const testSuites = {
   unit: [
     "tests/acceptance-docs.test.ts",
     "tests/asset-drop.test.ts",
+    "tests/canvas-reference-drop.test.ts",
     "tests/brand-tokens.test.ts",
     "tests/canvas-authoring-commands.test.ts",
     "tests/module-authoring.test.ts",
@@ -92,6 +93,7 @@ export const testSuites = {
     "tests/desktop/release-status.spec.ts",
     "tests/desktop/gemini-credential-setup.spec.ts",
     "tests/desktop/canvas.spec.ts",
+    "tests/desktop/canvas-reference-drop.spec.ts",
     "tests/desktop/recipe-gallery.spec.ts",
     "tests/desktop/document-history.spec.ts",
     "tests/desktop/inspectors.spec.ts",
