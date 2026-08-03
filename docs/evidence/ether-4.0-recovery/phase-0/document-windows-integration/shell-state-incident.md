@@ -375,3 +375,48 @@ Registry backups, the UI-authored association document, watchdog marker, and
 profile diagnostics remain in place and untouched. The profile log contains
 ready/save activity but no observable second-instance/open/focus event after
 activation; this is diagnostic absence only, not a definitive root-cause claim.
+
+## 2026-08-03 single association Enter-transition failure at `79b25ac`
+
+Status: **failed safely and archived; no route acceptance**. The exact
+approval-gated selector selected one test in one file, with one worker,
+`retries=0`, both required approvals, and no retry. The packaged run lasted
+38.1 s (40.4 s command wall time) at exact commit
+`79b25ace9a84f7fd7c46ba53f27055b41ae54cdd`. Installer SHA-256 was
+`89a8e60c825d3581fddeb4c905ca21c69e1889f871dccbbdcd1330042383f77a`;
+`Ether.exe` was
+`329340612560c625450600616c8b5c8643b7b77063b411984d3d359f93c57cef`; and
+`app.asar` was
+`ecff49c42130b4f3f11be2c42d8665ef472fcdba0524843daecfcdb9cb7f5b97`.
+
+The association route failed at `Enter:transition`: foreground did not
+transition from the exact Explorer HWND/PID to the exact Ether HWND/PID. The
+generated fail-closed script requires native `SendInput` insertion of exactly
+two inputs and a cleared Return high bit before that transition check; that
+ordering is an inference from the generated script, not captured output. No
+association diagnostic record appeared; the retained profile log contains only
+`ready`, `graph-revision`, `command`, and `document-state` events. This is
+diagnostic absence, not a definitive root-cause claim.
+
+Finalization proved exact Ether and retained-route process absence, removed zero
+target links, and passed shell classification. The UTF-8 `.ether` registry query
+restored to SHA-256
+`e28e10c3557e46a3cf3e8a0637b06dc3f758ee98a54edcfa604ce77e88aa01c4`; left and
+Return high bits were up; and the Explorer state was identical before/after:
+minimized, non-foreground Desktop HWND `131474`, PID `16776`. Recent contained
+209 files and all 209 were readable; the pre/post JSON snapshot digests were
+`42f5e74dcd9be25e3e7cfa48cdd76c936a6b03efc7ab8a8b7e058e7e2a1d1b94` and
+`5edc7490c3986a2894dccf0a623ca3b1941fb201ad137770e47928bcc2f45242`.
+
+The pre-existing opaque
+`%APPDATA%\\Microsoft\\Windows\\Recent\\CustomDestinations\\590aee7bdd69b59b.customDestinations-ms`
+remained 6233 bytes: pre SHA-256
+`4c5ff7584b5a320fe6ba549d9a38f1d557a6c53c967db5c1f080da29c977a1f0` at
+`2026-08-03T06:45:02.6158853Z`, post SHA-256
+`3f7830bb6aa140356493e4d0f7f227a8d13f168a43943f3eac379203d2f53ef8` at
+`2026-08-03T07:25:47.418Z`. It was never restored, deleted, touched, or
+timestamp-repaired. The disposable roots
+`C:\Users\deny7\AppData\Local\Temp\ether-a02-windows-integration-VlQ2YE`
+and `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-caa2se`
+remain preserved and untouched. The complete archive is
+`failed-attempts/2026-08-03-79b25ac-association-enter-transition/`.
