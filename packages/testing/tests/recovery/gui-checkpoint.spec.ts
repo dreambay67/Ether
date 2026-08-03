@@ -100,10 +100,11 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await input.leftClick(renamedTitle, "Restore Prompt command focus", "The directly edited Prompt remains the primary graph selection.");
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
-    await input.pressKey("Control+A", "Select a runnable graph scope", "The preview scope includes the blank-authored Workers without starting provider work.");
+    await input.pressKey("Control+A", "Select the preview graph scope", "The preview scope includes the blank-authored Workers without starting provider work.");
     await expect.poll(() => selectedNodeCount(page)).toBe(4);
-    await input.pressKey("Control+Enter", "Preview the selected run", "Ctrl+Enter prepares the selected-node plan without starting provider work.");
-    await expect(page.getByTestId("canvas-status")).toContainText("Selected plan ready");
+    await input.pressKey("Control+Enter", "Preview the selected run", "Ctrl+Enter reaches provider capability validation without starting provider work.");
+    await expect(page.getByTestId("canvas-status")).toContainText("requires an injected Worker or evaluation provider capability");
+    input.observe("Provider-free run preview", "The shortcut is wired while an unconfigured blank profile remains provider-safe.", "Preview stopped at the visible capability guard; no provider work started.");
 
     let expectedCount = 4;
     for (const definition of canonicalDefinitions.slice(2)) {
