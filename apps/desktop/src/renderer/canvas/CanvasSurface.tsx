@@ -177,7 +177,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       aria-label="Authoring canvas"
       tabIndex={0}
       onPointerDownCapture={(event) => {
-        if (!(event.target as HTMLElement).closest(".react-flow__pane")) return;
+        if (!(event.target instanceof HTMLElement) || !event.target.classList.contains("react-flow__pane")) return;
         event.currentTarget.focus({ preventScroll: true });
         if (event.button === 0) {
           marqueeGesture.current = { start: { x: event.clientX, y: event.clientY } };
@@ -204,7 +204,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         interaction.cancel();
       }}
       onDoubleClick={(event) => {
-        if ((event.target as HTMLElement).closest(".react-flow__pane")) openQuickAdd(event.clientX, event.clientY);
+        if (event.target instanceof HTMLElement && event.target.classList.contains("react-flow__pane")) openQuickAdd(event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
         if (isTextEditingTarget(event.target)) return;
