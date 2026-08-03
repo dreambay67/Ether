@@ -85,6 +85,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   const shellS0 = await snapshotWindowsShellState(primaryProfile.appData);
   let shellS1: WindowsShellStateSnapshot | null = null;
   let primaryJourneyFailure: unknown = null;
+  let journeyFailedAfterCheckpoint = false;
   const finalizationFailures: unknown[] = [];
 
   try {
@@ -158,6 +159,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     reopened = null;
   } catch (error) {
     primaryJourneyFailure = error;
+    journeyFailedAfterCheckpoint = shellS1 !== null;
   } finally {
     if (reopened !== null) {
       try {
@@ -185,6 +187,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     }
     if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
+      journeyFailedAfterCheckpoint,
       processFinalizationProven,
       shellCheckpointRestored: shellS1Restored
     })) {
@@ -195,9 +198,11 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
         finalizationFailures.push(error);
       }
     } else {
-      const reason = processFinalizationProven
-        ? "unproven post-S1 shell cleanup"
-        : "unproven process/session cleanup";
+      const reason = !processFinalizationProven
+        ? "unproven process/session cleanup"
+        : journeyFailedAfterCheckpoint
+          ? "post-S1 journey assertion/action failure"
+          : "unproven post-S1 shell cleanup";
       finalizationFailures.push(new Error(`Preserved primary recovery artifacts after ${reason}: root=${root}; profile=${primaryProfile.root}.`));
     }
   }

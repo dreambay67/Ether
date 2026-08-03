@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "document-lifecycle-reopen",
   "mode": "packaged",
-  "startedAt": "2026-08-02T21:44:58.617Z",
-  "finishedAt": "2026-08-02T21:45:02.008Z",
+  "startedAt": "2026-08-03T01:14:22.705Z",
+  "finishedAt": "2026-08-03T01:14:25.334Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "73186a641cf418a18354104819630de47d564734",
+    "gitCommit": "5417ce1999f04206918ef9aaf8fae1eac2ef33c8",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "69091bcfc673a1cfbc92fcf9bf0e1c93c1d380131adb334f441d31bcd2dab339"
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "837b2acfe5d5d4355f1c4c79d36162b68a2f07cbebfd3edcc0766b164452fa25"
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
       }
     ]
   },
@@ -45,7 +45,7 @@
       "label": "Capture the exact reopened document",
       "expected": "The graph comes from the ordinary Save/Save As journey, not a recovery fixture.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 100,
+      "durationMs": 95,
       "screenshotPath": "screenshots/03-reopened-ui-authored-document.png"
     },
     {

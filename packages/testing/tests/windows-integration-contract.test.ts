@@ -92,11 +92,12 @@ describe("A02 Windows integration harness contracts", () => {
   });
 
   it("requires process proof before cleanup and S1 equality after the checkpoint", () => {
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, processFinalizationProven: false, shellCheckpointRestored: false })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(true);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, processFinalizationProven: false, shellCheckpointRestored: true })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, processFinalizationProven: true, shellCheckpointRestored: true })).toBe(true);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, journeyFailedAfterCheckpoint: false, processFinalizationProven: false, shellCheckpointRestored: false })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, journeyFailedAfterCheckpoint: false, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(true);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: false, processFinalizationProven: false, shellCheckpointRestored: true })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: false, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: true, processFinalizationProven: true, shellCheckpointRestored: true })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: false, processFinalizationProven: true, shellCheckpointRestored: true })).toBe(true);
   });
 
   it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {

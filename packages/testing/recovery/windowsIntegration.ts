@@ -118,10 +118,11 @@ export function requireNoTestOwnedRecentShortcuts(paths: readonly string[], labe
 /** Process-exit proof is always mandatory; post-S1 cleanup also requires shell equality. */
 export function recoveryArtifactsMayBeCleanedAfterShellCheckpoint(input: {
   checkpointCaptured: boolean;
+  journeyFailedAfterCheckpoint: boolean;
   processFinalizationProven: boolean;
   shellCheckpointRestored: boolean;
 }): boolean {
-  return input.processFinalizationProven && (!input.checkpointCaptured || input.shellCheckpointRestored);
+  return input.processFinalizationProven && !input.journeyFailedAfterCheckpoint && (!input.checkpointCaptured || input.shellCheckpointRestored);
 }
 
 export type AssociationRestorationWatchdog = {

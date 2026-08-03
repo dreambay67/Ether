@@ -96,3 +96,57 @@ The ordinary native Save changed the same pre-existing real shell MRU file again
 | `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `341f541efc7457b9f89e1deeb054883442238d1449183bba5d25f24c0e9a744a` | `6ae9b25b15c6a7023ca3c0aacecd741133738e23bf91ffa69f95ec5749e63e35` | `2026-08-03T01:05:37.9730910Z` |
 
 No controlled rerun was performed for this correction.
+
+## 2026-08-03 successful packaged lifecycle evidence
+
+Status: **passed and retained as bounded packaged evidence**. The controlled run at
+HEAD `5417ce1999f04206918ef9aaf8fae1eac2ef33c8` completed the ordinary UI-authored
+document lifecycle, competing-writer read-only check, hard-kill reopen, and clean
+UI Automation close/reopen. No approval-gated association, Explorer drag, Jump List,
+COM, or destination-cleanup route was enabled.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `release/windows/win-unpacked/Ether.exe` | `03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f` |
+| `release/windows/win-unpacked/resources/app.asar` | `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `cf9c66de4c055ccdac1ec7891b57c5f23356a837fff8140824ac0e9b40c01bf4` |
+
+All four journey results record a fresh isolated profile, 1280x720 viewport at scale 1,
+the exact HEAD and artifact hashes above, `outcome: passed`, and `errors: []`. Visual
+inspection found the blank UI-authored node, saved/compact/portable state, manual
+History milestone, writer-lock read-only state, two-node hard-kill reopen, and clean
+reopen state. Read-only postcheck found no exact packaged Fixer `Ether.exe` process.
+The retained records are `document-lifecycle`, `document-lifecycle-writer-lock`,
+`document-lifecycle-reopen`, and `document-lifecycle-clean-reopen`.
+
+The native Save changed the following pre-existing shell file. This is an opaque
+diagnostic setup delta: no restore, deletion, overwrite, or timestamp repair was
+attempted, and this run does not prove shell-state restoration:
+
+| Relative path under `%APPDATA%\Microsoft\Windows\Recent` | Size | Before SHA-256 | After SHA-256 | Last written UTC |
+| --- | ---: | --- | --- | --- |
+| `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `6ae9b25b15c6a7023ca3c0aacecd741133738e23bf91ffa69f95ec5749e63e35` | `bac64f8ce95b79e7bcd153666f3029506b9c678ee82c480500875bbab3e78c99` | `2026-08-03T01:14:28.4121770Z` |
+
+## 2026-08-03 successful packaged visible-recovery evidence
+
+Status: **passed and retained as bounded packaged evidence**. The visible-recovery
+suite completed six records (three UI-authored baseline records plus the provider,
+unsupported-metadata, and media-repair journeys) at the same HEAD and package hashes
+above. Each result records `outcome: passed`, `errors: []`, fresh isolated profile,
+1280x720/scale-1 viewport, and no exact packaged Fixer process remained at postcheck.
+The provider History screenshot shows `Recovered artifact - review required`; the
+metadata screenshot shows the native unsupported-document error with the valid active
+baseline preserved; and the media repair preview/report separate media/artifact losses
+from graph losses and state that the damaged source was unchanged.
+
+The visible suite changed the same pre-existing shell file. This is another opaque
+diagnostic setup delta; no restore, deletion, overwrite, or timestamp repair was
+attempted:
+
+| Relative path under `%APPDATA%\Microsoft\Windows\Recent` | Size | Before SHA-256 | After SHA-256 | Last written UTC |
+| --- | ---: | --- | --- | --- |
+| `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `bac64f8ce95b79e7bcd153666f3029506b9c678ee82c480500875bbab3e78c99` | `73f204b9142103b29516e019c7a79056b49a4d7f490ed3d09039425a1e9d5ec7` | `2026-08-03T01:16:44.0729574Z` |
+
+These successful packaged runs do not close association, Explorer drag, Jump List,
+cross-machine portability, or owner-M requirements. The pre-existing shell file
+remains preserved in place under the historical restoration limitation above.

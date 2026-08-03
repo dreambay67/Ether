@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "visible-recovery-metadata-baseline",
   "mode": "packaged",
-  "startedAt": "2026-08-02T22:45:25.722Z",
-  "finishedAt": "2026-08-02T22:45:36.523Z",
+  "startedAt": "2026-08-03T01:16:14.740Z",
+  "finishedAt": "2026-08-03T01:16:26.151Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "d9fb92a62d5c6ce541025546f4fdc5c35e0999b5",
+    "gitCommit": "5417ce1999f04206918ef9aaf8fae1eac2ef33c8",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "07f6adabbb296b387899919536a0af3cd36eed84ef7bfe05973b0133259c071d"
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "edf009fd0d2cf03b6719c67789bf42381410d16514e5f9a306d24c69dea8b814"
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Create metadata baseline",
       "expected": "The corrupt-metadata fixture begins with a packaged UI-authored document.",
       "actual": "Left click at (91, 313).",
-      "durationMs": 56
+      "durationMs": 51
     },
     {
       "sequence": 2,
@@ -45,14 +45,14 @@
       "label": "Save metadata baseline",
       "expected": "The Windows Save dialog persists the baseline before the copied fixture is corrupted.",
       "actual": "Pressed Control+s.",
-      "durationMs": 27
+      "durationMs": 26
     },
     {
       "sequence": 3,
       "kind": "observation",
       "label": "Open corrupt metadata copy",
       "expected": "A native Ctrl+O sent to the exact packaged Ether window opens the document picker.",
-      "actual": "native-keyboard ownerPid=37720 shortcut=Ctrl+O",
+      "actual": "native-keyboard ownerPid=9804 shortcut=Ctrl+O",
       "durationMs": 0
     },
     {
@@ -69,7 +69,7 @@
       "label": "Capture unsupported corrupt metadata",
       "expected": "The packaged app keeps the valid active baseline after the native unsupported-document error.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 110,
+      "durationMs": 84,
       "screenshotPath": "screenshots/corrupt-metadata-unsupported.png"
     }
   ],

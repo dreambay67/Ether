@@ -79,6 +79,26 @@ Additional focused runs for this update:
 | AC-A03-010 | Deliberately corrupt media chunks report affected artifacts distinctly from graph corruption. | `packages/testing/tests/desktop/document-history.spec.ts` — `repair review groups media and graph losses into distinct UI sections`; `packages/testing/tests/document-blobs.test.ts` — `detects corrupt chunk length or hash before returning bytes`; `packages/testing/tests/document-recovery.test.ts` — `repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses`. | **A-PASS** for source renderer classification plus deterministic media-loss reporting; packaged damaged-media UI remains P evidence. |
 | AC-A03-011 | Repair writes a new `.ether` file and report; it never mutates the damaged source. | `packages/testing/tests/document-chaos.integration.ts` — `repairs into a reviewable new document and report without mutating the damaged source`; `packages/testing/tests/document-compatibility-4x.test.ts` — `repairs supported derived-index corruption through read-only recovery without mutating the source`; `packages/testing/tests/document-recovery.test.ts` — `repairs into a fresh schema-40000 file, rehashes blobs, and reports corrupt losses`. | **A-PASS** — destination/report, source hash preservation, and fresh schema validation are asserted. |
 
+## Packaged evidence reconciliation (separate from this A map)
+
+At HEAD `5417ce1999f04206918ef9aaf8fae1eac2ef33c8`, the installed package retained
+four passing lifecycle records and six passing visible-recovery records. Each result
+records the same `Ether.exe` SHA-256
+`03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f`, `app.asar`
+SHA-256 `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e`, fresh
+isolated profile, 1280x720/scale-1 viewport, and `errors: []`. Read-only postchecks
+found no exact packaged Fixer `Ether.exe` process. The lifecycle records cover native
+save, one-file publication, Save As/Copy/Compact/Portable controls, manual History,
+autosave, hard-kill reopen, clean UIA close/reopen, and competing-writer read-only
+state. The visible records cover review-required provider recovery, unsupported
+metadata, and distinct media/artifact versus graph repair losses.
+
+This appended reconciliation does not rewrite the A classifications above, does not
+promote the T01 ledger, and does not close the association, Explorer drag, Jump List,
+cross-machine, long-path/removable/cloud, or owner-M requirements. See
+`packaged-coverage-plan.md` for requirement-level boundaries and retained evidence
+paths.
+
 ## Audit conclusion
 
 Automated coverage is strongest for deterministic storage, leases, publication

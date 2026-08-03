@@ -2,22 +2,22 @@
 
 - Mode: packaged
 - Outcome: passed
-- Git commit: 73186a641cf418a18354104819630de47d564734
+- Git commit: 5417ce1999f04206918ef9aaf8fae1eac2ef33c8
 - Profile: fresh-isolated; APPDATA, LOCALAPPDATA, and userData isolated
 - Viewport: 1280×720; scale 1
-- Started: 2026-08-02T21:45:02.283Z
-- Finished: 2026-08-02T21:45:05.093Z
+- Started: 2026-08-03T01:14:25.606Z
+- Finished: 2026-08-03T01:14:29.042Z
 
 ## Build identity
 
-- release/windows/win-unpacked/Ether.exe: 69091bcfc673a1cfbc92fcf9bf0e1c93c1d380131adb334f441d31bcd2dab339
-- release/windows/win-unpacked/resources/app.asar: 837b2acfe5d5d4355f1c4c79d36162b68a2f07cbebfd3edcc0766b164452fa25
+- release/windows/win-unpacked/Ether.exe: 03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f
+- release/windows/win-unpacked/resources/app.asar: 8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e
 
 ## Actions
 
 | # | Input | Action | Expected | Actual | ms | Screenshot |
 | --- | --- | --- | --- | --- | ---: | --- |
-| 1 | screenshot | Capture the clean-close reopen | The same user-saved document remains writable after an exact Windows UI Automation close. | Captured after the documented preceding action. | 105 | screenshots/04-clean-close-reopen.png |
+| 1 | screenshot | Capture the clean-close reopen | The same user-saved document remains writable after an exact Windows UI Automation close. | Captured after the documented preceding action. | 116 | screenshots/04-clean-close-reopen.png |
 
 ## Captured errors
 
