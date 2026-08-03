@@ -43,6 +43,9 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.keyboard.up("Shift");
   await expect(promptNode.locator(".ether-node")).toHaveClass(/is-selected/);
   await expect(imageNode.locator(".ether-node")).toHaveClass(/is-selected/);
+  await promptNode.locator(".ether-node-title").click();
+  await expect(promptNode.locator(".ether-node")).toHaveClass(/is-selected/);
+  await expect(imageNode.locator(".ether-node")).not.toHaveClass(/is-selected/);
   await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   const addWithRealMouse = async (definitionId: string) => {
     const button = page.locator(`.node-library-item[data-node-definition='${definitionId}'] .node-library-add`);
