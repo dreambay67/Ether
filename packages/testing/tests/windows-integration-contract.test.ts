@@ -29,6 +29,7 @@ import {
   classifyJumpListRecycleProgress,
   compareWindowsShellState,
   buildNativeExplorerDragScript,
+  buildExplorerAssociationInvokeScript,
   deriveWindowsShellDeletionCandidate,
   describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
@@ -129,6 +130,39 @@ describe("A02 Windows integration harness contracts", () => {
       target: { x: 960, y: 540 }
     });
     expect(encodedPowerShellCommandLength(dragScript)).toBeLessThanOrEqual(30_000);
+  });
+
+  it("keeps Explorer foreground proof immediately adjacent to association Invoke and drag mouse-down", () => {
+    const associationScript = buildExplorerAssociationInvokeScript({
+      documentPath: "C:\\Ether Recovery\\Association Žltý.ether",
+      etherPid: 1234
+    });
+    const associationSelection = associationScript.indexOf("Immediately before association Invoke: exact Explorer window must expose exactly one selected item");
+    const associationMinimized = associationScript.indexOf("if (-not [EtherA02Native]::IsIconic($etherHwnd))");
+    const associationForeground = associationScript.indexOf("[EtherA02Native]::SetForegroundWindow($explorerHwnd)", associationMinimized);
+    const associationStarted = associationScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", associationForeground);
+    const associationInvoke = associationScript.indexOf("[System.Windows.Automation.InvokePattern]$pattern).Invoke()", associationStarted);
+    expect(associationSelection).toBeGreaterThanOrEqual(0);
+    expect(associationMinimized).toBeGreaterThan(associationSelection);
+    expect(associationForeground).toBeGreaterThan(associationMinimized);
+    expect(associationStarted).toBeGreaterThan(associationForeground);
+    expect(associationInvoke).toBeGreaterThan(associationStarted);
+
+    const dragScript = buildNativeExplorerDragScript({
+      documentPath: "C:\\Ether Recovery\\Explorer drag Žltý.ether",
+      etherPid: 1234,
+      target: { x: 960, y: 540 }
+    });
+    const cursorPositioned = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY)");
+    const cursorSettled = dragScript.indexOf("Start-Sleep -Milliseconds 100", cursorPositioned);
+    const dragForeground = dragScript.indexOf("[EtherA02Pointer]::SetForegroundWindow($explorerHwnd)", cursorSettled);
+    const dragStarted = dragScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", dragForeground);
+    const mouseDown = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0002", dragStarted);
+    expect(cursorPositioned).toBeGreaterThanOrEqual(0);
+    expect(cursorSettled).toBeGreaterThan(cursorPositioned);
+    expect(dragForeground).toBeGreaterThan(cursorSettled);
+    expect(dragStarted).toBeGreaterThan(dragForeground);
+    expect(mouseDown).toBeGreaterThan(dragStarted);
   });
 
   it("proves association and drag focus transitions inside their exact Explorer interactions", async () => {
