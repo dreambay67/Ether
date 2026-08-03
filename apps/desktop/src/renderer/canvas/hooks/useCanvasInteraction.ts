@@ -39,10 +39,12 @@ export function useCanvasInteraction(selectedIds: readonly string[], onSelected:
     queueMicrotask(settle);
   }, [commit, settle]);
   const beginMarquee = useCallback((additive: boolean) => {
-    marqueeBase.current = [...currentSelection.current];
+    const start = marqueeSelectionStart(currentSelection.current, additive);
+    marqueeBase.current = start.base;
     marqueeAdditive.current = additive;
     setMode("marquee");
-  }, []);
+    commit(start.selection);
+  }, [commit]);
   const updateMarquee = useCallback((ids: readonly string[]) => {
     commit(marqueeAdditive.current ? [...marqueeBase.current, ...ids] : ids);
   }, [commit]);
@@ -81,6 +83,11 @@ export function useCanvasInteraction(selectedIds: readonly string[], onSelected:
 
 export function toggleId(ids: readonly string[], id: string) {
   return ids.includes(id) ? ids.filter((candidate) => candidate !== id) : [...ids, id];
+}
+
+export function marqueeSelectionStart(ids: readonly string[], additive: boolean) {
+  const base = [...ids];
+  return { base, selection: additive ? base : [] };
 }
 
 function unique(ids: readonly string[]) {

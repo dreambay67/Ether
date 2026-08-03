@@ -3,7 +3,7 @@ import type { EtherNode } from "@ether/schema";
 
 import { commandIdForKeyboard } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
-import { toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
+import { marqueeSelectionStart, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
 
 const presentation = { collapsed: false, accent: "default", previewMode: "content" as const };
@@ -32,6 +32,11 @@ describe("canvas authoring command map", () => {
   it("toggles additive selection without duplicate IDs", () => {
     expect(toggleId(["a", "b"], "c")).toEqual(["a", "b", "c"]);
     expect(toggleId(["a", "b"], "a")).toEqual(["b"]);
+  });
+
+  it("replaces a prior selection when plain marquee begins", () => {
+    expect(marqueeSelectionStart(["worker"], false)).toEqual({ base: ["worker"], selection: [] });
+    expect(marqueeSelectionStart(["worker"], true)).toEqual({ base: ["worker"], selection: ["worker"] });
   });
 
   it("centers blank insertions and finds the first non-overlapping registry slot", () => {
