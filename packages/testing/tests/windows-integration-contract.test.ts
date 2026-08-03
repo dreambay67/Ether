@@ -49,10 +49,51 @@ import {
   requireAssociationRouteApproval,
   requireExplorerDragRouteApproval,
   requireJumpListRouteApproval,
-  requireShellUiApproval
+  requireShellUiApproval,
+  runAllDragRecoverySteps
 } from "../recovery/windowsIntegration.js";
 
 describe("A02 Windows integration harness contracts", () => {
+  it("attempts every post-GO drag recovery proof after earlier failures", async () => {
+    const attempts: string[] = [];
+    const rejected = (name: string) => async () => {
+      attempts.push(name);
+      throw new Error(name);
+    };
+    const failures = await runAllDragRecoverySteps({
+      awaitRetainedChildExit: rejected("child-exit"),
+      drainStageWrites: rejected("stage-drain"),
+      goPublished: true,
+      independentRelease: rejected("independent-release"),
+      latchTerminal: () => { attempts.push("terminal-latch"); throw new Error("terminal-latch"); },
+      persistAbortRequested: rejected("abort-requested"),
+      releaseWatchdog: rejected("watchdog-release-result"),
+      terminateRetainedChild: rejected("child-termination")
+    });
+    expect(attempts).toEqual([
+      "terminal-latch", "stage-drain", "abort-requested", "child-termination", "independent-release", "child-exit", "watchdog-release-result"
+    ]);
+    expect(failures).toHaveLength(7);
+  });
+
+  it("uses pre-GO watchdog cancellation but never invokes independent SendInput recovery", async () => {
+    const attempts: string[] = [];
+    const resolved = (name: string) => async () => { attempts.push(name); };
+    await runAllDragRecoverySteps({
+      awaitRetainedChildExit: resolved("child-exit"),
+      cancelPreGoWatchdog: resolved("watchdog-cancel-exit-result"),
+      drainStageWrites: resolved("stage-drain"),
+      goPublished: false,
+      independentRelease: resolved("independent-release"),
+      latchTerminal: () => { attempts.push("terminal-latch"); },
+      persistAbortRequested: resolved("abort-requested"),
+      terminateRetainedChild: resolved("child-termination")
+    });
+    expect(attempts).toEqual([
+      "terminal-latch", "stage-drain", "abort-requested", "child-termination", "child-exit", "watchdog-cancel-exit-result"
+    ]);
+  });
+
   it("keeps normal recovery journeys out of Recent and custom Jump List APIs", async () => {
     const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
     const [bootstrap, main, cleanup, driver, integrationSpec] = await Promise.all([
@@ -277,25 +318,57 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("$foregroundExplorerPid = 0");
     expect(windowsIntegration).toContain("Explorer HWND PID mismatch immediately before action");
     expect(windowsIntegration).toContain("requireAssociationRouteApproval();");
+    const dragRunner = windowsIntegration.slice(
+      windowsIntegration.indexOf("async function runTrackedNativeExplorerDrag"),
+      windowsIntegration.indexOf("type DragWatchdog")
+    );
+    const recoverySeam = windowsIntegration.slice(
+      windowsIntegration.indexOf("export async function runAllDragRecoverySteps"),
+      windowsIntegration.indexOf("function withDragRecoveryFailures")
+    );
+    const streamTracking = dragRunner.indexOf('child.stdout?.on("data"');
+    const stderrTracking = dragRunner.indexOf('child.stderr?.on("data"');
+    const exitTracking = dragRunner.indexOf("const exited = onceChildExit(child)");
+    const prepared = dragRunner.indexOf('writeDragDiagnosticStage(input.diagnostic, "prepared"');
     const watchdogReady = windowsIntegration.indexOf("await assertWatchdogReady(watchdog)");
     const releaseArmed = windowsIntegration.indexOf('writeDragDiagnosticStage(input.diagnostic, "release-armed"', watchdogReady);
     const go = windowsIntegration.indexOf("writeTokenBoundDurableFile(input.diagnostic.armPath", releaseArmed);
-    const terminalLatch = windowsIntegration.indexOf("terminal = true", go);
-    const abortPersisted = windowsIntegration.indexOf('writeDragDiagnosticStage(input.diagnostic, "abort-requested"', terminalLatch);
-    const retainedChildTermination = windowsIntegration.indexOf("if (child.exitCode === null) child.kill()", abortPersisted);
-    const independentRelease = windowsIntegration.indexOf("await independentDragLeftUp", retainedChildTermination);
+    const terminalLatch = recoverySeam.indexOf("operations.latchTerminal()");
+    const stageDrain = recoverySeam.indexOf('await attempt("stage drain"', terminalLatch);
+    const abortPersisted = recoverySeam.indexOf('await attempt("durable abort-requested"', stageDrain);
+    const retainedChildTermination = recoverySeam.indexOf('await attempt("retained child termination"', abortPersisted);
+    const independentRelease = recoverySeam.indexOf('await attempt("independent release"', retainedChildTermination);
+    const childExit = recoverySeam.indexOf('await attempt("retained child exit"', independentRelease);
+    const watchdogProof = recoverySeam.indexOf('await attempt("watchdog release/result proof"', childExit);
+    const preGoWatchdogProof = recoverySeam.indexOf('await attempt("pre-GO watchdog cancel/exit/result proof"', childExit);
+    expect(streamTracking).toBeGreaterThanOrEqual(0);
+    expect(stderrTracking).toBeGreaterThanOrEqual(0);
+    expect(exitTracking).toBeGreaterThanOrEqual(0);
+    expect(prepared).toBeGreaterThan(exitTracking);
+    expect(prepared).toBeGreaterThan(streamTracking);
+    expect(prepared).toBeGreaterThan(stderrTracking);
     expect(watchdogReady).toBeGreaterThanOrEqual(0);
     expect(releaseArmed).toBeGreaterThan(watchdogReady);
     expect(go).toBeGreaterThan(releaseArmed);
-    expect(terminalLatch).toBeGreaterThan(go);
-    expect(abortPersisted).toBeGreaterThan(terminalLatch);
+    expect(terminalLatch).toBeGreaterThanOrEqual(0);
+    expect(stageDrain).toBeGreaterThan(terminalLatch);
+    expect(abortPersisted).toBeGreaterThan(stageDrain);
     expect(retainedChildTermination).toBeGreaterThan(abortPersisted);
     expect(independentRelease).toBeGreaterThan(retainedChildTermination);
+    expect(childExit).toBeGreaterThan(independentRelease);
+    expect(watchdogProof).toBeGreaterThan(childExit);
+    expect(preGoWatchdogProof).toBeGreaterThan(childExit);
+    expect(recoverySeam).toContain("if (operations.goPublished) await attempt(\"independent release\"");
+    expect(windowsIntegration).toContain("cancelled-pre-go");
+    expect(windowsIntegration).toContain("child-dead-pre-go");
+    expect(windowsIntegration).toContain("deadline-pre-go");
+    expect(windowsIntegration).toContain('V $disarm \'cancel\'');
     expect(windowsIntegration).toContain("assertExactDragReleaseProof");
     expect(windowsIntegration).toContain("count !== 1");
     expect(windowsIntegration).toContain("(state & 0x8000) !== 0");
     expect(windowsIntegration).toContain("Drag watchdog GO token mismatch");
     expect(windowsIntegration).toContain("ConvertTo-Json -Compress");
+    expect(windowsIntegration).toContain("deadlineEpochMs: sidecar.deadlineEpochMs");
     expect(associationRoute).toContain("invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid })");
     expect(associationRoute).toContain('!routeIsExactly("association")');
     expect(dragRoute).toContain('!routeIsExactly("explorer-drag")');

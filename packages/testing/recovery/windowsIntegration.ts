@@ -824,6 +824,16 @@ export async function dragDocumentFromExplorerWithNativePointer(input: {
 async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticSidecar }, script: string): Promise<string> {
   assertPowerShellEncodedCommandLength(script);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  const stageNames: Record<string, DragDiagnosticStage> = { f: "source-foreground-proven", h: "threshold-crossed", m: "mouse-down-sent", r: "released", t: "target-proven", u: "release-attempted", v: "transition-proven" };
+  const observedStages = new Set<DragDiagnosticStage>();
+  let partialLine = "";
+  let stageWrites = Promise.resolve();
+  let terminal = false;
+  let watchdog: DragWatchdog | undefined;
+  let goPublished = false;
+  let timeoutHandle: NodeJS.Timeout | undefined;
   const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], {
     env: {
       ...process.env,
@@ -835,40 +845,37 @@ async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticS
     },
     stdio: ["ignore", "pipe", "pipe"], windowsHide: true
   });
-  if (child.pid === undefined || child.pid <= 0) throw new Error("Explorer drag did not create a retained PowerShell child PID.");
-  await writeDragDiagnosticStage(input.diagnostic, "prepared", { childPid: child.pid, down: false, releaseAttempted: false });
-  const watchdog = await startDragReleaseWatchdog({ ...input.diagnostic, childPid: child.pid });
-  await assertWatchdogReady(watchdog);
-  await writeDragDiagnosticStage(input.diagnostic, "release-armed", { childPid: child.pid, down: false, releaseAttempted: false });
-  await writeTokenBoundDurableFile(input.diagnostic.armPath, dragControlToken(input.diagnostic, child.pid, "go"));
-  const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
-  const stageNames: Record<string, DragDiagnosticStage> = { f: "source-foreground-proven", h: "threshold-crossed", m: "mouse-down-sent", r: "released", t: "target-proven", u: "release-attempted", v: "transition-proven" };
-  const observedStages = new Set<DragDiagnosticStage>();
-  let partialLine = "";
-  let stageWrites = Promise.resolve();
-  let terminal = false;
-  child.stdout?.on("data", (chunk: Buffer) => {
-    stdout.push(chunk);
-    if (terminal) return;
-    const lines = `${partialLine}${chunk.toString("utf8")}`.split(/\r?\n/u);
-    partialLine = lines.pop() ?? "";
-    for (const line of lines) {
-      const [, code, down, releaseAttempted] = /^A02D\|([apmfhturv])\|([01])\|([01])$/u.exec(line) ?? [];
-      const stage = code === undefined ? undefined : stageNames[code];
-      if (stage !== undefined) {
-        observedStages.add(stage);
-        stageWrites = stageWrites.then(() => writeDragDiagnosticStage(input.diagnostic, stage, { childPid: child.pid!, down: down === "1", releaseAttempted: releaseAttempted === "1" }));
-      }
-    }
-  });
-  child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
-  const exited = onceChildExit(child);
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => reject(new Error("Explorer drag exceeded its internal deadline.")), Math.max(1, input.diagnostic.deadlineEpochMs - Date.now()));
-  });
   try {
+    // Containment starts immediately after spawn, before any diagnostic or watchdog await.
+    const childPid = child.pid;
+    const exited = onceChildExit(child);
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout.push(chunk);
+      const observedChildPid = child.pid;
+      if (terminal || observedChildPid === undefined || observedChildPid <= 0) return;
+      const lines = `${partialLine}${chunk.toString("utf8")}`.split(/\r?\n/u);
+      partialLine = lines.pop() ?? "";
+      for (const line of lines) {
+        const [, code, down, releaseAttempted] = /^A02D\|([apmfhturv])\|([01])\|([01])$/u.exec(line) ?? [];
+        const stage = code === undefined ? undefined : stageNames[code];
+        if (stage !== undefined) {
+          observedStages.add(stage);
+          stageWrites = stageWrites.then(() => writeDragDiagnosticStage(input.diagnostic, stage, { childPid: observedChildPid, down: down === "1", releaseAttempted: releaseAttempted === "1" }));
+        }
+      }
+    });
+    child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+    if (childPid === undefined || childPid <= 0) throw new Error("Explorer drag did not create a retained PowerShell child PID.");
+    await writeDragDiagnosticStage(input.diagnostic, "prepared", { childPid, down: false, releaseAttempted: false });
+    watchdog = await startDragReleaseWatchdog({ ...input.diagnostic, childPid });
+    await assertWatchdogReady(watchdog);
+    if (Date.now() >= input.diagnostic.deadlineEpochMs) throw new Error("Explorer drag watchdog setup exceeded its internal deadline before GO.");
+    await writeDragDiagnosticStage(input.diagnostic, "release-armed", { childPid, down: false, releaseAttempted: false });
+    await writeTokenBoundDurableFile(input.diagnostic.armPath, dragControlToken(input.diagnostic, childPid, "go"));
+    goPublished = true;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error("Explorer drag exceeded its internal deadline.")), Math.max(1, input.diagnostic.deadlineEpochMs - Date.now()));
+    });
     const exit = await Promise.race([exited, timeout]);
     if (exit.code !== 0 || exit.signal !== null) {
       throw new Error(`Explorer drag child failed code=${exit.code ?? "none"} signal=${exit.signal ?? "none"}: ${Buffer.concat(stderr).toString("utf8").trim()}`);
@@ -877,23 +884,80 @@ async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticS
     if (!observedStages.has("transition-proven")) {
       throw new Error("Explorer drag child did not persist exact release/transition proof.");
     }
-    await writeDragDiagnosticStage(input.diagnostic, "transition-proven", { childPid: child.pid, down: false, releaseAttempted: true });
+    await writeDragDiagnosticStage(input.diagnostic, "transition-proven", { childPid, down: false, releaseAttempted: true });
     return Buffer.concat(stdout).toString("utf8").trim();
   } catch (error) {
-    terminal = true;
-    await stageWrites;
-    await writeDragDiagnosticStage(input.diagnostic, "abort-requested", { childPid: child.pid, down: true, releaseAttempted: false });
-    if (child.exitCode === null) child.kill();
-    const independentRelease = await independentDragLeftUp(input.diagnostic, child.pid);
-    await Promise.race([onceChildExit(child), delay(5_000)]);
-    if (child.exitCode === null) throw new Error("Explorer drag retained child did not exit after the bounded abort request.", { cause: error });
-    await assertWatchdogReleased(watchdog);
-    if (!independentRelease) throw new Error("Explorer drag independent release proof was unavailable.", { cause: error });
-    throw error;
+    const retainedChildPid = child.pid;
+    const recoveryFailures = await runAllDragRecoverySteps({
+      awaitRetainedChildExit: () => assertRetainedChildExit(child, retainedChildPid),
+      cancelPreGoWatchdog: watchdog === undefined ? undefined : () => cancelPreGoDragReleaseWatchdog(watchdog!),
+      drainStageWrites: () => stageWrites,
+      goPublished,
+      independentRelease: async () => {
+        if (retainedChildPid === undefined) throw new Error("Explorer drag had no exact child PID for independent release.");
+        await independentDragLeftUp(input.diagnostic, retainedChildPid);
+      },
+      latchTerminal: () => { terminal = true; },
+      persistAbortRequested: () => writeDragDiagnosticStage(input.diagnostic, "abort-requested", { childPid: retainedChildPid ?? 0, down: true, releaseAttempted: false }),
+      releaseWatchdog: watchdog === undefined ? undefined : () => assertWatchdogReleased(watchdog!),
+      terminateRetainedChild: () => terminateRetainedChild(child, retainedChildPid)
+    });
+    throw withDragRecoveryFailures(error, recoveryFailures);
   } finally {
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-    if (!terminal) await disarmDragReleaseWatchdog(watchdog);
+    if (!terminal && watchdog !== undefined) await disarmDragReleaseWatchdog(watchdog);
   }
+}
+
+export type DragRecoveryOperations = {
+  awaitRetainedChildExit: () => Promise<void>;
+  cancelPreGoWatchdog?: () => Promise<void>;
+  drainStageWrites: () => Promise<void>;
+  goPublished: boolean;
+  independentRelease: () => Promise<void>;
+  latchTerminal: () => void;
+  persistAbortRequested: () => Promise<void>;
+  releaseWatchdog?: () => Promise<void>;
+  terminateRetainedChild: () => Promise<void>;
+};
+
+/** Pure recovery seam: every applicable teardown proof is attempted even when an earlier one fails. */
+export async function runAllDragRecoverySteps(operations: DragRecoveryOperations): Promise<Error[]> {
+  const failures: Error[] = [];
+  const attempt = async (name: string, action: () => Promise<void>): Promise<void> => {
+    try { await action(); } catch (error) { failures.push(new Error(`Explorer drag recovery ${name} failed.`, { cause: error })); }
+  };
+  try { operations.latchTerminal(); } catch (error) { failures.push(new Error("Explorer drag recovery terminal latch failed.", { cause: error })); }
+  await attempt("stage drain", operations.drainStageWrites);
+  await attempt("durable abort-requested", operations.persistAbortRequested);
+  await attempt("retained child termination", operations.terminateRetainedChild);
+  if (operations.goPublished) await attempt("independent release", operations.independentRelease);
+  await attempt("retained child exit", operations.awaitRetainedChildExit);
+  if (operations.goPublished) {
+    if (operations.releaseWatchdog !== undefined) await attempt("watchdog release/result proof", operations.releaseWatchdog);
+  } else if (operations.cancelPreGoWatchdog !== undefined) {
+    await attempt("pre-GO watchdog cancel/exit/result proof", operations.cancelPreGoWatchdog);
+  }
+  return failures;
+}
+
+function withDragRecoveryFailures(original: unknown, recoveryFailures: Error[]): unknown {
+  return recoveryFailures.length === 0
+    ? original
+    : new AggregateError([original, ...recoveryFailures], "Explorer drag failed and recovery was incomplete.", { cause: original });
+}
+
+async function terminateRetainedChild(child: ChildProcess, childPid: number | undefined): Promise<void> {
+  if (childPid === undefined || childPid <= 0) return;
+  if (child.pid !== childPid) throw new Error("Explorer drag retained child PID changed before termination.");
+  if (child.exitCode === null && !child.kill()) throw new Error("Explorer drag retained child could not be terminated.");
+}
+
+async function assertRetainedChildExit(child: ChildProcess, childPid: number | undefined): Promise<void> {
+  if (childPid === undefined || childPid <= 0) return;
+  if (child.pid !== childPid) throw new Error("Explorer drag retained child PID changed before exit proof.");
+  await Promise.race([onceChildExit(child), delay(5_000)]);
+  if (child.exitCode === null) throw new Error("Explorer drag retained child did not exit after the bounded abort request.");
 }
 
 type DragWatchdog = DragDiagnosticSidecar & { child: ChildProcess; childPid: number; disarmPath: string; failurePath: string; readyPath: string; resultPath: string };
@@ -910,7 +974,7 @@ async function startDragReleaseWatchdog(input: DragDiagnosticSidecar & { childPi
     "function F($p,$v){$q=$p+'.tmp';$b=[Text.Encoding]::UTF8.GetBytes($v);$s=[IO.File]::Open($q,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::None);try{$s.Write($b,0,$b.Length);$s.Flush($true)}finally{$s.Dispose()};Move-Item -LiteralPath $q -Destination $p -Force}",
     "function R($k,$c,$s){F $result (([pscustomobject]@{token=$token;childPid=$childPid;parentPid=$parentPid;deadlineEpochMs=$deadlineMs;kind=$k;eventCount=$c;asyncKeyState=$s}|ConvertTo-Json -Compress))}",
     "function V($p,$kind){if(-not(Test-Path -LiteralPath $p)){return $false};return ((Get-Content -LiteralPath $p -Raw).Trim() -eq ($token+'|'+$childPid+'|'+$parentPid+'|'+$deadlineMs+'|'+$kind))}",
-    "try { F $ready ($token+'|'+$childPid+'|'+$parentPid+'|'+$deadlineMs+'|ready'); while([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadlineMs -and -not(V $arm 'go')){Start-Sleep -Milliseconds 25}; if(-not(V $arm 'go')){throw 'Watchdog did not receive an exact token-bound GO'}; while([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadlineMs){if(V $disarm 'disarm'){R 'disarmed' 0 0;exit 0};if(-not(Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -or -not(Get-Process -Id $childPid -ErrorAction SilentlyContinue)){break};Start-Sleep -Milliseconds 50};$count=[EtherA02DragWatchdog]::Up();$state=[EtherA02DragWatchdog]::GetAsyncKeyState(1);R 'released' $count $state}catch{F $failure $_.Exception.Message;exit 2}"
+    "try { F $ready ($token+'|'+$childPid+'|'+$parentPid+'|'+$deadlineMs+'|ready'); $go=$false; while([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadlineMs -and -not $go){if(V $arm 'go'){$go=$true;break};if(V $disarm 'cancel' -or V $disarm 'disarm'){R 'cancelled-pre-go' 0 0;exit 0};if(-not(Get-Process -Id $parentPid -ErrorAction SilentlyContinue)){R 'parent-dead-pre-go' 0 0;exit 0};if(-not(Get-Process -Id $childPid -ErrorAction SilentlyContinue)){R 'child-dead-pre-go' 0 0;exit 0};Start-Sleep -Milliseconds 25};if(-not $go){R 'deadline-pre-go' 0 0;exit 0};while([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadlineMs){if(V $disarm 'disarm'){R 'disarmed' 0 0;exit 0};if(-not(Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -or -not(Get-Process -Id $childPid -ErrorAction SilentlyContinue)){break};Start-Sleep -Milliseconds 50};$count=[EtherA02DragWatchdog]::Up();$state=[EtherA02DragWatchdog]::GetAsyncKeyState(1);R 'released' $count $state}catch{F $failure $_.Exception.Message;exit 2}"
   ].join("; ");
   assertPowerShellEncodedCommandLength(script);
   const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { detached: true, stdio: "ignore", windowsHide: true });
@@ -919,16 +983,10 @@ async function startDragReleaseWatchdog(input: DragDiagnosticSidecar & { childPi
 }
 
 async function disarmDragReleaseWatchdog(watchdog: DragWatchdog): Promise<void> {
-  await writeTokenBoundDurableFile(watchdog.disarmPath, dragControlToken(watchdog, watchdog.childPid, "disarm"));
-  await Promise.race([onceChildExit(watchdog.child), delay(5_000)]);
-  if (watchdog.child.exitCode === null) throw new Error("Explorer drag release watchdog did not exit after disarm.");
-  if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag release watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
-  const result = await readWatchdogResult(watchdog);
-  if (result.kind === "released") {
-    assertExactDragReleaseProof(result.eventCount, result.asyncKeyState, "watchdog");
-    return;
-  }
-  if (result.kind !== "disarmed") throw new Error("Explorer drag watchdog returned an unexpected terminal result after disarm.");
+  const failures: unknown[] = [];
+  try { await writeTokenBoundDurableFile(watchdog.disarmPath, dragControlToken(watchdog, watchdog.childPid, "disarm")); } catch (error) { failures.push(error); }
+  try { await assertWatchdogTerminal(watchdog, ["disarmed", "released"]); } catch (error) { failures.push(error); }
+  if (failures.length > 0) throw new AggregateError(failures, "Explorer drag watchdog finalization was incomplete.");
 }
 
 async function assertWatchdogReady(watchdog: DragWatchdog): Promise<void> {
@@ -937,16 +995,31 @@ async function assertWatchdogReady(watchdog: DragWatchdog): Promise<void> {
 }
 
 async function assertWatchdogReleased(watchdog: DragWatchdog): Promise<void> {
-  await Promise.race([onceChildExit(watchdog.child), delay(5_000)]);
-  if (watchdog.child.exitCode === null) throw new Error("Explorer drag watchdog did not exit after the retained child ended.");
-  if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
-  await assertWatchdogResult(watchdog, "released");
+  await assertWatchdogTerminal(watchdog, ["released"]);
 }
 
-async function assertWatchdogResult(watchdog: DragWatchdog, expectedKind: "disarmed" | "released"): Promise<void> {
-  const result = await readWatchdogResult(watchdog);
-  if (result.kind !== expectedKind) throw new Error("Explorer drag watchdog result had an unexpected terminal state.");
-  if (expectedKind === "released") assertExactDragReleaseProof(result.eventCount, result.asyncKeyState, "watchdog");
+async function cancelPreGoDragReleaseWatchdog(watchdog: DragWatchdog): Promise<void> {
+  const failures: unknown[] = [];
+  try { await writeTokenBoundDurableFile(watchdog.disarmPath, dragControlToken(watchdog, watchdog.childPid, "cancel")); } catch (error) { failures.push(error); }
+  try { await assertWatchdogTerminal(watchdog, ["cancelled-pre-go", "child-dead-pre-go", "parent-dead-pre-go", "deadline-pre-go"]); } catch (error) { failures.push(error); }
+  if (failures.length > 0) throw new AggregateError(failures, "Explorer drag pre-GO watchdog cancellation was incomplete.");
+}
+
+async function assertWatchdogTerminal(watchdog: DragWatchdog, expectedKinds: readonly string[]): Promise<void> {
+  const failures: unknown[] = [];
+  try {
+    await Promise.race([onceChildExit(watchdog.child), delay(5_000)]);
+    if (watchdog.child.exitCode === null) throw new Error("Explorer drag release watchdog did not exit within its bounded proof window.");
+  } catch (error) { failures.push(error); }
+  try {
+    if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag release watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
+  } catch (error) { failures.push(error); }
+  try {
+    const result = await readWatchdogResult(watchdog);
+    if (!expectedKinds.includes(result.kind)) throw new Error("Explorer drag watchdog result had an unexpected terminal state.");
+    if (result.kind === "released") assertExactDragReleaseProof(result.eventCount, result.asyncKeyState, "watchdog");
+  } catch (error) { failures.push(error); }
+  if (failures.length > 0) throw new AggregateError(failures, "Explorer drag watchdog terminal proof was incomplete.");
 }
 
 async function readWatchdogResult(watchdog: DragWatchdog): Promise<{ asyncKeyState: string | undefined; eventCount: string | undefined; kind: string }> {
@@ -968,7 +1041,7 @@ async function independentDragLeftUp(diagnostic: DragDiagnosticSidecar, childPid
   return true;
 }
 
-function dragControlToken(input: DragDiagnosticSidecar, childPid: number, kind: "ready" | "go" | "disarm"): string {
+function dragControlToken(input: DragDiagnosticSidecar, childPid: number, kind: "ready" | "go" | "disarm" | "cancel"): string {
   return `${input.token}|${childPid}|${input.parentPid}|${input.deadlineEpochMs}|${kind}`;
 }
 
@@ -1012,7 +1085,7 @@ function assertDragDiagnosticSidecar(sidecar: DragDiagnosticSidecar): void {
 }
 
 async function writeDragDiagnosticStage(sidecar: DragDiagnosticSidecar, stage: DragDiagnosticStage, extra: { childPid: number; down: boolean; releaseAttempted: boolean }): Promise<void> {
-  const payload = JSON.stringify({ ...extra, parentPid: sidecar.parentPid, stage, timestamp: new Date().toISOString(), token: sidecar.token });
+  const payload = JSON.stringify({ ...extra, deadlineEpochMs: sidecar.deadlineEpochMs, parentPid: sidecar.parentPid, stage, timestamp: new Date().toISOString(), token: sidecar.token });
   const temporary = `${sidecar.sidecarPath}.${process.pid}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "w");
   try { await handle.writeFile(payload, "utf8"); await handle.sync(); } finally { await handle.close(); }

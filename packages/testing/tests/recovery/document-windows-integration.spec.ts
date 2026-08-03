@@ -538,8 +538,8 @@ test(A02_ROUTE_TITLES["explorer-drag"], async () => {
       token: shellToken
     };
     const drag = await dragDocumentFromExplorerWithNativePointer({ diagnostic: dragDiagnostic, documentPath: sourcePath, etherPid: primaryPid, target });
-    const diagnostic = JSON.parse(await readFile(dragDiagnostic.sidecarPath, "utf8")) as { childPid?: number; down?: boolean; parentPid?: number; releaseAttempted?: boolean; stage?: string; token?: string };
-    if (diagnostic.token !== shellToken || diagnostic.parentPid !== process.pid || !Number.isSafeInteger(diagnostic.childPid) || diagnostic.childPid! <= 0 || diagnostic.stage !== "transition-proven" || diagnostic.down !== false || diagnostic.releaseAttempted !== true) {
+    const diagnostic = JSON.parse(await readFile(dragDiagnostic.sidecarPath, "utf8")) as { childPid?: number; deadlineEpochMs?: number; down?: boolean; parentPid?: number; releaseAttempted?: boolean; stage?: string; token?: string };
+    if (diagnostic.token !== shellToken || diagnostic.parentPid !== process.pid || diagnostic.deadlineEpochMs !== dragDiagnostic.deadlineEpochMs || !Number.isSafeInteger(diagnostic.childPid) || diagnostic.childPid! <= 0 || diagnostic.stage !== "transition-proven" || diagnostic.down !== false || diagnostic.releaseAttempted !== true) {
       throw new Error("Explorer drag did not durably prove the exact child-owned release and foreground transition.");
     }
     dragDiagnosticsProven = true;
