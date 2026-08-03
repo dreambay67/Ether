@@ -65,6 +65,9 @@ test("authors the practical phase-one journey from a blank packaged document", a
     const workerBox = await requiredBox(worker, "Worker for additive marquee");
     await input.shiftMarquee(...marqueeAround(workerBox, canvasBox), "Add Worker with Shift marquee", "Shift marquee preserves Prompt and adds Worker.");
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text", "prompt.worker"]);
+    const runPrompt = page.getByRole("complementary", { name: "Selected run prompt" });
+    await expect(runPrompt).toHaveCSS("display", "grid");
+    await expect.poll(async () => (await requiredBox(runPrompt.getByRole("button", { name: "Preview selected run" }), "run preview button")).width).toBeGreaterThan(140);
     await input.screenshot("02-marquee-and-movement.png", evidence, "Capture movement and additive marquee", "The separated nodes show one reliable movement and two-node additive selection state.");
 
     await input.pressKey("Control+D", "Duplicate selected nodes", "Ctrl+D duplicates the two selected nodes with a visible offset.");
@@ -111,11 +114,18 @@ test("authors the practical phase-one journey from a blank packaged document", a
       expectedCount += 1;
       await addDefinition(page, input, definition, expectedCount);
     }
+    for (const [label, paneId] of [["Hide Reference Desk", "artifacts"], ["Hide Build tools", "tools"], ["Hide Project lens", "inspector"]] as const) {
+      await input.leftClick(page.getByRole("button", { name: label, exact: true }), label, "The ordinary panel control clears more room for the authored graph.");
+      await expect(page.getByTestId(`pane-${paneId}`)).toHaveClass(/is-collapsed/u);
+    }
+    const expandedCanvasBox = await requiredBox(canvas, "expanded authoring canvas");
     await input.leftClick(blankCanvasPoint(canvasBox), "Return focus to the canvas", "Canvas focus owns the final fit command.");
     await expect(canvas).toBeFocused();
     await input.pressKey("Home", "Fit the authored graph", "Home fits all authored node types into the viewport.");
     await page.waitForTimeout(450);
     for (const definition of canonicalDefinitions) await expect(page.locator(`.ether-node[data-node-definition='${definition}']`).first()).toBeVisible();
+    const authoredBounds = await page.getByTestId("ether-node").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect()).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })));
+    expect(authoredBounds.every((bounds) => bounds.left >= expandedCanvasBox.x && bounds.top >= expandedCanvasBox.y && bounds.right <= expandedCanvasBox.x + expandedCanvasBox.width && bounds.bottom <= expandedCanvasBox.y + expandedCanvasBox.height)).toBe(true);
     const visibleDefinitions = await page.getByTestId("ether-node").evaluateAll((nodes) => [...new Set(nodes.map((node) => node.getAttribute("data-node-definition")).filter(Boolean))]);
     expect(visibleDefinitions.sort()).toEqual([...canonicalDefinitions].sort());
     input.observe("All canonical cards authored", "Every canonical type can be created from the blank document without a graph fixture.", `${visibleDefinitions.length} distinct node definitions are visible on the durable canvas.`);
