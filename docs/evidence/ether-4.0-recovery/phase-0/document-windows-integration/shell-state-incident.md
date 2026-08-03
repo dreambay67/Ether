@@ -414,8 +414,8 @@ remained 6233 bytes: pre SHA-256
 `4c5ff7584b5a320fe6ba549d9a38f1d557a6c53c967db5c1f080da29c977a1f0` at
 `2026-08-03T06:45:02.6158853Z`, post SHA-256
 `3f7830bb6aa140356493e4d0f7f227a8d13f168a43943f3eac379203d2f53ef8` at
-`2026-08-03T07:25:47.418Z`. It was never restored, deleted, touched, or
-timestamp-repaired. The disposable roots
+`2026-08-03T07:25:47.418Z`. The harness never restored, deleted, overwrote, or
+timestamp-repaired it. The disposable roots
 `C:\Users\deny7\AppData\Local\Temp\ether-a02-windows-integration-VlQ2YE`
 and `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-caa2se`
 remain preserved and untouched. The complete archive is

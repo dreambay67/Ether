@@ -47,8 +47,8 @@ diagnostic absence, not a definitive root cause.
   `4c5ff7584b5a320fe6ba549d9a38f1d557a6c53c967db5c1f080da29c977a1f0` at
   `2026-08-03T06:45:02.6158853Z`; post-state was SHA-256
   `3f7830bb6aa140356493e4d0f7f227a8d13f168a43943f3eac379203d2f53ef8` at
-  `2026-08-03T07:25:47.418Z`. It was never restored, deleted, touched, or
-  timestamp-repaired.
+  `2026-08-03T07:25:47.418Z`. The harness never restored, deleted, overwrote,
+  or timestamp-repaired it.
 
 The disposable roots remain preserved and untouched:
 
