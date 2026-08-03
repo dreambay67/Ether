@@ -24,6 +24,7 @@ import sharp from "sharp";
 import { ExecutorRegistry } from "../executors/registry.js";
 import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets, ExecutionProviderResolver } from "../executors/types.js";
 import { ExecutorFailure } from "../executors/types.js";
+import { toProviderPayloads } from "../executors/input.js";
 import { verifyPlanHash } from "../plan/hashPlan.js";
 import { isCancellation } from "./cancellation.js";
 import { ExecutionConcurrencyDomains } from "./concurrencyDomains.js";
@@ -178,18 +179,10 @@ export class DurableScheduler {
       ...step.inputPayloadIds,
       ...(step.resolvedInputBindings ?? []).map((binding) => binding.payloadId)
     ];
-    const inputs = await this.persistence.resolvePayloads(unique(inputIds), stagingDirectory);
-    const providerInputs = inputs.map((input) => ({
-      id: input.id,
-      channel: input.channel,
-      role: input.role,
-      text: input.content.kind === "text" ? input.content.value : undefined,
-      data: input.content.kind === "object" ? input.content.value : undefined,
-      assetId: input.content.kind === "artifact" ? input.content.artifactId : undefined,
-      metadata: input.metadata,
-      sourceNodeId: input.source.nodeId,
-      sourceEdgeId: input.source.edgeId
-    }));
+    const inputs = this.persistence.resolvePlanInputs === undefined
+      ? await this.persistence.resolvePayloads(unique(inputIds), stagingDirectory)
+      : await this.persistence.resolvePlanInputs({ claim, step, plannedWorkItem, stagingDirectory });
+    const providerInputs = toProviderPayloads(inputs);
     await this.withConcurrency(binding, signal, async () => {
       const providers = this.options.providerResolver === undefined
         ? this.providers
@@ -205,7 +198,7 @@ export class DurableScheduler {
         providers
       });
       if (result.kind === "provider-generation") {
-        await this.executeProviderCompletion(claim, step, binding, result, stagingDirectory, signal);
+        await this.executeProviderCompletion(claim, step, binding, result, inputs, stagingDirectory, signal);
       } else if (result.kind === "waiting-review") {
         await this.persistence.waitForReview({ claim, ...result.checkpoint });
       } else {
@@ -255,7 +248,9 @@ export class DurableScheduler {
         producer: { kind: "local", executor: step.executor },
         outputPayloadIds: [payloadId],
         parentOutputVersionId: null,
-        approval: { state: "unreviewed" },
+        approval: step.parameters.reviewPolicy === "auto-apply"
+          ? { state: "approved", actor: "system", at: completedAt }
+          : { state: "unreviewed" },
         runId: claim.job.id,
         stepId: step.id,
         workItemId: claim.workItem.id,
@@ -296,6 +291,7 @@ export class DurableScheduler {
     step: ExecutorClaim["plan"]["steps"][number],
     requestedBinding: ProviderBinding | null,
     invocation: Extract<Awaited<ReturnType<ExecutorRegistry["execute"]>>, { kind: "provider-generation" }>,
+    inputs: readonly PayloadEnvelope[],
     stagingDirectory: string,
     signal: AbortSignal
   ): Promise<void> {
@@ -318,6 +314,8 @@ export class DurableScheduler {
       providerId: binding.providerId,
       modelId: binding.modelId,
       capabilitySnapshot: binding.capabilitySnapshot,
+      inputPayloadIds: inputs.map((input) => input.id),
+      selectedOutputVersionIds: unique(inputs.map((input) => input.source.outputVersionId)),
       request: invocation.input as unknown as Record<string, unknown>,
       response: null,
       metadata: null,
@@ -501,6 +499,8 @@ export class DurableScheduler {
         providerId: completion.providerId,
         modelId: binding.modelId,
         capabilitySnapshot: binding.capabilitySnapshot,
+        inputPayloadIds: completion.inputPayloadIds,
+        selectedOutputVersionIds: completion.selectedOutputVersionIds,
         request: completion.request,
         response: completion.response ?? {},
         metadata: completion.metadata ?? {}

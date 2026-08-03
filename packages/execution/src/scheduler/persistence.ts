@@ -6,7 +6,8 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { streamBlobRange, type ClaimedExecution, type DocumentStore } from "@ether/document";
-import type { Artifact, ExecutionJob, PayloadEnvelope } from "@ether/schema";
+import { resolveOutputSelector } from "@ether/graph-kernel";
+import { OutputSelectorSchema, PayloadChannelSchema, type Artifact, type ExecutionJob, type PayloadEnvelope } from "@ether/schema";
 
 import { ExecutorFailure, type ExecutorClaim } from "../executors/types.js";
 
@@ -23,6 +24,12 @@ export type SchedulerPersistence = {
   stageProviderCompletion(completion: unknown): Promise<unknown>;
   discardProviderCompletion(attemptId: string): Promise<boolean>;
   resolvePayloads(payloadIds: readonly string[], stagingDirectory?: string): Promise<PayloadEnvelope[]>;
+  resolvePlanInputs?(input: {
+    claim: ExecutorClaim;
+    step: ExecutorClaim["plan"]["steps"][number];
+    plannedWorkItem: import("@ether/schema").PlannedWorkItem;
+    stagingDirectory: string;
+  }): Promise<PayloadEnvelope[]>;
   waitForReview(input: { claim: ExecutorClaim; selectionMode: "one" | "many"; minimumSelections: number }): Promise<void>;
 };
 
@@ -34,7 +41,7 @@ export type DocumentStoreLike = {
 };
 
 export function documentStorePersistence(store: DocumentStoreLike): SchedulerPersistence {
-  return {
+  const persistence: SchedulerPersistence = {
     // A Save As publishes the same open store under a new document identity. Keep
     // scheduler persistence bound to that live identity rather than the identity
     // captured when the document was first opened.
@@ -91,6 +98,71 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
         return { ...payload, metadata: { ...payload.metadata, assetPath, resolvedArtifactId: artifact.id } };
       }));
     },
+    resolvePlanInputs: async ({ claim, step, plannedWorkItem, stagingDirectory }) => {
+      const staticIds = [
+        ...plannedWorkItem.inputs.map((input) => input.payloadId),
+        ...step.inputPayloadIds,
+        ...(step.resolvedInputBindings ?? []).map((binding) => binding.payloadId)
+      ];
+      const bindings: Array<Record<string, unknown>> = Array.isArray(step.compiledContext.inputBindings)
+        ? step.compiledContext.inputBindings.flatMap((binding) =>
+          binding !== null && typeof binding === "object" && !Array.isArray(binding)
+            ? [binding as Record<string, unknown>]
+            : []
+        )
+        : [];
+      const dynamic = await store.read(({ outputs }) => bindings.flatMap((binding) => {
+        const sourceStepId = typeof binding.sourceStepId === "string" ? binding.sourceStepId : null;
+        const sourceNodeId = typeof binding.sourceNodeId === "string" ? binding.sourceNodeId : null;
+        const sourceChannel = PayloadChannelSchema.safeParse(binding.sourceChannel);
+        const selector = OutputSelectorSchema.safeParse(binding.selector);
+        if (sourceStepId === null || sourceNodeId === null || !sourceChannel.success || !selector.success) return [];
+        const versions = callMethod<import("@ether/schema").NodeOutputVersion[]>(outputs, "listByNode", [sourceNodeId])
+          .filter((version) => version.runId === claim.job.id && version.stepId === sourceStepId);
+        const payloads = versions
+          .flatMap((version) => version.outputPayloadIds)
+          .map((payloadId) => callMethod<PayloadEnvelope | undefined>(outputs, "getPayload", [payloadId]))
+          .filter((payload): payload is PayloadEnvelope => payload !== undefined);
+        const selected = resolveOutputSelector({
+          selector: selector.data,
+          nodeId: sourceNodeId,
+          channel: sourceChannel.data,
+          versions,
+          payloads
+        });
+        if (selected.diagnostics.length > 0) {
+          const diagnostic = selected.diagnostics[0]!;
+          throw new ExecutorFailure(
+            "INPUT_SELECTOR_UNRESOLVED",
+            `Step ${step.id} cannot consume planned edge ${typeof binding.edgeId === "string" ? binding.edgeId : "(unknown)"}: ${diagnostic.message}`
+          );
+        }
+        const selectedVersions = new Set(selected.versionIds);
+        return versions
+          .filter((version) => selectedVersions.has(version.id))
+          .flatMap((version) => version.outputPayloadIds)
+          .map((payloadId) => payloads.find((payload) => payload.id === payloadId))
+          .filter((payload): payload is PayloadEnvelope => payload !== undefined && payload.channel === sourceChannel.data)
+          .map((payload) => ({
+            payload,
+            role: typeof binding.role === "string" ? binding.role : payload.role,
+            edgeId: typeof binding.edgeId === "string" ? binding.edgeId : undefined
+          }));
+      }));
+      const resolved = await persistence.resolvePayloads(
+        [...new Set([...staticIds, ...dynamic.map((entry) => entry.payload.id)])],
+        stagingDirectory
+      );
+      const dynamicById = new Map(dynamic.map((entry) => [entry.payload.id, entry]));
+      return resolved.map((payload) => {
+        const binding = dynamicById.get(payload.id);
+        return binding === undefined ? payload : {
+          ...payload,
+          role: binding.role as PayloadEnvelope["role"],
+          source: { ...payload.source, ...(binding.edgeId === undefined ? {} : { edgeId: binding.edgeId }) }
+        };
+      });
+    },
     waitForReview: async (input) => {
       await store.transaction(({ execution }) => {
         const create = optionalExecutionMethod(execution, "createReviewCheckpoint")
@@ -105,6 +177,7 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
       });
     }
   };
+  return persistence;
 }
 
 function extensionForMediaType(mediaType: string): string {

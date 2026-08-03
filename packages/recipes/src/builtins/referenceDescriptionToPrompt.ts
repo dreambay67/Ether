@@ -2,7 +2,7 @@ import { briefParameter, edge, graph, manifest, node, referenceParameter, requir
 
 const graphRef = "recipe.reference-description-to-prompt";
 const references = node("references", "reference.set", "Reference images", 54, 82, { kind: "reference.set", artifactIds: [], enabledChannels: ["image"], ordering: "manual" });
-const worker = node("describe", "prompt.worker", "Describe visual language", 332, 82, { kind: "prompt.worker", behavior: "extract", instruction: "Describe the visual language of the supplied reference images, then shape it for this goal: {{brief}}", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.15, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: false, maxTokens: 2600 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } });
+const worker = node("describe", "prompt.worker", "Describe visual language", 332, 82, { kind: "prompt.worker", behavior: "extract", instruction: "Describe the visual language of the supplied reference images, then shape it for this goal: {{brief}}", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.15, reviewPolicy: "inspect-first", contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: false, maxTokens: 2600 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } });
 const prompt = node("prompt", "prompt.text", "Ready-to-use prompt", 610, 82, { kind: "prompt.text", body: "Use the extracted visual direction as the production prompt.", assembly: "replace" });
 const llm = requirement("describe", "llm", ["text", "image"], ["text"], 1);
 

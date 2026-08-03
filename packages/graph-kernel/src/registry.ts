@@ -165,7 +165,7 @@ const libraryMetadata: Record<NodeDefinitionId, {
 
 const defaults: Record<NodeDefinitionId, () => NodeConfig> = {
   "prompt.text": () => ({ kind: "prompt.text", body: "", assembly: "append" }),
-  "prompt.worker": () => ({ kind: "prompt.worker", behavior: "rewrite", instruction: "", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8_000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }),
+  "prompt.worker": () => ({ kind: "prompt.worker", behavior: "rewrite", instruction: "", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.2, reviewPolicy: "inspect-first", contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8_000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }),
   "reference.set": () => ({ kind: "reference.set", artifactIds: [], enabledChannels: [], ordering: "manual" }),
   "generation.image": () => ({ kind: "generation.image", providerId: "codex", profileId: "image-default", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputFormat: "image/png", outputCount: 1 }),
   "edit.image": () => ({ kind: "edit.image", providerId: "codex", profileId: "image-edit", strength: 0.75, outputCount: 1 }),

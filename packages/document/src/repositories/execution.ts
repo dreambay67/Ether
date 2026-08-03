@@ -897,6 +897,8 @@ export class ExecutionRepository {
     providerId: string;
     modelId: string;
     capabilitySnapshot: ProviderCapability;
+    inputPayloadIds?: string[];
+    selectedOutputVersionIds?: string[];
     request: Record<string, unknown>;
     response: Record<string, unknown>;
     metadata: Record<string, unknown>;
@@ -1048,8 +1050,9 @@ export class ExecutionRepository {
         nodeId: step.nodeId,
         graphId: input.claim.plan.graphId,
         graphRevisionId: input.claim.plan.graphRevisionId,
-        inputPayloadIds: step.inputPayloadIds.filter((payloadId) => outputs.getPayload(payloadId) !== undefined),
-        selectedOutputVersionIds: [],
+        inputPayloadIds: (input.inputPayloadIds ?? step.inputPayloadIds)
+          .filter((payloadId) => outputs.getPayload(payloadId) !== undefined),
+        selectedOutputVersionIds: input.selectedOutputVersionIds ?? [],
         compiledContextHash: input.claim.plan.contentHash,
         producer: {
           kind: "provider",

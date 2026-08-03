@@ -202,6 +202,8 @@ export async function reconcileStaging(
             providerId: completion.providerId,
             modelId: completion.modelId,
             capabilitySnapshot: ProviderCapabilitySchema.parse(completion.capabilitySnapshot),
+            inputPayloadIds: completion.inputPayloadIds,
+            selectedOutputVersionIds: completion.selectedOutputVersionIds,
             request: completion.request,
             response: completion.response ?? {},
             metadata: completion.metadata ?? {}

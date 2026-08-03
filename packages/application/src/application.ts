@@ -45,6 +45,7 @@ import {
   type ExecutionProviderFacets,
   type ExecutionProviderResolver
 } from "@ether/execution";
+import type { StructuredOutputSchema } from "@ether/intelligence";
 import { previewGraphTransaction } from "@ether/graph-kernel";
 import type { GenerationProvider } from "@ether/providers";
 import {
@@ -139,6 +140,8 @@ export class EtherApplication implements EtherApplicationService {
       providerCapabilities?:
         | ProviderCapability[]
         | (() => Promise<readonly ProviderCapability[]>);
+      /** Application-owned schemas are copied into a previewed Worker plan. */
+      workerSchemaCatalog?: readonly StructuredOutputSchema[];
       pathGrantResolver?: PathGrantResolver;
       liveOutputFileSystem?: LiveOutputFileSystem;
       dispatchMode?: "automatic" | "manual";
@@ -843,6 +846,7 @@ export class EtherApplication implements EtherApplicationService {
       scope: input.scope,
       capability: capabilities.primary,
       providerCapabilities: capabilities.all,
+      workerRuntimeIntegration: { schemaCatalog: this.options.workerSchemaCatalog ?? [] },
       outputVersions: snapshot.versions,
       payloads: snapshot.payloads,
       createdAt: new Date().toISOString()
@@ -1296,6 +1300,7 @@ export class EtherApplication implements EtherApplicationService {
       scope: { kind: "node", nodeId },
       capability: capabilities.primary,
       providerCapabilities: capabilities.all,
+      workerRuntimeIntegration: { schemaCatalog: this.options.workerSchemaCatalog ?? [] },
       outputVersions: snapshot.versions,
       payloads: snapshot.payloads,
       createdAt: new Date().toISOString()

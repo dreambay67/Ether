@@ -149,6 +149,9 @@ export const ProviderCompletionRecoverySchema = z
     providerId: z.string().min(1),
     modelId: z.string().min(1),
     capabilitySnapshot: z.record(z.unknown()),
+    /** Exact immutable inputs resolved at execution time (including same-run selectors). */
+    inputPayloadIds: z.array(z.string().min(1)).optional(),
+    selectedOutputVersionIds: z.array(z.string().min(1)).optional(),
     request: z.record(z.unknown()),
     response: z.record(z.unknown()).nullable(),
     metadata: z.record(z.unknown()).nullable(),

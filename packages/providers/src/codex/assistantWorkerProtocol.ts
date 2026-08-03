@@ -60,6 +60,13 @@ export function assertAssistantWorkerRequest(value: unknown): asserts value is A
   assertSectionArray(value.sections, "Codex assistant worker request.sections");
   assertReferenceArray(value.references, "Codex assistant worker request.references");
   assertEdgeRoleArray(value.edgeRoles, "Codex assistant worker request.edgeRoles");
+  assertOptionalContextPolicy(value.contextPolicy, "Codex assistant worker request.contextPolicy");
+  assertOptionalNullableString(value.memoryScopeKey, "Codex assistant worker request.memoryScopeKey");
+  assertOptionalOutputContract(value.outputContract, "Codex assistant worker request.outputContract");
+  assertOptionalObject(value.outputSchema, "Codex assistant worker request.outputSchema");
+  assertOptionalDownstream(value.downstream, "Codex assistant worker request.downstream");
+  assertOptionalObject(value.contextManifest, "Codex assistant worker request.contextManifest");
+  assertOptionalReviewPolicy(value.reviewPolicy, "Codex assistant worker request.reviewPolicy");
   assertString(value.requestedAt, "Codex assistant worker request.requestedAt");
   assertString(value.outputDirectory, "Codex assistant worker request.outputDirectory");
 }
@@ -224,6 +231,44 @@ function assertSectionKind(value: unknown, label: string): asserts value is "pro
 function assertOptionalString(value: unknown, label: string): asserts value is string | undefined {
   if (value !== undefined) {
     assertString(value, label);
+  }
+}
+
+function assertOptionalNullableString(value: unknown, label: string): asserts value is string | null | undefined {
+  if (value !== undefined && value !== null) assertString(value, label);
+}
+
+function assertOptionalContextPolicy(value: unknown, label: string): void {
+  if (value === undefined) return;
+  assertObject(value, label);
+  if (typeof value.includeUpstream !== "boolean" || typeof value.includeDownstreamCapabilities !== "boolean") {
+    throw new Error(`${label} must declare boolean inclusion flags.`);
+  }
+  assertNumber(value.maxTokens, `${label}.maxTokens`);
+}
+
+function assertOptionalOutputContract(value: unknown, label: string): void {
+  if (value === undefined) return;
+  assertObject(value, label);
+  if (value.channel !== "text" && value.channel !== "data") throw new Error(`${label}.channel must be text or data.`);
+  assertOptionalString(value.schemaId, `${label}.schemaId`);
+  assertNumber(value.count, `${label}.count`);
+  if (value.selectionPolicy !== "latest" && value.selectionPolicy !== "all" && value.selectionPolicy !== "best") {
+    throw new Error(`${label}.selectionPolicy is invalid.`);
+  }
+}
+
+function assertOptionalDownstream(value: unknown, label: string): void {
+  if (value === undefined || value === null) return;
+  assertObject(value, label);
+  assertArray(value.requiredChannels, `${label}.requiredChannels`);
+  assertArray(value.providerProfileIds, `${label}.providerProfileIds`);
+  assertArray(value.limitations, `${label}.limitations`);
+}
+
+function assertOptionalReviewPolicy(value: unknown, label: string): void {
+  if (value !== undefined && value !== "inspect-first" && value !== "auto-apply") {
+    throw new Error(`${label} must be inspect-first or auto-apply.`);
   }
 }
 

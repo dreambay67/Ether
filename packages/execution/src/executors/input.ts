@@ -9,6 +9,13 @@ export function toProviderPayloads(inputs: readonly PayloadEnvelope[]): Provider
     text: input.content.kind === "text" ? input.content.value : undefined,
     data: input.content.kind === "object" ? input.content.value : undefined,
     assetId: input.content.kind === "artifact" ? input.content.artifactId : undefined,
+    // Artifact resolution deliberately materializes paths on the immutable
+    // payload envelope's metadata. Promote the transport fields here so every
+    // provider (including Assistant vision turns) sees the actual local file,
+    // rather than having to know Ether's persistence detail.
+    assetPath: readStringMetadata(input, "assetPath"),
+    uri: readStringMetadata(input, "uri"),
+    mimeType: readStringMetadata(input, "mimeType") ?? readStringMetadata(input, "mediaType"),
     metadata: input.metadata,
     sourceNodeId: input.source.nodeId,
     sourceEdgeId: input.source.edgeId

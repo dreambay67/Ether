@@ -7,6 +7,12 @@ import {
   type AdapterDefinition
 } from "@ether/graph-kernel";
 import {
+  compileWorkerContext,
+  resolveMemoryScopeKey,
+  WorkerContextCompilationError,
+  type StructuredOutputSchema
+} from "@ether/intelligence";
+import {
   ExecutionPlanSchema,
   type BatchProviderAllocation,
   type ConnectionRole,
@@ -68,6 +74,10 @@ export interface CompilePlanInput {
   batchExclusionsByNode?: Readonly<Record<string, readonly BatchExclusion[]>>;
   batchCap?: number;
   requestedParallelism?: number;
+  /** Enables the immutable Worker runtime contract used by the production preview path. */
+  workerRuntimeIntegration?: {
+    schemaCatalog?: readonly StructuredOutputSchema[];
+  };
   createdAt: string;
 }
 
@@ -84,6 +94,8 @@ export type PlanCompilationErrorCode =
   | "EDIT_MASK_UNSUPPORTED"
   | "EDIT_WORKSPACE_ARTIFACT_NOT_FOUND"
   | "EDIT_SOURCE_NOT_ON_IMAGE_LANE"
+  | "WORKER_CONTEXT_INVALID"
+  | "WORKER_RUNTIME_UNAVAILABLE"
   | "INVALID_PLAN";
 
 export class PlanCompilationError extends Error {
@@ -312,6 +324,9 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
         exclusions: Math.max(...batchResults.map((result) => result.summary.exclusions), 0),
         workItemCount: Math.max(...batchResults.map((result) => result.summary.workItemCount), 0)
       };
+  const runtimeSteps = input.workerRuntimeIntegration === undefined
+    ? steps
+    : compileWorkerRuntimeContexts(input, topology, steps);
   const withoutHash = {
     id: input.id,
     capsuleVersion: 1 as const,
@@ -321,7 +336,7 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
     graphId: input.graph.id,
     graphRevisionId: input.graphRevisionId,
     scope: planScope(input.scope, scope),
-    steps,
+    steps: runtimeSteps,
     workItems: workItems.items,
     providerCapabilitySnapshots: allCapabilities,
     estimatedCalls: steps.reduce(
@@ -348,6 +363,146 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
       { cause: error }
     );
   }
+}
+
+/**
+ * Worker inputs produced inside this plan have no persisted output version at preview
+ * time.  Compile the available pinned context now, then record the exact runtime
+ * policy/manifest beside the plan so dispatch never re-reads mutable graph settings.
+ */
+function compileWorkerRuntimeContexts(
+  input: CompilePlanInput,
+  topology: PlannerTopology,
+  steps: PlanStep[]
+): PlanStep[] {
+  const workerSteps = new Map(steps.map((step) => [step.nodeId, step]));
+  return steps.map((step) => {
+    const target = topology.nodeById.get(step.nodeId);
+    if (target?.config.kind !== "prompt.worker") return step;
+    const binding = step.providerBinding;
+    if (binding === null || binding === undefined) {
+      throw new PlanCompilationError(
+        "WORKER_RUNTIME_UNAVAILABLE",
+        `Worker ${target.id} has no immutable provider binding.`
+      );
+    }
+    const runtimeCatalog = runtimeCatalogForWorker(target.config, binding.capabilitySnapshot, binding.modelId);
+    const retainedEdges = input.graph.edges.filter((edge) => {
+      if (edge.to.kind !== "node" || edge.from.kind !== "node") return true;
+      if (edge.to.nodeId !== target.id) return true;
+      const sourceNodeId = edge.from.nodeId;
+      // Resolver and planned source nodes will supply their materialized payload at
+      // dispatch. They are represented by the immutable step bindings below.
+      return (input.outputVersions ?? []).some((version) => version.nodeId === sourceNodeId);
+    });
+    const downstream = downstreamCapabilities(input, topology, target.id, workerSteps);
+    if (target.config.outputContract.count > binding.capabilitySnapshot.maxOutputsPerCall) {
+      throw new PlanCompilationError(
+        "WORKER_RUNTIME_UNAVAILABLE",
+        `Worker ${target.id} requests ${target.config.outputContract.count} variants, but ${binding.providerId}/${binding.profileId} verifies at most ${binding.capabilitySnapshot.maxOutputsPerCall}.`,
+        { nodeId: target.id, requested: target.config.outputContract.count, maximum: binding.capabilitySnapshot.maxOutputsPerCall }
+      );
+    }
+    let compiled: ReturnType<typeof compileWorkerContext>;
+    try {
+      compiled = compileWorkerContext({
+        graph: { ...input.graph, edges: retainedEdges },
+        targetNodeId: target.id,
+        versions: input.outputVersions ?? [],
+        payloads: input.payloads ?? [],
+        runtimeCatalog,
+        adapterCapabilities: [...adapterCapabilityIds(input)],
+        downstream,
+        schemaCatalog: input.workerRuntimeIntegration?.schemaCatalog ?? []
+      });
+    } catch (error) {
+      if (error instanceof WorkerContextCompilationError) {
+        throw new PlanCompilationError(
+          "WORKER_CONTEXT_INVALID",
+          `Worker ${target.id} cannot be dispatched: ${error.message}`,
+          { nodeId: target.id, manifest: error.manifest as unknown as Record<string, unknown> }
+        );
+      }
+      throw error;
+    }
+    const plannedIncomingEdges = input.graph.edges
+      .filter((edge) => edge.enabled && edge.from.kind === "node" && edge.to.kind === "node" && edge.to.nodeId === target.id)
+      .map((edge) => edge.id)
+      .sort();
+    const lineageKey = compiled.manifest.lineageKey || `planned:${plannedIncomingEdges.join(",")}`;
+    const memoryScopeKey = resolveMemoryScopeKey(target.config.memoryPolicy, {
+      documentId: input.documentId,
+      graphId: input.graph.id,
+      nodeId: target.id,
+      lineageKey
+    });
+    return {
+      ...step,
+      compiledContext: jsonObject({
+        ...step.compiledContext,
+        worker: {
+          request: compiled.request,
+          manifest: compiled.manifest,
+          memoryScopeKey,
+          schemaCatalog: input.workerRuntimeIntegration?.schemaCatalog ?? [],
+          inputChannels: binding.capabilitySnapshot.inputChannels,
+          maxReferences: binding.capabilitySnapshot.maxReferences,
+          ...(compiled.request.outputContract.schemaId === undefined ? {} : {
+            outputSchema: input.workerRuntimeIntegration?.schemaCatalog
+              ?.find((schema) => schema.id === compiled.request.outputContract.schemaId)?.schema
+          }),
+          plannedIncomingEdges
+        }
+      })
+    };
+  });
+}
+
+function runtimeCatalogForWorker(
+  config: Extract<PlannerNode["config"], { kind: "prompt.worker" }>,
+  capability: ProviderCapability,
+  boundModel: string
+) {
+  if (capability.operation !== "llm" || capability.provenance !== "runtime-discovered") {
+    throw new PlanCompilationError(
+      "WORKER_RUNTIME_UNAVAILABLE",
+      `Worker ${config.profile} requires a runtime-discovered LLM capability.`,
+      { providerId: capability.providerId, profileId: capability.profileId }
+    );
+  }
+  const reasoningEfforts = capability.reasoningEfforts ?? [];
+  if (!reasoningEfforts.includes(config.reasoningEffort)) {
+    throw new PlanCompilationError(
+      "WORKER_RUNTIME_UNAVAILABLE",
+      `The active model ${boundModel} does not expose reasoning effort ${config.reasoningEffort}.`,
+      { modelId: boundModel, reasoningEffort: config.reasoningEffort }
+    );
+  }
+  return {
+    profileMappings: config.profile === "custom"
+      ? []
+      : [{ profile: config.profile, model: boundModel, reasoningEffort: config.reasoningEffort }],
+    models: [{ model: boundModel, reasoningEfforts, capability }]
+  };
+}
+
+function downstreamCapabilities(
+  input: CompilePlanInput,
+  topology: PlannerTopology,
+  sourceNodeId: string,
+  steps: ReadonlyMap<string, PlanStep>
+) {
+  const direct = (topology.outgoing.get(sourceNodeId) ?? []).filter((edge) => edge.to.kind === "node");
+  if (direct.length === 0) return null;
+  const requiredChannels = [...new Set(direct.map((edge) => edge.to.kind === "node" ? edge.to.channel : "data"))].sort();
+  const downstreamSteps = direct.flatMap((edge) => edge.to.kind === "node" ? [steps.get(edge.to.nodeId)] : [])
+    .filter((step): step is PlanStep => step !== undefined);
+  const bindings = downstreamSteps.map((step) => step.providerBinding).filter((binding): binding is ProviderBinding => binding !== null && binding !== undefined);
+  return {
+    requiredChannels,
+    providerProfileIds: [...new Set(bindings.map((binding) => binding.profileId))].sort(),
+    limitations: [...new Set(bindings.flatMap((binding) => binding.capabilitySnapshot.limitations))].sort()
+  };
 }
 
 function validateNodeConfigurations(topology: PlannerTopology): void {
@@ -584,6 +739,7 @@ function makeNodeStep(input: {
     sourceChannel: edge.edge.from.kind === "node" ? edge.edge.from.channel : "data",
     targetChannel: edge.edge.to.kind === "node" ? edge.edge.to.channel : "data",
     role: edge.edge.role,
+    sourceStepId: edge.sourceStepId,
     selector: edge.edge.selector as unknown as JsonObject,
     adapterId: edge.adapter?.adapterId ?? null,
     sourcePayloadIds: edge.sourcePayloadIds,

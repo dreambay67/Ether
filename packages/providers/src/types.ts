@@ -327,6 +327,27 @@ export type AssistantProviderInput = {
   references: GenerationReferenceInput[];
   edgeRoles: GenerationProviderInput["edgeRoles"];
   inputs?: PayloadEnvelope[];
+  /** Immutable Worker runtime contract compiled during Ether Run Preview. */
+  contextPolicy?: {
+    includeUpstream: boolean;
+    includeDownstreamCapabilities: boolean;
+    maxTokens: number;
+  };
+  memoryScopeKey?: string | null;
+  outputContract?: {
+    channel: "text" | "data";
+    schemaId?: string;
+    count: number;
+    selectionPolicy: "latest" | "all" | "best";
+  };
+  outputSchema?: Record<string, unknown>;
+  downstream?: {
+    requiredChannels: ProviderPayloadChannel[];
+    providerProfileIds: string[];
+    limitations: string[];
+  } | null;
+  contextManifest?: Record<string, unknown>;
+  reviewPolicy?: "inspect-first" | "auto-apply";
   model?: string;
   reasoningEffort?: string;
   timeoutMs?: number;

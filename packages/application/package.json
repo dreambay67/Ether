@@ -24,6 +24,7 @@
     "@ether/document": "workspace:*",
     "@ether/execution": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
+    "@ether/intelligence": "workspace:*",
     "@ether/providers": "workspace:*",
     "@ether/recipes": "workspace:*",
     "@ether/schema": "workspace:*",

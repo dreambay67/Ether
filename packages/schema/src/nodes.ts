@@ -92,6 +92,9 @@ export type WorkerBehavior = z.infer<typeof WorkerBehaviorSchema>;
 export const WorkerProfileSchema = z.enum(["fast", "balanced", "deep", "custom"]);
 export type WorkerProfile = z.infer<typeof WorkerProfileSchema>;
 
+export const WorkerReviewPolicySchema = z.enum(["inspect-first", "auto-apply"]);
+export type WorkerReviewPolicy = z.infer<typeof WorkerReviewPolicySchema>;
+
 export const ContextPolicySchema = z
   .object({
     includeUpstream: z.boolean(),
@@ -136,6 +139,8 @@ export const PromptWorkerConfigSchema = z
     model: z.string().min(1),
     reasoningEffort: z.string().min(1),
     variation: z.number().min(0).max(1),
+    /** Defaults to inspect-first when read so older documents remain executable. */
+    reviewPolicy: WorkerReviewPolicySchema.optional(),
     contextPolicy: ContextPolicySchema,
     memoryPolicy: MemoryPolicySchema,
     outputContract: WorkerOutputContractSchema

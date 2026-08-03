@@ -12,15 +12,16 @@
   },
   "files": ["dist"],
   "scripts": {
-    "prebuild": "pnpm --filter @ether/document build && pnpm --filter @ether/providers build",
+    "prebuild": "pnpm --filter @ether/document build && pnpm --filter @ether/providers build && pnpm --filter @ether/intelligence build",
     "build": "tsc -p tsconfig.json",
-    "pretypecheck": "pnpm --filter @ether/document build && pnpm --filter @ether/providers build",
+    "pretypecheck": "pnpm --filter @ether/document build && pnpm --filter @ether/providers build && pnpm --filter @ether/intelligence build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@ether/document": "workspace:*",
     "@ether/graph-kernel": "workspace:*",
+    "@ether/intelligence": "workspace:*",
     "@ether/providers": "workspace:*",
     "@ether/schema": "workspace:*",
     "@img/sharp-win32-x64": "0.35.3",

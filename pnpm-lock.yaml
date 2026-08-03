@@ -123,6 +123,9 @@ importers:
       '@ether/graph-kernel':
         specifier: workspace:*
         version: link:../graph-kernel
+      '@ether/intelligence':
+        specifier: workspace:*
+        version: link:../intelligence
       '@ether/providers':
         specifier: workspace:*
         version: link:../providers
@@ -160,6 +163,9 @@ importers:
       '@ether/graph-kernel':
         specifier: workspace:*
         version: link:../graph-kernel
+      '@ether/intelligence':
+        specifier: workspace:*
+        version: link:../intelligence
       '@ether/providers':
         specifier: workspace:*
         version: link:../providers

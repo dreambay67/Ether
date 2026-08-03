@@ -180,8 +180,10 @@ function buildCodexAssistantExecArgs(
     lastMessagePath,
     "--json",
     "--config",
-    'model_reasoning_effort="low"'
+    `model_reasoning_effort=${JSON.stringify(input.reasoningEffort ?? "low")}`
   ];
+
+  if (input.model) args.splice(1, 0, "--model", input.model);
 
   for (const reference of input.references) {
     if (reference.assetPath) {
@@ -233,6 +235,15 @@ ${sections || "None"}
 
 Reference images:
 ${references || "None"}
+
+Worker runtime contract:
+${JSON.stringify({
+  contextPolicy: input.contextPolicy ?? null,
+  memoryScopeKey: input.memoryScopeKey ?? null,
+  outputContract: input.outputContract ?? null,
+  downstream: input.downstream ?? null,
+  reviewPolicy: input.reviewPolicy ?? "inspect-first"
+}, null, 2)}
 
 Output directory:
 ${outputDir}

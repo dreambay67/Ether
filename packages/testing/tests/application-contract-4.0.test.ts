@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
-import type { ExecutionProviderFacets } from "@ether/execution";
+import { ExecutorRegistry, type ExecutionProviderFacets } from "@ether/execution";
 import { nodeDefinitions } from "@ether/graph-kernel";
 import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider } from "@ether/providers";
 import {
@@ -11,6 +11,7 @@ import {
   EtherGraphSchema,
   type EtherGraph,
   type GraphTransaction,
+  type PayloadEnvelope,
   type ProviderCapability
 } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
@@ -496,7 +497,8 @@ describe("Ether 4.0 application boundary", () => {
       providerId: "reasoning-provider", profileId: "reasoning-default", operation: "llm",
       inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"],
       aspectRatios: [], resolutions: [], maxReferences: 8, maxOutputsPerCall: 1,
-      supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: []
+      modelId: "gpt-5", reasoningEfforts: ["medium"],
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
     };
     const facets: ExecutionProviderFacets = {
       worker: { run: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["assistant.text"], text: "Rewritten launch prompt" }) },
@@ -549,5 +551,150 @@ describe("Ether 4.0 application boundary", () => {
     expect(routed).toEqual(expect.arrayContaining([
       { providerId: "reasoning-provider", modelId: "gpt-5" }
     ]));
+  });
+
+  it("runs an immutable Prompt → Worker → Worker → Image plan with runtime Worker contracts", async () => {
+    const root = await temporaryRoot();
+    const workerCalls: Array<Record<string, unknown>> = [];
+    const image = new FakeImageProvider();
+    const workerCapability: ProviderCapability = {
+      providerId: "fake-worker", profileId: "worker:fake-v1", modelId: "fake-v1", reasoningEfforts: ["medium"],
+      operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"],
+      aspectRatios: [], resolutions: [], maxReferences: 4, maxOutputsPerCall: 1, maxParallelism: 1,
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: ["fake worker"]
+    };
+    const imageCapability: ProviderCapability = {
+      providerId: "ether-fake-local", profileId: "fake-image-default", operation: "generate-image",
+      inputChannels: ["text", "image", "data"], outputChannels: ["image"], aspectRatios: ["1:1"],
+      resolutions: [{ id: "32", width: 32, height: 32, label: "32 x 32" }], maxReferences: 4, maxOutputsPerCall: 1,
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
+    };
+    const workerConfig = (instruction: string, reviewPolicy: "inspect-first" | "auto-apply" = "auto-apply") => ({
+      kind: "prompt.worker" as const, behavior: "rewrite" as const, instruction, profile: "balanced" as const,
+      providerId: "fake-worker", profileId: "worker:fake-v1", model: "fake-v1", reasoningEffort: "medium",
+      variation: 0.1, reviewPolicy,
+      contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 2_000 },
+      memoryPolicy: { mode: "per-branch" as const }, outputContract: { channel: "text" as const, count: 1, selectionPolicy: "latest" as const }
+    });
+    const serial = EtherGraphSchema.parse({
+      ...graph(), id: "serial-worker-graph",
+      nodes: [
+        { id: "prompt", definitionId: "prompt.text", title: "Brief", position: { x: 0, y: 0 }, size: { width: 240, height: 180 }, config: { kind: "prompt.text", body: "A cobalt bottle in a calm studio.", assembly: "append" }, presentation: { collapsed: false, accent: "default", previewMode: "content" } },
+        { id: "worker-a", definitionId: "prompt.worker", title: "First rewrite", position: { x: 300, y: 0 }, size: { width: 240, height: 180 }, config: workerConfig("Clarify the product direction."), presentation: { collapsed: false, accent: "default", previewMode: "content" } },
+        { id: "worker-b", definitionId: "prompt.worker", title: "Second rewrite", position: { x: 600, y: 0 }, size: { width: 240, height: 180 }, config: workerConfig("Make the direction image-ready."), presentation: { collapsed: false, accent: "default", previewMode: "content" } },
+        { id: "image", definitionId: "generation.image", title: "Image", position: { x: 900, y: 0 }, size: { width: 240, height: 180 }, config: { kind: "generation.image", providerId: "ether-fake-local", profileId: "fake-image-default", aspectRatio: "1:1", resolution: { width: 32, height: 32 }, outputCount: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
+      ],
+      edges: [
+        { id: "prompt-a", from: { kind: "node", nodeId: "prompt", channel: "text" }, to: { kind: "node", nodeId: "worker-a", channel: "text" }, role: "subject", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true },
+        { id: "a-b", from: { kind: "node", nodeId: "worker-a", channel: "text" }, to: { kind: "node", nodeId: "worker-b", channel: "text" }, role: "subject", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true },
+        { id: "b-image", from: { kind: "node", nodeId: "worker-b", channel: "text" }, to: { kind: "node", nodeId: "image", channel: "text" }, role: "subject", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true }
+      ]
+    });
+    const app = new EtherApplication({
+      appDataRoot: root, appVersion: "4.0.0-test", provider: image,
+      providerCapabilities: [workerCapability, imageCapability],
+      providerResolver: () => ({
+        image,
+        worker: { run: async (input) => {
+          workerCalls.push(input as unknown as Record<string, unknown>);
+          const text = input.assistantNodeId === "worker-a"
+            ? "A cobalt bottle on a quiet plinth."
+            : "A cobalt bottle on a quiet plinth, soft daylight, editorial product photography.";
+          return { providerId: "fake-worker", providerName: "Fake Worker", capabilities: ["assistant.text"], text };
+        } }
+      })
+    });
+    await app.createDocument({ path: path.join(root, "serial-worker.ether"), title: "Serial Worker", initialGraph: serial });
+    const document = await app.queryDocument();
+    const preview = await app.execute({ kind: "command", id: "serial-preview", correlationId: "serial-preview", documentId: document.documentId, name: "run.preview", payload: { graphId: serial.id, scope: { kind: "graph" } } });
+    if (preview.kind !== "response" || preview.name !== "run.preview") throw new Error(JSON.stringify(preview));
+    const workerStep = preview.payload.plan.steps.find((step) => step.nodeId === "worker-a")!;
+    expect(workerStep.compiledContext).toMatchObject({ worker: { request: { model: "fake-v1", reasoningEffort: "medium", outputContract: { channel: "text" } }, memoryScopeKey: expect.stringMatching(/^memory:v1:branch:/) } });
+    const workerItem = preview.payload.plan.workItems.find((item) => workerStep.workItemIds.includes(item.id))!;
+    const mediaPayload: PayloadEnvelope = {
+      id: "vision-payload", channel: "image", role: "subject",
+      content: { kind: "artifact", artifactId: "vision-artifact" },
+      source: { nodeId: "reference", outputVersionId: "vision-output", lineageKey: "vision-lineage" },
+      metadata: { assetPath: path.join(root, "vision-input.png"), mediaType: "image/png" }
+    };
+    let deliveredMedia: unknown;
+    await new ExecutorRegistry().execute({
+      claim: {
+        plan: preview.payload.plan,
+        job: { id: "media-job", status: "running" },
+        workItem: { id: "media-work", plannedWorkItemId: workerItem.id, status: "running" },
+        attempt: { id: "media-attempt", ordinal: 1, status: "running", startedAt: timestamp, createdAt: timestamp },
+        providerAttemptId: "media-provider-attempt"
+      },
+      step: workerStep,
+      plannedWorkItem: workerItem,
+      inputs: [mediaPayload],
+      providerInputs: [],
+      signal: new AbortController().signal,
+      stagingDirectory: root,
+      providers: {
+        worker: {
+          run: async (input) => {
+            deliveredMedia = input.inputs;
+            return { providerId: "fake-worker", providerName: "Fake Worker", capabilities: ["assistant.text"], text: "A cobalt bottle in a studio." };
+          }
+        }
+      }
+    });
+    expect(deliveredMedia).toEqual([expect.objectContaining({
+      channel: "image", assetId: "vision-artifact", assetPath: path.join(root, "vision-input.png"), mimeType: "image/png"
+    })]);
+    const permit = await app.execute({ kind: "command", id: "serial-permit", correlationId: "serial-permit", documentId: document.documentId, name: "permission.grantRun", payload: { planId: preview.payload.plan.id, contentHash: preview.payload.plan.contentHash } });
+    if (permit.kind !== "response" || permit.name !== "permission.grantRun") throw new Error(JSON.stringify(permit));
+    const started = await app.execute({ kind: "command", id: "serial-start", correlationId: "serial-start", documentId: document.documentId, name: "run.start", payload: { planId: preview.payload.plan.id, contentHash: preview.payload.plan.contentHash, runPermitId: permit.payload.permitId } });
+    if (started.kind !== "response" || started.name !== "run.start") throw new Error(JSON.stringify(started));
+    expect((await app.waitForJob(started.payload.job.id)).status).toBe("completed");
+    expect(workerCalls).toHaveLength(2);
+    expect(workerCalls[0]).toMatchObject({ contextPolicy: { includeUpstream: true }, downstream: { providerProfileIds: ["worker:fake-v1"] }, reviewPolicy: "auto-apply" });
+    expect(workerCalls[1]?.prompt).toContain("A cobalt bottle on a quiet plinth.");
+    const first = await app.queryNodeOutputs("worker-a");
+    const second = await app.queryNodeOutputs("worker-b");
+    const imageOutputs = await app.queryNodeOutputs("image");
+    expect(first[0]).toMatchObject({ approval: { state: "approved", actor: "system" } });
+    expect(second[0]).toMatchObject({ approval: { state: "approved", actor: "system" } });
+    expect(second[0]?.inputPayloadIds).toEqual(expect.arrayContaining(first[0]!.outputPayloadIds));
+    expect(imageOutputs[0]?.inputPayloadIds).toEqual(expect.arrayContaining(second[0]!.outputPayloadIds));
+    expect((await app.queryGraph(serial.id)).nodes.find((node) => node.id === "worker-b")?.config).toMatchObject({ instruction: "Make the direction image-ready." });
+
+    const current = await app.queryDocument();
+    const currentGraph = await app.queryGraph(serial.id);
+    const currentWorkerB = currentGraph.nodes.find((node) => node.id === "worker-b")!;
+    await app.applyGraphTransaction({
+      commandId: "switch-worker-b-to-inspect-first",
+      transaction: {
+        id: "switch-worker-b-to-inspect-first",
+        baseDocumentRevisionId: current.documentRevisionId,
+        baseGraphRevisions: { [serial.id]: current.graphRevisions[serial.id]! },
+        title: "Inspect second worker output",
+        actor: "user",
+        layoutPolicy: "preserve",
+        operations: [{
+          type: "updateNode",
+          graphId: serial.id,
+          nodeId: "worker-b",
+          node: {
+            ...currentWorkerB,
+            config: currentWorkerB.config.kind === "prompt.worker"
+              ? { ...currentWorkerB.config, reviewPolicy: "inspect-first" }
+              : currentWorkerB.config
+          } as EtherGraph["nodes"][number]
+        }]
+      }
+    });
+    const inspectPreview = await app.execute({ kind: "command", id: "inspect-preview", correlationId: "inspect-preview", documentId: document.documentId, name: "run.preview", payload: { graphId: serial.id, scope: { kind: "node", nodeId: "worker-b" } } });
+    if (inspectPreview.kind !== "response" || inspectPreview.name !== "run.preview") throw new Error(JSON.stringify(inspectPreview));
+    const inspectPermit = await app.execute({ kind: "command", id: "inspect-permit", correlationId: "inspect-permit", documentId: document.documentId, name: "permission.grantRun", payload: { planId: inspectPreview.payload.plan.id, contentHash: inspectPreview.payload.plan.contentHash } });
+    if (inspectPermit.kind !== "response" || inspectPermit.name !== "permission.grantRun") throw new Error(JSON.stringify(inspectPermit));
+    const inspectStart = await app.execute({ kind: "command", id: "inspect-start", correlationId: "inspect-start", documentId: document.documentId, name: "run.start", payload: { planId: inspectPreview.payload.plan.id, contentHash: inspectPreview.payload.plan.contentHash, runPermitId: inspectPermit.payload.permitId } });
+    if (inspectStart.kind !== "response" || inspectStart.name !== "run.start") throw new Error(JSON.stringify(inspectStart));
+    expect((await app.waitForJob(inspectStart.payload.job.id)).status).toBe("completed");
+    const inspected = (await app.queryNodeOutputs("worker-b")).find((output) => output.runId === inspectStart.payload.job.id);
+    expect(inspected).toMatchObject({ approval: { state: "unreviewed" } });
+    await app.closeDocument();
   });
 });

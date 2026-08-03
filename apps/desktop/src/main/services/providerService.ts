@@ -219,21 +219,23 @@ export function createProviderService(options: {
         }) ?? []
       );
       const codexAvailable = health.status === "ready" || health.transport === "exec-fallback";
-      const modelIds = health.models.length > 0
-        ? health.models.map((model) => model.id)
-        : [health.defaultModelId ?? "codex-default"];
+      const workerModels = health.models.length > 0
+        ? health.models.map((model) => ({ id: model.id, reasoningEfforts: model.reasoningEfforts }))
+        : [{ id: health.defaultModelId ?? "codex-default", reasoningEfforts: health.reasoningEfforts }];
       const intelligence = codexAvailable
-        ? modelIds.flatMap((modelId): ProviderCapability[] => [{
+        ? workerModels.flatMap(({ id: modelId, reasoningEfforts }): ProviderCapability[] => [{
             providerId: CODEX_ASSISTANT_PROVIDER_ID,
             profileId: `worker:${modelId}`,
             modelId,
+            reasoningEfforts,
             operation: "llm",
             inputChannels: ["text", "image", "data"],
             outputChannels: ["text", "data"],
             aspectRatios: [],
             resolutions: [],
             maxReferences: 32,
-            maxOutputsPerCall: 4,
+            // The Worker protocol emits one independently validated result per turn.
+            maxOutputsPerCall: 1,
             maxParallelism: 4,
             supportsCancellation: true,
             supportsSeed: false,
@@ -243,6 +245,7 @@ export function createProviderService(options: {
             providerId: CODEX_VISION_EVALUATION_PROVIDER_ID,
             profileId: `evaluation:${modelId}`,
             modelId,
+            reasoningEfforts,
             operation: "llm",
             inputChannels: ["text", "image", "data"],
             outputChannels: ["data"],

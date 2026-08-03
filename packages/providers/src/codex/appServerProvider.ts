@@ -286,10 +286,11 @@ class AppServerAssistantProvider implements AssistantProvider {
     if (fallback) return withFallbackMetadata(await fallback.run(input, context), this.route.runtime.health());
     const result = await this.route.runner.run({
       documentId: documentIdFromInput(input.workspacePath),
-      memoryScopeKey: memoryScopeFromMetadata(input.inputs),
+      memoryScopeKey: input.memoryScopeKey ?? memoryScopeFromMetadata(input.inputs),
       cwd: input.workspacePath,
       prompt: assistantPrompt(input),
       images: collectEnvelopeImages(input.inputs),
+      ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
       model: input.model,
       reasoningEffort: input.reasoningEffort,
       timeoutMs: input.timeoutMs,
@@ -300,7 +301,9 @@ class AppServerAssistantProvider implements AssistantProvider {
       providerName: this.descriptor.name,
       capabilities: [...this.descriptor.capabilities],
       text: result.text,
-      outputs: [{ channel: "text", text: result.text }],
+      outputs: input.outputContract?.channel === "data"
+        ? [{ channel: "data", data: result.structuredOutput ?? result.text }]
+        : [{ channel: "text", text: result.text }],
       metadata: provenanceMetadata(result)
     };
   }
@@ -406,7 +409,11 @@ function assistantPrompt(input: AssistantProviderInput) {
     input.instruction,
     input.prompt,
     input.notes,
-    ...input.sections.map((section) => `${section.title}: ${section.text}`)
+    ...input.sections.map((section) => `${section.title}: ${section.text}`),
+    input.contextPolicy ? `Context policy: ${JSON.stringify(input.contextPolicy)}` : "",
+    input.outputContract ? `Output contract: ${JSON.stringify(input.outputContract)}` : "",
+    input.downstream ? `Downstream capability summary: ${JSON.stringify(input.downstream)}` : "",
+    input.reviewPolicy ? `Review policy: ${input.reviewPolicy}` : ""
   ].filter((value) => value.trim()).join("\n\n");
 }
 
