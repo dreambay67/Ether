@@ -20,7 +20,7 @@ export function CanvasToolbar({ commands, paletteOpen, onPaletteClose }: { comma
       {TOOLBAR_COMMANDS.map(({ id, icon, compact }) => {
         const item = byId.get(id);
         if (!item) return null;
-        return <button key={id} type="button" className={compact ? "is-compact" : undefined} disabled={!item.enabled} aria-label={item.label} aria-keyshortcuts={item.shortcut} title={item.enabled ? `${item.label}: ${item.shortcut}` : item.disabledReason} onPointerDown={(event) => event.preventDefault()} onClick={() => void item.execute()}>{icon}{compact ? null : item.label}</button>;
+        return <button key={id} type="button" className={compact ? "is-compact" : undefined} disabled={!item.enabled} aria-label={item.label} aria-keyshortcuts={item.shortcut} title={item.enabled ? `${item.label}: ${item.shortcut}` : item.disabledReason} onMouseDown={(event) => { if (event.button === 0) { event.preventDefault(); void item.execute(); } }} onClick={(event) => { if (event.detail === 0) void item.execute(); }}>{icon}{compact ? null : item.label}</button>;
       })}
     </nav>
     {paletteOpen ? <CommandPalette commands={commands} onClose={onPaletteClose} /> : null}

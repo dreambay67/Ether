@@ -51,6 +51,8 @@ test("authors, protects, edits, navigates, reorganizes, and dissolves a Module f
         activeElement: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName ?? "none",
         status: document.querySelector<HTMLElement>("[data-testid='canvas-status']")?.innerText ?? "missing",
         selectedNodes: document.querySelectorAll("[data-testid='ether-node'].is-selected").length,
+        renderedNodes: document.querySelectorAll("[data-testid='ether-node']").length,
+        graphNodeCount: document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']")?.dataset.graphNodeCount ?? "missing",
         createModuleDisabled: document.querySelector<HTMLButtonElement>("button[aria-label='Create module']")?.disabled ?? true
       }));
       throw new Error(`Create Module diagnostic: ${JSON.stringify(diagnostic)}`);
