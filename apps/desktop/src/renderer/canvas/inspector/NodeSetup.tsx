@@ -1,11 +1,13 @@
-import { CircleHelp } from "lucide-react";
+import { useId } from "react";
 import type { EtherNode } from "@ether/schema";
+import { ContextHelp } from "../../help/ContextHelp";
 import { DraftConflict } from "./DraftConflict";
 import { controlHelp, inspectorDefinition, nodeDisplayName } from "./inspectorConfig";
 import { useInspectorDraft } from "./useInspectorDraft";
 
 export function Help({ text, label }: { text: string; label: string }) {
-  return <span className="inspector-help" title={text}><CircleHelp size={14} aria-label={`${label} help`} /></span>;
+  const id = useId().replaceAll(":", "");
+  return <ContextHelp id={`inspector-${id}`} label={label}>{text}</ContextHelp>;
 }
 
 export function InspectorSection({ title, help, children, advanced = false }: { title: string; help: string; children: React.ReactNode; advanced?: boolean }) {

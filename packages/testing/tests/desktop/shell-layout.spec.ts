@@ -216,6 +216,62 @@ test("keeps pointer workflows and primary controls usable across the required sc
   }
 });
 
+test("passes shell accessibility invariants and exposes keyboard help and channel targeting", async ({ page }) => {
+  await openShell(page);
+  const violations = await page.evaluate(() => {
+    const visible = (element: Element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    };
+    const accessibleName = (element: Element) => {
+      const labelledBy = element.getAttribute("aria-labelledby");
+      const labelledText = labelledBy?.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join(" ").trim();
+      const labelText = element.closest("label")?.textContent?.trim();
+      return element.getAttribute("aria-label")?.trim() || labelledText || labelText || element.textContent?.trim() || element.getAttribute("title")?.trim() || "";
+    };
+    const failures: string[] = [];
+    const ids = [...document.querySelectorAll<HTMLElement>("[id]")].map((element) => element.id);
+    for (const id of new Set(ids)) if (ids.filter((candidate) => candidate === id).length > 1) failures.push(`duplicate id: ${id}`);
+    for (const element of document.querySelectorAll("button, input, select, textarea, [role=button], [role=separator], [role=option], [tabindex]")) {
+      if (!visible(element) || element.getAttribute("tabindex") === "-1") continue;
+      if (accessibleName(element).length === 0) failures.push(`unnamed control: ${element.tagName.toLowerCase()}.${element.className}`);
+      const tabIndex = Number(element.getAttribute("tabindex") ?? "0");
+      if (tabIndex > 0) failures.push(`positive tabindex: ${accessibleName(element)}`);
+      for (const id of (element.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean)) {
+        if (document.getElementById(id) === null) failures.push(`missing description ${id}: ${accessibleName(element)}`);
+      }
+    }
+    for (const image of document.querySelectorAll("img")) if (!image.hasAttribute("alt") && image.getAttribute("aria-hidden") !== "true") failures.push("image without alt text");
+    for (const dialog of document.querySelectorAll('[role="dialog"]')) if (accessibleName(dialog).length === 0) failures.push("unnamed dialog");
+    return failures;
+  });
+  expect(violations).toEqual([]);
+
+  const promptTitle = page.getByRole("button", { name: "Shell prompt", exact: true });
+  await promptTitle.focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("node-inspector")).toBeVisible();
+  const help = page.getByRole("button", { name: "Setup help" });
+  await help.focus();
+  const tooltipId = await help.getAttribute("aria-describedby");
+  if (tooltipId === null) throw new Error("Setup help did not expose a tooltip description.");
+  const tooltip = page.locator(`#${tooltipId}`);
+  await expect(tooltip).toHaveAttribute("data-open", "true");
+  await expect(tooltip).toContainText("canonical node registry");
+  await page.keyboard.press("Escape");
+  await expect(tooltip).toHaveAttribute("data-open", "false");
+
+  const prompt = page.locator('[data-testid="rf__node-shell-prompt"]');
+  const image = page.locator('[data-testid="rf__node-shell-image"]');
+  await prompt.getByLabel("Text output").focus();
+  await page.keyboard.press("Enter");
+  await expect(image.getByTestId("channel-zone-input-text")).toHaveAttribute("data-compatible", "true");
+  await image.getByLabel("Text input").focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("edge-role-chip")).toHaveCount(1);
+});
+
 async function openShell(page: Page) {
   await page.addInitScript(() => {
     const listeners: Array<(event: unknown) => void> = [];

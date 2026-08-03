@@ -322,6 +322,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       }}
       onKeyDown={(event) => {
         if (isTextEditingTarget(event.target)) return;
+        if (event.target !== event.currentTarget && event.target instanceof Element && event.target.closest("button, input, select, textarea, summary, a[href], [role='button'], [role='option'], [role='menuitem'], [role='separator']")) return;
         const commandId = commandIdForKeyboard(event.nativeEvent);
         const command = commandId === null ? undefined : commands.find((item) => item.id === commandId);
         if (command !== undefined) {

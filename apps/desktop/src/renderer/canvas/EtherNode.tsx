@@ -34,7 +34,7 @@ export const EtherNode = memo(function EtherNode({ id, data, selected }: NodePro
   const primaryEditor = primaryEditorFor(node);
   return <article className={`ether-node ether-node-family-${family}${selected ? " is-selected" : ""}${data.activeEditor ? " is-editing" : ""}`} data-testid="ether-node" data-node-id={id} data-node-family={family} data-node-definition={node.definitionId}>
     <NodeResizer color="var(--ether-cyan)" isVisible={selected && !data.readOnly && !data.activeEditor} minWidth={190} minHeight={132} onResizeStart={data.onResizeStart} onResizeEnd={(_, params) => { if (!data.readOnly) data.onResize(id, { width: Math.round(params.width), height: Math.round(params.height) }); data.onResizeEnd(); }} />
-    <ChannelRail direction="input" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedInput} intentChannels={data.intentInput} />
+    <ChannelRail direction="input" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedInput} intentChannels={data.intentInput} disabled={data.readOnly} />
     <header className="ether-node-header"><span className="ether-node-family">{familyLabel[family] ?? family}</span><span className="ether-node-subtype">{subtitle}</span></header>
     <div className="ether-node-main">
       {data.activeEditor === "title" ? <InlineNodeEditor label="Node title" value={node.title} singleLine onCommit={(value) => data.onEditCommit(id, "title", value)} onCancel={data.onEditCancel} /> : <button type="button" className="ether-node-title" onClick={(event) => { event.stopPropagation(); data.onSelect(id, event.ctrlKey || event.metaKey || event.shiftKey); }} onDoubleClick={() => { if (!data.readOnly) data.onEditRequest(id, "title"); }} title={data.readOnly ? "Node title" : "Double-click or press F2 to rename"}>{node.title}</button>}
@@ -42,7 +42,7 @@ export const EtherNode = memo(function EtherNode({ id, data, selected }: NodePro
     </div>
     <NodeStatusLayer status={data.status ?? null} />
     <footer className="ether-node-footer"><span>{data.activeEditor ? "Editing" : node.presentation.collapsed ? "Collapsed" : "Ready"}</span><button type="button" className="nodrag" aria-label={`Delete ${node.title}`} disabled={data.readOnly || data.activeEditor !== null} onClick={() => { if (!data.readOnly) data.onDelete(id); }}><Trash2 size={14} /></button></footer>
-    <ChannelRail direction="output" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedOutput} intentChannels={data.intentOutput} />
+    <ChannelRail direction="output" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedOutput} intentChannels={data.intentOutput} disabled={data.readOnly} />
   </article>;
 });
 
@@ -82,10 +82,10 @@ function InlineNodeEditor({ label, value, placeholder, singleLine = false, onCom
 
 export function ModuleNode({ id, data, selected }: NodeProps & { data: { title: string; description: string; accent: string; locked: boolean; collapsed: boolean; inputs: Array<{ id: string; channel: PayloadChannel }>; outputs: Array<{ id: string; channel: PayloadChannel }>; readOnly: boolean; onEnter(id: string): void; onToggle(id: string): void } }) {
   return <article className={`ether-module-node${selected ? " is-selected" : ""}${data.locked ? " is-locked" : " is-unlocked"}`} style={{ "--module-accent": data.accent } as React.CSSProperties} data-testid="ether-module-node" data-module-id={id} data-module-locked={data.locked ? "true" : "false"}>
-    {data.inputs.map((port, index) => <Handle key={`in-${port.id}`} id={`in:${port.id}`} type="target" position={Position.Left} style={{ top: `${18 + index * 18}px` }} aria-label={`Input ${port.id} ${port.channel}`} />)}
+    {data.inputs.map((port, index) => <Handle key={`in-${port.id}`} id={`in:${port.id}`} type="target" position={Position.Left} style={{ top: `${18 + index * 18}px` }} aria-label={`Input ${port.id} ${port.channel}`} aria-disabled={data.readOnly} role="button" tabIndex={data.readOnly ? -1 : 0} onKeyDown={(event) => { if (!data.readOnly && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); event.currentTarget.click(); } }} />)}
     <header><span>{data.locked ? <LockKeyhole size={13} aria-label="Locked module" /> : <Unlock size={13} aria-label="Unlocked module" />}</span><button type="button" className="ether-module-title nodrag" onDoubleClick={() => data.onEnter(id)} title="Double-click to enter module">{data.title}</button></header>
     <p>{data.collapsed ? `Collapsed${data.description ? ` · ${data.description}` : ""}` : data.description || (data.locked ? "Members protected from the parent canvas" : "Unlocked for parent-canvas movement")}</p>
     <footer><button type="button" className="ether-module-enter nodrag" onClick={() => data.onEnter(id)}>Enter</button><button type="button" className="ether-module-collapse nodrag" disabled={data.readOnly} onClick={() => { if (!data.readOnly) data.onToggle(id); }}>{data.collapsed ? "Expand" : "Collapse"}</button></footer>
-    {data.outputs.map((port, index) => <Handle key={`out-${port.id}`} id={`out:${port.id}`} type="source" position={Position.Right} style={{ top: `${18 + index * 18}px` }} aria-label={`Output ${port.id} ${port.channel}`} />)}
+    {data.outputs.map((port, index) => <Handle key={`out-${port.id}`} id={`out:${port.id}`} type="source" position={Position.Right} style={{ top: `${18 + index * 18}px` }} aria-label={`Output ${port.id} ${port.channel}`} aria-disabled={data.readOnly} role="button" tabIndex={data.readOnly ? -1 : 0} onKeyDown={(event) => { if (!data.readOnly && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); event.currentTarget.click(); } }} />)}
   </article>;
 }
