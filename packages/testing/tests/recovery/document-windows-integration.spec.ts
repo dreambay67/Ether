@@ -30,7 +30,8 @@ import {
   associationArtifactsMayBeCleaned,
   assertWindowsShellCheckpointStable,
   assertWindowsShellClassificationClean,
-  assertWindowsShellMicroBaselineAfterRecycle,
+  classifyJumpListComProgress,
+  classifyJumpListRecycleProgress,
   cleanupWindowsIntegrationRoot,
   closeExactWindowWithNativeKeyboard,
   completeNativeFileDialogWithUia,
@@ -89,6 +90,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   let shellS1: WindowsShellStateSnapshot | null = null;
   let shellS1TargetShortcuts: string[] | null = null;
   let postS1ShellClassified = false;
+  let postS1ExactProcessAbsenceProven = false;
   let primaryJourneyFailure: unknown = null;
   let journeyFailedAfterCheckpoint = false;
   const finalizationFailures: unknown[] = [];
@@ -146,11 +148,27 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     await expect.poll(() => primary?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await primary.close("passed");
     primary = null;
+    postS1ExactProcessAbsenceProven = true;
 
     await removeTestOwnedDisposableRoots(primaryProfile.root, disposableRoots);
     for (const disposableRoot of disposableRoots) await expect.poll(() => exists(disposableRoot)).toBe(false);
 
-    reopened = await launch(executable, "a02-windows-reopen-after-cleanup", primaryProfile, documentPath);
+    postS1ExactProcessAbsenceProven = false;
+    reopened = await launch(executable, "a02-windows-reopen-after-cleanup", primaryProfile, documentPath, false, {
+      afterLaunchFailureApplicationExit: async () => {
+        postS1ExactProcessAbsenceProven = true;
+        if (shellS1 === null || shellS1TargetShortcuts === null) return;
+        await classifyShellAfterExactExit({
+          documentPaths: [documentPath, renamedPath, copyPath],
+          profile: primaryProfile,
+          root,
+          s0: shellS0,
+          s1: shellS1,
+          s1TargetShortcuts: shellS1TargetShortcuts
+        });
+        postS1ShellClassified = true;
+      }
+    });
     await expect(reopened.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
     await expect(reopened.page.locator(".react-flow__node")).toHaveCount(1);
     await assertDocumentIdentity(documentPath);
@@ -167,6 +185,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     const primaryS1TargetShortcuts = shellS1TargetShortcuts;
     await reopened.close("passed", {
       afterApplicationExit: async () => {
+        postS1ExactProcessAbsenceProven = true;
         const disposition = await classifyShellAfterExactExit({
           documentPaths: [documentPath, renamedPath, copyPath],
           profile: primaryProfile,
@@ -186,8 +205,9 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   } finally {
     if (reopened !== null) {
       try {
-        await reopened.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null && !journeyFailedAfterCheckpoint ? {
+        await reopened.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
           afterApplicationExit: async () => {
+            postS1ExactProcessAbsenceProven = true;
             const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
             reopened?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
             postS1ShellClassified = true;
@@ -199,13 +219,22 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     }
     if (primary !== null) {
       try {
-        await primary.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null && !journeyFailedAfterCheckpoint ? {
+        await primary.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
           afterApplicationExit: async () => {
+            postS1ExactProcessAbsenceProven = true;
             const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
             primary?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
             postS1ShellClassified = true;
           }
         } : {});
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    if (reopened === null && primary === null && !postS1ShellClassified && shellS1 !== null && shellS1TargetShortcuts !== null && postS1ExactProcessAbsenceProven) {
+      try {
+        await classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1, s1TargetShortcuts: shellS1TargetShortcuts });
+        postS1ShellClassified = true;
       } catch (error) {
         finalizationFailures.push(error);
       }
@@ -341,7 +370,7 @@ test("runs the separately approved reversible Explorer association route", async
         finalizationFailures.push(error);
       }
     }
-    if (session !== null) await session.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null && !journeyFailedAfterCheckpoint ? {
+    if (session !== null) await session.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
       afterApplicationExit: async () => {
         const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath], profile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
         session?.input.observe("Post-S1 association shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
@@ -456,7 +485,7 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     }
     if (session !== null) {
       try {
-        await session.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null && !journeyFailedAfterCheckpoint ? {
+        await session.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
           afterApplicationExit: async () => {
             const disposition = await classifyShellAfterExactExit({ documentPaths: [sourcePath, targetPath], profile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
             session?.input.observe("Post-S1 Explorer shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
@@ -523,6 +552,8 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   let s1RecentShortcutPaths: string[] | null = null;
   let jumpListFailure: unknown = null;
   let journeyFailedAfterCheckpoint = false;
+  let recentLaunchProcessExitProven = false;
+  const jumpListCleanupState = createJumpListShellCleanupState();
   const finalizationFailures: unknown[] = [];
   try {
     setupSession = await launch(executable, "a02-windows-jump-list-setup", profile);
@@ -548,7 +579,23 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     s1RecentShortcutPaths = await snapshotS1TargetShortcuts({ documentPaths: [documentPath], profile, root });
 
     recentModeLaunched = true;
-    session = await launch(executable, "a02-windows-jump-list", profile, documentPath, true);
+    session = await launch(executable, "a02-windows-jump-list", profile, documentPath, true, {
+      afterLaunchFailureApplicationExit: async () => {
+        recentLaunchProcessExitProven = true;
+        if (shellS1 === null || s1RecentShortcutPaths === null) return;
+        await restoreApprovedJumpListShellState({
+          allowNoCandidate: true,
+          before: shellS1,
+          documentPaths: [documentPath],
+          profile,
+          root,
+          s1RecentShortcutPaths,
+          state: jumpListCleanupState,
+          token: shellToken
+        });
+        jumpListShellStateRestored = true;
+      }
+    });
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
@@ -599,6 +646,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
           profile,
           root,
           s1RecentShortcutPaths: approvedRecentShortcutPaths,
+          state: jumpListCleanupState,
           token: shellToken
         });
         session?.input.observe("Jump List app-scoped cleanup", "After exact process absence, only the exact new recovery candidate is recycled; J2 equals the J0 micro-baseline without that candidate while opaque in-place OS changes are recorded.", shellDisposition);
@@ -647,15 +695,23 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     }
     if (session !== null) {
       try {
-        await session.close("failed", recentModeLaunched && !jumpListShellStateRestored && !journeyFailedAfterCheckpoint ? {
+        await session.close("failed", recentModeLaunched && !jumpListShellStateRestored ? {
           afterApplicationExit: async () => {
             if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
             if (s1RecentShortcutPaths === null) throw new Error("S1 Recent shortcut baseline was not captured before approved Jump List cleanup.");
-            await restoreApprovedJumpListShellState({ before: shellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths, token: shellToken });
+            await restoreApprovedJumpListShellState({ before: shellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths, state: jumpListCleanupState, token: shellToken });
             jumpListShellStateRestored = true;
           }
         } : {});
         session = null;
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    if (session === null && recentModeLaunched && !jumpListShellStateRestored && shellS1 !== null && s1RecentShortcutPaths !== null && recentLaunchProcessExitProven) {
+      try {
+        await restoreApprovedJumpListShellState({ allowNoCandidate: true, before: shellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths, state: jumpListCleanupState, token: shellToken });
+        jumpListShellStateRestored = true;
       } catch (error) {
         finalizationFailures.push(error);
       }
@@ -742,7 +798,8 @@ async function classifyShellAfterExactExit(input: {
     appData: input.profile.appData,
     additionalAppData: [realAppData],
     root: input.root,
-    documentPaths: input.documentPaths
+    documentPaths: input.documentPaths,
+    s1: input.s1
   });
   const final = await resnapshotWindowsShellState(input.s1);
   const s1Classification = classifyWindowsShellStateChanges(input.s1, final);
@@ -756,46 +813,122 @@ async function classifyShellAfterExactExit(input: {
  * Jump List journey. It proves that every affected real/isolated Recent file
  * is one new recovery-AUMID AutomaticDestinations artifact before recycling it.
  */
+type JumpListShellCleanupState = {
+  candidate?: { appData: string; relativePath: string };
+  disposition?: string;
+  j0?: WindowsShellStateSnapshot;
+  j1?: WindowsShellStateSnapshot;
+  removedShortcuts: string[];
+  s1ToJ0AllowedOpaque: WindowsShellStateChange[];
+  stage: "new" | "j0-captured" | "com-invoked" | "j1-captured" | "recycle-invoked" | "j2-verified" | "no-candidate";
+};
+
+function createJumpListShellCleanupState(): JumpListShellCleanupState {
+  return { removedShortcuts: [], s1ToJ0AllowedOpaque: [], stage: "new" };
+}
+
 async function restoreApprovedJumpListShellState(input: {
+  allowNoCandidate?: boolean;
   before: WindowsShellStateSnapshot;
   documentPaths: readonly string[];
   profile: RecoveryJourneySession["profile"];
   root: string;
   s1RecentShortcutPaths: readonly string[];
+  state: JumpListShellCleanupState;
   token: string;
 }): Promise<string> {
   const realAppData = process.env.APPDATA;
   if (realAppData === undefined) throw new Error("Jump List cleanup requires the real APPDATA snapshot root.");
   requireNoTestOwnedRecentShortcuts(input.s1RecentShortcutPaths);
-  const removedShortcuts = await cleanupTestOwnedRecentShortcuts({
-    appData: input.profile.appData,
-    additionalAppData: [realAppData],
-    root: input.root,
-    documentPaths: input.documentPaths
-  });
-  const j0 = await resnapshotWindowsShellState(input.before);
-  const s1ToJ0 = classifyWindowsShellStateChanges(input.before, j0, { allowNewRecoveryAutomaticDestination: true });
-  assertWindowsShellClassificationClean(s1ToJ0, "S1-to-J0");
-  const candidate = requireSingleNewRecoveryAutomaticDestination(s1ToJ0, path.resolve(realAppData), "practical Jump List route");
-
-  await removeRecoveryShellAutomaticDestinations(input.token);
-
-  const j1 = await resnapshotWindowsShellState(j0);
-  const postFile = requireExactRecoveryCandidateMutation(compareWindowsShellState(j0, j1), candidate, "app-scoped COM cleanup");
-  if (postFile.size !== 2560) {
-    throw new Error(`Jump List cleanup did not leave the expected 2560-byte recovery artifact: ${candidate.relativePath}.`);
+  if (input.state.stage === "new") {
+    input.state.removedShortcuts.push(...await cleanupTestOwnedRecentShortcuts({
+      appData: input.profile.appData,
+      additionalAppData: [realAppData],
+      root: input.root,
+      documentPaths: input.documentPaths,
+      s1: input.before
+    }));
+    const j0 = await resnapshotWindowsShellState(input.before);
+    const s1ToJ0 = classifyWindowsShellStateChanges(input.before, j0, { allowNewRecoveryAutomaticDestination: true });
+    assertWindowsShellClassificationClean(s1ToJ0, "S1-to-J0");
+    input.state.j0 = j0;
+    input.state.s1ToJ0AllowedOpaque = s1ToJ0.allowedOpaqueModifications;
+    if (s1ToJ0.newRecoveryAutomaticDestinations.length === 0 && input.allowNoCandidate === true) {
+      input.state.stage = "no-candidate";
+      return formatJumpListShellDisposition(input.state);
+    }
+    input.state.candidate = requireSingleNewRecoveryAutomaticDestination(s1ToJ0, path.resolve(realAppData), "practical Jump List route");
+    input.state.stage = "j0-captured";
   }
-  const currentCandidate = j1.roots
-    .find((root) => root.appData === path.resolve(realAppData))?.files
-    .find((file) => file.path === candidate.relativePath);
-  if (currentCandidate === undefined || currentCandidate.sha256 !== postFile.sha256 || currentCandidate.size !== postFile.size) {
+  if (input.state.stage === "no-candidate" || input.state.stage === "j2-verified") return formatJumpListShellDisposition(input.state);
+
+  const { candidate, j0 } = input.state;
+  if (candidate === undefined || j0 === undefined) throw new Error(`Jump List cleanup state ${input.state.stage} lacks its stored J0 candidate.`);
+  if (input.state.stage === "j0-captured") {
+    const current = await resnapshotWindowsShellState(j0);
+    assertWindowsShellCheckpointStable(j0, current, "J0 before first COM invocation");
+    input.state.stage = "com-invoked";
+    await removeRecoveryShellAutomaticDestinations(input.token);
+  }
+  if (input.state.stage === "com-invoked") {
+    let j1 = await resnapshotWindowsShellState(j0);
+    if (classifyJumpListComProgress({ candidate, current: j1, j0 }) === "com-not-applied") {
+      await removeRecoveryShellAutomaticDestinations(input.token);
+      j1 = await resnapshotWindowsShellState(j0);
+    }
+    input.state.j1 = assertExactJumpListCandidateMutation(j0, j1, candidate);
+    input.state.stage = "j1-captured";
+  }
+  if (input.state.stage === "j1-captured") {
+    const j1 = input.state.j1;
+    if (j1 === undefined) throw new Error("Jump List J1 was not stored before recycle.");
+    const current = await resnapshotWindowsShellState(j0);
+    if (classifyJumpListRecycleProgress({ candidate, j0, j1, current }) === "candidate-recycled") {
+      input.state.stage = "j2-verified";
+      return formatJumpListShellDisposition(input.state);
+    }
+    const currentCandidate = findExactSnapshotFile(current, candidate);
+    input.state.stage = "recycle-invoked";
+    input.state.disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: currentCandidate });
+  }
+  if (input.state.stage === "recycle-invoked") {
+    const j1 = input.state.j1;
+    if (j1 === undefined) throw new Error("Jump List J1 was not stored for recycle retry.");
+    const current = await resnapshotWindowsShellState(j0);
+    if (classifyJumpListRecycleProgress({ candidate, j0, j1, current }) === "candidate-present") {
+      const currentCandidate = findExactSnapshotFile(current, candidate);
+      input.state.disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: currentCandidate });
+      return restoreApprovedJumpListShellState(input);
+    }
+    input.state.stage = "j2-verified";
+  }
+  return formatJumpListShellDisposition(input.state);
+}
+
+function assertExactJumpListCandidateMutation(
+  j0: WindowsShellStateSnapshot,
+  j1: WindowsShellStateSnapshot,
+  candidate: { appData: string; relativePath: string }
+): WindowsShellStateSnapshot {
+  const postFile = requireExactRecoveryCandidateMutation(compareWindowsShellState(j0, j1), candidate, "app-scoped COM cleanup");
+  if (postFile.size !== 2560) throw new Error(`Jump List cleanup did not leave the expected 2560-byte recovery artifact: ${candidate.relativePath}.`);
+  const currentCandidate = findExactSnapshotFile(j1, candidate);
+  if (currentCandidate.sha256 !== postFile.sha256 || currentCandidate.size !== postFile.size) {
     throw new Error(`Jump List cleanup candidate changed before Recycle verification: ${candidate.relativePath}.`);
   }
+  return j1;
+}
 
-  const disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: currentCandidate });
-  const j2 = await resnapshotWindowsShellState(j0);
-  assertWindowsShellMicroBaselineAfterRecycle(j0, j2, candidate);
-  return `${disposition}; removed exact post-S1 Recent shortcuts=${removedShortcuts.length}${removedShortcuts.length === 0 ? "" : `: ${removedShortcuts.join(", ")}`}; S1-to-J0 allowed opaque=${formatWindowsShellStateChanges(s1ToJ0.allowedOpaqueModifications) || "(none)"}; J0-to-J1 exact candidate=${candidate.relativePath}; J2=J0 minus exact candidate.`;
+function findExactSnapshotFile(snapshot: WindowsShellStateSnapshot, candidate: { appData: string; relativePath: string }): { path: string; sha256: string; size: number } {
+  const file = snapshot.roots.find((root) => path.resolve(root.appData) === path.resolve(candidate.appData))?.files
+    .find((entry) => entry.path === candidate.relativePath);
+  if (file === undefined) throw new Error(`Jump List exact candidate is absent when it must be present: ${candidate.relativePath}.`);
+  return file;
+}
+
+function formatJumpListShellDisposition(state: JumpListShellCleanupState): string {
+  const candidate = state.candidate?.relativePath ?? "(no recovery candidate created before launch failure)";
+  return `${state.disposition ?? "no Recycle action required"}; removed exact post-S1 Recent shortcuts=${state.removedShortcuts.length}${state.removedShortcuts.length === 0 ? "" : `: ${state.removedShortcuts.join(", ")}`}; S1-to-J0 allowed opaque=${formatWindowsShellStateChanges(state.s1ToJ0AllowedOpaque) || "(none)"}; candidate=${candidate}; stage=${state.stage}.`;
 }
 
 function requireSingleNewRecoveryAutomaticDestination(
@@ -854,7 +987,8 @@ async function launch(
   journeyId: string,
   profile?: RecoveryJourneySession["profile"],
   openPath?: string,
-  recoveryShellRecent = false
+  recoveryShellRecent = false,
+  options: { afterLaunchFailureApplicationExit?: () => Promise<void> | void } = {}
 ): Promise<RecoveryJourneySession> {
   return launchRecoveryJourney({
     ...packagedJourneyConfig(workspaceRoot, journeyId),
@@ -863,6 +997,7 @@ async function launch(
     evidenceMode: "committed",
     committedEvidencePath: ["phase-0", "document-windows-integration", journeyId],
     ...(profile === undefined ? { cleanupProfile: false } : { profile, cleanupProfile: false }),
+    ...options,
     ...(recoveryShellRecent ? { recoveryShellRecent: true } : {}),
     packagedArgs: () => openPath === undefined ? [] : [openPath]
   });

@@ -94,6 +94,11 @@ export type WindowsShellStateClassification = {
   violations: WindowsShellStateChange[];
 };
 
+export type WindowsShellDeletionCandidate = {
+  appData: string;
+  relativePath: string;
+};
+
 const OPAQUE_SHELL_DESTINATION = /^(?:AutomaticDestinations\/[^/]+\.automaticDestinations-ms|CustomDestinations\/[^/]+\.customDestinations-ms)$/iu;
 const RECOVERY_AUTOMATIC_DESTINATION = /^AutomaticDestinations\/[^/]+\.automaticDestinations-ms$/iu;
 
@@ -146,6 +151,53 @@ export function assertWindowsShellMicroBaselineAfterRecycle(
     changes[0]?.after !== null
   ) {
     throw new Error(`J2 did not equal J0 minus the exact recycled recovery destination: ${formatWindowsShellStateChanges(changes)}`);
+  }
+}
+
+/** Determines whether a retried recycle step still needs work or was already completed. */
+export function classifyJumpListRecycleProgress(input: {
+  candidate: { appData: string; relativePath: string };
+  j0: WindowsShellStateSnapshot;
+  j1: WindowsShellStateSnapshot;
+  current: WindowsShellStateSnapshot;
+}): "candidate-present" | "candidate-recycled" {
+  if (compareWindowsShellState(input.j1, input.current).length === 0) return "candidate-present";
+  assertWindowsShellMicroBaselineAfterRecycle(input.j0, input.current, input.candidate);
+  return "candidate-recycled";
+}
+
+/** Distinguishes an unapplied COM cleanup from its exact, empty-candidate result on retry. */
+export function classifyJumpListComProgress(input: {
+  candidate: { appData: string; relativePath: string };
+  current: WindowsShellStateSnapshot;
+  j0: WindowsShellStateSnapshot;
+}): "com-not-applied" | "com-applied" {
+  const changes = compareWindowsShellState(input.j0, input.current);
+  if (changes.length === 0) return "com-not-applied";
+  if (
+    changes.length !== 1 || changes[0]?.appData !== input.candidate.appData ||
+    changes[0]?.before?.path !== input.candidate.relativePath || changes[0]?.after?.path !== input.candidate.relativePath ||
+    changes[0].after.size !== 2560
+  ) {
+    throw new Error(`COM retry state changed anything other than the exact 2560-byte J0 recovery candidate: ${formatWindowsShellStateChanges(changes) || "(none)"}.`);
+  }
+  return "com-applied";
+}
+
+/** A target-link cleanup candidate is safe only when its exact pathname did not exist at S1. */
+export function assertWindowsShellDeletionCandidatesAbsentAtS1(
+  s1: WindowsShellStateSnapshot,
+  candidates: readonly WindowsShellDeletionCandidate[]
+): void {
+  for (const candidate of candidates) {
+    const root = s1.roots.find((snapshotRoot) => sameWindowsPath(snapshotRoot.appData, candidate.appData));
+    if (root === undefined) throw new Error(`No S1 shell root exists for deletion candidate ${candidate.appData}:${candidate.relativePath}.`);
+    if (!candidate.relativePath.toLowerCase().endsWith(".lnk")) {
+      throw new Error(`Refusing a non-shortcut shell deletion candidate: ${candidate.appData}:${candidate.relativePath}.`);
+    }
+    if (root.files.some((file) => file.path.toLocaleLowerCase("en-US") === candidate.relativePath.toLocaleLowerCase("en-US"))) {
+      throw new Error(`Refusing to delete an S1-pre-existing shortcut pathname: ${candidate.appData}:${candidate.relativePath}.`);
+    }
   }
 }
 
@@ -640,38 +692,46 @@ export async function snapshotTestOwnedRecentShortcuts(input: {
 
 /**
  * Removes only `.lnk` records that both resolve to one of the exact test
- * documents and live under the isolated profile's Recent directory. It never
- * clears the shell's whole Recent list or touches an unrelated target.
+ * documents and live under an explicitly snapshotted real or isolated Recent
+ * directory. A pathname present at S1 is never deleted, even if Windows later
+ * retargets it to a test document.
  */
 export async function cleanupTestOwnedRecentShortcuts(input: {
   appData: string;
   additionalAppData?: readonly string[];
   root: string;
   documentPaths: readonly string[];
+  s1: WindowsShellStateSnapshot;
 }): Promise<string[]> {
   await Promise.all(input.documentPaths.map((candidate) => assertTestOwnedPath(input.root, candidate)));
   const appDataRoots = [...new Set([input.appData, ...(input.additionalAppData ?? [])].map((candidate) => path.resolve(candidate).toLocaleLowerCase("en-US")))];
   const removed: string[] = [];
   for (const normalized of appDataRoots) {
     const appData = [input.appData, ...(input.additionalAppData ?? [])].find((candidate) => path.resolve(candidate).toLocaleLowerCase("en-US") === normalized)!;
-    const output = await runPowerShell(recentShortcutScript({ ...input, appData }, true));
+    const s1Root = input.s1.roots.find((snapshotRoot) => sameWindowsPath(snapshotRoot.appData, appData));
+    if (s1Root === undefined) throw new Error(`S1 shell snapshot has no exact root for Recent cleanup: ${appData}.`);
+    const output = await runPowerShell(recentShortcutScript({ ...input, appData, s1Paths: s1Root.files.map((file) => file.path) }, true));
     if (output.length > 0) removed.push(...output.split(/\r?\n/u).filter(Boolean));
   }
   return removed;
 }
 
-function recentShortcutScript(input: { appData: string; root: string; documentPaths: readonly string[] }, remove: boolean): string {
+function recentShortcutScript(input: { appData: string; root: string; documentPaths: readonly string[]; s1Paths?: readonly string[] }, remove: boolean): string {
   const targets = input.documentPaths.map((candidate) => path.resolve(candidate));
-  const removal = remove ? "Remove-Item -LiteralPath $_.FullName -Force; " : "";
+  const s1Paths = input.s1Paths ?? [];
+  const removal = remove
+    ? "if ($s1Paths -contains $relative) { throw ('Refusing to delete S1-pre-existing shortcut pathname: ' + $relative) }; if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { throw ('Shortcut disappeared before deletion: ' + $candidatePath) }; $currentInfo = Get-Item -LiteralPath $candidatePath -Force; $currentHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash; if ($currentInfo.Length -ne $candidateSize -or -not [string]::Equals($currentHash, $candidateHash, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('Shortcut bytes changed before deletion: ' + $candidatePath) }; $currentShortcut = $shell.CreateShortcut($candidatePath); $currentTarget = [System.IO.Path]::GetFullPath($currentShortcut.TargetPath); $currentMatch = @($targets | Where-Object { [string]::Equals($_, $currentTarget, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $currentUnderRoot = $currentTarget.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if (-not ($currentMatch -and $currentUnderRoot)) { throw ('Shortcut target changed before deletion: ' + $candidatePath) }; Remove-Item -LiteralPath $candidatePath -Force; if (Test-Path -LiteralPath $candidatePath -PathType Leaf) { throw ('Shortcut survived deletion: ' + $candidatePath) }; "
+    : "";
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$appData = '${ps(input.appData)}'`,
     `$root = '${ps(input.root)}'`,
     `$targets = @(${targets.map((target) => `'${ps(target)}'`).join(",")})`,
+    `$s1Paths = @(${s1Paths.map((candidate) => `'${ps(candidate)}'`).join(",")})`,
     "$recent = Join-Path $appData 'Microsoft\\Windows\\Recent'",
     "if (-not (Test-Path -LiteralPath $recent)) { return }",
     "$shell = New-Object -ComObject WScript.Shell",
-    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { try { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath); $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { ${removal}Write-Output $_.FullName } } catch {} }`
+    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { $shortcut = $null; try { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath) } catch {}; if ($null -ne $shortcut) { $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { $candidatePath = $_.FullName; $candidateSize = $_.Length; $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash; $relative = [System.IO.Path]::GetRelativePath($recent, $candidatePath).Replace('\\', '/'); ${removal}Write-Output $candidatePath } } }`
   ].join("; ");
   return script;
 }

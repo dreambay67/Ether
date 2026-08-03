@@ -20,10 +20,13 @@ import {
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
   associationArtifactsMayBeCleaned,
+  assertWindowsShellDeletionCandidatesAbsentAtS1,
   assertWindowsShellClassificationClean,
   assertWindowsShellCheckpointStable,
   assertWindowsShellMicroBaselineAfterRecycle,
   classifyWindowsShellStateChanges,
+  classifyJumpListComProgress,
+  classifyJumpListRecycleProgress,
   compareWindowsShellState,
   describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
@@ -54,6 +57,10 @@ describe("A02 Windows integration harness contracts", () => {
     expect(cleanup).toMatch(/86c14003-4d6b-4ef3-a7b4-0506663b2e68/iu);
     expect(cleanup).toMatch(/SetAppID\(appId\).*RemoveAllDestinations/su);
     expect(cleanup).not.toMatch(/SHAddToRecentDocs|setJumpList/u);
+    const windowsIntegration = await readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsIntegration.ts"), "utf8");
+    expect(windowsIntegration).toContain("Refusing to delete S1-pre-existing shortcut pathname");
+    expect(windowsIntegration).toContain("Shortcut bytes changed before deletion");
+    expect(windowsIntegration).toContain("Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256");
   });
 
   it("declares only representative packaged coverage and names the remaining Windows gaps", () => {
@@ -115,6 +122,27 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => assertWindowsShellMicroBaselineAfterRecycle(j0, j2, { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" })).not.toThrow();
     const concurrentWrite = { roots: [{ appData: "C:\\real", files: [{ path: "CustomDestinations/existing.customDestinations-ms", sha256: "c".repeat(64), size: 12 }] }] };
     expect(() => assertWindowsShellMicroBaselineAfterRecycle(j0, concurrentWrite, { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" })).toThrow(/J2 did not equal J0/u);
+    expect(classifyJumpListRecycleProgress({ candidate: { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" }, j0, j1: j0, current: j0 })).toBe("candidate-present");
+    expect(classifyJumpListRecycleProgress({ candidate: { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" }, j0, j1: j0, current: j2 })).toBe("candidate-recycled");
+    expect(() => classifyJumpListRecycleProgress({ candidate: { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" }, j0, j1: j0, current: concurrentWrite })).toThrow(/J2 did not equal J0/u);
+    const j1 = { roots: [{ appData: "C:\\real", files: [
+      { path: "AutomaticDestinations/recovery.automaticDestinations-ms", sha256: "d".repeat(64), size: 2560 },
+      { path: "CustomDestinations/existing.customDestinations-ms", sha256: "b".repeat(64), size: 12 }
+    ] }] };
+    expect(classifyJumpListComProgress({ candidate: { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" }, current: j0, j0 })).toBe("com-not-applied");
+    expect(classifyJumpListComProgress({ candidate: { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" }, current: j1, j0 })).toBe("com-applied");
+    expect(() => classifyJumpListComProgress({ candidate: { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" }, current: concurrentWrite, j0 })).toThrow(/COM retry state changed/u);
+  });
+
+  it("refuses deletion of a shortcut pathname that existed in the full S1 root", () => {
+    const s1 = { roots: [
+      { appData: "C:\\real", files: [{ path: "retargeted.lnk", sha256: "a".repeat(64), size: 4 }] },
+      { appData: "C:\\isolated", files: [] }
+    ] };
+    expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\real", relativePath: "retargeted.lnk" }])).toThrow(/S1-pre-existing shortcut/u);
+    expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\isolated", relativePath: "new-target.lnk" }])).not.toThrow();
+    expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\missing", relativePath: "new-target.lnk" }])).toThrow(/No S1 shell root/u);
+    expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\isolated", relativePath: "not-a-link.txt" }])).toThrow(/non-shortcut/u);
   });
 
   it("fails every removal and new or changed non-opaque shell file", () => {

@@ -17,6 +17,7 @@ import {
   blankAuthoringJourney,
   collectJourneyBuildIdentity,
   journeyEvidencePaths,
+  launchFailureAfterExitCleanupMayRun,
   parsePositiveSafeProcessIds,
   retainOwnedPackagedProcessIds,
   sha256File
@@ -155,6 +156,11 @@ describe("Ether recovery journey driver", () => {
     for (const output of ["0\n", "-1\n", "NaN\n", "41408\n0\n40364\n", "9007199254740992\n"]) {
       expect(() => parsePositiveSafeProcessIds(output)).toThrow(/Invalid packaged journey process ID/u);
     }
+  });
+
+  it("runs launch-failure after-exit sanitation only after exact shutdown proof", () => {
+    expect(launchFailureAfterExitCleanupMayRun(false)).toBe(false);
+    expect(launchFailureAfterExitCleanupMayRun(true)).toBe(true);
   });
 
   it("preserves a supplied recovery profile by default, cleans it only when requested, and rejects outside roots", async () => {

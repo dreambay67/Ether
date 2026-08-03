@@ -110,6 +110,8 @@ export type JourneyProfileReuse = {
   profile?: JourneyProfile;
   /** Caller-provided profiles are retained unless this explicit cleanup is requested. */
   cleanupProfile?: boolean;
+  /** Invoked only after a failed launch has proven shutdown of its owned process set. */
+  afterLaunchFailureApplicationExit?: () => Promise<void> | void;
 };
 
 export type SourceElectronJourneyConfig = JourneyProfileReuse & {
@@ -147,6 +149,11 @@ export type PackagedJourneyConfig = JourneyProfileReuse & {
 };
 
 export type RecoveryJourneyConfig = SourceElectronJourneyConfig | PackagedJourneyConfig;
+
+/** Launch-failure shell sanitation may run only after the driver has proven its owned process set absent. */
+export function launchFailureAfterExitCleanupMayRun(applicationExited: boolean): boolean {
+  return applicationExited;
+}
 
 export function blankAuthoringJourney(journeyId: string, providerAdapter: AuthoringJourneyDeclaration["providerAdapter"] = "none"): AuthoringJourneyDeclaration {
   return {
@@ -713,6 +720,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   } catch (error) {
     const failures: unknown[] = [error];
     let applicationExited = false;
+    let afterLaunchFailureCallbackCompleted = config.afterLaunchFailureApplicationExit === undefined;
     try {
       await shutdownLaunchedJourney({
         sourceApp,
@@ -726,7 +734,13 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     } catch (shutdownError) {
       failures.push(shutdownError);
     }
-    if (applicationExited && cleanupProfile) {
+    if (launchFailureAfterExitCleanupMayRun(applicationExited)) {
+      try {
+        await config.afterLaunchFailureApplicationExit?.();
+        afterLaunchFailureCallbackCompleted = true;
+      } catch (afterExitError) { failures.push(afterExitError); }
+    }
+    if (applicationExited && afterLaunchFailureCallbackCompleted && cleanupProfile) {
       try { await cleanupIsolatedJourneyProfile(profile); } catch (cleanupError) { failures.push(cleanupError); }
     }
     if (failures.length > 1) throw new AggregateError(failures, "Journey launch failed and exact process shutdown was not clean.", { cause: error });
@@ -822,12 +836,12 @@ async function shutdownLaunchedJourney(input: {
   if (input.packagedBrowser !== null) {
     try { await input.packagedBrowser.close(); } catch (error) { failures.push(error); }
   }
-  if (input.packagedProcess !== null) {
+  if (input.packagedProcess !== null || input.packagedExecutablePath.length > 0) {
     try {
       await stopNewPackagedProcesses({
         executablePath: input.packagedExecutablePath,
         profileMarker: input.profileMarker,
-        seedProcessId: input.packagedProcess.pid,
+        seedProcessId: input.packagedProcess?.pid,
         retainedProcessIds: input.ownedPackagedProcessIds
       });
     } catch (error) { failures.push(error); }
