@@ -92,13 +92,17 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await input.screenshot("03-direct-editing.png", evidence, "Capture controlled direct editing", "The selected Prompt visibly owns the only bounded on-canvas editor.");
     await input.pressKey("Control+Enter", "Commit primary content edit", "Ctrl+Enter commits text while the editor owns focus.");
     await expect(primaryEditor).toBeHidden();
+    await input.leftClick(renamedTitle, "Restore Prompt command focus", "The directly edited Prompt remains the primary graph selection.");
+    await input.pressKey("Control+Enter", "Preview the selected run", "Ctrl+Enter prepares the selected-node plan without starting provider work.");
+    await expect(page.getByTestId("canvas-status")).toContainText("Selected plan ready");
 
     let expectedCount = 4;
     for (const definition of canonicalDefinitions.slice(2)) {
       expectedCount += 1;
       await addDefinition(page, input, definition, expectedCount);
     }
-    await input.leftClick(canvasPoint(canvasBox, 260, 42), "Return focus to the canvas", "Canvas focus owns the final fit command.");
+    await input.leftClick(blankCanvasPoint(canvasBox), "Return focus to the canvas", "Canvas focus owns the final fit command.");
+    await expect(canvas).toBeFocused();
     await input.pressKey("Home", "Fit the authored graph", "Home fits all authored node types into the viewport.");
     await page.waitForTimeout(450);
     for (const definition of canonicalDefinitions) await expect(page.locator(`.ether-node[data-node-definition='${definition}']`).first()).toBeVisible();
@@ -121,7 +125,7 @@ async function addDefinition(page: Page, input: import("../../recovery/journeyDr
   const row = page.locator(`.node-library-item[data-node-definition='${definition}']`);
   await row.scrollIntoViewIfNeeded();
   await input.leftClick(row.locator(".node-library-add"), `Add ${definition} from Node Library`, `The registry factory creates ${definition} with canonical defaults.`);
-  await expect(page.getByTestId("ether-node")).toHaveCount(expectedCount);
+  await expect(page.getByTestId("ether-canvas-surface")).toHaveAttribute("data-graph-node-count", String(expectedCount));
 }
 
 async function requiredBox(locator: Locator, label: string) {
@@ -134,8 +138,8 @@ function center(box: { x: number; y: number; width: number; height: number }): J
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-function canvasPoint(canvas: { x: number; y: number; width: number; height: number }, fromRight: number, fromTop: number): JourneyPoint {
-  return { x: canvas.x + canvas.width - fromRight, y: canvas.y + fromTop };
+function blankCanvasPoint(canvas: { x: number; y: number; width: number; height: number }): JourneyPoint {
+  return { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height - 28 };
 }
 
 function marqueeAround(box: { x: number; y: number; width: number; height: number }, canvas: { x: number; y: number; width: number; height: number }): [JourneyPoint, JourneyPoint] {
