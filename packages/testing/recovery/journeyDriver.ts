@@ -852,7 +852,12 @@ async function shutdownLaunchedJourney(input: {
     try { await closeSourceElectron(input.sourceApp); } catch (error) { failures.push(error); }
   }
   if (input.packagedBrowser !== null) {
-    try { await input.packagedBrowser.close(); } catch (error) { failures.push(error); }
+    try {
+      await Promise.race([
+        input.packagedBrowser.close().catch(() => undefined),
+        delay(5_000)
+      ]);
+    } catch (error) { failures.push(error); }
   }
   if (input.packagedProcess !== null || input.packagedExecutablePath.length > 0) {
     try {
