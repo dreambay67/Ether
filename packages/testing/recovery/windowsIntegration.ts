@@ -581,8 +581,9 @@ export async function invokeDocumentFromExplorerWithUia(input: { documentPath: s
     "$matchedWindow = $null",
     "$item = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) {",
-    "  foreach ($window in @($shell.Windows())) { try { if (-not $existingHwnd.ContainsKey([string]$window.HWND) -and [string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$nativePid = 0; [EtherA02Native]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$nativePid) | Out-Null; if ($nativePid -eq 0) { throw 'Exact Explorer HWND resolved to a non-positive PID' }; $explorerPid = [int64]$nativePid; $matchedWindow = $window; break } } catch {} }",
-    "  if ($null -eq $explorerPid) { Start-Sleep -Milliseconds 150; continue }",
+    "  if ($null -eq $matchedWindow) { foreach ($window in @($shell.Windows())) { try { if (-not $existingHwnd.ContainsKey([string]$window.HWND) -and [string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { $matchedWindow = $window; break } } catch {} } }",
+    "  if ($null -eq $matchedWindow) { Start-Sleep -Milliseconds 150; continue }",
+    "  [uint32]$nativePid = 0; [EtherA02Native]::GetWindowThreadProcessId([intptr]$matchedWindow.HWND, [ref]$nativePid) | Out-Null; if ($nativePid -eq 0) { throw 'Exact Explorer HWND PID was zero' }; $explorerPid = [int64]$nativePid",
     "  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName)",
     "  $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND)",
     "  $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)",
@@ -632,7 +633,8 @@ function exactExplorerForegroundScript(nativeType: string, stage: string): strin
     "$explorerHwnd = [intptr]$matchedWindow.HWND",
     `if ($explorerHwnd -eq [intptr]::Zero) { throw '${stage}: exact Explorer HWND is zero' }`,
     `if (-not [${nativeType}]::SetForegroundWindow($explorerHwnd)) { throw '${stage}: SetForegroundWindow denied exact Explorer HWND' }`,
-    `if ([${nativeType}]::GetForegroundWindow() -ne $explorerHwnd) { throw '${stage}: exact Explorer HWND was not foreground after SetForegroundWindow' }`
+    `if ([${nativeType}]::GetForegroundWindow() -ne $explorerHwnd) { throw '${stage}: exact Explorer HWND was not foreground after SetForegroundWindow' }`,
+    `[uint32]$foregroundExplorerPid = 0; [${nativeType}]::GetWindowThreadProcessId($explorerHwnd, [ref]$foregroundExplorerPid) | Out-Null; if ($foregroundExplorerPid -eq 0 -or [int64]$foregroundExplorerPid -ne $explorerPid) { throw '${stage}: Explorer HWND PID mismatch immediately before action' }`
   ].join("; ");
 }
 
@@ -692,8 +694,9 @@ export function buildNativeExplorerDragScript(input: {
     "$deadline = [DateTime]::UtcNow.AddSeconds(15)",
     "$matchedWindow = $null; $explorerPid = $null; $item = $null",
     "while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) {",
-    "  foreach ($window in @($shell.Windows())) { try { if (-not $existingHwnd.ContainsKey([string]$window.HWND) -and [string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { [uint32]$nativePid = 0; [EtherA02Pointer]::GetWindowThreadProcessId([intptr]$window.HWND, [ref]$nativePid) | Out-Null; if ($nativePid -eq 0) { throw 'Exact Explorer HWND resolved to a non-positive PID' }; $explorerPid = [int64]$nativePid; $matchedWindow = $window; break } } catch {} }",
-    "  if ($null -eq $explorerPid) { Start-Sleep -Milliseconds 150; continue }",
+    "  if ($null -eq $matchedWindow) { foreach ($window in @($shell.Windows())) { try { if (-not $existingHwnd.ContainsKey([string]$window.HWND) -and [string]::Equals(([uri]$window.LocationURL).LocalPath.TrimEnd('\\'), $folder.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { $matchedWindow = $window; break } } catch {} } }",
+    "  if ($null -eq $matchedWindow) { Start-Sleep -Milliseconds 150; continue }",
+    "  [uint32]$nativePid = 0; [EtherA02Pointer]::GetWindowThreadProcessId([intptr]$matchedWindow.HWND, [ref]$nativePid) | Out-Null; if ($nativePid -eq 0) { throw 'Exact Explorer HWND PID was zero' }; $explorerPid = [int64]$nativePid",
     "  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName)",
     `  $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND); $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -gt 1) { throw ('Exact new Explorer window exposed multiple drag sources named ' + $displayName) }; if ($candidates.Count -eq 1) { ${exactExplorerSelectedDocumentMatchesScript()}; if ($selectionMatches) { $item = $candidates[0] } }`,
     "  if ($null -eq $item) { Start-Sleep -Milliseconds 150 }",

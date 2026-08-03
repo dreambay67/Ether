@@ -154,8 +154,12 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("sourceHwnd=");
     expect(windowsIntegration).toContain("targetHwnd=");
     expect(windowsIntegration).toContain("latencyMs=");
-    expect(windowsIntegration).toContain("Exact Explorer HWND resolved to a non-positive PID");
+    expect(windowsIntegration).toContain("Exact Explorer HWND PID was zero");
+    expect(windowsIntegration).not.toContain("GetWindowThreadProcessId([intptr]$window.HWND, [ref]$nativePid)");
     expect(windowsIntegration.split("$explorerPid = [int64]$nativePid")).toHaveLength(3);
+    expect(windowsIntegration.split("if ($nativePid -eq 0) { throw 'Exact Explorer HWND PID was zero' }")).toHaveLength(3);
+    expect(windowsIntegration).toContain("$foregroundExplorerPid = 0");
+    expect(windowsIntegration).toContain("Explorer HWND PID mismatch immediately before action");
     expect(associationRoute).toContain("invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid })");
     expect(associationRoute).not.toContain("document.hasFocus()");
     expect(associationRoute).not.toContain("assertExactWindowForegroundWithUia(primaryPid)");
