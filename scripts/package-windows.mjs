@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, cp, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -58,6 +58,63 @@ const workspacePackages = [
   ["@ether/schema", "packages/schema"]
 ];
 const workspacePackagePaths = new Map(workspacePackages);
+
+export function releaseStagingPaths(rootDir = workspaceRoot, stagingId = "") {
+  if (stagingId !== "" && !/^[a-z0-9][a-z0-9-]*$/iu.test(stagingId)) {
+    throw new Error(`Unsafe release staging identifier ${stagingId}.`);
+  }
+  const desktopRoot = path.join(path.resolve(rootDir), "apps", "desktop");
+  const suffix = stagingId === "" ? "" : `-${stagingId}`;
+  return {
+    runtimeRoot: path.join(desktopRoot, `.release-runtime${suffix}`),
+    projectRoot: path.join(desktopRoot, `.release-project${suffix}`)
+  };
+}
+
+export async function withWindowsReleaseLock(rootDir = workspaceRoot, operation = "windows-release", callback) {
+  if (typeof callback !== "function") throw new Error("Windows release lock requires an operation callback.");
+  const resolvedRoot = path.resolve(rootDir);
+  const lockRoot = path.join(resolvedRoot, "release", ".windows-package.lock");
+  const ownerPath = path.join(lockRoot, "owner.json");
+  const owner = {
+    schemaVersion: 1,
+    token: randomUUID(),
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    operation
+  };
+  await mkdir(path.dirname(lockRoot), { recursive: true });
+  try {
+    await mkdir(lockRoot);
+  } catch (error) {
+    if (!(error instanceof Error) || error.code !== "EEXIST") throw error;
+    const existing = await readFile(ownerPath, "utf8").then((value) => value.trim(), () => "owner metadata unavailable");
+    throw new Error(`Windows release operation is already active: ${existing}`, { cause: error });
+  }
+  await writeFile(ownerPath, `${JSON.stringify(owner, null, 2)}\n`, { flag: "wx" });
+  let value;
+  let operationFailure;
+  try {
+    value = await callback({ lockRoot, ownerPath, ...owner });
+  } catch (error) {
+    operationFailure = error;
+  }
+  let releaseFailure;
+  try {
+    const current = JSON.parse(await readFile(ownerPath, "utf8"));
+    if (current.token !== owner.token) throw new Error("Windows release lock ownership changed before release.");
+    await rm(ownerPath, { force: true, maxRetries: 12, retryDelay: 250 });
+    await rm(lockRoot, generatedTreeRemoval);
+  } catch (error) {
+    releaseFailure = error;
+  }
+  if (operationFailure !== undefined && releaseFailure !== undefined) {
+    throw new AggregateError([operationFailure, releaseFailure], "Windows release operation and lock disposal both failed.", { cause: operationFailure });
+  }
+  if (operationFailure !== undefined) throw operationFailure;
+  if (releaseFailure !== undefined) throw releaseFailure;
+  return value;
+}
 const generatedTreeRemoval = { recursive: true, force: true, maxRetries: 12, retryDelay: 250 };
 
 export async function readReleaseMetadata(rootDir = workspaceRoot) {
@@ -94,19 +151,21 @@ export async function assertReleaseInputs(rootDir = workspaceRoot) {
 
 export async function packageWindowsApp(options = {}) {
   const rootDir = path.resolve(options.rootDir ?? workspaceRoot);
-  const releaseDir = path.join(rootDir, "release", "windows");
-  try {
+  return withWindowsReleaseLock(rootDir, "package-windows", async () => {
+    const releaseDir = path.join(rootDir, "release", "windows");
+    const staging = releaseStagingPaths(rootDir, `package-${process.pid}-${Date.now().toString(36)}`);
+    try {
     await createInstallerAssets(rootDir);
     await assertReleaseInputs(rootDir);
 
     // Stage twice before invoking electron-builder. This proves the release
     // input is deterministic without relying on NSIS timestamps or signatures.
-    await prepareProductionRuntime(rootDir);
-    let releaseProject = await prepareReleaseProject(rootDir);
+    await prepareProductionRuntime(rootDir, { targetRoot: staging.runtimeRoot });
+    let releaseProject = await prepareReleaseProject(rootDir, staging);
     const firstInventory = await createStagedInventory(releaseProject);
-    await cleanupReleaseStaging(rootDir);
-    await prepareProductionRuntime(rootDir);
-    releaseProject = await prepareReleaseProject(rootDir);
+    await cleanupReleaseStaging(rootDir, staging);
+    await prepareProductionRuntime(rootDir, { targetRoot: staging.runtimeRoot });
+    releaseProject = await prepareReleaseProject(rootDir, staging);
     const secondInventory = await createStagedInventory(releaseProject);
     if (firstInventory.hash !== secondInventory.hash) {
       throw new Error(`Release staging is not deterministic: ${firstInventory.hash} != ${secondInventory.hash}.`);
@@ -151,9 +210,10 @@ export async function packageWindowsApp(options = {}) {
       installerPath: path.join(releaseDir, installerFileName),
       executablePath: path.join(releaseDir, "win-unpacked", "Ether.exe")
     };
-  } finally {
-    await cleanupReleaseStaging(rootDir);
-  }
+    } finally {
+      await cleanupReleaseStaging(rootDir, staging);
+    }
+  });
 }
 
 async function runElectronBuilder(rootDir, releaseProject, targetArgs) {
@@ -215,8 +275,9 @@ export function createCalibratedReleaseInventory({
  * turns it into app.asar. pnpm workspace links point outside the application,
  * so copying them directly would either leak source files or fail at runtime.
  */
-export async function prepareProductionRuntime(rootDir = workspaceRoot) {
-  const targetRoot = path.join(rootDir, "apps", "desktop", ".release-runtime");
+export async function prepareProductionRuntime(rootDir = workspaceRoot, options = {}) {
+  const targetRoot = path.resolve(options.targetRoot ?? releaseStagingPaths(rootDir).runtimeRoot);
+  assertStagingTarget(rootDir, targetRoot, ".release-runtime");
   await rm(targetRoot, generatedTreeRemoval);
   await mkdir(targetRoot, { recursive: true });
   const state = { copiedTargets: new Set(), rootPackages: new Map() };
@@ -256,14 +317,15 @@ export async function assertProductionRuntime(targetRoot) {
   if (missing.length > 0) throw new Error(`The staged Ether runtime is incomplete: ${missing.join(", ")}`);
 }
 
-export async function cleanupReleaseStaging(rootDir = workspaceRoot) {
+export async function cleanupReleaseStaging(rootDir = workspaceRoot, options = {}) {
   const resolvedRoot = path.resolve(rootDir);
+  const defaults = releaseStagingPaths(resolvedRoot);
   const targets = [
-    path.join(resolvedRoot, "apps", "desktop", ".release-runtime"),
-    path.join(resolvedRoot, "apps", "desktop", ".release-project")
+    [path.resolve(options.runtimeRoot ?? defaults.runtimeRoot), ".release-runtime"],
+    [path.resolve(options.projectRoot ?? defaults.projectRoot), ".release-project"]
   ];
-  for (const target of targets) {
-    if (!isWithin(resolvedRoot, target)) throw new Error(`Refusing to clean release staging outside ${resolvedRoot}.`);
+  for (const [target, prefix] of targets) {
+    assertStagingTarget(resolvedRoot, target, prefix);
     await rm(target, generatedTreeRemoval);
   }
 }
@@ -305,15 +367,19 @@ export async function assertGeneratedBuilderConfig(
  * a custom files list is present. A tiny release-only project prevents it from
  * traversing pnpm workspace links while retaining the physical runtime closure.
  */
-export async function prepareReleaseProject(rootDir = workspaceRoot) {
+export async function prepareReleaseProject(rootDir = workspaceRoot, options = {}) {
   const desktopRoot = path.join(rootDir, "apps", "desktop");
-  const projectRoot = path.join(desktopRoot, ".release-project");
+  const defaults = releaseStagingPaths(rootDir);
+  const runtimeRoot = path.resolve(options.runtimeRoot ?? defaults.runtimeRoot);
+  const projectRoot = path.resolve(options.projectRoot ?? defaults.projectRoot);
+  assertStagingTarget(rootDir, runtimeRoot, ".release-runtime");
+  assertStagingTarget(rootDir, projectRoot, ".release-project");
   await rm(projectRoot, generatedTreeRemoval);
   await mkdir(projectRoot, { recursive: true });
   await Promise.all([
     copyProductionTree(path.join(desktopRoot, "dist"), path.join(projectRoot, "dist")),
     copyProductionTree(path.join(desktopRoot, "dist-electron"), path.join(projectRoot, "dist-electron")),
-    copyProductionTree(path.join(desktopRoot, ".release-runtime"), path.join(projectRoot, "node_modules"))
+    copyProductionTree(runtimeRoot, path.join(projectRoot, "node_modules"))
   ]);
   await writeThirdPartyNotices(rootDir, projectRoot);
   await writeFile(path.join(projectRoot, "package.json"), `${JSON.stringify({
@@ -352,10 +418,16 @@ export async function prepareReleaseProject(rootDir = workspaceRoot) {
     "files:",
     "  - dist/**/*",
     "  - dist-electron/**/*",
-    "  - node_modules/**/*",
     "  - package.json",
     `  - ${thirdPartyNoticesFileName}`,
     `  - ${stagedInventoryFileName}`,
+    // beforeBuild=false suppresses electron-builder's dependency collector.
+    // Keep the audited physical closure in a separate file set so the main
+    // app matcher cannot prune node_modules before ASAR assembly.
+    "  - from: node_modules",
+    "    to: node_modules",
+    "    filter:",
+    "      - '**/*'",
     "asarUnpack:",
     "  - node_modules/sharp/**/*",
     "  - node_modules/@img/**/*",
@@ -601,19 +673,21 @@ async function assertReleaseArtifactContract(outputDir) {
 }
 
 export async function assertReleaseArtifacts(outputDir = releaseDirectory) {
-  await assertReleaseArtifactContract(outputDir);
-  await prepareProductionRuntime(workspaceRoot);
-  try {
-    const releaseProject = await prepareReleaseProject(workspaceRoot);
-    const currentInventory = await createStagedInventory(releaseProject);
-    return await auditPackagedRelease({
-      outputDir,
-      rootDir: workspaceRoot,
-      stagedInventory: currentInventory
-    });
-  } finally {
-    await cleanupReleaseStaging(workspaceRoot);
-  }
+  return withWindowsReleaseLock(workspaceRoot, "audit-windows-release", async () => {
+    await assertReleaseArtifactContract(outputDir);
+    await prepareProductionRuntime(workspaceRoot);
+    try {
+      const releaseProject = await prepareReleaseProject(workspaceRoot);
+      const currentInventory = await createStagedInventory(releaseProject);
+      return await auditPackagedRelease({
+        outputDir,
+        rootDir: workspaceRoot,
+        stagedInventory: currentInventory
+      });
+    } finally {
+      await cleanupReleaseStaging(workspaceRoot);
+    }
+  });
 }
 
 export async function auditPackagedRelease(options = {}) {
@@ -1077,6 +1151,13 @@ function normalizeArchivePath(value) {
 function isWithin(rootDirectory, candidate) {
   const relative = path.relative(rootDirectory, candidate);
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function assertStagingTarget(rootDir, target, expectedPrefix) {
+  const desktopRoot = path.join(path.resolve(rootDir), "apps", "desktop");
+  if (!isWithin(desktopRoot, target) || !path.basename(target).startsWith(expectedPrefix)) {
+    throw new Error(`Refusing release staging target outside ${desktopRoot}: ${target}.`);
+  }
 }
 
 async function readJson(filePath) {

@@ -28,13 +28,48 @@ import {
   releaseDirectory,
   releasePathViolation,
   releaseRootArtifactViolation,
+  releaseStagingPaths,
   reviewedBuilderConfigFileName,
-  thirdPartyNoticesFileName
+  thirdPartyNoticesFileName,
+  withWindowsReleaseLock
 } from "../../../scripts/package-windows.mjs";
 
 const repoRoot = path.resolve(__dirname, "../../..");
 
 describe("Windows installer release contract", () => {
+  it("isolates concurrent package staging beneath the desktop workspace", () => {
+    const first = releaseStagingPaths(repoRoot, "package-100-alpha");
+    const second = releaseStagingPaths(repoRoot, "package-200-beta");
+    expect(first).not.toEqual(second);
+    expect(first.runtimeRoot).toBe(path.join(repoRoot, "apps", "desktop", ".release-runtime-package-100-alpha"));
+    expect(first.projectRoot).toBe(path.join(repoRoot, "apps", "desktop", ".release-project-package-100-alpha"));
+    expect(() => releaseStagingPaths(repoRoot, "../outside")).toThrow(/unsafe release staging identifier/iu);
+  });
+
+  it("rejects a concurrent Windows release operation before shared output can mutate", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-release-lock-"));
+    let releaseHolder!: () => void;
+    let markEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    try {
+      await mkdir(path.join(root, "apps", "desktop"), { recursive: true });
+      const holder = withWindowsReleaseLock(root, "holder", async () => {
+        markEntered();
+        await held;
+      });
+      await entered;
+      await expect(withWindowsReleaseLock(root, "contender", async () => undefined))
+        .rejects.toThrow(/already active:[\s\S]*"operation": "holder"/iu);
+      releaseHolder();
+      await holder;
+      await expect(withWindowsReleaseLock(root, "successor", async () => "ready")).resolves.toBe("ready");
+    } finally {
+      releaseHolder?.();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("aligns root, desktop, workspace, and document metadata at 4.0.0", async () => {
     const metadata = await readReleaseMetadata(repoRoot);
     expect(metadata.rootPackage.version).toBe("4.0.0");
@@ -321,6 +356,8 @@ describe("Windows installer release contract", () => {
       expect(generatedConfig).not.toMatch(/[a-z]:[\\/]/i);
       expect(generatedConfig).toContain("output: ../../../release/windows");
       expect(generatedConfig).toContain("beforeBuild: ./scripts/electron-builder-before-build.cjs");
+      expect(generatedConfig).toContain("  - from: node_modules\n    to: node_modules\n");
+      expect(generatedConfig).not.toContain("  - node_modules/**/*");
       expect(generatedConfig).toContain(`  - ${thirdPartyNoticesFileName}`);
       const notices = await readFile(path.join(releaseProject, thirdPartyNoticesFileName), "utf8");
       expect(notices).toContain("ETHER 4.0 THIRD-PARTY NOTICES");
