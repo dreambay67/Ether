@@ -173,6 +173,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
         finalizationFailures.push(error);
       }
     }
+    const processFinalizationProven = finalizationFailures.length === 0;
     let shellS1Restored = false;
     if (shellS1 !== null) {
       try {
@@ -184,7 +185,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     }
     if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
-      processFinalizationProven: finalizationFailures.length === 0,
+      processFinalizationProven,
       shellCheckpointRestored: shellS1Restored
     })) {
       try {
@@ -194,7 +195,10 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
         finalizationFailures.push(error);
       }
     } else {
-      finalizationFailures.push(new Error(`Preserved primary recovery artifacts after unproven post-S1 cleanup: root=${root}; profile=${primaryProfile.root}.`));
+      const reason = processFinalizationProven
+        ? "unproven post-S1 shell cleanup"
+        : "unproven process/session cleanup";
+      finalizationFailures.push(new Error(`Preserved primary recovery artifacts after ${reason}: root=${root}; profile=${primaryProfile.root}.`));
     }
   }
   if (primaryJourneyFailure !== null) {

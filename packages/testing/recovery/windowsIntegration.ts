@@ -115,13 +115,13 @@ export function requireNoTestOwnedRecentShortcuts(paths: readonly string[], labe
   }
 }
 
-/** Before S1, no approved shell mutation exists; after S1, cleanup requires both exit and shell proof. */
+/** Process-exit proof is always mandatory; post-S1 cleanup also requires shell equality. */
 export function recoveryArtifactsMayBeCleanedAfterShellCheckpoint(input: {
   checkpointCaptured: boolean;
   processFinalizationProven: boolean;
   shellCheckpointRestored: boolean;
 }): boolean {
-  return !input.checkpointCaptured || (input.processFinalizationProven && input.shellCheckpointRestored);
+  return input.processFinalizationProven && (!input.checkpointCaptured || input.shellCheckpointRestored);
 }
 
 export type AssociationRestorationWatchdog = {
