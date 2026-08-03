@@ -304,6 +304,8 @@ describe("Windows installer release contract", () => {
     expect(generatedConfig).toContain("shortcutName: Ether");
     expect(generatedConfig).toContain("guid: ad6cd9b2-3723-5b60-a3d0-3938212aac8e");
     expect(generatedConfig).toContain("DreamBay.Ether.Document");
+    expect(generatedConfig).toContain("beforeBuild: ./scripts/electron-builder-before-build.cjs");
+    expect(generatedConfig).not.toContain("npmRebuild: false");
     expect(generatedConfig.replaceAll("\\", "/").toLocaleLowerCase())
       .not.toContain(repoRoot.replaceAll("\\", "/").toLocaleLowerCase());
   }, 120_000);
@@ -318,6 +320,7 @@ describe("Windows installer release contract", () => {
       const generatedConfig = await readFile(path.join(releaseProject, "electron-builder.yml"), "utf8");
       expect(generatedConfig).not.toMatch(/[a-z]:[\\/]/i);
       expect(generatedConfig).toContain("output: ../../../release/windows");
+      expect(generatedConfig).toContain("beforeBuild: ./scripts/electron-builder-before-build.cjs");
       expect(generatedConfig).toContain(`  - ${thirdPartyNoticesFileName}`);
       const notices = await readFile(path.join(releaseProject, thirdPartyNoticesFileName), "utf8");
       expect(notices).toContain("ETHER 4.0 THIRD-PARTY NOTICES");

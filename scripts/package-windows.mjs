@@ -58,6 +58,7 @@ const workspacePackages = [
   ["@ether/schema", "packages/schema"]
 ];
 const workspacePackagePaths = new Map(workspacePackages);
+const generatedTreeRemoval = { recursive: true, force: true, maxRetries: 12, retryDelay: 250 };
 
 export async function readReleaseMetadata(rootDir = workspaceRoot) {
   const [rootPackage, desktopPackage] = await Promise.all([
@@ -118,7 +119,7 @@ export async function packageWindowsApp(options = {}) {
     // The placeholder keeps the builder file set identical while remaining
     // excluded from the recursive inventory it will eventually contain.
     await writeFile(path.join(releaseProject, stagedInventoryFileName), "{}\n");
-    await rm(releaseDir, { recursive: true, force: true });
+    await rm(releaseDir, generatedTreeRemoval);
     await runElectronBuilder(rootDir, releaseProject, ["--dir"]);
     const calibratedInventory = await calibratePackagedRelease({
       outputDir: releaseDir,
@@ -130,7 +131,7 @@ export async function packageWindowsApp(options = {}) {
       `${JSON.stringify(calibratedInventory, null, 2)}\n`
     );
 
-    await rm(releaseDir, { recursive: true, force: true });
+    await rm(releaseDir, generatedTreeRemoval);
     await runElectronBuilder(rootDir, releaseProject, ["--win", "nsis"]);
     await removeElectronBuilderDiagnostics(releaseDir);
     await cp(
@@ -216,7 +217,7 @@ export function createCalibratedReleaseInventory({
  */
 export async function prepareProductionRuntime(rootDir = workspaceRoot) {
   const targetRoot = path.join(rootDir, "apps", "desktop", ".release-runtime");
-  await rm(targetRoot, { recursive: true, force: true });
+  await rm(targetRoot, generatedTreeRemoval);
   await mkdir(targetRoot, { recursive: true });
   const state = { copiedTargets: new Set(), rootPackages: new Map() };
   for (const [packageName, sourceRelativePath] of workspacePackages) {
@@ -263,7 +264,7 @@ export async function cleanupReleaseStaging(rootDir = workspaceRoot) {
   ];
   for (const target of targets) {
     if (!isWithin(resolvedRoot, target)) throw new Error(`Refusing to clean release staging outside ${resolvedRoot}.`);
-    await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await rm(target, generatedTreeRemoval);
   }
 }
 
@@ -307,7 +308,7 @@ export async function assertGeneratedBuilderConfig(
 export async function prepareReleaseProject(rootDir = workspaceRoot) {
   const desktopRoot = path.join(rootDir, "apps", "desktop");
   const projectRoot = path.join(desktopRoot, ".release-project");
-  await rm(projectRoot, { recursive: true, force: true });
+  await rm(projectRoot, generatedTreeRemoval);
   await mkdir(projectRoot, { recursive: true });
   await Promise.all([
     copyProductionTree(path.join(desktopRoot, "dist"), path.join(projectRoot, "dist")),
@@ -344,7 +345,7 @@ export async function prepareReleaseProject(rootDir = workspaceRoot) {
     "copyright: \"Copyright \\u00A9 2026 DreamBay\"",
     "asar: true",
     "electronVersion: 43.1.1",
-    "npmRebuild: false",
+    "beforeBuild: ./scripts/electron-builder-before-build.cjs",
     "directories:",
     "  output: ../../../release/windows",
     "  buildResources: ../../../build/installer",

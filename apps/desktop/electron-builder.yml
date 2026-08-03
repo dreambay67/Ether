@@ -13,7 +13,10 @@ electronVersion: 43.1.1
 asarUnpack:
   - node_modules/sharp/**/*
   - node_modules/@img/**/*
-npmRebuild: false
+# The runtime dependency closure is staged and audited by scripts/package-windows.mjs.
+# Returning false marks node_modules as externally handled so electron-builder does not
+# re-walk and race its own dependency collector against that immutable file set.
+beforeBuild: ./scripts/electron-builder-before-build.cjs
 
 files:
   - dist/**/*
