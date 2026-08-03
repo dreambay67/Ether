@@ -8,7 +8,7 @@ import {
   createAntigravityImageProviders,
   createGeminiImageProviders,
   GEMINI_IMAGE_PROVIDER_IDS,
-  resolveGoogleImageProviderAlias,
+  resolveImageProviderAlias,
   type GeminiCredentialState,
   type GeminiImageProvider,
   type CodexRuntimeHealth
@@ -354,7 +354,7 @@ export function createProviderService(options: {
     } | null | undefined) => ({
       image: binding === null || binding === undefined
         ? options.codex.bundle.generation
-        : generation.get(resolveGoogleImageProviderAlias(binding.providerId, binding.profileId).providerId) ?? undefined,
+        : generation.get(resolveImageProviderAlias(binding.providerId, binding.profileId).providerId) ?? undefined,
       worker: binding === null || binding === undefined
         ? options.codex.bundle.assistant
         : assistant.get(binding.providerId) ?? undefined,

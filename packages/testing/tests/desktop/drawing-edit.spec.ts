@@ -60,9 +60,10 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
           if (command.name === "editWorkspace.commit") {
             const kind = (command.payload as unknown as { kind?: string } | undefined)?.kind;
             const drawing = kind === "drawing";
+            const maskChannel = (command.payload as unknown as { channel?: string } | undefined)?.channel === "mask";
             return { payload: {
-              outputVersion: { id: drawing ? "drawing-output-version" : "mask-output-version", approval: { state: "unreviewed" }, outputPayloadIds: [drawing ? "drawing-payload" : "mask-payload"], createdAt: "2026-07-23T00:02:00.000Z" },
-              artifact: { id: drawing ? "drawing-artifact" : "mask-artifact", contentKey: (drawing ? "d" : "c").repeat(64), channel: drawing ? "image" : "mask", mediaType: "image/svg+xml", byteLength: 2048, source: { outputVersionId: drawing ? "drawing-output-version" : "mask-output-version", payloadId: drawing ? "drawing-payload" : "mask-payload" }, createdAt: "2026-07-23T00:02:00.000Z", metadata: { title: drawing ? "Published sketch" : "Product edit mask" } }
+              outputVersion: { id: drawing && !maskChannel ? "drawing-output-version" : "mask-output-version", approval: { state: "unreviewed" }, outputPayloadIds: [drawing && !maskChannel ? "drawing-payload" : "mask-payload"], createdAt: "2026-07-23T00:02:00.000Z" },
+              artifact: { id: drawing && !maskChannel ? "drawing-artifact" : "mask-artifact", contentKey: (drawing && !maskChannel ? "d" : "c").repeat(64), channel: drawing && !maskChannel ? "image" : "mask", mediaType: "image/svg+xml", byteLength: 2048, source: { outputVersionId: drawing && !maskChannel ? "drawing-output-version" : "mask-output-version", payloadId: drawing && !maskChannel ? "drawing-payload" : "mask-payload" }, createdAt: "2026-07-23T00:02:00.000Z", metadata: { title: drawing && !maskChannel ? "Published sketch" : "Product edit mask" } }
             } };
           }
           if (command.name === "graph.applyTransaction" && command.payload?.transaction) update(command.payload.transaction.operations);
@@ -143,11 +144,29 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
   });
   expect(savedStroke?.width).toBe(42);
   expect(savedStroke?.color.toLowerCase()).toBe("#37e6ea80");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await expect(drawing).toHaveAttribute("data-tool", "select");
+  box = await drawing.boundingBox();
+  if (!box) throw new Error("Drawing canvas geometry unavailable for selection");
+  await page.mouse.click(box.x + box.width * .45, box.y + box.height * .48);
+  await expect(drawing).toHaveAttribute("data-selected-count", "1");
+  await expect(drawing.getByTestId("drawing-stroke").first()).toHaveAttribute("data-selected", "true");
+  await page.getByLabel("Drawing output channel").selectOption("mask");
+  await page.getByRole("button", { name: "Publish drawing" }).click();
+  await expect(page.getByTestId("canvas-status")).toContainText("Drawing mask artifact mask-artifact committed");
+  const drawingMaskCommit = await page.evaluate(() => {
+    const commands = (window as typeof window & { __drawingCommands: Array<{ name: string; payload?: Record<string, unknown> }> }).__drawingCommands;
+    return commands.find((command) => command.name === "editWorkspace.commit" && command.payload?.kind === "drawing" && command.payload?.channel === "mask")?.payload as { channel: string; geometry: { strokes: unknown[] }; content: { data: string } };
+  });
+  expect(drawingMaskCommit).toMatchObject({ channel: "mask" });
+  expect(drawingMaskCommit.geometry.strokes).toHaveLength(1);
+  expect(drawingMaskCommit.content.data).toContain("#ffffff");
+  await page.getByLabel("Drawing output channel").selectOption("image");
   await page.getByRole("button", { name: "Publish drawing" }).click();
   await expect(page.getByTestId("canvas-status")).toContainText("Drawing artifact drawing-artifact committed");
   const drawingCommit = await page.evaluate(() => {
     const commands = (window as typeof window & { __drawingCommands: Array<{ name: string; payload?: Record<string, unknown> }> }).__drawingCommands;
-    return commands.find((command) => command.name === "editWorkspace.commit" && command.payload?.kind === "drawing")?.payload as {
+    return commands.find((command) => command.name === "editWorkspace.commit" && command.payload?.kind === "drawing" && command.payload?.channel === "image")?.payload as {
       graphId: string; nodeId: string; kind: string; channel: string; mediaType: string; width: number; height: number; byteLength: number;
       content: { encoding: string; data: string };
       drawing: { kind: string; width: number; height: number; background: string; strokes: Array<{ width: number; color: string }> };

@@ -142,6 +142,7 @@ export {
 } from "./gemini/imageProvider.js";
 export {
   DEFAULT_GOOGLE_NANO_BANANA_PROVIDER_ID,
+  resolveImageProviderAlias,
   resolveGoogleImageProviderAlias
 } from "./gemini/routing.js";
 export {

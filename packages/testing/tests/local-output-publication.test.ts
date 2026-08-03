@@ -140,6 +140,14 @@ describe("typed local output publication", () => {
     expect(await app.readArtifactBytes(drawingResponse.payload.artifact.id)).toEqual(drawingSvg);
     expect(drawingResponse.payload.artifact.metadata).toMatchObject({ drawing: { strokes } });
 
+    const drawingMaskGeometry = { width: 2, height: 2, strokes: [{ id: "stroke-1", tool: "brush" as const, size: 7, opacity: 1, points: strokes[0]!.points }] };
+    const drawingMaskSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#000000"/><path d="M0 0 L2 2" stroke="#ffffff"/></svg>');
+    const drawingMaskResponse = await app.execute({
+      kind: "command", id: "drawing-mask-publish", correlationId: "drawing-mask-publish", documentId: app.boundaryStore().documentId, name: "editWorkspace.commit",
+      payload: { graphId: "root", nodeId: "drawing", kind: "drawing", channel: "mask", mediaType: "image/svg+xml", width: 2, height: 2, byteLength: drawingMaskSvg.byteLength, content: { encoding: "utf8", data: drawingMaskSvg.toString("utf8") }, geometry: drawingMaskGeometry, drawing: { kind: "canvas.drawing", width: 2, height: 2, background: "#ffffff", strokes } }
+    });
+    expect(drawingMaskResponse).toMatchObject({ kind: "response", name: "editWorkspace.commit", payload: { artifact: { channel: "mask" }, outputVersion: { producer: { executor: "drawing" } } } });
+
     const comment = "x".repeat(300 * 1024);
     const maskBytes = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><!--${comment}--><rect width="2" height="2" fill="black"/></svg>`);
     const geometry = { width: 2, height: 2, strokes: [{ id: "mask-1", tool: "brush" as const, size: 1, opacity: .8, points: [{ x: 0, y: 0, pressure: 1 }] }] };
@@ -230,10 +238,39 @@ describe("typed local output publication", () => {
     });
     if (executorResult.kind !== "provider-generation" || executorResult.operation !== "edit") throw new Error("Edit executor did not produce a provider edit request.");
     expect(executorResult.input).toMatchObject({
+      operation: "inpaint", recipe: { id: "object-removal" }, frame: { mode: "source", x: 0, y: 0, width: 2, height: 2 },
       sourceImage: { assetId: "source-artifact" },
       mask: { assetId: first.payload.artifact.id, assetMetadata: { maskSemantics: "guidance-only-not-pixel-exact" } },
       notes: expect.stringMatching(/guidance-only.*pixel-exact/i)
     });
+    const outpaintStep = {
+      ...editStep,
+      parameters: {
+        ...editStep.parameters,
+        workspace: {
+          ...(editStep.parameters.workspace as Record<string, unknown>),
+          recipeId: "outpaint-scene",
+          frame: { mode: "outpaint", x: 10, y: 12, width: 4, height: 5 }
+        }
+      }
+    };
+    const outpaintResult = await new ExecutorRegistry().execute({
+      claim: {
+        plan: editPlan,
+        job: { id: "job-edit-outpaint", status: "running" },
+        workItem: { id: "work-edit-outpaint", plannedWorkItemId: plannedWorkItem.id, status: "running" },
+        attempt: { id: "attempt-edit-outpaint", ordinal: 1, status: "running", startedAt: at, createdAt: at },
+        providerAttemptId: "provider-attempt-edit-outpaint"
+      },
+      step: outpaintStep,
+      plannedWorkItem,
+      inputs: boundPayloads,
+      providerInputs: [],
+      signal: new AbortController().signal,
+      stagingDirectory: root,
+      providers: { image: new FakeImageProvider() }
+    });
+    expect(outpaintResult).toMatchObject({ kind: "provider-generation", operation: "edit", input: { operation: "outpaint", recipe: { id: "outpaint-scene" }, frame: { mode: "outpaint", x: 10, y: 12, width: 4, height: 5 } } });
 
     const beforeUnsupported = await app.queryDocument();
     const editBeforeUnsupported = (await app.queryGraph("root")).nodes.find((node) => node.id === "edit")!;

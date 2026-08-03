@@ -282,8 +282,9 @@ export const applicationCommandPayloadSchemas = {
     drawing: CanvasDrawingConfigSchema.optional(),
     editState: EditWorkspaceStateSchema.optional()
   }).strict().superRefine((value, context) => {
-    if (value.kind === "drawing" && value.channel !== "image") context.addIssue({ code: z.ZodIssueCode.custom, path: ["channel"], message: "Drawing outputs use the Image channel." });
+    if (value.kind === "drawing" && value.channel !== "image" && value.channel !== "mask") context.addIssue({ code: z.ZodIssueCode.custom, path: ["channel"], message: "Drawing outputs use the Image or Mask channel." });
     if (value.kind === "drawing" && value.drawing === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["drawing"], message: "Drawing outputs require their editable stroke document." });
+    if (value.kind === "drawing" && value.channel === "mask" && value.geometry === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["geometry"], message: "Drawing Mask outputs require editable geometry." });
     if (value.drawing && (value.drawing.width !== value.width || value.drawing.height !== value.height)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["drawing"], message: "Drawing geometry must match the published raster dimensions." });
     if (value.kind === "mask" && value.channel !== "mask") context.addIssue({ code: z.ZodIssueCode.custom, path: ["channel"], message: "Mask outputs use the Mask channel." });
     if (value.kind === "mask" && value.geometry === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["geometry"], message: "Mask outputs require editable geometry." });

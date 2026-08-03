@@ -48,7 +48,7 @@ import {
 } from "@ether/execution";
 import type { StructuredOutputSchema } from "@ether/intelligence";
 import { previewGraphTransaction } from "@ether/graph-kernel";
-import type { GenerationProvider } from "@ether/providers";
+import { resolveImageProviderAlias, type GenerationProvider } from "@ether/providers";
 import {
   ApplicationCommandSchema,
   ApplicationEventSchema,
@@ -1790,8 +1790,11 @@ export class EtherApplication implements EtherApplicationService {
     if (input.kind === "mask" && node.config.kind !== "edit.image" && node.config.kind !== "edit.mask") {
       throw new ApplicationServiceError("LOCAL_OUTPUT_KIND_MISMATCH", "Mask output can only be published from an Image Edit or Mask node.");
     }
-    if ((input.kind === "drawing" && input.channel !== "image") || (input.kind === "mask" && input.channel !== "mask")) {
+    if ((input.kind === "drawing" && input.channel !== "image" && input.channel !== "mask") || (input.kind === "mask" && input.channel !== "mask")) {
       throw new ApplicationServiceError("LOCAL_OUTPUT_CHANNEL_MISMATCH", "The local output channel does not match its output kind.");
+    }
+    if (input.kind === "drawing" && input.channel === "mask" && input.geometry === undefined) {
+      throw new ApplicationServiceError("LOCAL_OUTPUT_DRAWING_INVALID", "Drawing Mask publication requires editable mask geometry.");
     }
     if (input.editState?.capability.mode === "unsupported") {
       throw new ApplicationServiceError("EDIT_CAPABILITY_UNSUPPORTED", input.editState.capability.detail ?? "The selected provider cannot perform image editing.");
@@ -2003,7 +2006,10 @@ async function planningCapabilities(
     // A provider diagnostic is advisory; planning remains available without a cap.
   }
   const discovered = graph.nodes.flatMap((node): ProviderCapability[] => {
-    if (node.config.kind !== "generation.image" || node.config.providerId !== provider.descriptor.id) return [];
+    if (
+      node.config.kind !== "generation.image" ||
+      resolveImageProviderAlias(node.config.providerId, node.config.profileId).providerId !== provider.descriptor.id
+    ) return [];
     return [{
       providerId: provider.descriptor.id,
       profileId: node.config.profileId,

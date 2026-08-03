@@ -1,4 +1,5 @@
 import { GEMINI_IMAGE_PROVIDER_IDS, type GeminiImageProfile } from "./imageProvider.js";
+import { CODEX_PROVIDER_ID } from "../codex/imageProvider.js";
 
 /**
  * Keeps persisted route identity deliberate: old concrete IDs stay on the
@@ -21,6 +22,14 @@ export function resolveGoogleImageProviderAlias(providerId: string, profileId?: 
     return { providerId, route: providerId.startsWith("google-gemini-api-") ? "gemini-api" as const : "antigravity-fallback" as const, migratedLogicalAlias: false };
   }
   return { providerId, route: "other" as const, migratedLogicalAlias: false };
+}
+
+/** Resolve only documented logical image routes to concrete runtime IDs. */
+export function resolveImageProviderAlias(providerId: string, profileId?: string) {
+  if (providerId === "codex") {
+    return { providerId: CODEX_PROVIDER_ID, route: "codex" as const, migratedLogicalAlias: true };
+  }
+  return resolveGoogleImageProviderAlias(providerId, profileId);
 }
 
 export const DEFAULT_GOOGLE_NANO_BANANA_PROVIDER_ID = GEMINI_IMAGE_PROVIDER_IDS["nano-banana-2"];

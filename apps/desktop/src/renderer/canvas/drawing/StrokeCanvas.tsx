@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Brush, Eraser, Redo2, Undo2 } from "lucide-react";
-import type { CanvasDrawingConfig, DrawingPoint, DrawingStroke } from "@ether/schema";
+import { Brush, Eraser, MousePointer2, Redo2, Undo2 } from "lucide-react";
+import type { CanvasDrawingConfig, DrawingPoint, DrawingStroke, EditMaskGeometry } from "@ether/schema";
 
 export type StrokeCanvasProps = {
   width: number;
@@ -11,7 +11,7 @@ export type StrokeCanvasProps = {
   onChange(strokes: DrawingStroke[]): void;
 };
 
-type Tool = "brush" | "eraser";
+type Tool = "brush" | "eraser" | "select";
 
 const HISTORY_LIMIT = 50;
 
@@ -21,6 +21,7 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
   const [opacity, setOpacity] = useState(.8);
   const [color, setColor] = useState("#37e6ea");
   const [localStrokes, setLocalStrokes] = useState(strokes);
+  const [selectedStrokeIds, setSelectedStrokeIds] = useState<string[]>([]);
   const [draft, setDraft] = useState<DrawingPoint[]>([]);
   const [undoStack, setUndoStack] = useState<DrawingStroke[][]>([]);
   const [redoStack, setRedoStack] = useState<DrawingStroke[][]>([]);
@@ -38,6 +39,7 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
     externalSignatureRef.current = nextSignature;
     localStrokesRef.current = strokes;
     setLocalStrokes(strokes);
+    setSelectedStrokeIds((selected) => selected.filter((id) => strokes.some((stroke) => stroke.id === id)));
 
     if (nextSignature === emittedSignatureRef.current) {
       emittedSignatureRef.current = null;
@@ -67,6 +69,7 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
     setRedoStack([]);
     localStrokesRef.current = next;
     setLocalStrokes(next);
+    setSelectedStrokeIds((selected) => selected.filter((id) => next.some((stroke) => stroke.id === id)));
     emittedSignatureRef.current = signature(next);
     onChange(next);
   };
@@ -79,6 +82,7 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
     setRedoStack((history) => [...history.slice(-(HISTORY_LIMIT - 1)), current]);
     localStrokesRef.current = previous;
     setLocalStrokes(previous);
+    setSelectedStrokeIds((selected) => selected.filter((id) => previous.some((stroke) => stroke.id === id)));
     emittedSignatureRef.current = signature(previous);
     onChange(previous);
   };
@@ -91,6 +95,7 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
     setUndoStack((history) => [...history.slice(-(HISTORY_LIMIT - 1)), current]);
     localStrokesRef.current = next;
     setLocalStrokes(next);
+    setSelectedStrokeIds((selected) => selected.filter((id) => next.some((stroke) => stroke.id === id)));
     emittedSignatureRef.current = signature(next);
     onChange(next);
   };
@@ -117,6 +122,10 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
   const start = (event: ReactPointerEvent<SVGSVGElement>) => {
     event.stopPropagation();
     if (disabled || !event.isPrimary || event.button !== 0 || pointerIdRef.current !== null) return;
+    if (tool === "select") {
+      selectStroke(event, point(event));
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerIdRef.current = event.pointerId;
     gestureStartRef.current = localStrokesRef.current;
@@ -127,6 +136,22 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
     }
     draftRef.current = [first];
     setDraft([first]);
+  };
+
+  const selectStroke = (event: ReactPointerEvent<SVGSVGElement>, at: DrawingPoint) => {
+    const threshold = Math.max(12, brushSize);
+    let nearest: { id: string; distance: number } | undefined;
+    for (const stroke of localStrokesRef.current) {
+      const distance = Math.min(...stroke.points.map((candidate) => Math.hypot(candidate.x - at.x, candidate.y - at.y)));
+      if (distance <= threshold + stroke.width / 2 && (nearest === undefined || distance < nearest.distance)) {
+        nearest = { id: stroke.id, distance };
+      }
+    }
+    setSelectedStrokeIds((selected) => {
+      if (nearest === undefined) return event.shiftKey ? selected : [];
+      if (event.shiftKey) return selected.includes(nearest.id) ? selected.filter((id) => id !== nearest.id) : [...selected, nearest.id];
+      return [nearest.id];
+    });
   };
 
   const move = (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -173,6 +198,7 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
   return (
     <div className="drawing-surface" data-testid="drawing-surface">
       <div className="drawing-toolbar nodrag nopan" role="toolbar" aria-label="Drawing tools" onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" aria-label="Select" aria-pressed={tool === "select"} onClick={() => setTool("select")} disabled={disabled}><MousePointer2 size={14} aria-hidden="true" />Select</button>
         <button type="button" aria-label="Brush" aria-pressed={tool === "brush"} onClick={() => setTool("brush")} disabled={disabled}><Brush size={14} aria-hidden="true" />Brush</button>
         <button type="button" aria-label="Eraser" aria-pressed={tool === "eraser"} onClick={() => setTool("eraser")} disabled={disabled}><Eraser size={14} aria-hidden="true" />Eraser</button>
         <button type="button" aria-label="Undo stroke" onClick={undo} disabled={disabled || undoStack.length === 0}><Undo2 size={14} aria-hidden="true" /></button>
@@ -182,10 +208,11 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
         <label>Opacity<input type="range" aria-label="Brush opacity" min="0.1" max="1" step="0.05" value={opacity} onChange={(event) => setOpacity(Number(event.target.value))} disabled={disabled} /></label>
       </div>
       <svg
-        className={`stroke-canvas nodrag nopan${tool === "eraser" ? " is-erasing" : ""}`}
+        className={`stroke-canvas nodrag nopan${tool === "eraser" ? " is-erasing" : ""}${tool === "select" ? " is-selecting" : ""}`}
         data-testid="stroke-canvas"
         data-tool={tool}
         data-stroke-count={localStrokes.length}
+        data-selected-count={selectedStrokeIds.length}
         viewBox={`0 0 ${width} ${height}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
@@ -196,9 +223,9 @@ export function StrokeCanvas({ width, height, background, strokes, disabled = fa
         onPointerUp={(event) => endGesture(event, false)}
         onPointerCancel={(event) => endGesture(event, true)}
       >
-        {rendered.map((stroke) => <path key={stroke.id} data-testid={stroke.id === "ether-drawing-draft" ? "drawing-draft" : "drawing-stroke"} d={path(stroke.points)} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" />)}
+        {rendered.map((stroke) => <path key={stroke.id} data-testid={stroke.id === "ether-drawing-draft" ? "drawing-draft" : "drawing-stroke"} data-selected={selectedStrokeIds.includes(stroke.id) ? "true" : "false"} className={selectedStrokeIds.includes(stroke.id) ? "is-selected" : undefined} d={path(stroke.points)} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" />)}
       </svg>
-      <small aria-live="polite">{localStrokes.length} persistent stroke{localStrokes.length === 1 ? "" : "s"}</small>
+      <small aria-live="polite">{selectedStrokeIds.length > 0 ? `${selectedStrokeIds.length} selected · ` : ""}{localStrokes.length} persistent stroke{localStrokes.length === 1 ? "" : "s"}</small>
     </div>
   );
 }
@@ -218,6 +245,33 @@ export function buildDrawingSvg(drawing: CanvasDrawingConfig) {
 ${paths}
   <metadata>${escapeXml(JSON.stringify({ version: 1, drawing }))}</metadata>
 </svg>`;
+}
+
+/** Publish the same editable strokes as a deterministic white-selected mask. */
+export function buildDrawingMaskSvg(drawing: CanvasDrawingConfig) {
+  const paths = drawing.strokes.map((stroke) => (
+    `  <path d="${drawingPath(stroke.points)}" fill="none" stroke="#ffffff" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round"/>`
+  )).join("\n");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${drawing.width}" height="${drawing.height}" viewBox="0 0 ${drawing.width} ${drawing.height}" role="img" aria-label="Ether drawing mask">
+  <title>Ether drawing mask</title>
+  <rect width="${drawing.width}" height="${drawing.height}" fill="#000000"/>
+${paths}
+  <metadata>${escapeXml(JSON.stringify({ version: 1, polarity: "white-selected-black-clear", drawing }))}</metadata>
+</svg>`;
+}
+
+export function drawingToMaskGeometry(drawing: CanvasDrawingConfig): EditMaskGeometry {
+  return {
+    width: Math.round(drawing.width),
+    height: Math.round(drawing.height),
+    strokes: drawing.strokes.map((stroke) => ({
+      id: stroke.id,
+      tool: "brush" as const,
+      size: stroke.width,
+      opacity: 1,
+      points: stroke.points
+    }))
+  };
 }
 
 function path(points: DrawingPoint[]) {

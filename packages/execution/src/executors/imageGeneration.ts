@@ -65,8 +65,12 @@ export class ImageEditExecutor implements StepExecutor {
     }
     const mask = context.inputs.find((input) => input.channel === "mask");
     const maskPath = mask === undefined ? undefined : readStringMetadata(mask, "assetPath");
-    const operation = stringParameter(context.step.parameters, "operation", "inpaint");
     const workspace = context.step.parameters.workspace;
+    const workspaceRecord = recordValue(workspace);
+    const workspaceFrame = frameValue(workspaceRecord?.frame);
+    const workspaceRecipeId = typeof workspaceRecord?.recipeId === "string" ? workspaceRecord.recipeId : undefined;
+    const configuredOperation = stringParameter(context.step.parameters, "operation", "");
+    const operation = configuredOperation || operationForWorkspace(workspaceRecipeId, workspaceFrame);
     const capabilityMode = workspace !== null && typeof workspace === "object" && !Array.isArray(workspace)
       && workspace.capability !== null && typeof workspace.capability === "object" && !Array.isArray(workspace.capability)
       && typeof workspace.capability.mode === "string"
@@ -113,12 +117,39 @@ export class ImageEditExecutor implements StepExecutor {
           maskSemantics: capabilityMode === "guidance-only" ? "guidance-only-not-pixel-exact" : "native-or-unspecified"
         }
       },
+      ...(workspaceRecipeId === undefined ? {} : { recipe: { id: workspaceRecipeId } }),
+      ...(workspaceFrame === undefined ? {} : { frame: workspaceFrame }),
       inputs: context.providerInputs,
       model: binding?.modelId ?? provider.descriptor.model,
       requestedAt: context.claim.attempt.startedAt ?? context.claim.attempt.createdAt
     };
     return { kind: "provider-generation", provider, operation: "edit", input, expectedOutputCount: outputCount };
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function frameValue(value: unknown): ImageEditProviderInput["frame"] {
+  const frame = recordValue(value);
+  if (frame === undefined || (frame.mode !== "source" && frame.mode !== "crop" && frame.mode !== "outpaint")) return undefined;
+  const values = [frame.x, frame.y, frame.width, frame.height];
+  if (!values.every((item) => typeof item === "number" && Number.isFinite(item))) return undefined;
+  return {
+    mode: frame.mode,
+    x: frame.x as number,
+    y: frame.y as number,
+    width: frame.width as number,
+    height: frame.height as number
+  };
+}
+
+function operationForWorkspace(recipeId: string | undefined, frame: ImageEditProviderInput["frame"]): ImageEditProviderInput["operation"] {
+  if (frame?.mode === "outpaint" || recipeId === "outpaint-scene") return "outpaint";
+  return "inpaint";
 }
 
 function references(

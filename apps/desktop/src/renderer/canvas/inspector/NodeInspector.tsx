@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragE
 import { getNodeDefinition } from "@ether/graph-kernel";
 import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditMaskGeometry, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
 import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
-import { StrokeCanvas, buildDrawingSvg } from "../drawing/StrokeCanvas";
+import { StrokeCanvas, buildDrawingMaskSvg, buildDrawingSvg, drawingToMaskGeometry } from "../drawing/StrokeCanvas";
 import { channelLabel } from "../ports/channelRegistry";
 import { EditWorkspace, type ImageEditCapability, type ImageEditCommit, type ImageEditSource } from "../edit/EditWorkspace";
 import { MaskWorkspace } from "../edit/MaskWorkspace";
@@ -18,6 +18,13 @@ import { useInspectorDraft } from "./useInspectorDraft";
 
 type AppBridge = { command(command: unknown): Promise<{ payload?: unknown }>; query(query: unknown): Promise<{ payload?: Record<string, unknown> }> };
 const app = () => (window.ether as unknown as { application?: AppBridge }).application;
+
+// Keep the renderer's capability matching browser-safe. The concrete provider
+// package is Node-oriented; only the documented logical Codex route needs a
+// literal mapping here.
+function resolveRendererImageProviderAlias(providerId: string): string {
+  return providerId === "codex" ? "codex-chatgpt-image-2" : providerId;
+}
 
 function OutputVersions({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, report } = context;
@@ -188,7 +195,7 @@ function ProviderFields({ context }: { context: InspectorNodeContext }) {
     return () => window.removeEventListener("ether:provider-policy-changed", refresh);
   }, [report]);
   if (node.config.kind !== "generation.image" && node.config.kind !== "edit.image") return null;
-  const operation = draft.draft.kind === "generation.image" ? "generate-image" : "edit-image"; const supported = capabilities.filter((capability) => capability.operation === operation); const selected = supported.find((capability) => capability.providerId === draft.draft.providerId && capability.profileId === draft.draft.profileId);
+  const operation = draft.draft.kind === "generation.image" ? "generate-image" : "edit-image"; const supported = capabilities.filter((capability) => capability.operation === operation); const selectedProviderId = resolveRendererImageProviderAlias(draft.draft.providerId); const selected = supported.find((capability) => capability.providerId === selectedProviderId && capability.profileId === draft.draft.profileId);
   const selectedAspectRatio = draft.draft.kind === "generation.image" ? draft.draft.aspectRatio : "";
   const reset = (capability: ProviderCapability) => { draft.update((current) => { const aspectRatio = capability.aspectRatios[0] ?? (current.kind === "generation.image" ? current.aspectRatio : ""); const resolution = current.kind === "generation.image" ? replacementResolution(capability, aspectRatio, current.resolution) : undefined; const outputFormats = capability.outputFormats?.length ? capability.outputFormats : ["image/png", "image/jpeg"] as const; const outputFormat = current.kind === "generation.image" && outputFormats.includes(current.outputFormat ?? "image/png") ? current.outputFormat ?? "image/png" : outputFormats[0]; return { ...current, providerId: capability.providerId, profileId: capability.profileId, outputCount: 1, ...(current.kind === "generation.image" ? { aspectRatio, resolution: resolution ? { width: resolution.width, height: resolution.height } : current.resolution, outputFormat } : {}) }; }); setResetNotice(`Defaults reset for ${capability.providerId} / ${capability.profileId}: output count 1${capability.aspectRatios[0] ? `, ${capability.aspectRatios[0]}` : ""}.`); };
   const save = async () => { if (!draft.dirty) return; if (draft.conflict) { report("Resolve the changed-base warning before saving provider settings."); return; } const saved = await apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: draft.draft } as EtherNode }] as GraphOperation[], "Update provider settings"); if (saved) draft.markCommitted(); };
@@ -234,6 +241,7 @@ function geminiCostGuidance(capability: ProviderCapability, config: GenerationIm
 
 function DrawingFields({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, apply, report } = context;
+  const [publishChannel, setPublishChannel] = useState<"image" | "mask">("image");
   if (node.config.kind !== "canvas.drawing") return null;
   const drawing = node.config;
   const updateDrawing = (next: CanvasDrawingConfig, title: string) => void apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: next } as EtherNode }] as GraphOperation[], title);
@@ -245,27 +253,30 @@ function DrawingFields({ context }: { context: InspectorNodeContext }) {
   };
   const publish = async () => {
     try {
-      const content = buildDrawingSvg(drawing);
+      const content = publishChannel === "mask" ? buildDrawingMaskSvg(drawing) : buildDrawingSvg(drawing);
       const response = await app()?.command(documentCommand("editWorkspace.commit", document.documentId, {
         graphId: graph.id,
         nodeId: node.id,
         kind: "drawing",
-        channel: "image",
+        channel: publishChannel,
         mediaType: "image/svg+xml",
         width: drawing.width,
         height: drawing.height,
         byteLength: new TextEncoder().encode(content).byteLength,
         content: { encoding: "utf8", data: content },
+        ...(publishChannel === "mask" ? { geometry: drawingToMaskGeometry(drawing) } : {}),
         drawing
       }));
       const committed = response?.payload as { artifact?: Artifact } | undefined;
       if (!committed?.artifact) throw new Error("The drawing publisher did not return its immutable artifact.");
-      report(`Drawing artifact ${committed.artifact.id} committed from ${node.title}.`);
+      report(publishChannel === "image"
+        ? `Drawing artifact ${committed.artifact.id} committed from ${node.title}.`
+        : `Drawing mask artifact ${committed.artifact.id} committed from ${node.title}.`);
     } catch (error) {
       report(error instanceof Error ? error.message : "The drawing could not be published.");
     }
   };
-  return <InspectorSection title="Drawing" help="Each completed brush or eraser gesture is one reversible graph transaction. Publishing creates an immutable Image artifact while preserving this editable stroke document."><div className="inspector-drawing-size"><label>Width<input aria-label="Drawing width" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.width} onBlur={(event) => updateDrawing({ ...drawing, width: Math.max(1, Number(event.target.value) || drawing.width) }, "Resize drawing")}/></label><label>Height<input aria-label="Drawing height" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.height} onBlur={(event) => updateDrawing({ ...drawing, height: Math.max(1, Number(event.target.value) || drawing.height) }, "Resize drawing")}/></label></div><label>Background<input aria-label="Drawing background" disabled={document.mode !== "writable"} defaultValue={drawing.background} onBlur={(event) => { const background = event.target.value.trim(); if (background) updateDrawing({ ...drawing, background }, "Change drawing background"); }} /></label><StrokeCanvas width={drawing.width} height={drawing.height} background={drawing.background} strokes={drawing.strokes} disabled={document.mode !== "writable"} onChange={updateStrokes} /><div className="inspector-actions"><button type="button" disabled={document.mode !== "writable"} onClick={() => void publish()}>Publish drawing</button></div></InspectorSection>;
+  return <InspectorSection title="Drawing" help="Draw, select, erase, and undo strokes. Publish the editable document as either an Image or a white-selected Mask artifact."><div className="inspector-drawing-size"><label>Width<input aria-label="Drawing width" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.width} onBlur={(event) => updateDrawing({ ...drawing, width: Math.max(1, Number(event.target.value) || drawing.width) }, "Resize drawing")}/></label><label>Height<input aria-label="Drawing height" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.height} onBlur={(event) => updateDrawing({ ...drawing, height: Math.max(1, Number(event.target.value) || drawing.height) }, "Resize drawing")}/></label></div><label>Background<input aria-label="Drawing background" disabled={document.mode !== "writable"} defaultValue={drawing.background} onBlur={(event) => { const background = event.target.value.trim(); if (background) updateDrawing({ ...drawing, background }, "Change drawing background"); }} /></label><label>Output channel<select aria-label="Drawing output channel" value={publishChannel} onChange={(event) => setPublishChannel(event.target.value === "mask" ? "mask" : "image")} disabled={document.mode !== "writable"}><option value="image">Image</option><option value="mask">Mask</option></select></label><StrokeCanvas width={drawing.width} height={drawing.height} background={drawing.background} strokes={drawing.strokes} disabled={document.mode !== "writable"} onChange={updateStrokes} /><div className="inspector-actions"><button type="button" disabled={document.mode !== "writable"} onClick={() => void publish()}>Publish drawing</button></div></InspectorSection>;
 }
 
 function ImageEditFields({ context }: { context: InspectorNodeContext }) {
@@ -321,7 +332,7 @@ function ImageEditFields({ context }: { context: InspectorNodeContext }) {
   const sourceArtifact = artifacts.find((artifact) => artifact.id === sourceId);
   const source = sourceArtifact ? artifactEditSource(document.documentId, sourceArtifact) : undefined;
   const outputArtifact = allArtifacts.find((artifact) => outputVersionIds.includes(artifact.source.outputVersionId));
-  const selectedCapability = capabilities.find((capability) => capability.operation === "edit-image" && capability.providerId === config.providerId && capability.profileId === config.profileId);
+  const selectedCapability = capabilities.find((capability) => capability.operation === "edit-image" && capability.providerId === resolveRendererImageProviderAlias(config.providerId) && capability.profileId === config.profileId);
   const capability = imageEditCapability(config.providerId, config.profileId, selectedCapability);
   const persistedWorkspace = config.workspace?.sourceArtifactId === sourceId ? config.workspace : undefined;
   const persistWorkspace = async (workspace: EditWorkspaceState, title = "Update edit workspace") => {

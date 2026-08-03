@@ -259,6 +259,41 @@ describe("Ether execution planner", () => {
     ]);
   });
 
+  it("binds canonical logical Codex image defaults to the runtime provider capability", () => {
+    const graph = representativeGraph();
+    const edit = node("edit", {
+      kind: "edit.image", providerId: "codex", profileId: "image-edit", strength: 0.75, outputCount: 1
+    });
+    graph.nodes.push(edit);
+    const codexImage: ProviderCapability = {
+      ...capability,
+      providerId: "codex-chatgpt-image-2",
+      profileId: "image-default",
+      modelId: "chatgpt-image-2"
+    };
+    const codexEdit: ProviderCapability = {
+      ...capability,
+      providerId: "codex-chatgpt-image-2",
+      profileId: "image-edit",
+      operation: "edit-image",
+      inputChannels: ["text", "image", "mask", "data"],
+      modelId: "chatgpt-image-2"
+    };
+    const generator = graph.nodes.find((candidate) => candidate.id === "generator")!;
+    if (generator.config.kind !== "generation.image") throw new Error("Expected Image Generator.");
+    generator.config = { ...generator.config, providerId: "codex", profileId: "image-default" };
+    const plan = compile(graph, { kind: "graph" }, [codexImage, codexEdit]);
+    expect(plan.steps.find((step) => step.nodeId === "generator")?.providerBinding).toMatchObject({
+      providerId: "codex-chatgpt-image-2", profileId: "image-default"
+    });
+    expect(plan.steps.find((step) => step.nodeId === "edit")?.providerBinding).toMatchObject({
+      providerId: "codex-chatgpt-image-2", profileId: "image-edit"
+    });
+    expect(plan.steps.find((step) => step.nodeId === "generator")?.parameters).toMatchObject({
+      providerId: "codex-chatgpt-image-2", profileId: "image-default"
+    });
+  });
+
   it("expands Cartesian batch work deterministically with exclusions and bounded parallelism", () => {
     const expansion = expandBatch({
       stepId: "step-generator",

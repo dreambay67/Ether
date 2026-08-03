@@ -29,7 +29,7 @@ import {
   type ProviderBinding,
   type ProviderCapability
 } from "@ether/schema";
-import { resolveGoogleImageProviderAlias } from "@ether/providers";
+import { resolveImageProviderAlias } from "@ether/providers";
 
 import {
   BatchExpansionError,
@@ -1157,7 +1157,7 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
       return makeProviderBinding(input, providerId, config.model, config, config.profileId);
     }
     case "generation.image": {
-      const selection = resolveGoogleImageProviderAlias(config.providerId, config.profileId);
+      const selection = resolveImageProviderAlias(config.providerId, config.profileId);
       return makeProviderBinding(input, selection.providerId, undefined, config, config.profileId);
     }
     case "edit.image": {
@@ -1168,7 +1168,7 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
           { providerId: config.providerId, profileId: config.profileId }
         );
       }
-      const selection = resolveGoogleImageProviderAlias(config.providerId, config.profileId);
+      const selection = resolveImageProviderAlias(config.providerId, config.profileId);
       const binding = makeProviderBinding(input, selection.providerId, undefined, config, config.profileId);
       const capability = binding.capabilitySnapshot;
       if (capability.operation !== "edit-image" || !capability.inputChannels.includes("image") || !capability.outputChannels.includes("image")) {

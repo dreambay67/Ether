@@ -6,7 +6,7 @@ import path from "node:path";
 import { EtherApplication } from "@ether/application";
 import { ExecutorRegistry, type ExecutionProviderFacets } from "@ether/execution";
 import { nodeDefinitions } from "@ether/graph-kernel";
-import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider } from "@ether/providers";
+import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider, type GenerationProvider } from "@ether/providers";
 import {
   ApplicationCommandSchema,
   EtherGraphSchema,
@@ -163,6 +163,56 @@ describe("Ether 4.0 application boundary", () => {
         .toEqual(nodeDefinitions.map((item) => item.id));
     } finally {
       await desktop.close();
+    }
+  });
+
+  it("runs a fresh logical Codex Image Generator through the deterministic fake request boundary", async () => {
+    const root = await temporaryRoot();
+    const fake = new FakeImageProvider();
+    const requests: unknown[] = [];
+    const codexFake = {
+      descriptor: { ...fake.descriptor, id: CODEX_PROVIDER_ID },
+      diagnose: () => ({ ...fake.diagnose(), id: CODEX_PROVIDER_ID }),
+      generate: async (input: Parameters<GenerationProvider["generate"]>[0], context?: Parameters<GenerationProvider["generate"]>[1]) => {
+        requests.push(input);
+        const result = await fake.generate(input, context === undefined ? undefined : {
+          ...context,
+          complete: (value) => context.complete({ ...value, providerId: CODEX_PROVIDER_ID })
+        });
+        return { ...result, providerId: CODEX_PROVIDER_ID };
+      },
+      edit: async (input: Parameters<GenerationProvider["edit"]>[0], context?: Parameters<GenerationProvider["edit"]>[1]) => {
+        requests.push(input);
+        const result = await fake.edit(input, context === undefined ? undefined : {
+          ...context,
+          complete: (value) => context.complete({ ...value, providerId: CODEX_PROVIDER_ID })
+        });
+        return { ...result, providerId: CODEX_PROVIDER_ID };
+      }
+    } as unknown as GenerationProvider;
+    const imageCapability: ProviderCapability = {
+      providerId: CODEX_PROVIDER_ID, profileId: "image-default", operation: "generate-image",
+      inputChannels: ["text", "image", "data"], outputChannels: ["image"], aspectRatios: ["1:1"],
+      resolutions: [{ id: "32", width: 32, height: 32, label: "32 x 32" }], maxReferences: 8, maxOutputsPerCall: 1,
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
+    };
+    const config = nodeDefinitions.find((definition) => definition.id === "generation.image")!.defaultConfig();
+    if (config.kind !== "generation.image") throw new Error("Expected canonical Image Generator defaults.");
+    const logicalGraph = oneNodeGraph("image", "generation.image", { ...config, resolution: { width: 32, height: 32 } });
+    const app = new EtherApplication({ appDataRoot: root, appVersion: "4.0.0-test", provider: codexFake, providerCapabilities: [imageCapability], dispatchMode: "manual" });
+    try {
+      await app.createDocument({ path: path.join(root, "logical-codex.ether"), title: "Logical Codex", initialGraph: logicalGraph });
+      const preview = await app.previewRun({ commandId: "logical-codex-preview", graphId: logicalGraph.id, scope: { kind: "node", nodeId: "image" } });
+      expect(preview.steps.find((step) => step.nodeId === "image")?.providerBinding).toMatchObject({ providerId: CODEX_PROVIDER_ID, profileId: "image-default" });
+      const permit = await app.grantRunPermit({ commandId: "logical-codex-permit", planId: preview.id, contentHash: preview.contentHash });
+      const started = await app.startRun({ commandId: "logical-codex-start", planId: preview.id, contentHash: preview.contentHash, runPermitId: permit.id });
+      await app.runPending(started.id);
+      const completed = await app.waitForJob(started.id);
+      expect(completed.status).toBe("completed");
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({ generationNodeId: "image", output: { aspectRatio: "1:1", width: 32, height: 32 } });
+    } finally {
+      await app.closeDocument();
     }
   });
 
