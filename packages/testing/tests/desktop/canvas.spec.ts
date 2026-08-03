@@ -47,18 +47,18 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(page.getByRole("button", { name: "Target channel Data" })).toBeVisible();
   await page.getByTestId("edge-role-chip").getByRole("button", { name: "General" }).click();
   await page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(4);
   await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
-  await expect(page.locator(".ether-node")).toHaveCount(3);
+  await expect(page.locator(".ether-node")).toHaveCount(5);
   await page.getByTestId("edge-role-chip").click({ button: "right" });
   await expect(page.getByTestId("edge-role-chip")).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(4);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(6);
 
   await expect(page.getByLabel("Output output-1 text")).toBeVisible();
   const group = page.locator(".react-flow__node-group"); const groupBox = await group.boundingBox();
   expect(groupBox).not.toBeNull();
   await page.mouse.move(groupBox!.x + 20, groupBox!.y + 18); await page.mouse.down(); await page.mouse.move(groupBox!.x + 58, groupBox!.y + 44, { steps: 5 }); await page.mouse.up();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(5);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(7);
 
   await page.getByRole("button", { name: "Polish module" }).dblclick();
   await expect(page.getByTestId("canvas-status")).toContainText("Entered Polish module");
@@ -69,7 +69,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.getByRole("button", { name: "Expose selected parameter" }).click();
   await page.getByRole("button", { name: "Leave module" }).click();
   await expect(page.getByLabel("Canvas legend").getByText("Canvas fixture")).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(8);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(10);
 
   const rootImage = page.locator('[data-testid="rf__node-image"]');
   await page.locator(".react-flow__node-etherNode").nth(2).locator(".ether-node-main p").click();
@@ -80,5 +80,5 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" }).click();
   await expect(page.getByTestId("canvas-status")).toContainText("Selected run started: selected-job");
   await page.getByRole("button", { name: "Undo graph transaction" }).click(); await page.getByRole("button", { name: "Redo graph transaction" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(13);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(15);
 });
