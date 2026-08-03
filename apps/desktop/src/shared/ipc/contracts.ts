@@ -167,6 +167,10 @@ export const DesktopDocumentEventSchema = z
   })
   .strict();
 export type DesktopDocumentEvent = z.infer<typeof DesktopDocumentEventSchema>;
+export const DesktopCanvasCommandSchema = z.object({
+  command: z.enum(["createModule", "dissolveModule"])
+}).strict();
+export type DesktopCanvasCommand = z.infer<typeof DesktopCanvasCommandSchema>;
 
 export const desktopIpcContracts = {
   [desktopIpcChannels.document.bootstrap]: { request: empty, response: resultSchema(DocumentDescriptorSchema) },
@@ -249,6 +253,10 @@ export const desktopIpcContracts = {
   },
   [desktopIpcChannels.application.event]: {
     request: ApplicationEventSchema,
+    response: resultSchema(z.null())
+  },
+  [desktopIpcChannels.canvas.command]: {
+    request: DesktopCanvasCommandSchema,
     response: resultSchema(z.null())
   },
   [desktopIpcChannels.runtime.versions]: {

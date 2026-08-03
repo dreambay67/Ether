@@ -21,7 +21,8 @@ import {
 } from "@ether/mcp-server/bridge";
 
 import { registerDocumentHandlers } from "./ipc/registerDocumentHandlers.js";
-import { normalizeDesktopError } from "../shared/ipc/contracts.js";
+import { DesktopCanvasCommandSchema, normalizeDesktopError } from "../shared/ipc/contracts.js";
+import { desktopIpcChannels } from "../shared/ipc/channels.js";
 import { registerGraphHandlers } from "./ipc/registerGraphHandlers.js";
 import { registerApplicationHandlers } from "./ipc/registerApplicationHandlers.js";
 import {
@@ -58,6 +59,7 @@ import {
 } from "./lifecycle.js";
 import { resolveRecoveryShellIdentity } from "./recoveryShellIdentity.js";
 import { createRecoveryAssociationDiagnostics } from "./recoveryAssociationDiagnostics.js";
+import { canvasCommandForAccelerator } from "./canvasAccelerator.js";
 import {
   createCredentialWindowOptions,
   createMainWindowOptions,
@@ -133,6 +135,19 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   const mainWindow = new BrowserWindow(credentialOnly
     ? createCredentialWindowOptions(preloadPath)
     : createMainWindowOptions(preloadPath));
+  if (!credentialOnly) {
+    mainWindow.webContents.on("before-input-event", (event, input) => {
+      const command = canvasCommandForAccelerator(input);
+      if (command === null) return;
+      event.preventDefault();
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(
+          desktopIpcChannels.canvas.command,
+          DesktopCanvasCommandSchema.parse({ command })
+        );
+      }
+    });
+  }
   if (recoveryShell !== null) mainWindow.setTitle(recoveryShell.taskbarName);
   mainWindow.once("ready-to-show", () => {
     if (credentialOnly) {

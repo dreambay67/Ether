@@ -37,6 +37,9 @@ export const desktopIpcChannels = {
     query: "ether:application:query",
     event: "ether:application:event"
   },
+  canvas: {
+    command: "ether:canvas:command"
+  },
   runtime: {
     versions: "ether:runtime:versions",
     providerHealth: "ether:runtime:provider-health",

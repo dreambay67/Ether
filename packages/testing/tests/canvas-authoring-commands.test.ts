@@ -5,6 +5,7 @@ import { commandIdForKeyboard, commandPreservesCanvasFocus } from "../../../apps
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
 import { marqueeHitIds, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
+import { canvasCommandForAccelerator } from "../../../apps/desktop/src/main/canvasAccelerator";
 
 const presentation = { collapsed: false, accent: "default", previewMode: "content" as const };
 const base = { id: "node-1", title: "Node", position: { x: 10, y: 20 }, size: { width: 240, height: 150 }, presentation };
@@ -27,6 +28,15 @@ describe("canvas authoring command map", () => {
     expect(key("Enter", { ctrlKey: true })).toBe("runSelected");
     expect(key("k", { ctrlKey: true })).toBe("palette");
     expect(key("Home")).toBe("fit");
+  });
+
+  it("routes Chromium-reserved Module accelerators through Electron main", () => {
+    const input = { type: "keyDown", key: "g", control: true, meta: false, alt: false, shift: false };
+    expect(canvasCommandForAccelerator(input)).toBe("createModule");
+    expect(canvasCommandForAccelerator({ ...input, shift: true })).toBe("dissolveModule");
+    expect(canvasCommandForAccelerator({ ...input, isAutoRepeat: true })).toBeNull();
+    expect(canvasCommandForAccelerator({ ...input, alt: true })).toBeNull();
+    expect(canvasCommandForAccelerator({ ...input, key: "k" })).toBeNull();
   });
 
   it("keeps canvas focus for graph commands that do not open an editor or dialog", () => {

@@ -60,6 +60,21 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     return () => document.removeEventListener("keydown", handleWorkspaceShortcut);
   }, [commands, onCommandUnavailable]);
   useEffect(() => {
+    const canvasBridge = window.ether.canvas;
+    if (typeof canvasBridge?.onCommand !== "function") return;
+    return canvasBridge.onCommand(({ command: commandId }) => {
+      if (isTextEditingTarget(document.activeElement)) return;
+      const command = commands.find((item) => item.id === commandId);
+      if (command === undefined) return;
+      if (!command.enabled) {
+        if (command.disabledReason) onCommandUnavailable(command.disabledReason);
+        return;
+      }
+      if (commandPreservesCanvasFocus(command.id)) surfaceRef.current?.focus({ preventScroll: true });
+      void command.execute();
+    });
+  }, [commands, onCommandUnavailable]);
+  useEffect(() => {
     const surface = surfaceRef.current;
     if (!surface || typeof ResizeObserver === "undefined") return;
     let frame: number | null = null;

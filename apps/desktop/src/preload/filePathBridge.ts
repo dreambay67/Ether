@@ -1,6 +1,7 @@
 import { desktopIpcChannels } from "../shared/ipc/channels";
 import type {
   CompactResult,
+  DesktopCanvasCommand,
   DesktopDocumentEvent,
   DesktopIpcChannel,
   DesktopReference,
@@ -25,7 +26,7 @@ import type {
 type BridgeTransport = {
   invoke(channel: DesktopIpcChannel, request: unknown): Promise<NormalizedResult<unknown>>;
   subscribe(
-    channel: typeof desktopIpcChannels.document.event | typeof desktopIpcChannels.application.event,
+    channel: typeof desktopIpcChannels.document.event | typeof desktopIpcChannels.application.event | typeof desktopIpcChannels.canvas.command,
     listener: (event: unknown) => void
   ): () => void;
   openDroppedDocument(file: File, documentId: string): Promise<NormalizedResult<unknown>>;
@@ -118,6 +119,10 @@ export function createEtherBridge(transport: BridgeTransport) {
         unwrap<ApplicationQueryResponse>(transport.invoke(desktopIpcChannels.application.query, query)),
       onEvent: (listener: (event: ApplicationEvent) => void) =>
         transport.subscribe(desktopIpcChannels.application.event, (event) => listener(event as ApplicationEvent))
+    },
+    canvas: {
+      onCommand: (listener: (event: DesktopCanvasCommand) => void) =>
+        transport.subscribe(desktopIpcChannels.canvas.command, (event) => listener(event as DesktopCanvasCommand))
     },
     runtime: {
       versions: () => unwrap<{ app: string; electron: string; node: string }>(transport.invoke(desktopIpcChannels.runtime.versions, {})),

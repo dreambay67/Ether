@@ -84,6 +84,29 @@ describe("desktop IPC contract", () => {
     ).toBe(true);
   });
 
+  it("exposes only the typed Module accelerator commands to the renderer", () => {
+    const contract = desktopIpcContracts[desktopIpcChannels.canvas.command];
+    expect(contract.request.parse({ command: "createModule" })).toEqual({ command: "createModule" });
+    expect(contract.request.parse({ command: "dissolveModule" })).toEqual({ command: "dissolveModule" });
+    expect(contract.request.safeParse({ command: "delete" }).success).toBe(false);
+
+    let subscription: ((event: unknown) => void) | undefined;
+    const received: unknown[] = [];
+    const bridge = createEtherBridge({
+      invoke: async () => ({ ok: true, value: null }),
+      subscribe: (channel, listener) => {
+        if (channel === desktopIpcChannels.canvas.command) subscription = listener;
+        return () => { subscription = undefined; };
+      },
+      openDroppedDocument: async () => ({ ok: true, value: undefined })
+    });
+    const unsubscribe = bridge.canvas.onCommand((event) => received.push(event));
+    subscription?.({ command: "createModule" });
+    expect(received).toEqual([{ command: "createModule" }]);
+    unsubscribe();
+    expect(subscription).toBeUndefined();
+  });
+
   it("keeps repair selection and its lossy confirmation path-free", async () => {
     const repair = desktopIpcContracts[desktopIpcChannels.document.repair];
     expect(repair.request.safeParse({ allowLossy: false }).success).toBe(true);
@@ -522,6 +545,7 @@ describe("desktop IPC contract", () => {
     expect(Object.keys(bridge).sort()).toEqual([
       "application",
       "artifacts",
+      "canvas",
       "document",
       "graph",
       "permissions",
