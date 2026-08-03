@@ -57,6 +57,7 @@ import {
   startContainedLifecycle
 } from "./lifecycle.js";
 import { resolveRecoveryShellIdentity } from "./recoveryShellIdentity.js";
+import { createRecoveryAssociationDiagnostics } from "./recoveryAssociationDiagnostics.js";
 import {
   createCredentialWindowOptions,
   createMainWindowOptions,
@@ -212,12 +213,12 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
       });
     }
   };
-  const reportFailure = async (error: unknown) => {
+  const reportFailure = async (error: unknown, fallbackCorrelationId?: string) => {
     const message = error instanceof Error ? error.message : "Ether could not complete the command.";
     const candidate = error as { causeId?: unknown; correlationId?: unknown } | null;
     const correlationId = typeof candidate?.correlationId === "string"
       ? candidate.correlationId
-      : randomUUID();
+      : fallbackCorrelationId ?? randomUUID();
     logDiagnostic({
       ...(typeof candidate?.causeId === "string" ? { causeId: candidate.causeId } : {}),
       correlationId,
@@ -227,6 +228,12 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     });
     await dialog.showMessageBox(mainWindow, { type: "error", title: "Ether", message });
   };
+  const recoveryAssociationDiagnostics = createRecoveryAssociationDiagnostics({
+    flushSync: () => diagnosticLogger.flushSync?.(),
+    log: logDiagnostic,
+    recoveryShell,
+    window: mainWindow
+  });
   const rememberWhenRendererLoaded = () => {
     if (!rendererLoaded) {
       rememberAfterRendererLoad = true;
@@ -529,11 +536,21 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
 
   app.on("second-instance", (_event, argv) => {
     const requested = findEtherArgument(argv);
+    const trace = recoveryAssociationDiagnostics?.received(argv, requested);
     if (requested === null) {
       mainWindow.focus();
+      trace?.handled({ kind: "cancelled" });
       return;
     }
-    void openController.request("second-instance", requested).catch(reportFailure);
+    void openController.request("second-instance", requested, {
+      onFocusAttempt: () => trace?.focusAttempt()
+    }).then(
+      (outcome) => trace?.handled(outcome),
+      (error) => {
+        trace?.failed(error);
+        return reportFailure(error, trace?.correlationId);
+      }
+    );
   });
   app.on("open-file", (event, filePath) => {
     event.preventDefault();

@@ -34,6 +34,7 @@ import {
   referenceCapabilities,
   type NativeDialogPort
 } from "../../../../apps/desktop/src/main/services/applicationService";
+import { createRecoveryAssociationDiagnostics } from "../../../../apps/desktop/src/main/recoveryAssociationDiagnostics";
 import * as applicationServiceModule from "../../../../apps/desktop/src/main/services/applicationService";
 import {
   createEtherAssetProtocolHandler,
@@ -881,11 +882,107 @@ describe("desktop document lifecycle", () => {
       open: async (canonicalPath) => { opened.push(canonicalPath); }
     });
 
-    await coordinator.request(filePath);
-    await coordinator.request(path.join(root, ".", "Campaign.ether"));
+    const openedOutcome = await coordinator.request(filePath);
+    let focusAttempted = 0;
+    const focusedOutcome = await coordinator.request(path.join(root, ".", "Campaign.ether"), {
+      onFocusAttempt: () => { focusAttempted += 1; }
+    });
 
     expect(opened).toHaveLength(1);
     expect(focused).toBe(1);
+    expect(focusAttempted).toBe(1);
+    expect(openedOutcome.disposition).toBe("opened");
+    expect(focusedOutcome.disposition).toBe("focused");
+    await expect(coordinator.request(filePath, { onFocusAttempt: () => { throw new Error("diagnostic hook failure"); } })).resolves.toMatchObject({ disposition: "focused" });
+    expect(focused).toBe(2);
+  });
+
+  it("records token-bound recovery association receipt, disposition, focus state, and failure ordering", () => {
+    const recoveryToken = "0123456789abcdef0123456789abcdef";
+    const candidatePath = "C:\\private\\Association.ether";
+    const records: Array<{ correlationId: string; details?: Record<string, unknown>; event: string }> = [];
+    const deferred: Array<() => void> = [];
+    let flushes = 0;
+    const diagnostics = createRecoveryAssociationDiagnostics({
+      flushSync: () => { flushes += 1; },
+      log: (record) => { records.push(record); },
+      recoveryShell: {
+        appUserModelId: `com.dreambay.ether.recovery.${recoveryToken}`,
+        recentEnabled: false,
+        taskbarName: "Ether Recovery 01234567",
+        token: recoveryToken
+      },
+      schedulePostFocus: (callback) => { deferred.push(callback); },
+      window: { isFocused: () => false, isMinimized: () => false, isVisible: () => true }
+    });
+    expect(diagnostics).not.toBeNull();
+    const trace = diagnostics!.received([
+      "Ether.exe",
+      "--user-data-dir=C:\\private",
+      candidatePath
+    ], candidatePath);
+    trace.focusAttempt();
+    trace.handled({ canonicalPath: candidatePath, disposition: "focused", kind: "handled" });
+    deferred.forEach((callback) => callback());
+    trace.failed(Object.assign(new Error("C:\\private\\secret"), { code: "ENOENT" }));
+
+    expect(records.map((record) => record.event)).toEqual([
+      "desktop.recovery.association.second-instance.received",
+      "desktop.recovery.association.second-instance.focus-attempt",
+      "desktop.recovery.association.second-instance.handled",
+      "desktop.recovery.association.second-instance.focus-state",
+      "desktop.recovery.association.second-instance.failed"
+    ]);
+    expect(new Set(records.map((record) => record.correlationId)).size).toBe(1);
+    expect(records[0]?.details).toMatchObject({ candidate: "ether-argument", etherArgumentCount: 1, primaryProcessId: process.pid });
+    expect(records[0]?.details?.candidatePathHash).toBe(createHash("sha256").update(`${recoveryToken}\0${path.resolve(candidatePath).toLocaleLowerCase("en-US")}`).digest("hex"));
+    expect(records[2]?.details?.canonicalPathHash).toBe(createHash("sha256").update(`${recoveryToken}\0${candidatePath.toLocaleLowerCase("en-US")}`).digest("hex"));
+    expect(records[0]?.details).not.toHaveProperty("candidatePath");
+    expect(records[2]?.details).toMatchObject({ disposition: "focused" });
+    expect(records[3]?.details).toMatchObject({ postSettleFocused: false, postSettleMinimized: false, postSettleVisible: true });
+    expect(records[4]?.details).toMatchObject({ errorCode: "ENOENT" });
+    expect(JSON.stringify(records)).not.toContain("C:\\private");
+    expect(flushes).toBe(5);
+  });
+
+  it("keeps recovery association diagnostics non-throwing when the logger or settled window is unavailable", () => {
+    const deferred: Array<() => void> = [];
+    const records: Array<{ details?: Record<string, unknown>; event: string }> = [];
+    const diagnostics = createRecoveryAssociationDiagnostics({
+      log: (record) => {
+        records.push(record);
+        if (record.event.endsWith("focus-attempt")) throw new Error("injected logger failure");
+      },
+      recoveryShell: {
+        appUserModelId: "com.dreambay.ether.recovery.0123456789abcdef0123456789abcdef",
+        recentEnabled: false,
+        taskbarName: "Ether Recovery 01234567",
+        token: "0123456789abcdef0123456789abcdef"
+      },
+      schedulePostFocus: (callback) => { deferred.push(callback); },
+      window: {
+        isFocused: () => { throw new Error("closed"); },
+        isMinimized: () => { throw new Error("closed"); },
+        isVisible: () => { throw new Error("closed"); }
+      }
+    });
+    const trace = diagnostics!.received(["C:\\private\\Association.ether"], "C:\\private\\Association.ether");
+    expect(() => trace.focusAttempt()).not.toThrow();
+    expect(() => deferred.forEach((callback) => callback())).not.toThrow();
+    expect(records.at(-1)).toMatchObject({
+      details: { postSettleState: "unavailable" },
+      event: "desktop.recovery.association.second-instance.focus-state"
+    });
+  });
+
+  it("does not enable association diagnostics outside the token-bound recovery identity", () => {
+    const records: unknown[] = [];
+    expect(createRecoveryAssociationDiagnostics({
+      log: (record) => { records.push(record); },
+      recoveryShell: null,
+      window: { isFocused: () => true, isMinimized: () => false, isVisible: () => true }
+    })).toBeNull();
+    expect(records).toHaveLength(0);
   });
 
   it("routes picker, drop, argv, second-instance, and open-file through one coordinator", async () => {

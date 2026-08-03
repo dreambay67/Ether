@@ -199,20 +199,32 @@ export class AutosaveCoordinator {
   }
 }
 
+export type OpenDocumentDisposition = "focused" | "opened";
+
+export type OpenDocumentRequestOutcome =
+  | { kind: "cancelled" }
+  | { canonicalPath: string; disposition: OpenDocumentDisposition; kind: "handled" };
+
+export type OpenDocumentRequestHooks = { onFocusAttempt?: () => void };
+
 export class OpenDocumentCoordinator {
   private activeIdentity: string | null = null;
 
   constructor(private readonly port: { focus(): void; open(canonicalPath: string): Promise<void> }) {}
 
-  async request(filePath: string): Promise<void> {
+  async request(filePath: string, hooks: OpenDocumentRequestHooks = {}): Promise<{ canonicalPath: string; disposition: OpenDocumentDisposition }> {
     const canonicalPath = await realpath(filePath);
     const identity = process.platform === "win32" ? canonicalPath.toLocaleLowerCase() : canonicalPath;
     if (this.activeIdentity === identity) {
+      try { hooks.onFocusAttempt?.(); } catch {
+        // Observational hooks must not affect document activation.
+      }
       this.port.focus();
-      return;
+      return { canonicalPath, disposition: "focused" };
     }
     await this.port.open(canonicalPath);
     this.activeIdentity = identity;
+    return { canonicalPath, disposition: "opened" };
   }
 
   markOpen(canonicalPath: string): void {
@@ -234,14 +246,13 @@ export class OpenDocumentController {
     private readonly selectDocument: () => Promise<string | null>
   ) {}
 
-  async request(source: OpenDocumentSource, filePath?: string): Promise<boolean> {
+  async request(source: OpenDocumentSource, filePath?: string, hooks: OpenDocumentRequestHooks = {}): Promise<OpenDocumentRequestOutcome> {
     const requestedPath = source === "picker" ? await this.selectDocument() : filePath;
-    if (requestedPath === null) return false;
+    if (requestedPath === null) return { kind: "cancelled" };
     if (requestedPath === undefined) {
       throw codedError("INVALID_DOCUMENT_PATH", `The ${source} open request has no document path.`);
     }
-    await this.coordinator.request(requestedPath);
-    return true;
+    return { kind: "handled", ...(await this.coordinator.request(requestedPath, hooks)) };
   }
 }
 
