@@ -614,7 +614,7 @@ function hardenAssociationPointerScript(script: string): string {
     .replace("$clickY -ge $clientOrigin.Y", "$clickX -ge $clientOrigin.X")
     .replace(
       "[EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null",
-      `if (-not [EtherA02Native]::SetCursorPos($clickX,$clickY)) { throw 'Association chrome: cursor placement failed' }; $cursor = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::GetCursorPos([ref]$cursor)) { throw 'Association chrome: cursor read failed' }; ${actualPointCheck}; $lParam = [intptr](($cursor.Y -shl 16) -bor ($cursor.X -band 0xffff)); $hit = [int][EtherA02Native]::SendMessage($explorerHwnd,0x84,[intptr]::Zero,$lParam); if ($hit -in 1,3,8,9,20) { throw 'Association chrome: interactive hit test rejected' }; if ($hit -notin 10,11,12,13,14,15,16,17) { throw 'Association chrome: non-inert hit test rejected' }`
+      `if (-not [EtherA02Native]::SetCursorPos($clickX,$clickY)) { throw 'Association chrome: cursor placement failed' }; $cursor = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::GetCursorPos([ref]$cursor)) { throw 'Association chrome: cursor read failed' }; if($cursor.X -ne $clickX -or $cursor.Y -ne $clickY){throw 'Association chrome: cursor readback mismatch'}; ${actualPointCheck}; $lParam = [intptr](($cursor.Y -shl 16) -bor ($cursor.X -band 0xffff)); $hit = [int][EtherA02Native]::SendMessage($explorerHwnd,0x84,[intptr]::Zero,$lParam); if ($hit -in 1,3,8,9,20) { throw 'Association chrome: interactive hit test rejected' }; if ($hit -notin 10,11,12,13,14,15,16,17) { throw 'Association chrome: non-inert hit test rejected' }`
     );
 }
 
@@ -768,16 +768,16 @@ export function buildNativeExplorerDragScript(input: {
 /** Keeps the approval-gated native drag below Windows' encoded-command limit. */
 function compactNativeExplorerDragScript(script: string): string {
   const readCursor = (stage: string) => `$cursor = New-Object EtherA02Pointer+POINT; if (-not [EtherA02Pointer]::GetCursorPos([ref]$cursor)) { throw '${stage}: cursor read failed' }`;
-  const actualRoot = "function P($x,$y,$h,$g){$q=New-Object EtherA02Pointer+POINT;$q.X=$x;$q.Y=$y;$w=[EtherA02Pointer]::WindowFromPoint($q);if($w -eq [intptr]::Zero -or [EtherA02Pointer]::GetAncestor($w,2)-ne $h){throw($g+': WindowFromPoint root was not the exact expected HWND')}}";
+  const actualRoot = "function P($x,$y,$ex,$ey,$h,$g){if($x-ne$ex-or$y-ne$ey){throw($g+': cursor readback mismatch')};$q=New-Object EtherA02Pointer+POINT;$q.X=$x;$q.Y=$y;$w=[EtherA02Pointer]::WindowFromPoint($q);if($w -eq [intptr]::Zero -or [EtherA02Pointer]::GetAncestor($w,2)-ne $h){throw($g+': WindowFromPoint root was not the exact expected HWND')}}";
   return script
     // SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW: preserve size/position and show it without activation.
     .replace("0x0040", "0x0054")
     .replace("$down = $false", `${actualRoot}; $down = $false`)
     .replace("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos($sourceX,$sourceY)) { throw 'Drag source: cursor placement failed' }")
-    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $explorerHwnd 'Drag source actual cursor'; $activationStartedAt =`)
-    .replace("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null", `if (-not [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)) { throw 'Drag threshold: cursor placement failed' }; ${readCursor("Drag threshold")}; P $cursor.X $cursor.Y $explorerHwnd 'Drag threshold actual cursor'`)
+    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $sourceX $sourceY $explorerHwnd 'Drag source actual cursor'; $activationStartedAt =`)
+    .replace("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null", `if (-not [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)) { throw 'Drag threshold: cursor placement failed' }; ${readCursor("Drag threshold")}; P $cursor.X $cursor.Y ($sourceX+$dragDistance) $sourceY $explorerHwnd 'Drag threshold actual cursor'`)
     .replace("[EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12)))) { throw 'Drag progression: cursor placement failed' }")
-    .replace("; [EtherA02Pointer]::mouse_event(0x0004", `; ${readCursor("Drag target")}; P $cursor.X $cursor.Y $etherHwnd 'Drag target actual cursor'; [EtherA02Pointer]::mouse_event(0x0004`)
+    .replace("; [EtherA02Pointer]::mouse_event(0x0004", `; ${readCursor("Drag target")}; P $cursor.X $cursor.Y $targetX $targetY $etherHwnd 'Drag target actual cursor'; [EtherA02Pointer]::mouse_event(0x0004`)
     .replaceAll("$documentFullPath", "$d")
     .replaceAll("$documentLeaf", "$l")
     .replaceAll("$folderNamespace", "$ns")
