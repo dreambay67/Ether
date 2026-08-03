@@ -118,6 +118,12 @@ describe("renderer channel registry", () => {
     });
     expect(presentation.adapters).toEqual(["local.data-to-text"]);
     expect(presentation.providers).toEqual(["ether.local · data-to-text"]);
+    expect(presentation.stepCount).toBe(1);
+    expect(presentation.steps[0]).toMatchObject({
+      subject: "Adapter · local.data-to-text",
+      executor: "deterministic",
+      provider: "ether.local · data-to-text"
+    });
   });
 });
 

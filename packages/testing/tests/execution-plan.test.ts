@@ -250,6 +250,13 @@ describe("Ether execution planner", () => {
       "worker",
       "generator"
     ]);
+    const downstreamPlan = compile(graph, { kind: "downstream", rootNodeId: "generator", includeRoot: false });
+    expect(downstreamPlan.scope).toEqual({ kind: "downstream", rootNodeId: "generator", includeRoot: false });
+    expect(downstreamPlan.steps.filter((step) => step.subject?.kind === "node").map((step) => step.nodeId)).toEqual([
+      "compare",
+      "filter",
+      "collection"
+    ]);
   });
 
   it("expands Cartesian batch work deterministically with exclusions and bounded parallelism", () => {

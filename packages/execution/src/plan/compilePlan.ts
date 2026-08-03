@@ -1190,10 +1190,8 @@ function staticNodeText(node: PlannerNode): string | null {
 }
 
 function planScope(scope: PlannerExecutionScope, resolution: ScopeResolution): ExecutionScope {
-  if (scope.kind !== "downstream" && scope.kind !== "refresh-upstream") return scope;
-  const fallbackNodeId = scope.kind === "downstream"
-    ? scope.rootNodeId
-    : scope.nodeId ?? scope.targetNodeId!;
+  if (scope.kind !== "refresh-upstream") return scope;
+  const fallbackNodeId = scope.nodeId ?? scope.targetNodeId!;
   return resolution.nodeIds.length > 0
     ? { kind: "selected", nodeIds: resolution.nodeIds }
     : { kind: "node", nodeId: fallbackNodeId };

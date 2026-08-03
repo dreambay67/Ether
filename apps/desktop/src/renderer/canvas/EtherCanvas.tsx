@@ -11,6 +11,7 @@ import { useTransactionCommands, type GraphRevisionSeed } from "./commands/useTr
 import { configFromPrimaryDraft, primaryEditorFor, type CanvasEditorField } from "./commands/directEditing";
 import { useGraphCommands } from "./commands/useGraphCommands";
 import type { InspectorContext } from "./inspector/types";
+import { runPlanPresentation, type RunPlanPresentation } from "./inspector/runPlanPresentation";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { centeredCanvasPosition, openCanvasPosition } from "./placement";
 import { addNodesToModuleOperations, createModuleOperations, moduleIsLocked, removeNodesFromModuleOperations } from "./modules/moduleModel";
@@ -23,7 +24,7 @@ type ApplicationQueryBridge = {
   command(command: unknown): Promise<{ payload?: Record<string, unknown> }>;
   onEvent?(listener: (event: { name?: string }) => void): () => void;
 };
-type PreparedSelectionPlan = { id: string; contentHash: string; estimatedCalls: number };
+type PreparedSelectionPlan = { id: string; contentHash: string; identity: string } & RunPlanPresentation;
 function graphContentBounds(graph: EtherGraph) {
   const items = [...graph.nodes, ...graph.modules];
   if (items.length === 0) return null;
@@ -90,7 +91,9 @@ function useNodeRuntimeStatuses(documentId: string, graphId: string) {
             ? "queued"
             : job.status === "running"
             ? "running"
-            : job.status === "failed" || job.status === "needs-attention" || job.status === "waiting-review"
+            : job.status === "waiting-review"
+              ? "review"
+            : job.status === "failed" || job.status === "needs-attention"
               ? "attention"
               : job.status === "completed" && job.completedAt !== null && now - Date.parse(job.completedAt) <= 10_000
                 ? "done"
@@ -123,7 +126,7 @@ function useNodeRuntimeStatuses(documentId: string, graphId: string) {
       }
     };
     void refresh();
-    const unsubscribe = typedQueryBridge()?.onEvent?.((event) => { if (event.name === "job.stateChanged") void refresh(); });
+    const unsubscribe = typedQueryBridge()?.onEvent?.((event) => { if (event.name === "job.stateChanged" || event.name === "workItem.stateChanged" || event.name === "attempt.stateChanged" || event.name === "plan.stateChanged") void refresh(); });
     return () => { current = false; if (expiryTimer !== undefined) clearTimeout(expiryTimer); unsubscribe?.(); };
   }, [documentId, graphId]);
   return statuses;
@@ -189,7 +192,11 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   const [selectionBusy, setSelectionBusy] = useState(false);
   const nodeStatuses = useNodeRuntimeStatuses(document.documentId, graph.id);
   const selectionFingerprint = selectedIds.join("\u001f");
-  useEffect(() => { setPreparedSelection(null); }, [document.documentId, graph.id, graph.updatedAt, selectionFingerprint]);
+  const selectionIdentity = `${document.documentId}\u001f${graph.id}\u001f${graph.updatedAt}\u001f${selectionFingerprint}`;
+  const selectionIdentityRef = useRef(selectionIdentity);
+  const selectionPreviewRequest = useRef(0);
+  selectionIdentityRef.current = selectionIdentity;
+  useEffect(() => { selectionPreviewRequest.current += 1; setPreparedSelection(null); setSelectionBusy(false); }, [selectionIdentity]);
   useEffect(() => {
     if (activeEditor !== null && !graph.nodes.some((node) => node.id === activeEditor.nodeId)) setActiveEditor(null);
     if (selectedEdgeId !== null && !graph.edges.some((edge) => edge.id === selectedEdgeId)) setSelectedEdgeId(null);
@@ -261,16 +268,24 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   const runSelected = async () => {
     const bridge = typedQueryBridge();
     if (!bridge || selectedIds.length === 0) return;
+    const operationIdentity = selectionIdentityRef.current;
+    let previewRequestId: number | null = null;
     setSelectionBusy(true);
     try {
       if (preparedSelection === null) {
+        const requestId = selectionPreviewRequest.current + 1;
+        selectionPreviewRequest.current = requestId;
+        previewRequestId = requestId;
+        setPreparedSelection(null);
         const response = await bridge.command(commandRequest("run.preview", document.documentId, { graphId: graph.id, scope: { kind: "selected", nodeIds: selectedIds } }));
+        if (selectionPreviewRequest.current !== requestId || selectionIdentityRef.current !== operationIdentity) return;
         const plan = response.payload?.plan as Partial<ExecutionPlan> | undefined;
         if (!plan || typeof plan.id !== "string" || typeof plan.contentHash !== "string" || typeof plan.estimatedCalls !== "number") throw new Error("Ether could not prepare the selected-node plan.");
-        setPreparedSelection({ id: plan.id, contentHash: plan.contentHash, estimatedCalls: plan.estimatedCalls });
+        setPreparedSelection({ id: plan.id, contentHash: plan.contentHash, identity: operationIdentity, ...runPlanPresentation(plan) });
         report(`Selected plan ready: ${plan.estimatedCalls} provider call${plan.estimatedCalls === 1 ? "" : "s"}. Review, then start it.`);
         return;
       }
+      if (preparedSelection.identity !== selectionIdentityRef.current) throw new Error("The selected run context changed. Preview the intended selection again.");
       const permit = await bridge.command(commandRequest("permission.grantRun", document.documentId, { planId: preparedSelection.id, contentHash: preparedSelection.contentHash }));
       const permitId = permit.payload?.permitId;
       if (typeof permitId !== "string") throw new Error("Ether did not issue a permit for the selected-node plan.");
@@ -279,10 +294,12 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
       setPreparedSelection(null);
       report(typeof job?.id === "string" ? `Selected run started: ${job.id}` : "Selected run started. Follow it in the Run desk.");
     } catch (error) {
-      setPreparedSelection(null);
-      report(error instanceof Error ? error.message : "The selected-node run needs attention.");
+      if (previewRequestId === null || (selectionPreviewRequest.current === previewRequestId && selectionIdentityRef.current === operationIdentity)) {
+        setPreparedSelection(null);
+        report(error instanceof Error ? error.message : "The selected-node run needs attention.");
+      }
     } finally {
-      setSelectionBusy(false);
+      if (previewRequestId === null || (selectionPreviewRequest.current === previewRequestId && selectionIdentityRef.current === operationIdentity)) setSelectionBusy(false);
     }
   };
   const beginEdit = useCallback((nodeId: string, field: CanvasEditorField) => {
@@ -460,5 +477,5 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     onStatus: report
   });
   const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
-  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); if (!additive) setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runDetail={preparedSelection ? "The exact selected-node plan is ready." : "Prepare an exact plan before any provider work starts."} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} /></div>;
+  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); if (!additive) setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} /></div>;
 });

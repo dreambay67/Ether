@@ -12,11 +12,7 @@ import type {
   NodeExecutorKind
 } from "@ether/schema";
 
-export type DownstreamExecutionScope = {
-  kind: "downstream";
-  rootNodeId: string;
-  includeRoot?: boolean;
-};
+export type DownstreamExecutionScope = Extract<ExecutionScope, { kind: "downstream" }>;
 
 export type RefreshUpstreamExecutionScope = {
   kind: "refresh-upstream";
@@ -26,7 +22,6 @@ export type RefreshUpstreamExecutionScope = {
 
 export type PlannerExecutionScope =
   | ExecutionScope
-  | DownstreamExecutionScope
   | RefreshUpstreamExecutionScope;
 
 export type PlannerNode = EtherNode & {

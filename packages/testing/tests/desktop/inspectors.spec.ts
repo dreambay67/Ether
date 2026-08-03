@@ -17,6 +17,12 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
       ], edges: [{ id: "lane", from: { kind: "node", nodeId: "worker", channel: "text" }, to: { kind: "node", nodeId: "image", channel: "text" }, role: "style", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true }, { id: "lane-two", from: { kind: "node", nodeId: "worker", channel: "data" }, to: { kind: "node", nodeId: "references", channel: "data" }, role: "general", order: 1, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true }], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
     };
     const descriptor = () => ({ documentId: "inspector-document", displayName: "Inspector", named: true, mode: "writable", readOnlyReason: null, commands: { save: true, saveAs: true, saveCopy: true, compact: true, makePortable: true }, saveState: "saved", documentRevisionId: `revision-${documentRevision}`, graphId: "inspector-graph", graphRevisionId: `graph-revision-${documentRevision}`, simulationEnabled: false, revision: documentRevision });
+    const catalog = [
+      { definitionId: "prompt.text", family: "prompt", title: "Prompt", description: "Write reusable text instructions.", example: "Describe a quiet studio portrait.", synonyms: ["instruction", "text"], inputChannels: [], outputChannels: ["text"], defaultConfig: { kind: "prompt.text", body: "", assembly: "append" }, inspector: { sections: [{ id: "main", title: "Prompt", fields: ["body", "assembly"] }] }, executor: "deterministic-assembly", presentation: { width: 250, height: 150, previewMode: "content" }, setupRequirement: "none" },
+      { definitionId: "prompt.worker", family: "prompt", title: "Worker", description: "Transform prompt material with a configured assistant.", example: "Rewrite the direction.", synonyms: ["assistant", "rewrite"], inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], defaultConfig: { kind: "prompt.worker", behavior: "rewrite", instruction: "", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }, inspector: { sections: [{ id: "main", title: "Worker", fields: ["behavior", "instruction", "profile", "model", "reasoningEffort", "variation", "contextPolicy", "memoryPolicy", "outputContract"] }] }, executor: "codex-llm", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "provider-capability" },
+      { definitionId: "generation.image", family: "generation", title: "Image Generator", description: "Generate images from text direction.", example: "Create a studio image.", synonyms: ["image", "render"], inputChannels: ["text", "image", "data"], outputChannels: ["image", "data"], defaultConfig: { kind: "generation.image", providerId: "fake-image", profileId: "studio", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 }, inspector: { sections: [{ id: "main", title: "Image Generator", fields: ["providerId", "profileId"] }] }, executor: "image-provider", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "provider-capability" },
+      { definitionId: "reference.set", family: "reference", title: "Reference Set", description: "Collect reusable reference material.", example: "Group visual references.", synonyms: ["reference", "assets"], inputChannels: ["image", "data"], outputChannels: ["image", "data"], defaultConfig: { kind: "reference.set", members: [], enabledChannels: ["image"], ordering: "manual" }, inspector: { sections: [{ id: "main", title: "Reference Set", fields: ["members", "enabledChannels", "ordering"] }] }, executor: "non-runnable", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "none" }
+    ];
     const commands: Array<{ name: string; payload: Record<string, unknown> }> = []; const queries: unknown[] = [];
     const capabilities = [
       { providerId: "fake-image", profileId: "studio", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1", "16:9"], resolutions: [{ id: "1024", width: 1024, height: 1024, label: "1024 square" }, { id: "wide", width: 1536, height: 864, label: "1536 x 864" }], maxReferences: 4, maxOutputsPerCall: 3, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: ["No seed support"] },
@@ -90,18 +96,19 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
         },
         query: async (request: { name: string; payload: Record<string, unknown> }) => {
           queries.push(request);
-          if (request.name === "provider.capabilities") return { payload: { capabilities } };
-          if (request.name === "node.compiledInputPreview") return { payload: { nodeId: request.payload.nodeId, instruction: "A quiet editorial still life\n\n[assembled reference context]", contextHash: "context-hash-123456789" } };
-          if (request.name === "node.outputs") return { payload: { outputs: request.payload.nodeId === "worker" ? outputs : [] } };
-          if (request.name === "job.list") return { payload: { jobs: [
+          if (request.name === "node.catalog") return { name: request.name, payload: { nodes: catalog } };
+          if (request.name === "provider.capabilities") return { name: request.name, payload: { capabilities } };
+          if (request.name === "node.compiledInputPreview") return { name: request.name, payload: { nodeId: request.payload.nodeId, instruction: "A quiet editorial still life\n\n[assembled reference context]", contextHash: "context-hash-123456789" } };
+          if (request.name === "node.outputs") return { name: request.name, payload: { outputs: request.payload.nodeId === "worker" ? outputs : [] } };
+          if (request.name === "job.list") return { name: request.name, payload: { jobs: [
             { id: "job-queued", planId: "plan-queued", status: "queued", createdAt: now.toISOString(), startedAt: now.toISOString(), completedAt: null },
             { id: "job-running", planId: "plan-running", status: "running", createdAt: now.toISOString(), startedAt: now.toISOString(), completedAt: null },
             { id: "job-old-attention", planId: "plan-old-attention", status: "failed", createdAt: new Date(now.getTime() - 20_000).toISOString(), startedAt: new Date(now.getTime() - 20_000).toISOString(), completedAt: new Date(now.getTime() - 19_000).toISOString() },
             { id: "job-done", planId: "plan-done", status: "completed", createdAt: completed, startedAt: completed, completedAt: completed },
             { id: "job-attention", planId: "plan-attention", status: "needs-attention", createdAt: completed, startedAt: completed, completedAt: completed }
           ] } };
-          if (request.name === "plan.summary") return { payload: { plan: plans[String(request.payload.planId)] } };
-          return { payload: { graph, documentRevisionId: `revision-${documentRevision}`, graphRevisionId: `graph-revision-${documentRevision}` } };
+          if (request.name === "plan.summary") return { name: request.name, payload: { plan: plans[String(request.payload.planId)] } };
+          return { name: request.name, payload: { graph, documentRevisionId: `revision-${documentRevision}`, graphRevisionId: `graph-revision-${documentRevision}` } };
         }
       },
       artifacts: { search: async () => [], generateFake: async () => [] }, references: { list: async () => [], act: async () => [] }, runtime: { versions: async () => ({ electron: "43", node: "24" }) }
@@ -112,6 +119,8 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   const commandNames = () => page.evaluate(() => (window as typeof window & { __inspectorCommands: Array<{ name: string }> }).__inspectorCommands.map((command) => command.name));
 
   await expect(page.locator(".ether-inspector-empty")).toBeVisible();
+  await expect(page.getByTestId("ether-canvas-surface")).toBeVisible();
+  await page.getByRole("button", { name: "Fit View" }).click();
   await expect(page.getByTestId("node-status-queued")).toHaveCount(1);
   await expect(page.getByTestId("node-status-running")).toHaveCount(1);
   await expect(page.getByTestId("node-status-done")).toHaveCount(1);
@@ -167,7 +176,6 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
     await expect(page.getByTestId("node-inspector").getByRole("button", { name: "Compare" })).toHaveCount(2);
   };
 
-  await page.getByRole("button", { name: "Fit View" }).click();
   await selectWorker();
   await expect(page.getByText("Style to Image", { exact: true })).toBeVisible();
   const beforeWorker = await commandCount();

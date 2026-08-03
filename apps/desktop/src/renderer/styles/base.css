@@ -4296,7 +4296,9 @@ button.ether-edge-channel-dot[aria-expanded="true"] {
   z-index: 45;
   display: grid;
   gap: 7px;
-  width: min(264px, calc(100% - 32px));
+  width: min(340px, calc(100% - 32px));
+  max-height: min(560px, calc(100% - 96px));
+  overflow: auto;
   border: 1px solid rgba(126, 244, 215, 0.44);
   border-radius: var(--ether-control-radius);
   padding: 10px;
@@ -4380,6 +4382,54 @@ button.ether-edge-channel-dot[aria-expanded="true"] {
 .inspector-prepared-plan span { color: var(--ether-text-primary); }
 .inspector-prepared-plan small { color: var(--ether-text-muted); }
 .inspector-prepared-plan em { color: var(--ether-warning, #fbbf24); font-style: normal; }
+
+.inspector-run-scope {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ether-text-muted);
+}
+
+.inspector-run-scope strong { color: var(--ether-text-primary); }
+
+.run-plan-details {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(55, 230, 234, 0.28);
+  border-radius: var(--ether-control-radius);
+  background: rgba(55, 230, 234, 0.06);
+}
+
+.run-plan-details > strong { color: var(--ether-aqua-signal); }
+.run-plan-details small { color: var(--ether-text-muted); overflow-wrap: anywhere; }
+.run-plan-details em { color: var(--ether-warning, #fbbf24); font-style: normal; overflow-wrap: anywhere; }
+.run-plan-details details { min-width: 0; }
+.run-plan-details summary { color: var(--ether-text-primary); cursor: pointer; font-weight: 750; }
+
+.run-plan-facts {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-wrap: wrap;
+  gap: 4px !important;
+}
+
+.run-plan-facts span {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(126, 244, 215, 0.09);
+  color: var(--ether-text-primary);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.run-plan-step-list { display: grid !important; grid-template-columns: 1fr !important; gap: 6px !important; margin-top: 6px; }
+.run-plan-step-list article { display: grid; gap: 3px; min-width: 0; padding: 7px; border: 1px solid rgba(153, 168, 186, 0.16); border-radius: 5px; background: rgba(7, 11, 18, 0.48); }
+.run-plan-step-list pre { max-height: 170px; margin: 2px 0 0; padding: 6px; overflow: auto; border-radius: 4px; background: rgba(2, 6, 12, 0.64); color: var(--ether-text-primary); font: 10px/1.45 var(--ether-font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-plan-permit-note { padding-top: 4px; border-top: 1px solid rgba(153, 168, 186, 0.12); }
 
 .run-panel-grid {
   display: grid;

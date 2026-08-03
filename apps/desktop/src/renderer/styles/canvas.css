@@ -24,6 +24,8 @@
 .canvas-selection-run-prompt > p { margin: 0; }
 .canvas-selection-run-prompt > p { font-size: 12px; font-weight: 650; line-height: 1.4; }
 .canvas-selection-run-prompt > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.canvas-selection-run-prompt > .run-plan-details { grid-template-columns: minmax(0, 1fr); max-height: min(330px, 48vh); overflow: auto; }
+.canvas-selection-run-prompt > .run-plan-details > * { grid-column: 1; }
 .canvas-selection-run-prompt button { width: auto; min-width: 0; line-height: 1.25; white-space: normal; }
 
 /* Phase-one authoring commands and direct editing. */

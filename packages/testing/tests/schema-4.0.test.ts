@@ -13,6 +13,7 @@ import {
   ExecutionAttemptSchema,
   ExecutionJobSchema,
   ExecutionPlanSchema,
+  ExecutionScopeSchema,
   ExecutionWorkItemSchema,
   GraphTransactionSchema,
   GraphBlueprintSchema,
@@ -938,6 +939,7 @@ describe("Ether 4.0 schema", () => {
 
   it("round-trips the immutable execution plan and rejects malformed capabilities", () => {
     expect(ProviderCapabilitySchema.parse(providerCapability)).toEqual(providerCapability);
+    expect(ExecutionScopeSchema.parse({ kind: "downstream", rootNodeId: "node-1", includeRoot: false })).toEqual({ kind: "downstream", rootNodeId: "node-1", includeRoot: false });
 
     const plan = {
       id: "plan-1",

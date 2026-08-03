@@ -1,12 +1,14 @@
 import type { EtherGraph } from "@ether/schema";
+import { RunPlanDetails } from "./inspector/RunPlanDetails";
+import type { RunPlanPresentation } from "./inspector/runPlanPresentation";
 
-export function CanvasSidePanels({ graph, selectedIds, status, runPrompt, runLabel, runDetail, runBusy, onRunSelected, onDismissRun, onLeave, onExposeParameter, onRemoveFromModule, onConvertGroup }: {
+export function CanvasSidePanels({ graph, selectedIds, status, runPrompt, runLabel, runPlan, runBusy, onRunSelected, onDismissRun, onLeave, onExposeParameter, onRemoveFromModule, onConvertGroup }: {
   graph: EtherGraph;
   selectedIds: string[];
   status: string;
   runPrompt: boolean;
   runLabel: string;
-  runDetail: string;
+  runPlan: RunPlanPresentation | null;
   runBusy: boolean;
   onRunSelected(): void;
   onDismissRun(): void;
@@ -29,7 +31,7 @@ export function CanvasSidePanels({ graph, selectedIds, status, runPrompt, runLab
       <button type="button" onClick={() => onConvertGroup(legacyGroup.id)}>Review conversion</button>
       {graph.groups.length > 1 ? <small>{graph.groups.length - 1} more group record{graph.groups.length === 2 ? "" : "s"} can be reviewed after this one.</small> : null}
     </aside> : null}
-    {runPrompt ? <aside className="canvas-selection-run-prompt" aria-label="Selected run prompt"><strong>{selectedIds.length} nodes selected</strong><p>{runDetail}</p><div><button type="button" disabled={runBusy} onClick={onRunSelected}>{runLabel}</button><button type="button" disabled={runBusy} onClick={onDismissRun}>Dismiss</button></div></aside> : null}
+    {runPrompt ? <aside className="canvas-selection-run-prompt" aria-label="Selected run prompt"><strong>{selectedIds.length} nodes selected</strong>{runPlan ? <RunPlanDetails plan={runPlan} title="Selected plan" /> : <p>Prepare an exact selected-node plan before any provider work starts.</p>}<div><button type="button" disabled={runBusy || (runPlan?.blockingWarnings.length ?? 0) > 0} onClick={onRunSelected}>{runLabel}</button><button type="button" disabled={runBusy} onClick={onDismissRun}>Dismiss</button></div></aside> : null}
     <div className="canvas-status" data-testid="canvas-status" aria-live="polite">{status}</div>
   </>;
 }
