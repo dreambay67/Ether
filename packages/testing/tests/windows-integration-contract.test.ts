@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +35,7 @@ import {
   compareWindowsShellState,
   buildNativeExplorerDragScript,
   buildExplorerAssociationInvokeScript,
+  buildAssociationInputSizeRuntimeContractScript,
   a02ApprovalFreeListCommand,
   deriveWindowsShellDeletionCandidate,
   describeWindowsShellSetupDelta,
@@ -52,6 +55,8 @@ import {
   requireShellUiApproval,
   runAllDragRecoverySteps
 } from "../recovery/windowsIntegration.js";
+
+const execFileAsync = promisify(execFile);
 
 describe("A02 Windows integration harness contracts", () => {
   it("attempts every post-GO drag recovery proof after earlier failures", async () => {
@@ -198,6 +203,37 @@ describe("A02 Windows integration harness contracts", () => {
     expect(diagnosticDragScript).toContain("Drag watchdog was not armed before native mouse-down");
   });
 
+  it("uses Marshal.SizeOf(typeof(INPUT)) through the exact generated native type", async () => {
+    const associationScript = buildExplorerAssociationInvokeScript({
+      documentPath: "C:\\Ether Recovery\\Association.ether",
+      etherPid: 1234
+    });
+    const inputSizeCall = associationScript.indexOf("$iz = [EtherA02Native]::InputSize()");
+    const sendInput = associationScript.indexOf("[EtherA02Native]::SendInput(2,$ei,$iz", inputSizeCall);
+    const runtimeContract = buildAssociationInputSizeRuntimeContractScript();
+    expect(inputSizeCall).toBeGreaterThanOrEqual(0);
+    expect(sendInput).toBeGreaterThan(inputSizeCall);
+    expect(associationScript).toContain("public static int InputSize(){return Marshal.SizeOf(typeof(INPUT));}");
+    expect(associationScript).not.toContain("[Runtime.InteropServices.Marshal]::SizeOf([EtherA02Native+INPUT])");
+    expect(runtimeContract).toContain("public static int InputSize(){return Marshal.SizeOf(typeof(INPUT));}");
+    expect(runtimeContract).toContain("$inputSize = [EtherA02Native]::InputSize()");
+    expect(runtimeContract).not.toContain("[EtherA02Native]::SendInput");
+    expect(runtimeContract).not.toContain("[EtherA02Native]::ReturnReleased");
+
+    if (process.platform !== "win32") return;
+    const { stdout } = await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      runtimeContract
+    ], { windowsHide: true });
+    const [reportedSize, expectedSize, pointerSize] = stdout.trim().split(":").map(Number);
+    expect(pointerSize).toBeOneOf([4, 8]);
+    expect(expectedSize).toBe(pointerSize === 8 ? 40 : 28);
+    expect(reportedSize).toBe(expectedSize);
+    if (pointerSize === 8) expect(reportedSize).toBe(40);
+  });
+
   it("keeps user-realistic Explorer focus proofs adjacent to native Enter and drag", () => {
     const associationScript = buildExplorerAssociationInvokeScript({
       documentPath: "C:\\Ether Recovery\\Association Žltý.ether",
@@ -247,6 +283,8 @@ describe("A02 Windows integration harness contracts", () => {
     expect(associationScript).toContain("GetAsyncKeyState(0x0D)");
     expect(associationScript).toContain("0x8000");
     expect(associationScript).toContain("ReturnReleased");
+    expect(associationScript).toContain("[EtherA02Native]::InputSize()");
+    expect(associationScript).not.toContain("[Runtime.InteropServices.Marshal]::SizeOf([EtherA02Native+INPUT])");
     expect(associationScript).toContain("[IntPtr]::Size -eq 8 -and $iz -ne 40");
     expect(associationScript).toContain("[IntPtr]::Size -eq 4 -and $iz -ne 28");
     expect(associationScript).toContain("$item.SetFocus()");

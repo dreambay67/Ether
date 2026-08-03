@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const MAX_ENCODED_POWERSHELL_COMMAND_LENGTH = 30_000;
+const ASSOCIATION_NATIVE_TYPE_DEFINITION = 'using System;using System.Runtime.InteropServices;public static class EtherA02Native{[StructLayout((LayoutKind)0)]public struct POINT{public int X,Y;}[StructLayout((LayoutKind)0)]public struct KEYBDINPUT{public ushort a,b;public uint c,d;public UIntPtr e;}[StructLayout((LayoutKind)0)]public struct MOUSEINPUT{public int a,b;public uint c,d,e;public UIntPtr f;}[StructLayout((LayoutKind)2)]public struct INPUTUNION{[FieldOffset(0)]public KEYBDINPUT k;[FieldOffset(0)]public MOUSEINPUT m;}[StructLayout((LayoutKind)0)]public struct INPUT{public uint type;public INPUTUNION U;}public static int InputSize(){return Marshal.SizeOf(typeof(INPUT));}[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);[DllImport("user32.dll")]public static extern bool IsIconic(IntPtr h);[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int z,uint f);[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern bool GetCursorPos(out POINT p);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);[DllImport("user32.dll",SetLastError=true)]public static extern uint SendInput(uint n,INPUT[] p,int cb);[DllImport("user32.dll")]public static extern short GetAsyncKeyState(int v);[DllImport("user32.dll")]public static extern IntPtr WindowFromPoint(POINT p);[DllImport("user32.dll")]public static extern IntPtr GetAncestor(IntPtr h,uint f);[DllImport("user32.dll")]public static extern bool ClientToScreen(IntPtr h,ref POINT p);[DllImport("user32.dll")]public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);static INPUT I(uint f){return new INPUT{type=1,U=new INPUTUNION{k=new KEYBDINPUT{a=0x0D,c=f}}};}public static INPUT[] EnterPair(){return new[]{I(0),I(2)};}public static INPUT[] EnterRelease(){return new[]{I(2)};}public static bool ReturnReleased(){var e=DateTime.UtcNow.AddSeconds(2);while(DateTime.UtcNow<e){if((GetAsyncKeyState(0x0D)&0x8000)==0)return true;System.Threading.Thread.Sleep(25);}return false;}}';
 
 export const WINDOWS_INTEGRATION_MODE = "ETHER_WINDOWS_INTEGRATION_MODE";
 export const A02_APPROVED_ROUTE = "ETHER_A02_APPROVED_ROUTE";
@@ -23,6 +24,19 @@ export const A02_ROUTE_TITLES: Readonly<Record<A02ApprovedRoute, string>> = Obje
 export function a02ApprovalFreeListCommand(route: A02ApprovedRoute): string {
   const title = A02_ROUTE_TITLES[route].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   return `pnpm.cmd -C packages/testing exec cross-env ETHER_WINDOWS_INTEGRATION_MODE=packaged ${A02_APPROVED_ROUTE}=${route} playwright test tests/recovery/document-windows-integration.spec.ts --config playwright.document-windows-integration.config.ts --grep "${title}$" --list --workers=1`;
+}
+
+/** Runtime-only ABI contract: compiles the exact generated native type without invoking any native API. */
+export function buildAssociationInputSizeRuntimeContractScript(): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "if ($PSVersionTable.PSVersion.Major -ne 5) { throw ('Expected Windows PowerShell 5.1, received ' + $PSVersionTable.PSVersion) }",
+    `Add-Type -TypeDefinition '${ASSOCIATION_NATIVE_TYPE_DEFINITION}'`,
+    "$inputSize = [EtherA02Native]::InputSize()",
+    "$expectedInputSize = if ([IntPtr]::Size -eq 8) { 40 } elseif ([IntPtr]::Size -eq 4) { 28 } else { throw ('Unsupported pointer size ' + [IntPtr]::Size) }",
+    "if ($inputSize -ne $expectedInputSize) { throw ('INPUT ABI size ' + $inputSize + '; expected ' + $expectedInputSize) }",
+    "Write-Output ($inputSize.ToString() + ':' + $expectedInputSize.ToString() + ':' + [IntPtr]::Size.ToString())"
+  ].join("; ");
 }
 export const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
 export const ASSOCIATION_APPROVAL_VALUE = "approved-by-main";
@@ -631,7 +645,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class EtherA02Native{[StructLayout(LayoutKind.Sequential)]public struct POINT{public int X,Y;}[StructLayout(LayoutKind.Sequential)]public struct KEYBDINPUT{public ushort a,b;public uint c,d;public UIntPtr e;}[StructLayout(LayoutKind.Sequential)]public struct MOUSEINPUT{public int a,b;public uint c,d,e;public UIntPtr f;}[StructLayout(LayoutKind.Explicit)]public struct INPUTUNION{[FieldOffset(0)]public KEYBDINPUT k;[FieldOffset(0)]public MOUSEINPUT m;}[StructLayout(LayoutKind.Sequential)]public struct INPUT{public uint type;public INPUTUNION U;}[DllImport(\"user32.dll\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);[DllImport(\"user32.dll\")]public static extern bool IsIconic(IntPtr h);[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int z,uint f);[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int x,int y);[DllImport(\"user32.dll\")]public static extern bool GetCursorPos(out POINT p);[DllImport(\"user32.dll\")]public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);[DllImport(\"user32.dll\",SetLastError=true)]public static extern uint SendInput(uint n,INPUT[] p,int cb);[DllImport(\"user32.dll\")]public static extern short GetAsyncKeyState(int v);[DllImport(\"user32.dll\")]public static extern IntPtr WindowFromPoint(POINT p);[DllImport(\"user32.dll\")]public static extern IntPtr GetAncestor(IntPtr h,uint f);[DllImport(\"user32.dll\")]public static extern bool ClientToScreen(IntPtr h,ref POINT p);[DllImport(\"user32.dll\")]public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);static INPUT I(uint f){return new INPUT{type=1,U=new INPUTUNION{k=new KEYBDINPUT{a=0x0D,c=f}}};}public static INPUT[] EnterPair(){return new[]{I(0),I(2)};}public static INPUT[] EnterRelease(){return new[]{I(2)};}public static bool ReturnReleased(){var e=DateTime.UtcNow.AddSeconds(2);while(DateTime.UtcNow<e){if((GetAsyncKeyState(0x0D)&0x8000)==0)return true;System.Threading.Thread.Sleep(25);}return false;}}' -ErrorAction SilentlyContinue",
+    `Add-Type -TypeDefinition '${ASSOCIATION_NATIVE_TYPE_DEFINITION}' -ErrorAction SilentlyContinue`,
     `$document = '${ps(input.documentPath)}'`,
     `$etherPid = ${input.etherPid}`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
@@ -701,7 +715,7 @@ function hardenAssociationPointerScript(script: string): string {
     "[uint32]$stableEtherPid=0;[EtherA02Native]::GetWindowThreadProcessId($etherHwnd,[ref]$stableEtherPid)|Out-Null;if($stableEtherPid -eq 0 -or [int64]$stableEtherPid -ne $etherPid){throw 'Enter:stability'}",
     "if($stabilitySample -eq 0){Start-Sleep -Milliseconds 50}",
     "}",
-    "$inputSize = [Runtime.InteropServices.Marshal]::SizeOf([EtherA02Native+INPUT]); if (([IntPtr]::Size -eq 8 -and $inputSize -ne 40) -or ([IntPtr]::Size -eq 4 -and $inputSize -ne 28)) { throw ('Enter:INPUT ABI size ' + $inputSize) }",
+    "$inputSize = [EtherA02Native]::InputSize(); if (([IntPtr]::Size -eq 8 -and $inputSize -ne 40) -or ([IntPtr]::Size -eq 4 -and $inputSize -ne 28)) { throw ('Enter:INPUT ABI size ' + $inputSize) }",
     "$returnDown = $false",
     "try { $activationStartedAt = [DateTime]::UtcNow; $returnDown = $true; $enterInputs = [EtherA02Native]::EnterPair(); $inserted = [EtherA02Native]::SendInput(2,$enterInputs,$inputSize); if ($inserted -lt 1) { $returnDown = $false }; if ($inserted -ne 2) { $insertError = [Runtime.InteropServices.Marshal]::GetLastWin32Error(); throw ('Enter:SendInput inserted ' + $inserted + '/2; lastError=' + $insertError) }; $returnDown = $false; $returnReleased = [EtherA02Native]::ReturnReleased(); if (-not $returnReleased) { throw 'Enter:key-state VK_RETURN high bit did not clear' }",
     compactEtherForegroundTransitionScript("EtherA02Native"),
