@@ -14,3 +14,4 @@ export * from "./structural.js";
 export * from "./transactions.js";
 export * from "./traversal.js";
 export * from "./validation.js";
+export * from "./variables.js";

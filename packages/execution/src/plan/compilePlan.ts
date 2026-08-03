@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 
 import {
   adapterDefinitions,
+  interpolateVariables,
+  renderVariableValue,
+  variableMap,
   resolveOutputSelector,
   validateConnection,
   type AdapterDefinition
@@ -112,6 +115,7 @@ export type PlanCompilationErrorCode =
   | "EDIT_SOURCE_NOT_ON_IMAGE_LANE"
   | "WORKER_CONTEXT_INVALID"
   | "WORKER_RUNTIME_UNAVAILABLE"
+  | "VARIABLE_INTERPOLATION_INVALID"
   | "INVALID_PLAN";
 
 export class PlanCompilationError extends Error {
@@ -186,8 +190,7 @@ const resolverDefinitionIds = new Set([
   "reference.set",
   "canvas.note",
   "flow.variables",
-  "flow.batch",
-  "flow.join"
+  "flow.batch"
 ]);
 
 export function compilePlan(input: CompilePlanInput): ExecutionPlan {
@@ -230,10 +233,13 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
   const drafts: StepDraft[] = [];
   const warnings: ExecutionPlan["warnings"] = [];
   const batchResults: BatchExpansionResult[] = [];
+  const variableMaps = new Map<string, ReadonlyMap<string, JsonValue>>();
 
   for (const nodeId of scope.nodeIds) {
     const target = topology.nodeById.get(nodeId);
     if (target === undefined || !isPlanStepNode(target)) continue;
+    const variables = variablesForTarget(topology, target.id);
+    variableMaps.set(target.id, variables);
     const incoming = (topology.incoming.get(nodeId) ?? [])
       .filter((edge) => edge.from.kind === "node" && edge.to.kind === "node")
       .sort(edgeOrder);
@@ -297,7 +303,8 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
       step: makeNodeStep({
         input,
         target,
-        incoming: resolvedIncoming
+        incoming: resolvedIncoming,
+        variables
       })
     });
   }
@@ -342,7 +349,7 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
       };
   const runtimeSteps = input.workerRuntimeIntegration === undefined
     ? steps
-    : compileWorkerRuntimeContexts(input, topology, steps);
+    : compileWorkerRuntimeContexts(input, topology, steps, variableMaps);
   const withoutHash = {
     id: input.id,
     capsuleVersion: 1 as const,
@@ -389,12 +396,14 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
 function compileWorkerRuntimeContexts(
   input: CompilePlanInput,
   topology: PlannerTopology,
-  steps: PlanStep[]
+  steps: PlanStep[],
+  variableMaps: ReadonlyMap<string, ReadonlyMap<string, JsonValue>>
 ): PlanStep[] {
   const workerSteps = new Map(steps.map((step) => [step.nodeId, step]));
   return steps.map((step) => {
     const target = topology.nodeById.get(step.nodeId);
     if (target?.config.kind !== "prompt.worker") return step;
+    const variables = variableMaps.get(target.id) ?? new Map<string, JsonValue>();
     const binding = step.providerBinding;
     if (binding === null || binding === undefined) {
       throw new PlanCompilationError(
@@ -402,7 +411,26 @@ function compileWorkerRuntimeContexts(
         `Worker ${target.id} has no immutable provider binding.`
       );
     }
-    const runtimeCatalog = runtimeCatalogForWorker(target.config, binding.capabilitySnapshot, binding.modelId);
+    const targetConfig = interpolatedNodeConfig(target.config, variables);
+    if (targetConfig.kind !== "prompt.worker") return step;
+    const workerNodeIds = new Set([target.id]);
+    const workerStack = [target.id];
+    while (workerStack.length > 0) {
+      const nodeId = workerStack.pop()!;
+      for (const edge of input.graph.edges) {
+        if (edge.enabled && edge.to.kind === "node" && edge.to.nodeId === nodeId && edge.from.kind === "node" && !workerNodeIds.has(edge.from.nodeId)) {
+          workerNodeIds.add(edge.from.nodeId);
+          workerStack.push(edge.from.nodeId);
+        }
+      }
+    }
+    const workerGraph: EtherGraph = {
+      ...input.graph,
+      nodes: input.graph.nodes.map((candidate) => workerNodeIds.has(candidate.id)
+        ? { ...candidate, config: interpolatedNodeConfig(candidate.config, variables) } as EtherGraph["nodes"][number]
+        : candidate)
+    };
+    const runtimeCatalog = runtimeCatalogForWorker(targetConfig, binding.capabilitySnapshot, binding.modelId);
     const retainedEdges = input.graph.edges.filter((edge) => {
       if (edge.to.kind !== "node" || edge.from.kind !== "node") return true;
       if (edge.to.nodeId !== target.id) return true;
@@ -422,7 +450,7 @@ function compileWorkerRuntimeContexts(
     let compiled: ReturnType<typeof compileWorkerContext>;
     try {
       compiled = compileWorkerContext({
-        graph: { ...input.graph, edges: retainedEdges },
+        graph: { ...workerGraph, edges: retainedEdges },
         targetNodeId: target.id,
         versions: input.outputVersions ?? [],
         payloads: input.payloads ?? [],
@@ -725,6 +753,7 @@ function makeNodeStep(input: {
   input: CompilePlanInput;
   target: PlannerNode;
   incoming: readonly EdgeResolution[];
+  variables: ReadonlyMap<string, JsonValue>;
 }): Omit<PlanStep, "workItemIds"> {
   const incomingDependencyIds = input.incoming.flatMap((edge) =>
     edge.adapterStepId !== null
@@ -769,7 +798,15 @@ function makeNodeStep(input: {
     targetPayloadIds: edge.targetPayloadIds,
     consequence: edge.consequence
   }));
-  const parameters = normalizedNodeParameters(input.target.config, providerBinding);
+  const interpolatedConfig = interpolatedNodeConfig(input.target.config, input.variables);
+  const parameters = normalizedNodeParameters(interpolatedConfig, providerBinding);
+  const joinConfig = input.target.config.kind === "flow.join"
+    ? {
+        expectedSourceEdgeIds: input.incoming.map((edge) => edge.edge.id).sort(),
+        strategy: input.target.config.strategy,
+        requireComplete: input.target.config.requireComplete
+      }
+    : undefined;
   return {
     id: nodeStepId(input.input.id, input.target.id),
     nodeId: input.target.id,
@@ -778,7 +815,7 @@ function makeNodeStep(input: {
     dependencyStepIds,
     inputPayloadIds: unique(bindings.map((binding) => binding.payloadId)),
     resolvedInputBindings: bindings,
-    compiledPrompt: compilePrompt(input.target, input.incoming),
+    compiledPrompt: compilePrompt({ ...input.target, config: interpolatedConfig } as PlannerNode, input.incoming, input.variables),
     compiledContext: jsonObject({
       nodeId: input.target.id,
       definitionId: input.target.definitionId,
@@ -786,13 +823,14 @@ function makeNodeStep(input: {
       referenceInputs: referenceInputs as unknown as JsonObject[],
       resolverInputs,
       sourceEdgeIds: input.incoming.map((edge) => edge.edge.id),
-      promptSections: compilePromptSections(input.target, input.incoming),
+      promptSections: compilePromptSections({ ...input.target, config: interpolatedConfig } as PlannerNode, input.incoming, input.variables),
       selectedDependencies: dependencyStepIds,
+      ...(joinConfig === undefined ? {} : { join: joinConfig }),
       ...(workspaceInputPolicy === undefined ? {} : { workspaceInputPolicy })
     }),
     parameters,
     selectors: input.incoming.map((edge) => edge.edge.selector as unknown as JsonObject),
-    executorConfig: parameters,
+    executorConfig: jsonObject({ ...parameters, ...(joinConfig === undefined ? {} : { join: joinConfig }) }),
     provider,
     providerBinding
   };
@@ -1350,34 +1388,67 @@ function adapterCapabilityIds(input: CompilePlanInput): Set<string> {
   return result;
 }
 
-function compilePrompt(target: PlannerNode, incoming: readonly EdgeResolution[]): string {
+function compilePrompt(
+  target: PlannerNode,
+  incoming: readonly EdgeResolution[],
+  variables: ReadonlyMap<string, JsonValue>
+): string {
   const instruction = target.config.kind === "prompt.worker" || target.config.kind === "review.evaluate"
-    ? target.config.instruction
+    ? interpolateText(target.config.instruction, variables)
     : "";
-  const sections = compilePromptSections(target, incoming);
+  const sections = compilePromptSections(target, incoming, variables);
   return [instruction, ...sections].filter((section) => section.length > 0).join("\n\n");
+}
+
+function variablesForTarget(
+  topology: PlannerTopology,
+  targetNodeId: string
+): ReadonlyMap<string, JsonValue> {
+  const visited = new Set<string>();
+  const stack = [targetNodeId];
+  const definitions = [];
+  while (stack.length > 0) {
+    const nodeId = stack.pop()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+    const node = topology.nodeById.get(nodeId);
+    if (node?.config.kind === "flow.variables") definitions.push(...node.config.variables);
+    for (const edge of topology.incoming.get(nodeId) ?? []) {
+      if (edge.from.kind === "node") stack.push(edge.from.nodeId);
+    }
+  }
+  try {
+    return variableMap(definitions);
+  } catch (error) {
+    throw new PlanCompilationError(
+      "VARIABLE_INTERPOLATION_INVALID",
+      error instanceof Error ? error.message : "Variable definitions are invalid.",
+      { targetNodeId, cause: error instanceof Error ? error.name : String(error) }
+    );
+  }
 }
 
 function compilePromptSections(
   _target: PlannerNode,
-  incoming: readonly EdgeResolution[]
+  incoming: readonly EdgeResolution[],
+  variables: ReadonlyMap<string, JsonValue>
 ): string[] {
   return incoming.flatMap((edge) => {
-    const value = staticNodeText(edge.source);
+    const value = staticNodeText(edge.source, variables);
     if (value === null || value.length === 0) return [];
     return [`${roleLabel(edge.edge.role)}: ${value}`];
   });
 }
 
-function staticNodeText(node: PlannerNode): string | null {
+function staticNodeText(node: PlannerNode, variables: ReadonlyMap<string, JsonValue>): string | null {
   switch (node.config.kind) {
     case "prompt.text":
-      return node.config.body;
+      return interpolateText(node.config.body, variables);
     case "canvas.note":
-      return node.config.body;
+      return interpolateText(node.config.body, variables);
     case "flow.variables":
       return node.config.variables
-        .map((variable) => `${variable.name}=${jsonText(variable.value)}`)
+        .map((variable) => `${variable.name}=${renderVariableValue(variable.value)}`)
         .join("\n");
     case "reference.set": {
       const members = node.config.members ?? [];
@@ -1393,6 +1464,31 @@ function staticNodeText(node: PlannerNode): string | null {
         .join("\n");
     default:
       return null;
+  }
+}
+
+function interpolateText(text: string, variables: ReadonlyMap<string, JsonValue>): string {
+  try {
+    return interpolateVariables(text, variables);
+  } catch (error) {
+    throw new PlanCompilationError(
+      "VARIABLE_INTERPOLATION_INVALID",
+      error instanceof Error ? error.message : "Variable interpolation failed.",
+      { cause: error instanceof Error ? error.name : String(error) }
+    );
+  }
+}
+
+function interpolatedNodeConfig(
+  config: PlannerNode["config"],
+  variables: ReadonlyMap<string, JsonValue>
+): PlannerNode["config"] {
+  switch (config.kind) {
+    case "prompt.text": return { ...config, body: interpolateText(config.body, variables) };
+    case "prompt.worker": return { ...config, instruction: interpolateText(config.instruction, variables) };
+    case "review.evaluate": return { ...config, instruction: interpolateText(config.instruction, variables) };
+    case "canvas.note": return { ...config, body: interpolateText(config.body, variables) };
+    default: return config;
   }
 }
 

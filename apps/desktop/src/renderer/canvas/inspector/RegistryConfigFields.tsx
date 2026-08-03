@@ -1,5 +1,6 @@
-import { getNodeDefinition } from "@ether/graph-kernel";
-import { payloadChannels, type EtherNode, type GraphOperation, type NodeConfig } from "@ether/schema";
+import { getNodeDefinition, interpolateVariables, renderVariableValue, variableMap, variableValueType } from "@ether/graph-kernel";
+import { useMemo, useState } from "react";
+import { payloadChannels, type EtherNode, type FlowVariablesConfig, type GraphOperation, type JsonValue, type NodeConfig } from "@ether/schema";
 import { DraftConflict } from "./DraftConflict";
 import { InspectorSection } from "./NodeSetup";
 import { createRegistryListItem, parseInspectorKeyValues, purposeBuiltRegistryKinds, registrySelectOptions } from "./registryFieldModel";
@@ -37,9 +38,117 @@ function ListEditor({ kind, field, value, disabled, onChange }: { kind: NodeConf
   </fieldset>;
 }
 
+const variableTypes = ["string", "number", "boolean", "object", "array", "null"] as const;
+type VariableType = typeof variableTypes[number];
+
+function variableType(value: JsonValue): VariableType {
+  return variableValueType(value);
+}
+
+function defaultVariableValue(type: VariableType): JsonValue {
+  switch (type) {
+    case "string": return "";
+    case "number": return 0;
+    case "boolean": return false;
+    case "object": return {};
+    case "array": return [];
+    case "null": return null;
+  }
+}
+
+function parseStructuredValue(raw: string, type: "object" | "array"): { ok: true; value: JsonValue } | { ok: false } {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (type === "object" && parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) return { ok: true, value: parsed as JsonValue };
+    if (type === "array" && Array.isArray(parsed)) return { ok: true, value: parsed as JsonValue };
+  } catch {
+    // The draft remains editable until blur/save validation.
+  }
+  return { ok: false };
+}
+
+function VariablesFields({ context }: { context: InspectorNodeContext }) {
+  const { graph, apply, report, document } = context;
+  const node = context.node as Extract<EtherNode, { config: { kind: "flow.variables" } }>;
+  const draft = useInspectorDraft<FlowVariablesConfig>(`${node.id}:variables`, node.config);
+  const disabled = document.mode !== "writable";
+  const [previewTemplate, setPreviewTemplate] = useState("");
+  const [valueDrafts, setValueDrafts] = useState<Record<number, string>>({});
+  const validation = useMemo(() => {
+    try {
+      const values = variableMap(draft.draft.variables);
+      return { values, error: null as string | null };
+    } catch (error) {
+      return { values: null, error: error instanceof Error ? error.message : "Variable definitions are invalid." };
+    }
+  }, [draft.draft.variables]);
+  const preview = useMemo(() => {
+    if (previewTemplate.length === 0 || validation.values === null) return null;
+    try {
+      return { value: interpolateVariables(previewTemplate, validation.values), error: null as string | null };
+    } catch (error) {
+      return { value: null, error: error instanceof Error ? error.message : "Preview could not be rendered." };
+    }
+  }, [previewTemplate, validation.values]);
+  const updateVariables = (variables: FlowVariablesConfig["variables"]) => draft.update({ ...draft.draft, variables });
+  const save = async () => {
+    if (draft.conflict) { report("Resolve the changed-base warning before saving this draft."); return; }
+    if (validation.error !== null) { report(validation.error); return; }
+    for (const [indexText, raw] of Object.entries(valueDrafts)) {
+      const index = Number(indexText);
+      const value = draft.draft.variables[index]?.value;
+      const type = value === undefined ? null : variableType(value);
+      if (type === "object" || type === "array") {
+        if (!parseStructuredValue(raw, type).ok) { report(`Variable ${index + 1} must contain valid JSON ${type}.`); return; }
+      }
+    }
+    const result = await apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: draft.draft } as EtherNode }] as GraphOperation[], "Update Variables");
+    if (result) draft.markCommitted();
+  };
+  return <InspectorSection title="Variables" help={"Define typed values once, then reference them downstream with ${name}. Use $${name} when the token should remain literal."}>
+    {draft.conflict ? <DraftConflict onLatest={draft.useLatest} onRebase={draft.rebaseDraft} /> : null}
+    <div className="inspector-variable-list" data-testid="inspector-variables">
+      {draft.draft.variables.map((variable, index) => {
+        const type = variableType(variable.value);
+        const update = (next: Partial<typeof variable>) => updateVariables(draft.draft.variables.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, ...next } : candidate));
+        return <article key={`variable-${index}`} className="inspector-list-item">
+          <header><strong>{variable.name || `Variable ${index + 1}`}</strong><button type="button" disabled={disabled} onClick={() => updateVariables(draft.draft.variables.filter((_, candidateIndex) => candidateIndex !== index))}>Remove</button></header>
+          <label>Name<input aria-label={`Variable ${index + 1} name`} disabled={disabled} value={variable.name} onChange={(event) => update({ name: event.target.value })} /></label>
+          <label>Type<select aria-label={`Variable ${index + 1} type`} disabled={disabled} value={type} onChange={(event) => update({ value: defaultVariableValue(event.target.value as VariableType) })}>{variableTypes.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+          {type === "boolean" ? <label className="inspector-checkbox">Value<input aria-label={`Variable ${index + 1} value`} disabled={disabled} type="checkbox" checked={variable.value === true} onChange={(event) => update({ value: event.target.checked })} /></label>
+            : type === "null" ? <span className="inspector-structured-summary">Value · null</span>
+              : type === "object" || type === "array" ? <label>Value<textarea aria-label={`Variable ${index + 1} value`} disabled={disabled} value={valueDrafts[index] ?? renderVariableValue(variable.value)} onChange={(event) => {
+                const raw = event.target.value;
+                setValueDrafts((current) => ({ ...current, [index]: raw }));
+                const parsed = parseStructuredValue(raw, type);
+                if (parsed.ok) update({ value: parsed.value });
+              }} onBlur={() => {
+                const raw = valueDrafts[index];
+                if (raw !== undefined && !parseStructuredValue(raw, type).ok) report(`Value must remain valid JSON ${type}.`);
+              }} /></label>
+                : <label>Value<input aria-label={`Variable ${index + 1} value`} disabled={disabled} type={type === "number" ? "number" : "text"} value={String(variable.value)} onChange={(event) => update({ value: type === "number" ? Number(event.target.value) : event.target.value })} /></label>}
+          <small>{renderVariableValue(variable.value)} · {type}</small>
+        </article>;
+      })}
+    </div>
+    <button type="button" disabled={disabled} className="inspector-add-item" onClick={() => {
+      const used = new Set(draft.draft.variables.map((variable) => variable.name));
+      let ordinal = 1;
+      while (used.has(`variable${ordinal}`)) ordinal += 1;
+      updateVariables([...draft.draft.variables, { name: `variable${ordinal}`, value: "" }]);
+    }}>Add variable</button>
+    <label>Interpolation preview<input aria-label="Variable interpolation preview" value={previewTemplate} placeholder="Hello ${name}" onChange={(event) => setPreviewTemplate(event.target.value)} /></label>
+    {validation.error !== null ? <p className="inspector-unavailable" role="alert">{validation.error}</p> : null}
+    {preview?.error !== null && preview?.error !== undefined ? <p className="inspector-unavailable" role="alert">{preview.error}</p> : null}
+    {preview?.value !== null && preview?.value !== undefined ? <p className="inspector-structured-summary" data-testid="variables-preview">Preview · {preview.value}</p> : null}
+    <div className="inspector-actions"><button type="button" disabled={disabled || !draft.dirty || draft.conflict || validation.error !== null} onClick={() => void save()}>Save variables</button></div>
+  </InspectorSection>;
+}
+
 export function RegistryConfigFields({ context }: { context: InspectorNodeContext }) {
   const { node, graph, apply, report, document } = context;
   const draft = useInspectorDraft<NodeConfig>(`${node.id}:registry`, node.config);
+  if (node.config.kind === "flow.variables") return <VariablesFields context={context} />;
   if (purposeBuiltRegistryKinds.has(node.config.kind)) return null;
   const disabled = document.mode !== "writable";
   const definition = getNodeDefinition(node.definitionId);

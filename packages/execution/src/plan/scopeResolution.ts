@@ -51,8 +51,7 @@ const resolverDefinitionIds = new Set([
   "reference.set",
   "canvas.note",
   "flow.variables",
-  "flow.batch",
-  "flow.join"
+  "flow.batch"
 ]);
 
 export class ScopeResolutionError extends Error {

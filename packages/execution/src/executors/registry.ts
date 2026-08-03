@@ -9,6 +9,7 @@ import { ReviewExecutor } from "./review.js";
 import type { ExecutorContext, ExecutorResult, StepExecutor } from "./types.js";
 import { WorkerExecutor } from "./worker.js";
 import { ExportExecutor } from "./export.js";
+import { JoinExecutor } from "./join.js";
 
 export class ExecutorRegistry {
   private readonly executors = new Map<NodeExecutorKind, StepExecutor>();
@@ -43,6 +44,7 @@ function defaultExecutors(): StepExecutor[] {
     new LocalMediaExecutor(),
     new ReviewExecutor(),
     new CollectionExecutor(),
-    new ExportExecutor()
+    new ExportExecutor(),
+    new JoinExecutor()
   ];
 }

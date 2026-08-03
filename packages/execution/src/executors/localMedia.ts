@@ -9,11 +9,11 @@ import { ExecutorFailure, requireFacet, type ExecutorContext, type ExecutorResul
 import { jsonValue } from "./input.js";
 
 export class LocalMediaExecutor implements StepExecutor {
-  readonly kinds = ["mask", "transform", "deterministic", "batch", "join", "deterministic-filter"] as const;
+  readonly kinds = ["mask", "transform", "deterministic", "batch", "deterministic-filter"] as const;
 
   async execute(context: ExecutorContext): Promise<ExecutorResult> {
     if (context.step.executor === "deterministic-filter") return filter(context);
-    if (context.step.executor === "batch" || context.step.executor === "join" || context.step.executor === "deterministic") {
+    if (context.step.executor === "batch" || context.step.executor === "deterministic") {
       return {
         kind: "complete",
         outputs: context.inputs.map((input) => ({

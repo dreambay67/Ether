@@ -8,4 +8,5 @@ export * from "./scheduler/concurrencyDomains.js";
 export * from "./scheduler/persistence.js";
 export * from "./executors/registry.js";
 export * from "./executors/localMedia.js";
+export * from "./executors/join.js";
 export * from "./executors/types.js";
