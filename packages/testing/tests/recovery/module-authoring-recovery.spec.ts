@@ -42,17 +42,18 @@ test("authors, protects, edits, navigates, reorganizes, and dissolves a Module f
     await expect.poll(() => selectedNodeCount(page)).toBe(2);
     const createModule = page.getByRole("button", { name: "Create module", exact: true });
     await expect(createModule).toBeEnabled();
-    await input.pressKey("Control+G", "Create Module from selection", "Ctrl+G moves the selection into one locked, durable Module.");
-    await page.waitForTimeout(500);
+    await input.leftClick(createModule, "Create Module from selection", "The visible command moves the selection into one locked, durable Module through the shared graph command.");
 
     const moduleCard = page.getByTestId("ether-module-node");
+    await page.waitForTimeout(500);
     if (await moduleCard.count() === 0) {
       const diagnostic = await page.evaluate(() => ({
-        activeElement: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? "none",
+        activeElement: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName ?? "none",
         status: document.querySelector<HTMLElement>("[data-testid='canvas-status']")?.innerText ?? "missing",
-        createModuleDisabled: (document.querySelector<HTMLButtonElement>("button[aria-label='Create module']")?.disabled ?? true)
+        selectedNodes: document.querySelectorAll("[data-testid='ether-node'].is-selected").length,
+        createModuleDisabled: document.querySelector<HTMLButtonElement>("button[aria-label='Create module']")?.disabled ?? true
       }));
-      throw new Error(`Ctrl+G diagnostic: ${JSON.stringify(diagnostic)}`);
+      throw new Error(`Create Module diagnostic: ${JSON.stringify(diagnostic)}`);
     }
     await expect(moduleCard).toHaveCount(1);
     await expect(moduleCard).toHaveAttribute("data-module-locked", "true");

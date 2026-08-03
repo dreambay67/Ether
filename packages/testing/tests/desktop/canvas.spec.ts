@@ -120,6 +120,11 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(page.getByTestId("canvas-status")).toContainText("Selected run started: selected-job");
   await page.getByRole("button", { name: "Undo graph transaction" }).click(); await page.getByRole("button", { name: "Redo graph transaction" }).click();
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(17);
+  const duplicateSelection = page.getByRole("button", { name: "Duplicate", exact: true });
+  await expect(duplicateSelection).toBeEnabled();
+  await duplicateSelection.click();
+  await expect(page.locator(".ether-node")).toHaveCount(7);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(18);
 });
 
 test("keeps node creation disabled while a new document with the same graph id hydrates", async ({ page }) => {

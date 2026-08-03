@@ -20,7 +20,7 @@ export function CanvasToolbar({ commands, paletteOpen, onPaletteClose }: { comma
       {TOOLBAR_COMMANDS.map(({ id, icon, compact }) => {
         const item = byId.get(id);
         if (!item) return null;
-        return <button key={id} type="button" className={compact ? "is-compact" : undefined} disabled={!item.enabled} aria-label={item.label} aria-keyshortcuts={item.shortcut} title={item.enabled ? `${item.label}: ${item.shortcut}` : item.disabledReason} onClick={() => void item.execute()}>{icon}{compact ? null : item.label}</button>;
+        return <button key={id} type="button" className={compact ? "is-compact" : undefined} disabled={!item.enabled} aria-label={item.label} aria-keyshortcuts={item.shortcut} title={item.enabled ? `${item.label}: ${item.shortcut}` : item.disabledReason} onPointerDown={(event) => event.preventDefault()} onClick={() => void item.execute()}>{icon}{compact ? null : item.label}</button>;
       })}
     </nav>
     {paletteOpen ? <CommandPalette commands={commands} onClose={onPaletteClose} /> : null}
@@ -49,7 +49,7 @@ function CommandPalette({ commands, onClose }: { commands: readonly GraphCommand
         if (event.key === "Enter") { event.preventDefault(); run(filtered[active]); }
       }} /></label>
       <div className="canvas-command-list" role="listbox" aria-label="Available canvas commands">
-        {filtered.map((command, index) => <button key={command.id} type="button" role="option" aria-selected={index === active} className={index === active ? "is-active" : undefined} disabled={!command.enabled} title={command.disabledReason} onMouseEnter={() => setActive(index)} onClick={() => run(command)}><span>{command.label}<small>{command.enabled ? "Ready" : command.disabledReason}</small></span><kbd>{command.shortcut}</kbd></button>)}
+        {filtered.map((command, index) => <button key={command.id} type="button" role="option" aria-selected={index === active} className={index === active ? "is-active" : undefined} disabled={!command.enabled} title={command.disabledReason} onPointerDown={(event) => event.preventDefault()} onMouseEnter={() => setActive(index)} onClick={() => run(command)}><span>{command.label}<small>{command.enabled ? "Ready" : command.disabledReason}</small></span><kbd>{command.shortcut}</kbd></button>)}
         {filtered.length === 0 ? <p>No matching canvas commands.</p> : null}
       </div>
     </section>
