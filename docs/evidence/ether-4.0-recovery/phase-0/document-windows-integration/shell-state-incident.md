@@ -274,3 +274,47 @@ none contained the route markers `EtherA02Pointer`, `EtherA02Native`, or
 `EtherA02JumpList`; no orphaned route-specific child remained. No process was
 killed or altered. The disposable roots/profiles and all opaque shell state stay
 preserved for diagnosis.
+
+## 2026-08-03 single corrected association selector failure at `d591fb8`
+
+Status: **failed safely and excluded from packaged evidence**. The approval-free
+selector first failed at `7a13ecc` before running a test: a Playwright full-title
+prefix selected zero tests. The selector was corrected at `d591fb8`; the
+corrected list selected exactly one test in one file, with no approvals or test
+body in the failed first attempt. The corrected run had the independent Sol
+PASS-to-run gate, exact direct selector, one worker, `retries=0`, route
+`association`, and only mutation plus shell approvals. No retry occurred.
+
+Preflight at clean `d591fb84d6bf2790bea0f9408ccf6b95569b2fa4` recorded
+`Ether.exe` SHA-256
+`03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f`, exact
+packaged Ether process count `0`, UTF-8 registry query SHA
+`e28e10c3557e46a3cf3e8a0637b06dc3f758ee98a54edcfa604ce77e88aa01c4`, left
+mouse-button high bit `0`, retained route PowerShell count `0`, and only Desktop
+Explorer HWND `131474` / PID `16776`. Recent had 209 files with aggregate digest
+`230cd9dbe77902279751b36f830469d9a23a73df20fe94bc76e764d231f12e7b`. The
+pre-existing opaque 590a file was 6233 bytes, SHA `5a35edef...56f69`, last
+written `2026-08-03T04:21:37.3432044Z`.
+
+The one runtime test lasted 38.5 s and failed at
+`association Enter: foreground did not transition from the exact Explorer HWND to the exact Ether HWND/PID`.
+Finalization proved exact process absence and passed shell classification; the
+registry returned to the preflight digest. The journey failed, so its artifacts
+remain preserved and are not promoted.
+
+Postflight recorded exact packaged Ether process count `0`, registry SHA
+`e28e10c3557e46a3cf3e8a0637b06dc3f758ee98a54edcfa604ce77e88aa01c4`, left
+mouse-button high bit `0`, retained route PowerShell count `0`, and only the same
+Desktop HWND/PID. Recent remained at 209 files with aggregate digest
+`32702af01e09cc1c0fcff920725510c98dbf8bab4de3136f74215438aa77d3`. The opaque
+590a file was 6233 bytes, SHA `af3dc124...f725`, last written
+`2026-08-03T05:46:13.8334113Z`; it was never restored, deleted, overwritten, or
+timestamp-repaired.
+
+The preserved root is
+`C:\Users\deny7\AppData\Local\Temp\ether-a02-windows-integration-gKy8Bk` and
+profile is `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-BEeglM`.
+Registry backups, the UI-authored association document, watchdog marker, and
+profile diagnostics remain in place and untouched. The profile log contains
+ready/save activity but no observable second-instance/open/focus event after
+activation; this is diagnostic absence only, not a definitive root-cause claim.
