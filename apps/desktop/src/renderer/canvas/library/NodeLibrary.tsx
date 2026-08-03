@@ -133,6 +133,7 @@ function NodeLibraryRow({ item, favorite, readOnly, onAdd, onFavorite }: {
       className="node-library-item"
       draggable={!readOnly}
       data-node-definition={item.definitionId}
+      title={`${item.description} Try: ${item.example}`}
       onDragStart={drag}
     >
       <button

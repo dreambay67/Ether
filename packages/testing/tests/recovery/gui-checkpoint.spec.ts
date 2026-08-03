@@ -125,12 +125,7 @@ async function addDefinition(page: Page, input: import("../../recovery/journeyDr
   const row = page.locator(`.node-library-item[data-node-definition='${definition}']`);
   await row.scrollIntoViewIfNeeded();
   await input.leftClick(row.locator(".node-library-add"), `Add ${definition} from Node Library`, `The registry factory creates ${definition} with canonical defaults.`);
-  try {
-    await expect(page.getByTestId("ether-canvas-surface")).toHaveAttribute("data-graph-node-count", String(expectedCount));
-  } catch (error) {
-    console.error(`ADD_DEFINITION_DIAGNOSTIC ${definition}: ${await page.getByTestId("canvas-status").textContent()}`);
-    throw error;
-  }
+  await expect(page.getByTestId("ether-canvas-surface")).toHaveAttribute("data-graph-node-count", String(expectedCount));
 }
 
 async function requiredBox(locator: Locator, label: string) {

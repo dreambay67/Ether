@@ -26,6 +26,17 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(firstLibraryCopy.getByText("Prompt", { exact: true })).toBeVisible();
   await expect.poll(async () => (await firstLibraryCopy.boundingBox())?.width ?? 0).toBeGreaterThan(80);
   await expect(page.locator(".ether-node")).toHaveCount(2);
+  const addWithRealMouse = async (definitionId: string) => {
+    const button = page.locator(`.node-library-item[data-node-definition='${definitionId}'] .node-library-add`);
+    await button.scrollIntoViewIfNeeded();
+    const box = await button.boundingBox();
+    if (box === null) throw new Error(`Node Library button ${definitionId} has no pointer target.`);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  await addWithRealMouse("prompt.text");
+  await expect(page.locator(".ether-node")).toHaveCount(3);
+  await addWithRealMouse("generation.image");
+  await expect(page.locator(".ether-node")).toHaveCount(4);
   await expect(page.getByTestId("channel-zone-output-data").first()).toHaveAttribute("data-connected", "true");
   await page.getByRole("button", { name: "Target channel Text" }).dispatchEvent("pointerdown", { button: 2, bubbles: true });
   const targetPicker = page.getByTestId("edge-channel-picker-target");
