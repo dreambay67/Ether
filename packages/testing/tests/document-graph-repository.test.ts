@@ -22,6 +22,21 @@ interface RevisionHead {
   graphRevisions: Record<string, string>;
 }
 
+interface DocumentHistoryEntry {
+  createdAt: string;
+  id: string;
+  isHead: boolean;
+  kind: "genesis" | "edit" | "undo" | "redo" | "recovery";
+  milestones: Array<{
+    createdAt: string;
+    id: string;
+    kind: "autosave" | "manual";
+    name: string;
+  }>;
+  recovery: { id: string; reviewRequired: true; state: "recovered" } | null;
+  title: string;
+}
+
 interface CommitResult extends RevisionHead {
   documentRevision: { id: string; kind: string };
   graphRevisionsCreated: Array<{ graphId: string; revisionId: string }>;
@@ -51,6 +66,7 @@ interface RepositoryContext {
       operation: GraphOperation;
     }>;
     head(): RevisionHead;
+    listHistory(): DocumentHistoryEntry[];
     listMilestones(): Array<{
       id: string;
       kind: "autosave" | "manual";
@@ -84,6 +100,7 @@ interface ReadRepositoryContext {
     | "getDocumentRevision"
     | "getOperations"
     | "head"
+    | "listHistory"
     | "listMilestones"
   >;
   settings: Pick<RepositoryContext["settings"], "getHeader" | "getLiveOutput">;
@@ -242,6 +259,7 @@ describe("transactional Ether document repositories", () => {
         "getDocumentRevision",
         "getOperations",
         "head",
+        "listHistory",
         "listMilestones"
       ],
       settingKeys: ["getHeader", "getLiveOutput"]
@@ -1131,6 +1149,17 @@ describe("transactional Ether document repositories", () => {
     await expect(store.transaction(({ revisions }) => revisions.redo())).rejects.toMatchObject({
       code: "NOTHING_TO_REDO"
     });
+    const history = await store.read(({ revisions }) => revisions.listHistory());
+    expect(history.map(({ kind, title, isHead }) => ({ kind, title, isHead }))).toEqual([
+      { kind: "edit", title: "Commit branch", isHead: true },
+      { kind: "undo", title: "Undo: Commit third", isHead: false },
+      { kind: "redo", title: "Redo: Commit third", isHead: false },
+      { kind: "undo", title: "Undo: Commit third", isHead: false },
+      { kind: "edit", title: "Commit third", isHead: false },
+      { kind: "edit", title: "Commit second", isHead: false },
+      { kind: "genesis", title: "Genesis", isHead: false }
+    ]);
+    expect(history.every((entry) => entry.milestones.length === 0 && entry.recovery === null)).toBe(true);
     await store.close();
   });
 
