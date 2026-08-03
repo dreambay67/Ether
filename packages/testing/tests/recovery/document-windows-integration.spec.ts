@@ -52,6 +52,7 @@ import {
   requireNoTestOwnedRecentShortcuts,
   recoveryShellIdentityArgument,
   recoveryShellTaskbarName,
+  recoveryArtifactsMayBeCleanedAfterShellCheckpoint,
   resnapshotWindowsShellState,
   restoreReversibleAssociation,
   startAssociationRestorationWatchdog,
@@ -81,7 +82,10 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   let primary: RecoveryJourneySession | null = null;
   let reopened: RecoveryJourneySession | null = null;
   const primaryProfile = await createIsolatedJourneyProfile();
-  const shellBefore = await snapshotWindowsShellState(primaryProfile.appData);
+  const shellS0 = await snapshotWindowsShellState(primaryProfile.appData);
+  let shellS1: WindowsShellStateSnapshot | null = null;
+  let primaryJourneyFailure: unknown = null;
+  const finalizationFailures: unknown[] = [];
 
   try {
     primary = await launch(executable, "a02-windows-primary", primaryProfile);
@@ -95,7 +99,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     await assertOneFileDocument(root, documentPath);
     await assertDocumentIdentity(documentPath);
     primary.input.observe("One-file format identity", "The saved document is a single valid Ether document with format/application/schema identity.", `Validated ${path.basename(documentPath)} with inspectEtherDocument.`);
-    primary.input.observe("Recent shortcut snapshot", "Only shortcuts resolving to unique test-owned paths are eligible for later cleanup.", `Found ${recentBefore.length} pre-existing matching isolated-profile Recent shortcuts.`);
+    primary.input.observe("Recent shortcut snapshot", "The pre-setup isolated-profile Recent links are diagnostic only; S1 becomes the first restoration checkpoint after native setup.", `Found ${recentBefore.length} pre-existing matching isolated-profile Recent shortcuts.`);
 
     await primary.input.leftClick(primary.page.getByRole("button", { name: "Save as", exact: true }), "Save As through the native Windows picker", "The UI switches only after the Unicode destination validates.");
     await completeNativeFileDialogWithUia(primaryPid, renamedPath);
@@ -115,6 +119,9 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     primary.input.observe("File > Open through native picker", "A native Ctrl+O sent to the exact packaged Ether window opens its native picker.", openAction);
     await completeNativeFileDialogWithUia(primaryPid, documentPath);
     await expect(primary.page.getByTestId("project-header")).toContainText(path.basename(documentPath));
+    shellS1 = await resnapshotWindowsShellState(shellS0);
+    primary.input.observe("Capture S1 after native primary setup", "S0 is diagnostic; every S0→S1 shell delta from native Save, Save As, Copy, and Open is recorded as OS-native setup and is not restored.", describeWindowsShellSetupDelta(shellS0, shellS1));
+    await assertShellCheckpointRestored(shellS1);
     await primary.input.screenshot("01-native-open-unicode.png", primary.evidence, "Capture File > Open result", "File > Open shows the original Unicode/spaces document.");
 
     await minimizeExactWindowWithUia(primaryPid);
@@ -149,15 +156,55 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     await expect.poll(() => reopened?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await reopened.close("passed");
     reopened = null;
+  } catch (error) {
+    primaryJourneyFailure = error;
   } finally {
-    if (reopened !== null) await reopened.close("failed");
-    if (primary !== null) await primary.close("failed");
-    try {
-      await restoreShellJourneyState({ profile: primaryProfile, root, shellBefore, documentPaths: [documentPath, renamedPath, copyPath] });
-    } finally {
-      await cleanupIsolatedJourneyProfile(primaryProfile).catch(() => undefined);
-      await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
+    if (reopened !== null) {
+      try {
+        await reopened.close("failed");
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
     }
+    if (primary !== null) {
+      try {
+        await primary.close("failed");
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    let shellS1Restored = false;
+    if (shellS1 !== null) {
+      try {
+        await assertShellCheckpointRestored(shellS1);
+        shellS1Restored = true;
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
+      checkpointCaptured: shellS1 !== null,
+      processFinalizationProven: finalizationFailures.length === 0,
+      shellCheckpointRestored: shellS1Restored
+    })) {
+      try {
+        await cleanupIsolatedJourneyProfile(primaryProfile);
+        await cleanupWindowsIntegrationRoot(root);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    } else {
+      finalizationFailures.push(new Error(`Preserved primary recovery artifacts after unproven post-S1 cleanup: root=${root}; profile=${primaryProfile.root}.`));
+    }
+  }
+  if (primaryJourneyFailure !== null) {
+    if (finalizationFailures.length > 0) {
+      throw new AggregateError([primaryJourneyFailure, ...finalizationFailures], "A02 primary journey and safe finalization failed.", { cause: finalizationFailures.at(-1) });
+    }
+    throw primaryJourneyFailure;
+  }
+  if (finalizationFailures.length > 0) {
+    throw new AggregateError(finalizationFailures, "A02 primary finalization did not prove safe cleanup.", { cause: finalizationFailures.at(-1) });
   }
 });
 
@@ -586,31 +633,6 @@ async function restoreAssociationWithWatchdog(
     throw primaryError;
   }
   await disarmAssociationRestorationWatchdog(watchdog);
-}
-
-async function restoreShellJourneyState(input: {
-  documentPaths: readonly string[];
-  profile: RecoveryJourneySession["profile"];
-  root: string;
-  shellBefore: WindowsShellStateSnapshot;
-}): Promise<void> {
-  const failures: unknown[] = [];
-  try {
-    await cleanupTestOwnedRecentShortcuts({
-      appData: input.profile.appData,
-      ...(process.env.APPDATA === undefined ? {} : { additionalAppData: [process.env.APPDATA] }),
-      root: input.root,
-      documentPaths: input.documentPaths
-    });
-  } catch (error) {
-    failures.push(error);
-  }
-  try {
-    await assertWindowsShellStateRestored(input.shellBefore);
-  } catch (error) {
-    failures.push(error);
-  }
-  if (failures.length > 0) throw new AggregateError(failures, "The isolated Windows shell state did not restore completely.");
 }
 
 /** S1 is the first restore obligation; S0 only documents unavoidable native setup deltas. */

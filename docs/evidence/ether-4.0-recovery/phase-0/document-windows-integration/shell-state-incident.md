@@ -66,11 +66,12 @@ Corrective action: the recovery driver now rejects `0`, negative, non-numeric, m
 
 ## S0/S1 shell-baseline change control
 
-Approved association, Explorer drag, and Jump List journeys now distinguish an initial diagnostic `S0` from the first restorable checkpoint `S1`:
+The normal A02 primary journey and the approved association, Explorer drag, and Jump List journeys now distinguish an initial diagnostic `S0` from the first restorable checkpoint `S1`:
 
 - `S0` is a byte-level real-and-isolated shell snapshot before the journey. Any `S0→S1` change caused by ordinary native UI or Save setup is recorded as an opaque OS-native setup delta; it is not deleted, overwritten, or claimed restored.
 - `S1` is captured only after the ordinary UI/native-save setup is complete, then immediately rechecked before association mutation, Explorer gesture, or approved Recent mode.
 - The final invariant is exact byte-level equality to `S1`. Any post-`S1` unrelated delta fails closed and preserves the disposable profile and test root for diagnosis.
+- The normal A02 primary route captures `S1` after its final native File > Open title check. Its second-instance, disposable-root, clean-close/reopen, and association dry-run work is post-`S1`; a failed session/process proof or final equality preserves the exact primary profile and Windows root.
 - The Jump List route creates and saves its document in an ordinary-recovery session with Recent disabled, exits that session, records `S0→S1`, and only then starts the exact approved Recent-mode session against the existing document. Its COM/recycle proof therefore permits only one post-`S1` recovery AutomaticDestinations delta and returns to `S1` exactly.
 
 ## 2026-08-03 second controlled packaged lifecycle failure

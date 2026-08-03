@@ -29,6 +29,7 @@ import {
   createWindowsIntegrationRoot,
   isAssociationMutationApproved,
   removeTestOwnedDisposableRoots,
+  recoveryArtifactsMayBeCleanedAfterShellCheckpoint,
   requireNoTestOwnedRecentShortcuts,
   requireAssociationMutationApproval,
   requireShellUiApproval
@@ -88,6 +89,13 @@ describe("A02 Windows integration harness contracts", () => {
   it("requires an empty exact-target Recent-link baseline before Recent mode", () => {
     expect(() => requireNoTestOwnedRecentShortcuts([])).not.toThrow();
     expect(() => requireNoTestOwnedRecentShortcuts(["C:\\real\\Recent\\Jump List.lnk"])).toThrow(/S1 contains matching test-owned Recent shortcuts/u);
+  });
+
+  it("preserves primary artifacts for any unproven post-S1 finalization", () => {
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, processFinalizationProven: false, shellCheckpointRestored: false })).toBe(true);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, processFinalizationProven: false, shellCheckpointRestored: true })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, processFinalizationProven: true, shellCheckpointRestored: true })).toBe(true);
   });
 
   it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {
