@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "document-lifecycle",
   "mode": "source-electron",
-  "startedAt": "2026-08-02T20:14:19.243Z",
-  "finishedAt": "2026-08-02T20:14:26.533Z",
+  "startedAt": "2026-08-03T00:38:26.320Z",
+  "finishedAt": "2026-08-03T00:38:33.507Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,7 +17,7 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "a824e697b733dc1f82e569fcca6182e1cbe4db34",
+    "gitCommit": "bf81dfdd25ce49e4c12f236e3ade09424e417271",
     "mode": "source-electron",
     "artifacts": [
       {
@@ -26,7 +26,7 @@
       },
       {
         "path": "apps/desktop/dist-electron/main/bootstrap.js",
-        "sha256": "15c36bf7beb643ea7abdb8384d179420adfa9637fb105705de014b6c5a749aa3"
+        "sha256": "11fa8b92a32a8f19fd2e4e04d38eb08bdfb452266faee0c462d4b1c73fa1dc72"
       },
       {
         "path": "apps/desktop/dist-electron/preload/preload.cjs",
@@ -45,7 +45,7 @@
       "label": "Create the first graph node on the blank canvas",
       "expected": "A Prompt node is created only through the visible authoring UI.",
       "actual": "Left click at (91, 313).",
-      "durationMs": 28
+      "durationMs": 59
     },
     {
       "sequence": 2,
@@ -53,7 +53,7 @@
       "label": "Capture the UI-authored graph",
       "expected": "The first node is visibly authored from a blank document.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 178,
+      "durationMs": 255,
       "screenshotPath": "screenshots/01-blank-ui-node.png"
     },
     {
@@ -61,8 +61,8 @@
       "kind": "keyboard-command",
       "label": "Save the untitled UI-authored document",
       "expected": "The native Save dialog writes one .ether document.",
-      "actual": "Pressed Control+S.",
-      "durationMs": 13
+      "actual": "Pressed Control+s.",
+      "durationMs": 71
     },
     {
       "sequence": 4,
@@ -86,7 +86,7 @@
       "label": "Inspect the manual save milestone",
       "expected": "Document History shows the Ctrl+S manual milestone as a reviewable record.",
       "actual": "Left click at (1079, 34).",
-      "durationMs": 19
+      "durationMs": 15
     },
     {
       "sequence": 7,
@@ -94,7 +94,7 @@
       "label": "Capture the visible manual milestone",
       "expected": "The document history names the manual Ctrl+S milestone.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 100,
+      "durationMs": 107,
       "screenshotPath": "screenshots/manual-save-history.png"
     },
     {
@@ -111,7 +111,7 @@
       "label": "Save As to a second path",
       "expected": "The active document switches only after the new destination is complete.",
       "actual": "Left click at (884, 34).",
-      "durationMs": 16
+      "durationMs": 20
     },
     {
       "sequence": 10,
@@ -119,7 +119,7 @@
       "label": "Save a copy without switching",
       "expected": "A complete copy is created while the active title remains the Save As destination.",
       "actual": "Left click at (923, 34).",
-      "durationMs": 14
+      "durationMs": 29
     },
     {
       "sequence": 11,
@@ -127,7 +127,7 @@
       "label": "Compact the UI-authored document",
       "expected": "Compaction reports actual before and after sizes without invalidating the document.",
       "actual": "Left click at (962, 34).",
-      "durationMs": 10
+      "durationMs": 9
     },
     {
       "sequence": 12,
@@ -135,7 +135,7 @@
       "label": "Make the UI-authored document portable",
       "expected": "The native confirmation completes a zero-reference portability check honestly.",
       "actual": "Left click at (1001, 34).",
-      "durationMs": 12
+      "durationMs": 13
     },
     {
       "sequence": 13,
@@ -143,7 +143,7 @@
       "label": "Capture completed document actions",
       "expected": "Save As, Copy, Compact, and Portable actions have completed on the UI-authored document.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 104,
+      "durationMs": 135,
       "screenshotPath": "screenshots/02-saved-compact-portable.png"
     },
     {
@@ -152,10 +152,18 @@
       "label": "Edit the saved document through the visible UI before a recovery restart",
       "expected": "A second node is committed and autosaved before the deliberate process kill.",
       "actual": "Left click at (91, 354).",
-      "durationMs": 9
+      "durationMs": 14
     },
     {
       "sequence": 15,
+      "kind": "observation",
+      "label": "Visible autosave transition",
+      "expected": "The ordinary graph edit visibly transitions through Saving to Saved.",
+      "actual": "Observed Saving -> Saved.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 16,
       "kind": "observation",
       "label": "Hard-kill after UI edit/autosave",
       "expected": "The exact journey process exits without a clean close, leaving normal AppData recovery state for the next launch.",
