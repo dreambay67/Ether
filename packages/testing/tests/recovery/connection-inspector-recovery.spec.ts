@@ -60,6 +60,19 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
       }
       await targetHandle.hover();
       await input.leftClick(targetHandle, `Complete ${label} lane`, `The ${label} lane persists through the ordinary connection interaction.`);
+      if (index === 0) {
+        await page.waitForTimeout(250);
+        input.observe(
+          "First lane completion state",
+          "The saved graph and rendered path both report the completed Text lane.",
+          JSON.stringify({
+            status: await page.getByTestId("canvas-status").innerText(),
+            sourceConnected: await evaluate.getByTestId(`channel-zone-output-${channel}`).getAttribute("data-connected"),
+            targetConnected: await batch.getByTestId(`channel-zone-input-${channel}`).getAttribute("data-connected"),
+            renderedEdges: await page.locator(".ether-edge-hit-target").count()
+          })
+        );
+      }
       await expect(page.locator(".ether-edge-hit-target")).toHaveCount(index + 1);
     }
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);

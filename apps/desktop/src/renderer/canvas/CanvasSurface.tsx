@@ -393,7 +393,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         minZoom={0.1}
         maxZoom={1.25}
         fitView={fitViewOnMount.current.enabled}
-        onlyRenderVisibleElements={!showSemanticOverview}
+        onlyRenderVisibleElements={largeGraph && !showSemanticOverview}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable
