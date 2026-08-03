@@ -22,6 +22,9 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   });
   await page.goto("/");
   await expect(page.getByTestId("ether-canvas-surface")).toBeVisible();
+  const firstLibraryCopy = page.locator(".node-library-item-copy").first();
+  await expect(firstLibraryCopy.getByText("Prompt", { exact: true })).toBeVisible();
+  await expect.poll(async () => (await firstLibraryCopy.boundingBox())?.width ?? 0).toBeGreaterThan(80);
   await expect(page.locator(".ether-node")).toHaveCount(2);
   await expect(page.getByTestId("channel-zone-output-data").first()).toHaveAttribute("data-connected", "true");
   await page.getByRole("button", { name: "Target channel Text" }).dispatchEvent("pointerdown", { button: 2, bubbles: true });

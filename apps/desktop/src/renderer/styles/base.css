@@ -2252,66 +2252,6 @@ button.ether-edge-channel-dot[aria-expanded="true"] {
   scroll-padding-block: 16px 32px;
 }
 
-.node-library-list details {
-  border: 1px solid rgba(153, 168, 186, 0.16);
-  border-radius: var(--ether-control-radius);
-  background: rgba(9, 15, 25, 0.64);
-}
-
-.node-library-list summary {
-  padding: 9px 10px;
-  color: var(--ether-text-primary);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.node-library-items {
-  display: grid;
-  gap: 6px;
-  padding: 0 8px 8px;
-}
-
-.node-library-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid rgba(153, 168, 186, 0.14);
-  border-radius: var(--ether-control-radius);
-  padding: 6px 8px;
-  background: rgba(7, 11, 18, 0.78);
-  color: var(--ether-text-primary);
-  cursor: grab;
-  text-align: left;
-}
-
-.node-library-item span {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  box-shadow: 0 0 16px currentColor;
-}
-
-.node-library-item strong,
-.node-library-item em {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-library-item strong {
-  font-size: 12px;
-}
-
-.node-library-item em {
-  color: var(--ether-text-muted);
-  font-size: 11px;
-  font-style: normal;
-}
-
 .node-palette-empty {
   margin: 0;
   padding: 10px;

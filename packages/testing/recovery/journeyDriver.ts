@@ -972,7 +972,7 @@ async function stopNewPackagedProcesses(input: {
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      `Stop-Process -Id ${processIds.join(",")} -Force -ErrorAction SilentlyContinue`
+      `Get-Process -Id ${processIds.join(",")} -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0`
     ]);
     await delay(200);
   }
