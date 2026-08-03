@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "a02-windows-jump-list",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T04:21:22.396Z",
+  "finishedAt": "2026-08-03T04:21:38.235Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "9d14f93d973db59d6a90d116b7e849ddb084b3ae",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Open existing S1 document in approved Recent mode",
+      "expected": "The approved Jump List session opens the ordinary-recovery document and does not invoke a native Save dialog; both real and isolated S1 Recent roots contained zero matching target links.",
+      "actual": "Opened Jump List 27464a55 Žltý.ether from the same disposable profile/token; S1 matching links=0.",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "a02-windows-jump-list-setup",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T04:21:10.802Z",
+  "finishedAt": "2026-08-03T04:21:18.992Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "9d14f93d973db59d6a90d116b7e849ddb084b3ae",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Create the ordinary-recovery Jump List document",
+      "expected": "The document is authored through the ordinary recovery UI with Recent disabled.",
+      "actual": "Left click at (91, 313).",
+      "durationMs": 61
+    },
+    {
+      "sequence": 2,
+      "kind": "keyboard-command",
+      "label": "Save ordinary-recovery Jump List setup document",
+      "expected": "The native picker creates the exact test-owned document before the approved Recent-mode session starts.",
+      "actual": "Pressed Control+s.",
+      "durationMs": 32
+    },
+    {
+      "sequence": 3,
+      "kind": "observation",
+      "label": "Close ordinary-recovery Jump List setup",
+      "expected": "The ordinary recovery process exits before S1 is captured and before Recent mode is admitted.",
+      "actual": "native-keyboard ownerPid=41748 shortcut=Alt+F4",
+      "durationMs": 0
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Capture S1 after ordinary native-save setup",
+      "expected": "S0 is diagnostic; every S0→S1 shell delta is recorded as OS-native setup and is not restored.",
+      "actual": "S0→S1 OS-native setup delta (recorded without restoration claim): C:\\Users\\deny7\\AppData\\Roaming:CustomDestinations/590aee7bdd69b59b.customDestinations-ms",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}

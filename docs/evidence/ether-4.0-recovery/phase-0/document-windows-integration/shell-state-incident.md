@@ -232,3 +232,43 @@ overwrite, or timestamp repair was attempted.
 The normal-route finalization sidecar records one passed attempt with exact-process
 absence proof and `removed exact post-S1 target links=0`. This is diagnostic shell
 evidence only; approval routes, T03 acceptance, and Phase 0 acceptance remain open.
+
+## 2026-08-03 accidental multi-route forwarding attempt at `9d14f93`
+
+Status: **failed safely and excluded from packaged evidence**. The intended
+association-only command was `pnpm ... run ... -- --grep ...`, but the literal
+`--` reached Playwright and the filter was not applied. All four tests in the
+file ran: the normal primary/reopen journeys, association, Explorer drag, and
+Jump List. The normal journeys individually passed but their newly generated
+canonical files were overwritten by this broad run; those seven files were
+copied to the forensic archive and then restored exactly from `HEAD`. The
+association route failed because foreground did not transition from the exact
+Explorer HWND to the exact Ether HWND/PID. Explorer drag timed out at 150 s.
+Jump List failed with `0` exact visible taskbar items and no new
+`AutomaticDestinations` candidate. The Jump List setup-only journey passed but
+does not prove the route.
+
+The complete archive, including unchanged encoded PowerShell diagnostics, is
+`failed-attempts/2026-08-03-9d14f93-argument-forwarding-multi-route/`. Preserved
+roots/profiles are `5tk5GI`/`MtuaJE` (association and normal), `3Se52X`/`9Q33lk`
+(Explorer drag), and `og6U3A`/`NT7K9F` (Jump List). No route acceptance, shell
+restoration, Phase 0, or release claim is made.
+
+Read-only preflight/postflight recorded exact packaged process count `0` and the
+same `.ether` registry digest
+`e28e10c3557e46a3cf3e8a0637b06dc3f758ee98a54edcfa604ce77e88aa01c4`. Recent
+remained at 209 files, with aggregate digest `bf49df40...cd62` before and
+`f9d7cb46...e34f` after. The pre-existing opaque
+`CustomDestinations\\590aee7bdd69b59b.customDestinations-ms` was 6233 bytes,
+SHA-256 `925466e6...25edbe` at `2026-08-03T03:36:32Z`, and changed in place to
+SHA-256 `5a35edef...56f69` at `2026-08-03T04:21:37Z`. It was never restored,
+deleted, overwritten, or timestamp-repaired. The canonical association was
+absent before the run; postflight Explorer inspection found only the existing
+Desktop HWND `131474`.
+
+After the drag timeout, a read-only safety probe found the left mouse button was
+not down. Three long-lived encoded PowerShell host processes were observed, but
+none contained the route markers `EtherA02Pointer`, `EtherA02Native`, or
+`EtherA02JumpList`; no orphaned route-specific child remained. No process was
+killed or altered. The disposable roots/profiles and all opaque shell state stay
+preserved for diagnosis.

@@ -1,0 +1,21 @@
+{
+  "attempts": [],
+  "durabilityFailureObserved": false,
+  "identity": {
+    "gitCommit": "9d14f93d973db59d6a90d116b7e849ddb084b3ae",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "journeyId": "a02-windows-explorer-drag",
+  "route": "explorer-drag",
+  "schemaVersion": 1
+}

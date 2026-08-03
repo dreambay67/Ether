@@ -1,0 +1,205 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: recovery\document-windows-integration.spec.ts >> runs the separately approved Explorer pointer drag/drop route
+- Location: tests\recovery\document-windows-integration.spec.ts:473:1
+
+# Error details
+
+```
+Test timeout of 150000ms exceeded.
+```
+
+# Page snapshot
+
+```yaml
+- main "Ether desktop workspace" [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Ether" [ref=e6]
+      - generic [ref=e7]:
+        - paragraph [ref=e8]: ETHER by DreamBay
+        - heading "Explorer drag source 40067a7c Žltý.ether" [level=1] [ref=e9]
+    - generic [ref=e12]: Saved
+    - navigation "Document commands" [ref=e13]:
+      - button "New document" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+      - button "Open document" [ref=e18] [cursor=pointer]:
+        - img [ref=e19]
+      - button "Save" [ref=e21] [cursor=pointer]:
+        - img [ref=e22]
+      - button "Save as" [ref=e26] [cursor=pointer]:
+        - img [ref=e27]
+      - button "Save a copy" [ref=e32] [cursor=pointer]:
+        - img [ref=e33]
+      - button "Compact document" [ref=e36] [cursor=pointer]:
+        - img [ref=e37]
+      - button "Make document portable" [ref=e42] [cursor=pointer]:
+        - img [ref=e43]
+      - button "Repair damaged document" [ref=e48] [cursor=pointer]:
+        - img [ref=e49]
+      - button "Document History" [ref=e51] [cursor=pointer]:
+        - img [ref=e52]
+      - button "Artifacts" [pressed] [ref=e56] [cursor=pointer]:
+        - img [ref=e57]
+        - text: Artifacts
+      - button "Provider Health" [ref=e62] [cursor=pointer]:
+        - img [ref=e63]
+      - button "Settings" [ref=e66] [cursor=pointer]:
+        - img [ref=e67]
+  - navigation "Ether workspaces" [ref=e70]:
+    - button "Build" [pressed] [ref=e71]
+    - button "Focus" [ref=e72]
+    - button "Run" [ref=e73]
+    - button "Review" [ref=e74]
+  - region "build workspace" [ref=e75]:
+    - generic [ref=e76]:
+      - generic [ref=e77]: build
+      - paragraph [ref=e78]: Arrange your graph and source material.
+    - region "Reference Desk" [ref=e79]:
+      - generic [ref=e80]:
+        - strong [ref=e81]: Reference Desk
+        - button "Hide Reference Desk" [ref=e82]:
+          - img [ref=e83]
+      - region "Reference Desk" [ref=e86]:
+        - generic [ref=e87]:
+          - generic [ref=e88]:
+            - text: Sources
+            - heading "Reference Desk" [level=2] [ref=e89]
+          - button "Refresh" [ref=e90]:
+            - img [ref=e91]
+            - text: Refresh
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - text: Reference Set
+            - combobox "Reference Set" [ref=e98]
+          - button "Link file" [disabled] [ref=e99]:
+            - img [ref=e100]
+            - text: Link file
+          - button "Embed copy" [disabled] [ref=e103]:
+            - img [ref=e104]
+            - text: Embed copy
+          - generic [ref=e108]:
+            - text: Drop behavior
+            - combobox "Dropped file storage" [ref=e109]:
+              - option "Link dropped files" [selected]
+              - option "Embed dropped files"
+          - generic [ref=e110]:
+            - img [ref=e111]
+            - text: Drop files anywhere in this desk
+        - generic "Reference views" [ref=e115]:
+          - button "Grid" [ref=e116]:
+            - img [ref=e117]
+            - text: Grid
+          - button "Filmstrip" [ref=e119]:
+            - img [ref=e120]
+            - text: Filmstrip
+          - button "Waveform" [ref=e122]:
+            - img [ref=e123]
+            - text: Waveform
+          - button "List" [pressed] [ref=e127]:
+            - img [ref=e128]
+            - text: List
+          - button "Compare selected" [disabled] [ref=e129]:
+            - img [ref=e130]
+            - text: Compare selected
+          - button "Deduplicate selection" [disabled] [ref=e137]
+        - paragraph [ref=e138]: Add a Reference Set node to organize source material.
+        - paragraph [ref=e139]: No references yet. Link a file to keep it external, embed a portable copy, or drop files here.
+        - generic [ref=e140]:
+          - generic [ref=e141]: 0 selected · 0 total
+          - generic [ref=e142]:
+            - combobox "Batch dimension" [disabled] [ref=e143]
+            - button "Send to Batch" [disabled] [ref=e144]
+          - generic [ref=e145]:
+            - button "Add to set" [disabled] [ref=e146]
+            - button "Replace set" [disabled] [ref=e147]
+      - separator "Resize Reference Desk" [ref=e148]
+    - generic [ref=e149]:
+      - region "Build tools" [ref=e150]:
+        - generic [ref=e151]:
+          - strong [ref=e152]: Build tools
+          - button "Hide Build tools" [ref=e153]:
+            - img [ref=e154]
+        - complementary "Graph tools" [ref=e157]:
+          - button "Prompt" [active] [ref=e158] [cursor=pointer]:
+            - img [ref=e159]
+            - text: Prompt
+          - button "Image" [ref=e160] [cursor=pointer]:
+            - img [ref=e161]
+            - text: Image
+          - button "Refresh" [ref=e165] [cursor=pointer]:
+            - img [ref=e166]
+            - text: Refresh
+          - button "Recipes" [ref=e171] [cursor=pointer]:
+            - img [ref=e172]
+            - text: Recipes
+        - separator "Resize Build tools" [ref=e176]
+      - region "Document canvas" [ref=e177]:
+        - generic [ref=e178]:
+          - navigation "Canvas commands" [ref=e179]:
+            - button "Add prompt from canvas" [ref=e180] [cursor=pointer]: Quick prompt
+            - button "Add image from canvas" [ref=e181] [cursor=pointer]: Quick image
+            - button "Group" [ref=e183] [cursor=pointer]:
+              - img [ref=e184]
+              - text: Group
+            - button "Module" [ref=e189] [cursor=pointer]
+            - button "Undo graph transaction" [ref=e191] [cursor=pointer]:
+              - img [ref=e192]
+            - button "Redo graph transaction" [ref=e195] [cursor=pointer]:
+              - img [ref=e196]
+          - application [ref=e200]:
+            - group [ref=e203]:
+              - article [ref=e204]:
+                - generic "Prompt 1 input channels":
+                  - generic "Text input" [ref=e206]
+                  - generic "Data input" [ref=e210]
+                - generic [ref=e213]:
+                  - generic [ref=e214]: Prompt
+                  - generic [ref=e215]: Text
+                - generic [ref=e216]:
+                  - button "Prompt 1" [ref=e217]
+                  - paragraph [ref=e218]: Describe the creative direction
+                - generic [ref=e219]:
+                  - generic [ref=e220]: Ready
+                  - button "Delete Prompt 1" [ref=e221] [cursor=pointer]:
+                    - img [ref=e222]
+                - generic "Prompt 1 output channels":
+                  - generic "Text output" [ref=e226]
+                  - generic "Data output" [ref=e230]
+            - img
+            - generic "Control Panel" [ref=e233]:
+              - button "Zoom In" [disabled]:
+                - img
+              - button "Zoom Out" [ref=e234] [cursor=pointer]:
+                - img [ref=e235]
+              - button "Fit View" [ref=e237] [cursor=pointer]:
+                - img [ref=e238]
+            - img "Mini Map" [ref=e241]
+          - complementary "Canvas legend" [ref=e244]:
+            - strong [ref=e245]: Untitled Graph
+            - generic [ref=e246]: 1 nodes - 0 lanes
+            - generic [ref=e247]: Left drag selects - right drag pans
+          - generic [ref=e248]: Add Prompt saved
+      - region "Project lens" [ref=e249]:
+        - generic [ref=e250]:
+          - strong [ref=e251]: Project lens
+          - button "Hide Project lens" [ref=e252]:
+            - img [ref=e253]
+        - generic [ref=e256]:
+          - img [ref=e257]
+          - strong [ref=e259]: Project lens
+          - paragraph [ref=e260]: Select one node or connection to reveal concise, task-specific controls.
+        - separator "Resize Project lens" [ref=e261]
+    - region "Run desk" [ref=e262]:
+      - button "Show Run desk" [ref=e264]:
+        - img [ref=e265]
+  - generic [ref=e267]:
+    - generic [ref=e268]: All changes are saved
+    - generic [ref=e269]: Local document
+```

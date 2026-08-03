@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "a02-windows-reopen-after-cleanup",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T04:17:56.483Z",
+  "finishedAt": "2026-08-03T04:18:03.047Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 720,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "9d14f93d973db59d6a90d116b7e849ddb084b3ae",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Test-owned cache/staging/live-output deletion",
+      "expected": "Only actual named disposable roots under the isolated profile were removed; project data reopens and validates.",
+      "actual": "Created and removed test-owned cache, staging, and live-output sentinels; reopened the UI-authored .ether and validated its graph/identity.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "observation",
+      "label": "Association dry run",
+      "expected": "The exact HKCU .ether key and original ProgID state are snapshotted before any future optional mutation.",
+      "actual": "Dry-run plan uses unique Ether.Recovery.a985ec73206f4e619bb75acc0e56a4b5; this harness does not mutate the registry or invoke Explorer.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 3,
+      "kind": "observation",
+      "label": "Clean close through keyboard",
+      "expected": "A native Alt+F4 sent to the exact packaged Ether window closes the Saved document without an unsaved-changes prompt.",
+      "actual": "native-keyboard ownerPid=6576 shortcut=Alt+F4",
+      "durationMs": 0
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Post-S1 primary shell classification",
+      "expected": "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.",
+      "actual": "removed exact post-S1 target links=0; S0→final=C:\\Users\\deny7\\AppData\\Roaming:CustomDestinations/590aee7bdd69b59b.customDestinations-ms; S1→final allowed opaque=C:\\Users\\deny7\\AppData\\Roaming:CustomDestinations/590aee7bdd69b59b.customDestinations-ms",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}
