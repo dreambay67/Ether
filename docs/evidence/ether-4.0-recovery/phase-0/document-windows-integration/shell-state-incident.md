@@ -250,8 +250,10 @@ does not prove the route.
 
 The complete archive, including unchanged encoded PowerShell diagnostics, is
 `failed-attempts/2026-08-03-9d14f93-argument-forwarding-multi-route/`. Preserved
-roots/profiles are `5tk5GI`/`MtuaJE` (association and normal), `3Se52X`/`9Q33lk`
-(Explorer drag), and `og6U3A`/`NT7K9F` (Jump List). No route acceptance, shell
+failure roots/profiles are `5tk5GI`/`MtuaJE` (association), `3Se52X`/`9Q33lk`
+(Explorer drag), and `og6U3A`/`NT7K9F` (Jump List); the individually passing
+normal rows do not have a separate root/profile recorded in the preserved
+diagnostics. No route acceptance, shell
 restoration, Phase 0, or release claim is made.
 
 Read-only preflight/postflight recorded exact packaged process count `0` and the

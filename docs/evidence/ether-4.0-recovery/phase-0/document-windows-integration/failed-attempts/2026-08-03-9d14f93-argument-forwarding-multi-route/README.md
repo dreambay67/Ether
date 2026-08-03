@@ -21,8 +21,8 @@ List route failed to produce its required candidate.
 
 | Journey | UTC interval | Outcome / reason | Preserved disposable root / profile |
 | --- | --- | --- | --- |
-| `a02-windows-primary` | 04:17:35.408 - 04:17:55.939 | passed individually; excluded because the combined run was out of scope and its canonical files were overwritten | `ether-a02-windows-integration-5tk5GI` / `ether-recovery-journey-MtuaJE` |
-| `a02-windows-reopen-after-cleanup` | 04:17:56.483 - 04:18:03.047 | passed individually; excluded for the same reason | same as primary |
+| `a02-windows-primary` | 04:17:35.408 - 04:17:55.939 | passed individually; excluded because the combined run was out of scope and its canonical files were overwritten | not separately recorded in the preserved failure diagnostics |
+| `a02-windows-reopen-after-cleanup` | 04:17:56.483 - 04:18:03.047 | passed individually; excluded for the same reason | not separately recorded in the preserved failure diagnostics |
 | `a02-windows-association` | 04:18:03.657 - 04:18:38.685 | failed: foreground did not transition from the exact Explorer HWND to the exact Ether HWND/PID | `ether-a02-windows-integration-5tk5GI` / `ether-recovery-journey-MtuaJE` |
 | `a02-windows-explorer-drag` | test timeout 150 s | failed: timed out while the Explorer drag-source page remained active | `ether-a02-windows-integration-3Se52X` / `ether-recovery-journey-9Q33lk` |
 | `a02-windows-jump-list-setup` | 04:21:10.802 - 04:21:18.992 | passed setup only; not a Jump List route result | `ether-a02-windows-integration-og6U3A` / `ether-recovery-journey-NT7K9F` |
