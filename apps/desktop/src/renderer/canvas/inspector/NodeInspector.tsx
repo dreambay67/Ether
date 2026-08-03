@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { getNodeDefinition } from "@ether/graph-kernel";
 import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
 import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
 import { StrokeCanvas, buildDrawingSvg } from "../drawing/StrokeCanvas";
+import { channelLabel } from "../ports/channelRegistry";
 import { EditWorkspace, type ImageEditCapability, type ImageEditCommit, type ImageEditSource } from "../edit/EditWorkspace";
 import { documentCommand, documentQuery, globalQuery } from "./applicationRequests";
 import { DraftConflict } from "./DraftConflict";
@@ -182,6 +184,7 @@ function DrawingFields({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, apply, report } = context;
   if (node.config.kind !== "canvas.drawing") return null;
   const drawing = node.config;
+  const updateDrawing = (next: CanvasDrawingConfig, title: string) => void apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: next } as EtherNode }] as GraphOperation[], title);
   const updateStrokes = (strokes: CanvasDrawingConfig["strokes"]) => {
     const next = { ...node, config: { ...drawing, strokes } } as EtherNode;
     void apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: next }] as GraphOperation[], "Update drawing").then((saved) => {
@@ -210,7 +213,7 @@ function DrawingFields({ context }: { context: InspectorNodeContext }) {
       report(error instanceof Error ? error.message : "The drawing could not be published.");
     }
   };
-  return <InspectorSection title="Drawing" help="Each completed brush or eraser gesture is one reversible graph transaction. Publishing creates an immutable Image artifact while preserving this editable stroke document."><StrokeCanvas width={drawing.width} height={drawing.height} background={drawing.background} strokes={drawing.strokes} disabled={document.mode !== "writable"} onChange={updateStrokes} /><div className="inspector-actions"><button type="button" disabled={document.mode !== "writable"} onClick={() => void publish()}>Publish drawing</button></div></InspectorSection>;
+  return <InspectorSection title="Drawing" help="Each completed brush or eraser gesture is one reversible graph transaction. Publishing creates an immutable Image artifact while preserving this editable stroke document."><div className="inspector-drawing-size"><label>Width<input aria-label="Drawing width" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.width} onBlur={(event) => updateDrawing({ ...drawing, width: Math.max(1, Number(event.target.value) || drawing.width) }, "Resize drawing")}/></label><label>Height<input aria-label="Drawing height" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.height} onBlur={(event) => updateDrawing({ ...drawing, height: Math.max(1, Number(event.target.value) || drawing.height) }, "Resize drawing")}/></label></div><label>Background<input aria-label="Drawing background" disabled={document.mode !== "writable"} defaultValue={drawing.background} onBlur={(event) => { const background = event.target.value.trim(); if (background) updateDrawing({ ...drawing, background }, "Change drawing background"); }} /></label><StrokeCanvas width={drawing.width} height={drawing.height} background={drawing.background} strokes={drawing.strokes} disabled={document.mode !== "writable"} onChange={updateStrokes} /><div className="inspector-actions"><button type="button" disabled={document.mode !== "writable"} onClick={() => void publish()}>Publish drawing</button></div></InspectorSection>;
 }
 
 function ImageEditFields({ context }: { context: InspectorNodeContext }) {
@@ -405,8 +408,20 @@ function ReferenceFields({ context }: { context: InspectorNodeContext }) {
   return <InspectorSection title="Reference Set" help="Add and Replace are explicit actions. Ether never silently replaces a source set."><label>Reference IDs <Help label="Reference IDs" text={controlHelp.references} /><textarea aria-label="Reference IDs" value={members} placeholder="reference-id, another-reference-id" onChange={(event) => setMembers(event.target.value)} /></label><div className="inspector-actions"><button type="button" onClick={() => void assign(false)}>Add references</button><button type="button" onClick={() => void assign(true)}>Replace set</button></div><small>{(node.config.members ?? node.config.artifactIds ?? []).length} saved member{(node.config.members ?? node.config.artifactIds ?? []).length === 1 ? "" : "s"}; ordered {node.config.ordering}.</small></InspectorSection>;
 }
 
+function NodeChannels({ context }: { context: InspectorNodeContext }) {
+  const { node, graph } = context;
+  const definition = getNodeDefinition(node.definitionId);
+  const incoming = graph.edges.filter((edge) => edge.to.kind === "node" && edge.to.nodeId === node.id);
+  const outgoing = graph.edges.filter((edge) => edge.from.kind === "node" && edge.from.nodeId === node.id);
+  const valid = definition.configSchema.safeParse(node.config);
+  return <InspectorSection title="Channels & routes" help="Inputs and outputs come from the canonical node contract. Lane roles and selectors stay visible at the receiving edge.">
+    <div className="inspector-channel-summary"><div><strong>Inputs</strong><span>{definition.library.inputChannels.length ? definition.library.inputChannels.map(channelLabel).join(" · ") : "None"}</span><small>{incoming.length} connected lane{incoming.length === 1 ? "" : "s"}</small></div><div><strong>Outputs</strong><span>{definition.library.outputChannels.map(channelLabel).join(" · ")}</span><small>{outgoing.length} connected lane{outgoing.length === 1 ? "" : "s"}</small></div></div>
+    {!valid.success ? <p className="inspector-unavailable" role="alert">Needs setup: {valid.error.issues[0]?.message ?? "The saved configuration is incomplete."}</p> : null}
+  </InspectorSection>;
+}
+
 export function NodeInspector({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, apply, report } = context; const roles = useMemo(() => outgoingRoles(graph, node), [graph, node]);
   const update = async (next: EtherNode, title: string) => { if (!next.title.trim()) { report("A node title cannot be empty."); return false; } return apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: next }] as GraphOperation[], title); };
-  return <div className="ether-inspector" data-testid="node-inspector"><NodeSetup node={node} disabled={document.mode !== "writable"} onUpdate={update} /><PromptFields context={context} /><WorkerFields context={context} /><ProviderFields context={context} /><DrawingFields context={context} /><ImageEditFields context={context} /><ReferenceFields context={context} /><RegistryConfigFields context={context} />{roles.length ? <InspectorSection title="Outgoing roles" help="Roles describe how every receiver interprets an outgoing channel."><div className="inspector-role-list">{roles.map(({ edge, target }) => <span key={edge.id}><strong>{roleLabels[edge.role]}</strong> to {target}</span>)}</div></InspectorSection> : null}<RunControls node={node} graphId={graph.id} documentId={document.documentId} disabled={document.mode !== "writable"} report={report} /><OutputVersions context={context} /><InspectorSection advanced title="Diagnostics & provenance" help={controlHelp.advanced}><p>Node ID: {node.id}</p><p>Definition: {node.definitionId}</p><p>Graph: {graph.id}</p></InspectorSection></div>;
+  return <div className="ether-inspector" data-testid="node-inspector"><NodeSetup node={node} disabled={document.mode !== "writable"} onUpdate={update} /><NodeChannels context={context} /><PromptFields context={context} /><WorkerFields context={context} /><ProviderFields context={context} /><DrawingFields context={context} /><ImageEditFields context={context} /><ReferenceFields context={context} /><RegistryConfigFields context={context} />{roles.length ? <InspectorSection title="Outgoing roles" help="Roles describe how every receiver interprets an outgoing channel."><div className="inspector-role-list">{roles.map(({ edge, target }) => <span key={edge.id}><strong>{roleLabels[edge.role]}</strong> · {channelLabel(edge.from.channel)} → {channelLabel(edge.to.channel)} · {edge.selector.kind} · {target}</span>)}</div></InspectorSection> : null}<RunControls node={node} graphId={graph.id} documentId={document.documentId} disabled={document.mode !== "writable"} report={report} /><OutputVersions context={context} /><InspectorSection advanced title="Diagnostics & provenance" help={controlHelp.advanced}><p>Node ID: {node.id}</p><p>Definition: {node.definitionId}</p><p>Graph: {graph.id}</p></InspectorSection></div>;
 }

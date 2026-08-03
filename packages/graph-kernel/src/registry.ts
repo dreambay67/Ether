@@ -188,7 +188,7 @@ const inspectorFields: Record<NodeDefinitionId, string[]> = {
   "reference.set": ["artifactIds", "enabledChannels", "ordering"], "generation.image": ["providerId", "profileId", "aspectRatio", "resolution", "outputFormat", "outputCount"],
   "edit.image": ["providerId", "profileId", "strength", "outputCount"], "edit.mask": ["mode", "feather"],
   "edit.transform": ["operation", "width", "height", "preserveAspectRatio"], "review.compare": ["selectionMode", "minimumSelections"],
-  "review.evaluate": ["instruction", "rubric", "profile", "model"], "review.filter": ["match", "rules", "routes"],
+  "review.evaluate": ["instruction", "rubric", "profile", "model", "reasoningEffort"], "review.filter": ["match", "rules", "routes"],
   "flow.variables": ["variables"], "flow.batch": ["dimensions", "exclusions", "parallelism"], "flow.join": ["strategy", "requireComplete"],
   "output.collection": ["collectionId", "membershipMode", "makePrimary"], "output.export": ["pathGrantId", "namingTemplate", "format", "collisionPolicy", "includeMetadata"],
   "canvas.note": ["body", "style"], "canvas.drawing": ["width", "height", "background", "strokes"]

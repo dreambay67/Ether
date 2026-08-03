@@ -11,6 +11,8 @@ export type EtherCanvasNodeData = {
   node: SchemaNode;
   connectedInput: PayloadChannel[];
   connectedOutput: PayloadChannel[];
+  intentInput: readonly PayloadChannel[] | null;
+  intentOutput: readonly PayloadChannel[] | null;
   status?: NodeRuntimeStatus;
   readOnly: boolean;
   activeEditor: CanvasEditorField | null;
@@ -32,7 +34,7 @@ export const EtherNode = memo(function EtherNode({ id, data, selected }: NodePro
   const primaryEditor = primaryEditorFor(node);
   return <article className={`ether-node ether-node-family-${family}${selected ? " is-selected" : ""}${data.activeEditor ? " is-editing" : ""}`} data-testid="ether-node" data-node-id={id} data-node-family={family} data-node-definition={node.definitionId}>
     <NodeResizer color="var(--ether-cyan)" isVisible={selected && !data.readOnly && !data.activeEditor} minWidth={190} minHeight={132} onResizeStart={data.onResizeStart} onResizeEnd={(_, params) => { if (!data.readOnly) data.onResize(id, { width: Math.round(params.width), height: Math.round(params.height) }); data.onResizeEnd(); }} />
-    <ChannelRail direction="input" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedInput} />
+    <ChannelRail direction="input" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedInput} intentChannels={data.intentInput} />
     <header className="ether-node-header"><span className="ether-node-family">{familyLabel[family] ?? family}</span><span className="ether-node-subtype">{subtitle}</span></header>
     <div className="ether-node-main">
       {data.activeEditor === "title" ? <InlineNodeEditor label="Node title" value={node.title} singleLine onCommit={(value) => data.onEditCommit(id, "title", value)} onCancel={data.onEditCancel} /> : <button type="button" className="ether-node-title" onClick={(event) => { event.stopPropagation(); data.onSelect(id, event.ctrlKey || event.metaKey || event.shiftKey); }} onDoubleClick={() => { if (!data.readOnly) data.onEditRequest(id, "title"); }} title={data.readOnly ? "Node title" : "Double-click or press F2 to rename"}>{node.title}</button>}
@@ -40,7 +42,7 @@ export const EtherNode = memo(function EtherNode({ id, data, selected }: NodePro
     </div>
     <NodeStatusLayer status={data.status ?? null} />
     <footer className="ether-node-footer"><span>{data.activeEditor ? "Editing" : node.presentation.collapsed ? "Collapsed" : "Ready"}</span><button type="button" className="nodrag" aria-label={`Delete ${node.title}`} disabled={data.readOnly || data.activeEditor !== null} onClick={() => { if (!data.readOnly) data.onDelete(id); }}><Trash2 size={14} /></button></footer>
-    <ChannelRail direction="output" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedOutput} />
+    <ChannelRail direction="output" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedOutput} intentChannels={data.intentOutput} />
   </article>;
 });
 

@@ -1,15 +1,18 @@
 import { useState, type CSSProperties } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeDefinitionId, PayloadChannel } from "@ether/schema";
-import { PAYLOAD_CHANNELS, channelLabel } from "./channelRegistry";
+import { PAYLOAD_CHANNELS, channelLabel, channelsFor } from "./channelRegistry";
 
-const contracts: Record<NodeDefinitionId, { input: PayloadChannel[]; output: PayloadChannel[] }> = {
-  "prompt.text": { input: ["text", "data"], output: ["text", "data"] }, "prompt.worker": { input: [...PAYLOAD_CHANNELS], output: ["text", "data"] }, "reference.set": { input: [...PAYLOAD_CHANNELS], output: [...PAYLOAD_CHANNELS] }, "generation.image": { input: ["text", "image", "data"], output: ["image", "text", "data"] }, "edit.image": { input: ["text", "image", "mask", "data"], output: ["image", "mask", "data"] }, "edit.mask": { input: ["image", "text", "data", "mask"], output: ["mask", "image", "data"] }, "edit.transform": { input: ["image", "data"], output: ["image", "data"] }, "review.compare": { input: ["text", "image", "video", "audio", "data"], output: ["text", "image", "video", "audio", "data"] }, "review.evaluate": { input: [...PAYLOAD_CHANNELS], output: ["text", "data", "image", "mask", "video", "audio"] }, "review.filter": { input: [...PAYLOAD_CHANNELS], output: [...PAYLOAD_CHANNELS] }, "flow.variables": { input: ["text", "data"], output: ["text", "data"] }, "flow.batch": { input: [...PAYLOAD_CHANNELS], output: [...PAYLOAD_CHANNELS] }, "flow.join": { input: [...PAYLOAD_CHANNELS], output: [...PAYLOAD_CHANNELS] }, "output.collection": { input: [...PAYLOAD_CHANNELS], output: [...PAYLOAD_CHANNELS] }, "output.export": { input: [...PAYLOAD_CHANNELS], output: ["data"] }, "canvas.note": { input: [], output: ["text", "data"] }, "canvas.drawing": { input: ["image", "data"], output: ["image", "mask", "data"] }
-};
-export function channelsFor(definitionId: NodeDefinitionId, direction: "input" | "output") { return contracts[definitionId][direction]; }
-export function ChannelRail({ direction, nodeTitle, nodeDefinitionId, connectedChannels = [] }: { direction: "input" | "output"; nodeTitle: string; nodeDefinitionId: NodeDefinitionId; connectedChannels?: PayloadChannel[] }) {
+export function ChannelRail({ direction, nodeTitle, nodeDefinitionId, connectedChannels = [], intentChannels = null }: {
+  direction: "input" | "output";
+  nodeTitle: string;
+  nodeDefinitionId: NodeDefinitionId;
+  connectedChannels?: PayloadChannel[];
+  intentChannels?: readonly PayloadChannel[] | null;
+}) {
   const [revealed, setRevealed] = useState(false); const available = channelsFor(nodeDefinitionId, direction);
-  return <div className={`ether-channel-rail ether-channel-rail-${direction}${revealed ? " is-revealed" : ""}`} onMouseEnter={() => setRevealed(true)} onMouseLeave={() => setRevealed(false)} onFocus={() => setRevealed(true)} onBlur={() => setRevealed(false)} aria-label={`${nodeTitle} ${direction} channels`}>
-    {PAYLOAD_CHANNELS.map((channel, index) => { const connected = connectedChannels.includes(channel); const supported = available.includes(channel); return <span key={channel} className={`channel-zone channel-zone-${direction} channel-zone-${channel}${connected ? " is-connected" : ""}${supported ? " is-supported" : ""} nodrag nopan`} data-testid={`channel-zone-${direction}-${channel}`} data-connected={connected ? "true" : "false"} style={{ "--channel-index": index } as CSSProperties}>{supported ? <Handle id={channel} type={direction === "input" ? "target" : "source"} position={direction === "input" ? Position.Left : Position.Right} className={`channel-handle-dot channel-handle-${channel}`} aria-label={`${channelLabel(channel)} ${direction}`} style={{ top: "50%" }} /> : null}<span className="channel-zone-label">{channelLabel(channel)}</span></span>; })}
+  const intentActive = intentChannels !== null;
+  return <div className={`ether-channel-rail ether-channel-rail-${direction}${revealed ? " is-revealed" : ""}${intentActive ? " is-connection-intent" : ""}`} onMouseEnter={() => setRevealed(true)} onMouseLeave={() => setRevealed(false)} onFocus={() => setRevealed(true)} onBlur={() => setRevealed(false)} aria-label={`${nodeTitle} ${direction} channels`}>
+    {PAYLOAD_CHANNELS.map((channel, index) => { const connected = connectedChannels.includes(channel); const supported = available.includes(channel); const compatible = intentChannels?.includes(channel) ?? false; return <span key={channel} className={`channel-zone channel-zone-${direction} channel-zone-${channel}${connected ? " is-connected" : ""}${supported ? " is-supported" : ""}${compatible ? " is-compatible" : ""} nodrag nopan`} data-testid={`channel-zone-${direction}-${channel}`} data-connected={connected ? "true" : "false"} data-compatible={compatible ? "true" : "false"} style={{ "--channel-index": index } as CSSProperties}>{supported ? <Handle id={channel} type={direction === "input" ? "target" : "source"} position={direction === "input" ? Position.Left : Position.Right} className={`channel-handle-dot channel-handle-${channel}`} aria-label={`${channelLabel(channel)} ${direction}`} style={{ top: "50%" }} /> : null}<span className="channel-zone-label">{channelLabel(channel)}</span></span>; })}
   </div>;
 }

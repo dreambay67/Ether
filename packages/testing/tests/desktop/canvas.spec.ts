@@ -18,7 +18,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
     ];
     let revision = 1; const graphRevisions: Record<string, string> = { "graph-root": "graph-revision-1", "graph-child": "child-revision-1" };
     const descriptor = () => ({ documentId: "canvas-document", displayName: "Canvas", named: true, mode: "writable", readOnlyReason: null, commands: { save: true, saveAs: true, saveCopy: true, compact: true, makePortable: true }, saveState: "saved", documentRevisionId: "revision-1", graphId: "graph-root", graphRevisionId: "graph-revision-1", simulationEnabled: false, revision: 1 });
-    const update = (operations: Array<Record<string, unknown>>) => { for (const operation of operations) { const root = operation.graphId === "graph-root"; if (operation.type === "updateEdge" && root) graph = { ...graph, edges: graph.edges.map((edge) => edge.id === operation.edgeId ? operation.edge as typeof edge : edge) }; if (operation.type === "removeEdge" && root) graph = { ...graph, edges: graph.edges.filter((edge) => edge.id !== operation.edgeId) }; if (operation.type === "addNode" && root) graph = { ...graph, nodes: [...graph.nodes, operation.node as typeof graph.nodes[number]] }; if (operation.type === "removeNode" && root) graph = { ...graph, nodes: graph.nodes.filter((node) => node.id !== operation.nodeId) }; if (operation.type === "updateGraphProperties") { if (root) graph = { ...graph, viewState: operation.viewState as typeof graph.viewState }; else childGraph = { ...childGraph, viewState: operation.viewState as typeof childGraph.viewState }; } if (operation.type === "updateGroup" && root) graph = { ...graph, groups: graph.groups.map((group) => group.id === operation.groupId ? operation.group as typeof group : group) }; if (operation.type === "removeGroup" && root) graph = { ...graph, groups: graph.groups.filter((group) => group.id !== operation.groupId) }; if (operation.type === "moveNodes") { const positions = operation.positions as Array<{ nodeId: string; position: { x: number; y: number } }>; if (root) graph = { ...graph, nodes: graph.nodes.map((node) => ({ ...node, position: positions.find((item) => item.nodeId === node.id)?.position ?? node.position })) }; else childGraph = { ...childGraph, nodes: childGraph.nodes.map((node) => ({ ...node, position: positions.find((item) => item.nodeId === node.id)?.position ?? node.position })) }; } if (operation.type === "updateModule" && root) graph = { ...graph, modules: graph.modules.map((module) => module.id === operation.moduleId ? operation.module as typeof module : module) }; if (operation.type === "updateModuleInterface" && root) graph = { ...graph, modules: graph.modules.map((module) => module.id === operation.moduleId ? { ...module, interface: operation.interface as typeof module.interface } : module) }; } };
+    const update = (operations: Array<Record<string, unknown>>) => { for (const operation of operations) { const root = operation.graphId === "graph-root"; if (operation.type === "addEdge" && root) graph = { ...graph, edges: [...graph.edges, operation.edge as typeof graph.edges[number]] }; if (operation.type === "updateEdge" && root) graph = { ...graph, edges: graph.edges.map((edge) => edge.id === operation.edgeId ? operation.edge as typeof edge : edge) }; if (operation.type === "removeEdge" && root) graph = { ...graph, edges: graph.edges.filter((edge) => edge.id !== operation.edgeId) }; if (operation.type === "addNode" && root) graph = { ...graph, nodes: [...graph.nodes, operation.node as typeof graph.nodes[number]] }; if (operation.type === "removeNode" && root) graph = { ...graph, nodes: graph.nodes.filter((node) => node.id !== operation.nodeId) }; if (operation.type === "updateGraphProperties") { if (root) graph = { ...graph, viewState: operation.viewState as typeof graph.viewState }; else childGraph = { ...childGraph, viewState: operation.viewState as typeof childGraph.viewState }; } if (operation.type === "updateGroup" && root) graph = { ...graph, groups: graph.groups.map((group) => group.id === operation.groupId ? operation.group as typeof group : group) }; if (operation.type === "removeGroup" && root) graph = { ...graph, groups: graph.groups.filter((group) => group.id !== operation.groupId) }; if (operation.type === "moveNodes") { const positions = operation.positions as Array<{ nodeId: string; position: { x: number; y: number } }>; if (root) graph = { ...graph, nodes: graph.nodes.map((node) => ({ ...node, position: positions.find((item) => item.nodeId === node.id)?.position ?? node.position })) }; else childGraph = { ...childGraph, nodes: childGraph.nodes.map((node) => ({ ...node, position: positions.find((item) => item.nodeId === node.id)?.position ?? node.position })) }; } if (operation.type === "updateModule" && root) graph = { ...graph, modules: graph.modules.map((module) => module.id === operation.moduleId ? operation.module as typeof module : module) }; if (operation.type === "updateModuleInterface" && root) graph = { ...graph, modules: graph.modules.map((module) => module.id === operation.moduleId ? { ...module, interface: operation.interface as typeof module.interface } : module) }; } };
     Object.defineProperty(window, "__canvasTransactions", { value: [] });
     Object.defineProperty(window, "ether", { value: { document: { onEvent: () => () => undefined, bootstrap: async () => descriptor(), new: async () => descriptor(), open: async () => descriptor(), openDropped: async () => descriptor(), save: async () => descriptor(), saveAs: async () => descriptor(), saveCopy: async () => descriptor(), compact: async () => ({ beforeBytes: 1, afterBytes: 1 }), makePortable: async () => ({ cancelled: false, embeddedCount: 0, embeddedBytes: 0, expectedBytes: 0, expectedCount: 0, missingReferences: [] }), close: async () => null }, graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) }, application: { onEvent: () => () => undefined, command: async (command: { name: string; payload?: { transaction?: { baseGraphRevisions: Record<string, string>; operations: Array<Record<string, unknown>> } } }) => { const transaction = command.payload?.transaction; if (transaction) { for (const [graphId, base] of Object.entries(transaction.baseGraphRevisions)) if (graphRevisions[graphId] !== base) throw new Error("stale graph revision"); update(transaction.operations); revision += 1; for (const graphId of Object.keys(transaction.baseGraphRevisions)) graphRevisions[graphId] = `${graphId}-revision-${revision}`; } (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.push(command); if (command.name === "run.preview") return { payload: { plan: { id: "selected-plan", contentHash: `sha256:v1:${"a".repeat(64)}`, estimatedCalls: 1 } } }; if (command.name === "permission.grantRun") return { payload: { permitId: "selected-permit" } }; if (command.name === "run.start") return { payload: { job: { id: "selected-job" } } }; return { payload: { kind: "revision", documentRevisionId: `revision-${revision}`, graphRevisions: Object.entries(graphRevisions).map(([graphId, revisionId]) => ({ graphId, revisionId })) } }; }, query: async (query: { name: string; payload: { graphId?: string } }) => query.name === "node.catalog" ? { name: "node.catalog", payload: { nodes: catalog } } : ({ name: query.name, payload: { graph: query.payload.graphId === "graph-child" ? childGraph : graph, documentRevisionId: `revision-${revision}`, graphRevisionId: graphRevisions[query.payload.graphId ?? "graph-root"] } }) }, artifacts: { search: async () => [], generateFake: async () => [] }, references: { list: async () => [], act: async () => [] }, runtime: { versions: async () => ({ electron: "43", node: "24" }) } } });
   });
@@ -66,21 +66,28 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await addWithRealMouse("generation.image");
   await expect(page.locator(".ether-node")).toHaveCount(4);
   await expect(page.getByTestId("channel-zone-output-data").first()).toHaveAttribute("data-connected", "true");
-  await page.getByRole("button", { name: "Target channel Text" }).dispatchEvent("pointerdown", { button: 2, bubbles: true });
+  await page.locator(".ether-edge-hit-target").dispatchEvent("click", { bubbles: true });
+  const edgeInspector = page.getByTestId("edge-inspector");
+  await expect(edgeInspector).toContainText("Adapter · local.data-to-text");
+  await expect(edgeInspector).toContainText("Receiver field");
+  await expect(edgeInspector.locator("details", { hasText: "Connection diagnostics" })).not.toHaveAttribute("open", "");
+  await edgeInspector.getByLabel("Output selection", { exact: true }).selectOption("latest");
+  await page.getByRole("button", { name: "Target channel Text" }).click();
   const targetPicker = page.getByTestId("edge-channel-picker-target");
   await expect(targetPicker).toBeVisible();
   await expect(targetPicker.getByRole("button", { name: "Image" })).toBeDisabled();
-  await targetPicker.getByRole("button", { name: "Data" }).dispatchEvent("pointerenter", { button: 2, bubbles: true });
-  await targetPicker.getByRole("button", { name: "Data" }).dispatchEvent("pointerup", { button: 2, bubbles: true });
+  await targetPicker.getByRole("button", { name: "Data" }).click();
   await expect(page.getByRole("button", { name: "Target channel Data" })).toBeVisible();
   await page.getByTestId("edge-role-chip").getByRole("button", { name: "General" }).click();
   await page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(4);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(5);
   await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
   await expect(page.locator(".ether-node")).toHaveCount(5);
-  await page.getByTestId("edge-role-chip").click({ button: "right" });
+  await promptNode.locator(".ether-node-title").click();
+  await page.getByRole("button", { name: "Target channel Data" }).click({ button: "right" });
   await expect(page.getByTestId("edge-role-chip")).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(6);
+  await expect(promptNode.locator(".ether-node")).toHaveClass(/is-selected/);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(7);
 
   await expect(page.getByLabel("Output output-1 text")).toBeVisible();
   const moduleCard = page.getByTestId("ether-module-node");
@@ -108,7 +115,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.getByTestId("module-inspector").getByRole("button", { name: "Collapse" }).click();
   await expect(page.getByTestId("ether-module-node")).toContainText("Collapsed");
   await expect(page.getByTestId("ether-module-node").getByRole("button", { name: "Expand" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(12);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(13);
 
   const rootImage = page.locator('[data-testid="rf__node-image"]');
   await page.locator(".react-flow__node-etherNode").nth(2).locator(".ether-node-main p").click();
@@ -119,12 +126,12 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" }).click();
   await expect(page.getByTestId("canvas-status")).toContainText("Selected run started: selected-job");
   await page.getByRole("button", { name: "Undo graph transaction" }).click(); await page.getByRole("button", { name: "Redo graph transaction" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(17);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(18);
   const duplicateSelection = page.getByRole("button", { name: "Duplicate", exact: true });
   await expect(duplicateSelection).toBeEnabled();
   await duplicateSelection.click();
   await expect(page.locator(".ether-node")).toHaveCount(7);
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(18);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(19);
 });
 
 test("keeps node creation disabled while a new document with the same graph id hydrates", async ({ page }) => {

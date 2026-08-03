@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { Background, Controls, MiniMap, ReactFlow, SelectionMode, useReactFlow, type Connection, type Node, type NodeProps, type OnNodeDrag, type Viewport, type XYPosition } from "@xyflow/react";
+import { validateConnection } from "@ether/graph-kernel";
 import { NodeDefinitionIdSchema, type EtherGraph, type NodeDefinitionId, type NodeLibraryItem, type NodePosition, type PayloadChannel } from "@ether/schema";
 import { EtherEdge, type EtherFlowEdgeData } from "./edges/EtherEdge";
 import { EtherNode, type EtherCanvasNodeData, ModuleNode } from "./EtherNode";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { marqueeHitIds, useCanvasInteraction } from "./hooks/useCanvasInteraction";
-import { channelsFor } from "./ports/ChannelRail";
+import { PAYLOAD_CHANNELS, channelsFor } from "./ports/channelRegistry";
 import { projectCanvasChannelActivity } from "./projection";
 import { markPerformance, measurePerformance } from "../performance/marks";
 import { notifyRendererInteractive } from "../runtime/interactive";
@@ -18,6 +19,7 @@ function OverviewCluster({ data }: NodeProps & { data: { count: number; title: s
   return <article className="ether-node ether-node-overview ether-node-family-canvas" data-testid="ether-node" data-cluster-node-count={data.count} aria-label={`${data.count} nodes in this canvas region`}><header className="ether-node-header"><span className="ether-node-family">Overview</span></header><strong>{data.title}</strong><span>{data.count} nodes</span></article>;
 }
 const nodeTypes = { etherNode: EtherNode, overviewCluster: OverviewCluster, module: ModuleNode }; const edgeTypes = { etherEdge: EtherEdge };
+type ConnectionIntent = { nodeId: string; handleId: PayloadChannel; handleType: "source" | "target" };
 export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selectedIds, selectedEdgeId, selectedModuleId, activeEditor, commands, viewport, onAddNode, onMove, onMoveModule, onResize, onDelete, onEditRequest, onEditCommit, onEditCancel, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onEdgeSelected, onModuleSelected, onViewport, onCommandUnavailable }: {
   graph: EtherGraph; catalog: readonly NodeLibraryItem[]; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; selectedIds: readonly string[]; selectedEdgeId: string | null; selectedModuleId: string | null; activeEditor: { nodeId: string; field: CanvasEditorField } | null; commands: readonly GraphCommand[]; viewport?: Viewport; onAddNode(definitionId: NodeDefinitionId, position: NodePosition): void; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onEditRequest(id: string, field: CanvasEditorField): void; onEditCommit(id: string, field: CanvasEditorField, value: string): Promise<boolean>; onEditCancel(): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onModuleSelected(id: string | null, additive?: boolean): void; onViewport(viewport: Viewport): void; onCommandUnavailable(message: string): void;
 }) {
@@ -34,6 +36,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const [semanticOverview, setSemanticOverview] = useState(largeGraph && initialViewport.zoom < 0.4);
   const [placementPreview, setPlacementPreview] = useState<{ x: number; y: number; title: string } | null>(null);
   const [quickAdd, setQuickAdd] = useState<{ anchor: { x: number; y: number }; position: NodePosition } | null>(null);
+  const [connectionIntent, setConnectionIntent] = useState<ConnectionIntent | null>(null);
   const showSemanticOverview = largeGraph && semanticOverview;
   useEffect(() => {
     if (activeEditor !== null) beginInteractionEdit();
@@ -101,15 +104,60 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     };
   }, [flow, graph.id, graph.nodes.length]);
   const compatibleChannels = useCallback((edge: EtherGraph["edges"][number], endpoint: "source" | "target") => {
-    const value = endpoint === "source" ? edge.from : edge.to; const oppositeChannel = endpoint === "source" ? edge.to.channel : edge.from.channel;
+    const value = endpoint === "source" ? edge.from : edge.to;
     if (value.kind === "module") return [value.channel];
     const node = graph.nodes.find((item) => item.id === value.nodeId);
     const available = node === undefined ? [value.channel] : channelsFor(node.definitionId, endpoint === "source" ? "output" : "input");
-    // Same-channel moves are always valid. Keep an existing adapted channel available, but do not
-    // claim a cross-channel adapter exists without an application capability decision.
-    return available.filter((channel) => channel === value.channel || channel === oppositeChannel);
-  }, [graph.nodes]);
+    const from = edge.from; const to = edge.to;
+    if (from.kind !== "node" || to.kind !== "node") return [value.channel];
+    const source = graph.nodes.find((item) => item.id === from.nodeId);
+    const target = graph.nodes.find((item) => item.id === to.nodeId);
+    if (source === undefined || target === undefined) return [value.channel];
+    return available.filter((channel) => {
+      if (channel === value.channel) return true;
+      const candidate = endpoint === "source" ? { ...edge, from: { ...edge.from, channel } } : { ...edge, to: { ...edge.to, channel } };
+      return validateConnection({
+        sourceDefinitionId: source.definitionId,
+        sourceChannel: candidate.from.channel,
+        targetDefinitionId: target.definitionId,
+        targetChannel: candidate.to.channel,
+        role: candidate.role,
+        adapter: candidate.adapter,
+        candidate,
+        existingEdges: graph.edges,
+        capabilities: [],
+        topology: { graphs: [graph] }
+      }).allowed;
+    });
+  }, [graph]);
   const activity = useMemo(() => projectCanvasChannelActivity(graph), [graph]);
+  const intentChannelsFor = useCallback((nodeId: string, definitionId: NodeDefinitionId, direction: "input" | "output"): readonly PayloadChannel[] | null => {
+    if (connectionIntent === null) return null;
+    if (connectionIntent.nodeId === nodeId) return [];
+    const origin = graph.nodes.find((node) => node.id === connectionIntent.nodeId);
+    if (origin === undefined) return [];
+    if (connectionIntent.handleType === "source" && direction === "input") {
+      return channelsFor(definitionId, "input").filter((targetChannel) => validateConnection({
+        sourceDefinitionId: origin.definitionId,
+        sourceChannel: connectionIntent.handleId,
+        targetDefinitionId: definitionId,
+        targetChannel,
+        role: "general",
+        capabilities: []
+      }).allowed);
+    }
+    if (connectionIntent.handleType === "target" && direction === "output") {
+      return channelsFor(definitionId, "output").filter((sourceChannel) => validateConnection({
+        sourceDefinitionId: definitionId,
+        sourceChannel,
+        targetDefinitionId: origin.definitionId,
+        targetChannel: connectionIntent.handleId,
+        role: "general",
+        capabilities: []
+      }).allowed);
+    }
+    return [];
+  }, [connectionIntent, graph.nodes]);
   const overviewClusters = useMemo(() => {
     if (!showSemanticOverview) return [];
     const cellWidth = 1_040;
@@ -140,12 +188,12 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       const height = module.collapsed ? 112 : module.size.height;
       return { id: `module:${module.id}`, type: "module", position: module.position, width: module.size.width, height, draggable: !readOnly && !moduleIsLocked(module), selected: selectedModuleId === module.id, data: { title: module.title, description: module.description ?? "", accent: moduleAccent(module), locked: moduleIsLocked(module), collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id) }, style: { width: module.size.width, height, zIndex: 1 } };
     }),
-    ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => { const editing = activeEditor?.nodeId === node.id; const height = editing ? Math.max(220, node.size.height) : node.size.height; return { id: node.id, type: "etherNode", position: node.position, width: node.size.width, height, selected: selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], status: nodeStatuses[node.id] ?? null, readOnly, activeEditor: editing ? activeEditor.field : null, onDelete, onResizeStart: interaction.beginResize, onResize, onResizeEnd: interaction.settle, onSelect: interaction.selectNode, onEditRequest, onEditCommit, onEditCancel } satisfies EtherCanvasNodeData, style: { width: node.size.width, height, zIndex: 1 } }; }))
-  ], [activeEditor, activity, graph.modules, graph.nodes, interaction.beginResize, interaction.selectNode, interaction.settle, nodeStatuses, onDelete, onEditCancel, onEditCommit, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectedIds, selectedModuleId, showSemanticOverview]);
+    ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => { const editing = activeEditor?.nodeId === node.id; const height = editing ? Math.max(220, node.size.height) : node.size.height; return { id: node.id, type: "etherNode", position: node.position, width: node.size.width, height, selected: selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], intentInput: intentChannelsFor(node.id, node.definitionId, "input"), intentOutput: intentChannelsFor(node.id, node.definitionId, "output"), status: nodeStatuses[node.id] ?? null, readOnly, activeEditor: editing ? activeEditor.field : null, onDelete, onResizeStart: interaction.beginResize, onResize, onResizeEnd: interaction.settle, onSelect: interaction.selectNode, onEditRequest, onEditCommit, onEditCancel } satisfies EtherCanvasNodeData, style: { width: node.size.width, height, zIndex: 1 } }; }))
+  ], [activeEditor, activity, graph.modules, graph.nodes, intentChannelsFor, interaction.beginResize, interaction.selectNode, interaction.settle, nodeStatuses, onDelete, onEditCancel, onEditCommit, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectedIds, selectedModuleId, showSemanticOverview]);
   const edges = useMemo(() => showSemanticOverview ? [] : graph.edges.map((edge) => ({ id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, selected: selectedEdgeId === edge.id, data: { edge, readOnly, compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel } satisfies EtherFlowEdgeData })), [compatibleChannels, graph.edges, onChannel, onDeleteEdge, onRole, readOnly, selectedEdgeId, showSemanticOverview]);
   markPerformance("canvas:projection:end");
   measurePerformance("canvas:projection", "canvas:projection:start", "canvas:projection:end");
-  const onConnectFlow = useCallback((connection: Connection) => { if (readOnly || !connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return; onConnect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle); }, [onConnect, readOnly]);
+  const onConnectFlow = useCallback((connection: Connection) => { setConnectionIntent(null); if (readOnly || !connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return; onConnect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle); }, [onConnect, readOnly]);
   const insertionAt = useCallback((clientX: number, clientY: number) => flow.screenToFlowPosition({ x: clientX, y: clientY }), [flow]);
   const openQuickAdd = useCallback((clientX: number, clientY: number) => {
     if (readOnly || catalog.length === 0) return;
@@ -319,8 +367,14 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         onEdgeClick={(_event, edge) => { interaction.clearSelection(); onModuleSelected(null); onEdgeSelected(edge.id); }}
         onNodeDragStart={(_event, node) => interaction.beginMove(graph.nodes.some((item) => item.id === node.id) ? node.id : undefined)}
         onNodeDragStop={onNodeDragStop}
-        onConnectStart={interaction.beginConnect}
-        onConnectEnd={interaction.settle}
+        onConnectStart={(_event, params) => {
+          interaction.beginConnect();
+          const channel = params.handleId === null ? null : PAYLOAD_CHANNELS.find((candidate) => candidate === params.handleId) ?? null;
+          if (params.nodeId !== null && channel !== null && (params.handleType === "source" || params.handleType === "target")) {
+            setConnectionIntent({ nodeId: params.nodeId, handleId: channel, handleType: params.handleType });
+          }
+        }}
+        onConnectEnd={() => { setConnectionIntent(null); interaction.settle(); }}
         onConnect={onConnectFlow}
         onMoveStart={(event) => {
           if (event instanceof MouseEvent && event.button === 2) interaction.beginPan();

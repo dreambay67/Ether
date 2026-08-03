@@ -1,3 +1,6 @@
+import { getNodeDefinition } from "@ether/graph-kernel";
+import type { NodeDefinitionId } from "@ether/schema";
+
 export const PAYLOAD_CHANNELS = ["text", "image", "mask", "data", "video", "audio"] as const;
 
 export type PayloadChannel = (typeof PAYLOAD_CHANNELS)[number];
@@ -144,4 +147,9 @@ export function channelLabel(channel: PayloadChannel) {
 
 export function roleLabel(role: ConnectionRole) {
   return ROLE_LABELS[role];
+}
+
+export function channelsFor(definitionId: NodeDefinitionId, direction: "input" | "output") {
+  const library = getNodeDefinition(definitionId).library;
+  return direction === "input" ? library.inputChannels : library.outputChannels;
 }
