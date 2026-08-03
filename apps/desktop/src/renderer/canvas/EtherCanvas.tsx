@@ -294,7 +294,13 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     }
   }, [document.documentId, graph.edges, graph.id, graph.modules, readOnly, report, setSelectedIds, transactions]);
   const fitGraph = useCallback(() => {
-    void flow.fitView({ padding: 0.2, minZoom: 0.1, maxZoom: 1.25, duration: 240 });
+    // Pane resizes re-center the viewport on their next animation frame. Fit after those
+    // adjustments settle so an immediate Home command remains authoritative.
+    globalThis.requestAnimationFrame(() => {
+      globalThis.requestAnimationFrame(() => {
+        void flow.fitView({ padding: 0.2, minZoom: 0.1, maxZoom: 1.25, duration: 240 });
+      });
+    });
   }, [flow]);
   const commands = useGraphCommands({
     graph, readOnly, selectedNodeIds: selectedIds, selectedEdgeId, selectedModuleId,

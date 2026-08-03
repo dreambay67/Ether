@@ -119,13 +119,25 @@ test("authors the practical phase-one journey from a blank packaged document", a
       await expect(page.getByTestId(`pane-${paneId}`)).toHaveClass(/is-collapsed/u);
     }
     const expandedCanvasBox = await requiredBox(canvas, "expanded authoring canvas");
-    await input.leftClick(blankCanvasPoint(canvasBox), "Return focus to the canvas", "Canvas focus owns the final fit command.");
+    await input.leftClick(blankCanvasPoint(expandedCanvasBox), "Return focus to the canvas", "Canvas focus owns the final fit command.");
     await expect(canvas).toBeFocused();
     await input.pressKey("Home", "Fit the authored graph", "Home fits all authored node types into the viewport.");
     await page.waitForTimeout(450);
     for (const definition of canonicalDefinitions) await expect(page.locator(`.ether-node[data-node-definition='${definition}']`).first()).toBeVisible();
-    const authoredBounds = await page.getByTestId("ether-node").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect()).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })));
-    expect(authoredBounds.every((bounds) => bounds.left >= expandedCanvasBox.x && bounds.top >= expandedCanvasBox.y && bounds.right <= expandedCanvasBox.x + expandedCanvasBox.width && bounds.bottom <= expandedCanvasBox.y + expandedCanvasBox.height)).toBe(true);
+    const authoredBounds = await page.getByTestId("ether-node").evaluateAll((nodes) => nodes.map((node) => {
+      const rect = node.getBoundingClientRect();
+      return { definition: node.getAttribute("data-node-definition"), left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+    }));
+    const overflow = authoredBounds.flatMap((bounds) => {
+      const outside = {
+        left: expandedCanvasBox.x - bounds.left,
+        top: expandedCanvasBox.y - bounds.top,
+        right: bounds.right - (expandedCanvasBox.x + expandedCanvasBox.width),
+        bottom: bounds.bottom - (expandedCanvasBox.y + expandedCanvasBox.height)
+      };
+      return Object.values(outside).some((distance) => distance > 1) ? [{ definition: bounds.definition, ...outside }] : [];
+    });
+    expect(overflow, "Home must fit every authored card inside the expanded canvas").toEqual([]);
     const visibleDefinitions = await page.getByTestId("ether-node").evaluateAll((nodes) => [...new Set(nodes.map((node) => node.getAttribute("data-node-definition")).filter(Boolean))]);
     expect(visibleDefinitions.sort()).toEqual([...canonicalDefinitions].sort());
     input.observe("All canonical cards authored", "Every canonical type can be created from the blank document without a graph fixture.", `${visibleDefinitions.length} distinct node definitions are visible on the durable canvas.`);
