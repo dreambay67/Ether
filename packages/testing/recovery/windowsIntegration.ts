@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -9,6 +9,21 @@ const execFileAsync = promisify(execFile);
 const MAX_ENCODED_POWERSHELL_COMMAND_LENGTH = 30_000;
 
 export const WINDOWS_INTEGRATION_MODE = "ETHER_WINDOWS_INTEGRATION_MODE";
+export const A02_APPROVED_ROUTE = "ETHER_A02_APPROVED_ROUTE";
+export const A02_APPROVED_ROUTES = ["normal", "association", "explorer-drag", "jump-list"] as const;
+export type A02ApprovedRoute = (typeof A02_APPROVED_ROUTES)[number];
+export const A02_ROUTE_TITLES: Readonly<Record<A02ApprovedRoute, string>> = Object.freeze({
+  normal: "records the scoped A02 packaged native-picker, identity, lease, and association dry-run journey",
+  association: "runs the separately approved reversible Explorer association route",
+  "explorer-drag": "runs the separately approved Explorer pointer drag/drop route",
+  "jump-list": "runs the separately approved Windows Jump List known-and-missing target route"
+});
+
+/** Discovery only: this command has no mutation/shell approvals and Playwright --list never executes a test body. */
+export function a02ApprovalFreeListCommand(route: A02ApprovedRoute): string {
+  const title = A02_ROUTE_TITLES[route].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return `pnpm.cmd -C packages/testing exec cross-env ETHER_WINDOWS_INTEGRATION_MODE=packaged ${A02_APPROVED_ROUTE}=${route} playwright test --config playwright.document-windows-integration.config.ts --grep "^${title}$" --list --workers=1`;
+}
 export const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
 export const ASSOCIATION_APPROVAL_VALUE = "approved-by-main";
 export const SHELL_UI_APPROVAL = "ETHER_A02_SHELL_UI_APPROVAL";
@@ -99,6 +114,16 @@ export type WindowsShellDeletionCandidate = {
   appData: string;
   relativePath: string;
 };
+
+export type DragDiagnosticSidecar = {
+  armPath: string;
+  deadlineEpochMs: number;
+  parentPid: number;
+  sidecarPath: string;
+  token: string;
+};
+
+type DragDiagnosticStage = "prepared" | "release-armed" | "mouse-down-sent" | "source-foreground-proven" | "threshold-crossed" | "target-proven" | "release-attempted" | "released" | "transition-proven" | "abort-requested";
 
 const OPAQUE_SHELL_DESTINATION = /^(?:AutomaticDestinations\/[^/]+\.automaticDestinations-ms|CustomDestinations\/[^/]+\.customDestinations-ms)$/iu;
 const RECOVERY_AUTOMATIC_DESTINATION = /^AutomaticDestinations\/[^/]+\.automaticDestinations-ms$/iu;
@@ -260,6 +285,34 @@ export function associationArtifactsMayBeCleaned(input: {
 
 export function isAssociationMutationApproved(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment[ASSOCIATION_APPROVAL] === ASSOCIATION_APPROVAL_VALUE;
+}
+
+/** Route selection is deliberately exact and case-sensitive: stale approvals cannot select a route. */
+export function isA02ApprovedRoute(route: A02ApprovedRoute, environment: NodeJS.ProcessEnv = process.env): boolean {
+  return environment[A02_APPROVED_ROUTE] === route;
+}
+
+export function requireA02ApprovedRoute(route: A02ApprovedRoute, environment: NodeJS.ProcessEnv = process.env): void {
+  if (!isA02ApprovedRoute(route, environment)) {
+    throw new Error(`Windows route ${route} is disabled. Main must explicitly set ${A02_APPROVED_ROUTE}=${route}.`);
+  }
+}
+
+export function requireAssociationRouteApproval(environment: NodeJS.ProcessEnv = process.env): void {
+  requireA02ApprovedRoute("association", environment);
+  requireAssociationMutationApproval(environment);
+  requireShellUiApproval(environment);
+}
+
+export function requireExplorerDragRouteApproval(environment: NodeJS.ProcessEnv = process.env): void {
+  requireA02ApprovedRoute("explorer-drag", environment);
+  requireShellUiApproval(environment);
+}
+
+export function requireJumpListRouteApproval(environment: NodeJS.ProcessEnv = process.env): void {
+  requireA02ApprovedRoute("jump-list", environment);
+  requireAssociationMutationApproval(environment);
+  requireShellUiApproval(environment);
 }
 
 export function requireAssociationMutationApproval(environment: NodeJS.ProcessEnv = process.env): void {
@@ -473,8 +526,17 @@ export async function createAssociationDryRunPlan(input: {
  * Restoration runs in finally at the call site even if UI Automation fails.
  */
 export async function applyReversibleAssociation(plan: ReversibleAssociationPlan): Promise<void> {
-  requireAssociationMutationApproval();
-  requireShellUiApproval();
+  requireAssociationRouteApproval();
+  await applyReversibleAssociationWithApprovedRoute(plan);
+}
+
+/** Jump List setup has its own exact route; it never inherits association approval. */
+export async function applyReversibleAssociationForJumpList(plan: ReversibleAssociationPlan): Promise<void> {
+  requireJumpListRouteApproval();
+  await applyReversibleAssociationWithApprovedRoute(plan);
+}
+
+async function applyReversibleAssociationWithApprovedRoute(plan: ReversibleAssociationPlan): Promise<void> {
   if (!plan.testOpenCommand.includes(RECOVERY_SHELL_IDENTITY_ARGUMENT) || !plan.testOpenCommand.includes("--user-data-dir=")) {
     throw new Error("Refusing association mutation without an isolated recovery shell command.");
   }
@@ -557,10 +619,9 @@ export async function triggerAssociationRestorationWatchdog(watchdog: Associatio
   if (!await isFile(watchdog.completePath)) throw new Error("Association watchdog exited without recording restoration.");
 }
 
-/** Uses Windows Explorer plus UI Automation InvokePattern; it never shells the document directly. */
+/** Uses Explorer UIA only to prove the exact focused item, then native Enter; it never shells the document directly. */
 export async function invokeDocumentFromExplorerWithUia(input: { documentPath: string; etherPid: number }): Promise<string> {
-  requireAssociationMutationApproval();
-  requireShellUiApproval();
+  requireAssociationRouteApproval();
   return runPowerShell(buildExplorerAssociationInvokeScript(input));
 }
 
@@ -570,7 +631,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint p); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern bool GetCursorPos(out POINT p); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); [DllImport(\"user32.dll\")] public static extern bool ClientToScreen(IntPtr h,ref POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l); }' -ErrorAction SilentlyContinue",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint p); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern bool GetCursorPos(out POINT p); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte v,byte s,uint f,UIntPtr e); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); [DllImport(\"user32.dll\")] public static extern bool ClientToScreen(IntPtr h,ref POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l); }' -ErrorAction SilentlyContinue",
     `$document = '${ps(input.documentPath)}'`,
     `$etherPid = ${input.etherPid}`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
@@ -609,9 +670,39 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
 
 function hardenAssociationPointerScript(script: string): string {
   const actualPointCheck = exactWindowRootAtPointScript("EtherA02Native", "$cursor.X", "$cursor.Y", "$explorerHwnd", "Association chrome actual cursor");
+  const invokeActivation = [
+    "$item = $candidates[0]",
+    "A 'Immediately before association Invoke'",
+    "$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
+    "if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern after chrome click' }",
+    "if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Exact Ether target did not remain minimized before association Invoke' }",
+    exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Invoke"),
+    "$activationStartedAt = [DateTime]::UtcNow",
+    "([System.Windows.Automation.InvokePattern]$pattern).Invoke()",
+    exactEtherForegroundTransitionScript("EtherA02Native", "association Invoke")
+  ].join("; ");
+  const nativeEnterActivation = [
+    "$item = $candidates[0]",
+    "A 'Immediately before association Enter'",
+    "if (-not $item.Current.IsEnabled -or $item.Current.IsOffscreen -or -not $item.Current.IsKeyboardFocusable) { throw 'Enter:state' }",
+    "$itemRuntimeId = [string]::Join(',', @($item.GetRuntimeId()))",
+    "try { $item.SetFocus() } catch { throw 'Enter:focus' }",
+    "if (-not $item.Current.HasKeyboardFocus) { throw 'Enter:focus' }",
+    "$focused = [System.Windows.Automation.AutomationElement]::FocusedElement",
+    "if ($null -eq $focused -or [string]::Join(',', @($focused.GetRuntimeId())) -ne $itemRuntimeId) { throw 'Enter:identity' }",
+    "A 'Immediately before association Enter'",
+    "if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Enter:minimized' }",
+    exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Enter"),
+    "$returnDown = $false",
+    "try { $activationStartedAt = [DateTime]::UtcNow; [EtherA02Native]::keybd_event(0x0D,0,0,[UIntPtr]::Zero); $returnDown = $true; [EtherA02Native]::keybd_event(0x0D,0,2,[UIntPtr]::Zero); $returnDown = $false",
+    exactEtherForegroundTransitionScript("EtherA02Native", "association Enter"),
+    "} finally { if ($returnDown) { [EtherA02Native]::keybd_event(0x0D,0,2,[UIntPtr]::Zero) } }"
+  ].join("; ");
   return script
     .replace("$clickX = [int]($explorerBounds.Left + 2); $clickY = [int]($explorerBounds.Top + 2)", "$clickX = [int]($explorerBounds.Left + 2); $clickY = [int][Math]::Round($explorerBounds.Top + ($explorerBounds.Height / 2))")
     .replace("$clickY -ge $clientOrigin.Y", "$clickX -ge $clientOrigin.X")
+    .replace(invokeActivation, nativeEnterActivation)
+    .replace("uia-invoked", "native-enter")
     .replace(
       "[EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null",
       `if (-not [EtherA02Native]::SetCursorPos($clickX,$clickY)) { throw 'Association chrome: cursor placement failed' }; $cursor = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::GetCursorPos([ref]$cursor)) { throw 'Association chrome: cursor read failed' }; if($cursor.X -ne $clickX -or $cursor.Y -ne $clickY){throw 'Association chrome: cursor readback mismatch'}; ${actualPointCheck}; $lParam = [intptr](($cursor.Y -shl 16) -bor ($cursor.X -band 0xffff)); $hit = [int][EtherA02Native]::SendMessage($explorerHwnd,0x84,[intptr]::Zero,$lParam); if ($hit -in 1,3,8,9,20) { throw 'Association chrome: interactive hit test rejected' }; if ($hit -notin 10,11,12,13,14,15,16,17) { throw 'Association chrome: non-inert hit test rejected' }`
@@ -645,6 +736,9 @@ function compactAssociationScript(script: string): string {
     .replaceAll("$foregroundHwnd", "$fh")
     .replaceAll("$foregroundExplorerPid", "$fp")
     .replaceAll("$foregroundPid", "$fpid")
+    .replaceAll("$itemRuntimeId", "$ir")
+    .replaceAll("$focused", "$fo")
+    .replaceAll("$returnDown", "$rd")
     .replaceAll("$transitionLatencyMs", "$lm");
 }
 
@@ -711,21 +805,147 @@ function exactEtherForegroundTransitionScript(nativeType: string, stage: string)
  * DataTransfer, bridge, or synthetic DOM drop is involved.
  */
 export async function dragDocumentFromExplorerWithNativePointer(input: {
+  diagnostic: DragDiagnosticSidecar;
   documentPath: string;
   etherPid: number;
   target: NativeScreenPoint;
 }): Promise<string> {
-  requireShellUiApproval();
-  return runPowerShell(buildNativeExplorerDragScript(input));
+  requireExplorerDragRouteApproval();
+  assertDragDiagnosticSidecar(input.diagnostic);
+  return runTrackedNativeExplorerDrag(input, buildNativeExplorerDragScript(input));
+}
+
+async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticSidecar }, script: string): Promise<string> {
+  assertPowerShellEncodedCommandLength(script);
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], {
+    env: {
+      ...process.env,
+      ETHER_A02_DRAG_ARM_PATH: input.diagnostic.armPath,
+      ETHER_A02_DRAG_DEADLINE: String(input.diagnostic.deadlineEpochMs),
+      ETHER_A02_DRAG_PARENT_PID: String(input.diagnostic.parentPid),
+      ETHER_A02_DRAG_SIDECAR_PATH: input.diagnostic.sidecarPath,
+      ETHER_A02_DRAG_TOKEN: input.diagnostic.token
+    },
+    stdio: ["ignore", "pipe", "pipe"], windowsHide: true
+  });
+  if (child.pid === undefined || child.pid <= 0) throw new Error("Explorer drag did not create a retained PowerShell child PID.");
+  await writeDragDiagnosticStage(input.diagnostic, "prepared", { childPid: child.pid, down: false, releaseAttempted: false });
+  const watchdog = startDragReleaseWatchdog({ ...input.diagnostic, childPid: child.pid });
+  await writeFile(input.diagnostic.armPath, `${input.diagnostic.token}\n`, "utf8");
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  const stageNames: Record<string, DragDiagnosticStage> = { a: "release-armed", f: "source-foreground-proven", h: "threshold-crossed", m: "mouse-down-sent", p: "prepared", r: "released", t: "target-proven", u: "release-attempted", v: "transition-proven" };
+  const observedStages = new Set<DragDiagnosticStage>();
+  let partialLine = "";
+  let stageWrites = Promise.resolve();
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdout.push(chunk);
+    const lines = `${partialLine}${chunk.toString("utf8")}`.split(/\r?\n/u);
+    partialLine = lines.pop() ?? "";
+    for (const line of lines) {
+      const [, code, down, releaseAttempted] = /^A02D\|([apmfhturv])\|([01])\|([01])$/u.exec(line) ?? [];
+      const stage = code === undefined ? undefined : stageNames[code];
+      if (stage !== undefined) {
+        observedStages.add(stage);
+        stageWrites = stageWrites.then(() => writeDragDiagnosticStage(input.diagnostic, stage, { childPid: child.pid!, down: down === "1", releaseAttempted: releaseAttempted === "1" }));
+      }
+    }
+  });
+  child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
+  const exited = onceChildExit(child);
+  const timeout = setTimeout(() => child.kill(), Math.max(1, input.diagnostic.deadlineEpochMs - Date.now()));
+  try {
+    const exit = await exited;
+    if (exit.code !== 0 || exit.signal !== null) {
+      throw new Error(`Explorer drag child failed code=${exit.code ?? "none"} signal=${exit.signal ?? "none"}: ${Buffer.concat(stderr).toString("utf8").trim()}`);
+    }
+    await stageWrites;
+    if (!observedStages.has("transition-proven")) {
+      throw new Error("Explorer drag child did not persist exact release/transition proof.");
+    }
+    await writeDragDiagnosticStage(input.diagnostic, "transition-proven", { childPid: child.pid, down: false, releaseAttempted: true });
+    return Buffer.concat(stdout).toString("utf8").trim();
+  } catch (error) {
+    await writeDragDiagnosticStage(input.diagnostic, "abort-requested", { childPid: child.pid, down: true, releaseAttempted: false });
+    if (child.exitCode === null) child.kill();
+    await independentDragLeftUp(input.diagnostic, child.pid);
+    await Promise.race([onceChildExit(child), delay(5_000)]);
+    if (child.exitCode === null) throw new Error("Explorer drag retained child did not exit after the bounded abort request.", { cause: error });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    await disarmDragReleaseWatchdog(watchdog);
+  }
+}
+
+type DragWatchdog = { child: ChildProcess; disarmPath: string; failurePath: string };
+
+function startDragReleaseWatchdog(input: DragDiagnosticSidecar & { childPid: number }): DragWatchdog {
+  const disarmPath = `${input.sidecarPath}.watchdog-disarm`;
+  const failurePath = `${input.sidecarPath}.watchdog-failure`;
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    `$token='${ps(input.token)}'; $sidecar='${ps(input.sidecarPath)}'; $disarm='${ps(disarmPath)}'; $failure='${ps(failurePath)}'; $childPid=${input.childPid}; $parentPid=${input.parentPid}; $deadline=[DateTimeOffset]::FromUnixTimeMilliseconds(${input.deadlineEpochMs}).UtcDateTime`,
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02DragWatchdog { [DllImport(\"user32.dll\")] public static extern uint SendInput(uint n, INPUT[] i, int s); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int v); [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public MOUSEINPUT mi; } [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx,dy; public uint data,flags,time; public IntPtr extra; } public static uint Up() { var i=new INPUT[]{new INPUT{type=0,mi=new MOUSEINPUT{flags=0x0004}}}; return SendInput(1,i,Marshal.SizeOf(typeof(INPUT))); } }' -ErrorAction SilentlyContinue",
+    "while ([DateTime]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $disarm)) { if (-not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -or -not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) { break }; Start-Sleep -Milliseconds 100 }",
+    "if (-not (Test-Path -LiteralPath $disarm)) { try { $count=[EtherA02DragWatchdog]::Up(); $state=[EtherA02DragWatchdog]::GetAsyncKeyState(1); [IO.File]::WriteAllText($sidecar + '.watchdog-result', ('token=' + $token + ';childPid=' + $childPid + ';parentPid=' + $parentPid + ';eventCount=' + $count + ';asyncKeyState=' + $state)); } catch { [IO.File]::WriteAllText($failure, $_.Exception.Message) } }"
+  ].join("; ");
+  assertPowerShellEncodedCommandLength(script);
+  const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { detached: true, stdio: "ignore", windowsHide: true });
+  if (child.pid === undefined || child.pid <= 0) throw new Error("Explorer drag watchdog did not create a retained PID.");
+  child.unref();
+  return { child, disarmPath, failurePath };
+}
+
+async function disarmDragReleaseWatchdog(watchdog: DragWatchdog): Promise<void> {
+  await writeFile(watchdog.disarmPath, "verified\n", "utf8");
+  await Promise.race([onceChildExit(watchdog.child), delay(5_000)]);
+  if (watchdog.child.exitCode === null) throw new Error("Explorer drag release watchdog did not exit after disarm.");
+  if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag release watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
+}
+
+async function independentDragLeftUp(diagnostic: DragDiagnosticSidecar, childPid: number): Promise<void> {
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02DragRelease { [DllImport(\"user32.dll\")] public static extern uint SendInput(uint n, INPUT[] i, int s); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int v); [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public MOUSEINPUT mi; } [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx,dy; public uint data,flags,time; public IntPtr extra; } public static uint Up() { var i=new INPUT[]{new INPUT{type=0,mi=new MOUSEINPUT{flags=0x0004}}}; return SendInput(1,i,Marshal.SizeOf(typeof(INPUT))); } }' -ErrorAction SilentlyContinue",
+    `$count=[EtherA02DragRelease]::Up(); $state=[EtherA02DragRelease]::GetAsyncKeyState(1); [IO.File]::WriteAllText('${ps(diagnostic.sidecarPath)}.independent-release', 'token=${ps(diagnostic.token)};childPid=${childPid};parentPid=${diagnostic.parentPid};eventCount=' + $count + ';asyncKeyState=' + $state)`
+  ].join("; ");
+  await runPowerShell(script, 5_000);
+}
+
+function assertDragDiagnosticSidecar(sidecar: DragDiagnosticSidecar): void {
+  if (!/^[a-f0-9]{32}$/u.test(sidecar.token) || sidecar.parentPid !== process.pid || !Number.isSafeInteger(sidecar.deadlineEpochMs) || sidecar.deadlineEpochMs <= Date.now()) {
+    throw new Error("Explorer drag requires an exact fresh diagnostic token, parent PID, and future deadline.");
+  }
+}
+
+async function writeDragDiagnosticStage(sidecar: DragDiagnosticSidecar, stage: DragDiagnosticStage, extra: { childPid: number; down: boolean; releaseAttempted: boolean }): Promise<void> {
+  const payload = JSON.stringify({ ...extra, parentPid: sidecar.parentPid, stage, timestamp: new Date().toISOString(), token: sidecar.token });
+  const temporary = `${sidecar.sidecarPath}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "w");
+  try { await handle.writeFile(payload, "utf8"); await handle.sync(); } finally { await handle.close(); }
+  await rename(temporary, sidecar.sidecarPath);
+}
+
+function onceChildExit(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
+  return new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 /** Pure script construction keeps the encoded command bounded without launching Explorer or PowerShell. */
 export function buildNativeExplorerDragScript(input: {
+  diagnostic?: DragDiagnosticSidecar;
   documentPath: string;
   etherPid: number;
   target: NativeScreenPoint;
 }): string {
   if (!Number.isSafeInteger(input.etherPid) || input.etherPid <= 0) throw new Error("Explorer drag requires an exact positive Ether PID.");
+  const diagnostic = input.diagnostic === undefined ? [] : ["function W{while(-not(Test-Path -LiteralPath $env:ETHER_A02_DRAG_ARM_PATH)){if([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [int64]$env:ETHER_A02_DRAG_DEADLINE){throw 'Drag watchdog was not armed before native mouse-down'};Start-Sleep -Milliseconds 25};if((Get-Content -LiteralPath $env:ETHER_A02_DRAG_ARM_PATH -Raw).Trim() -ne $env:ETHER_A02_DRAG_TOKEN){throw 'Drag watchdog arm token mismatch'}}"];
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
@@ -738,6 +958,7 @@ export function buildNativeExplorerDragScript(input: {
     `$etherPid = ${input.etherPid}`,
     `$targetX = ${Math.round(input.target.x)}`,
     `$targetY = ${Math.round(input.target.y)}`,
+    ...diagnostic,
     exactEtherTopLevelWindowScript("EtherA02Pointer"),
     "$shell = New-Object -ComObject Shell.Application",
     exactExplorerSelectionFunctionsScript(),
@@ -762,22 +983,28 @@ export function buildNativeExplorerDragScript(input: {
     "$down = $false",
     `try { $explorerHwnd = [intptr]$matchedWindow.HWND; $targetWindow = [System.Windows.Automation.AutomationElement]::FromHandle($etherHwnd).Current.BoundingRectangle; if ($targetX -lt $targetWindow.Left -or $targetX -gt $targetWindow.Right -or $targetY -lt $targetWindow.Top -or $targetY -gt $targetWindow.Bottom) { throw 'Drop outside Ether' }; $moveX = if ($targetX -gt 520) { 0 } else { [int]([System.Windows.SystemParameters]::PrimaryScreenWidth - 460) }; [EtherA02Pointer]::SetWindowPos($explorerHwnd, [intptr]::Zero, $moveX, 0, 440, 520, 0x0040) | Out-Null; Start-Sleep -Milliseconds 300; $explorerRoot = [System.Windows.Automation.AutomationElement]::FromHandle($explorerHwnd); $explorerBounds = $explorerRoot.Current.BoundingRectangle; if ($targetX -ge $explorerBounds.Left -and $targetX -le $explorerBounds.Right -and $targetY -ge $explorerBounds.Top -and $targetY -le $explorerBounds.Bottom) { throw 'Explorer covers drop target' }; $item = $null; $deadline = [DateTime]::UtcNow.AddSeconds(10); while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $explorerRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -gt 1) { throw ('Exact Explorer HWND exposed multiple drag sources named ' + $displayName) }; if ($candidates.Count -eq 1) { ${exactExplorerSelectedDocumentMatchesScript()}; if ($selectionMatches) { $item = $candidates[0] } }; if ($null -eq $item) { Start-Sleep -Milliseconds 150 } }; if ($null -eq $item) { throw 'Explorer source disappeared' }; ${exactExplorerSelectedDocumentScript("After arranging drag window")}; $source = $item.Current.BoundingRectangle; if ($source.Width -le 0 -or $source.Height -le 0) { throw 'Exact Explorer source has no usable screen bounds after arranging window' }; if ($targetX -ge $source.Left -and $targetX -le $source.Right -and $targetY -ge $source.Top -and $targetY -le $source.Bottom) { throw 'Explorer source and Ether target rectangles overlap' }; $sourceX = [int][Math]::Round($source.Left + ($source.Width / 2)); $sourceY = [int][Math]::Round($source.Top + ($source.Height / 2)); [EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null; Start-Sleep -Milliseconds 100; ${exactWindowRootAtPointScript("EtherA02Pointer", "$sourceX", "$sourceY", "$explorerHwnd", "Drag source")}; $activationStartedAt = [DateTime]::UtcNow; [EtherA02Pointer]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); $down = $true; $dragFocusDeadline = [DateTime]::UtcNow.AddSeconds(2); $dragFocused = $false; while ([DateTime]::UtcNow -lt $dragFocusDeadline -and -not $dragFocused) { if ([EtherA02Pointer]::GetForegroundWindow() -eq $explorerHwnd) { [uint32]$foregroundExplorerPid = 0; [EtherA02Pointer]::GetWindowThreadProcessId($explorerHwnd, [ref]$foregroundExplorerPid) | Out-Null; if ($foregroundExplorerPid -ne 0 -and [int64]$foregroundExplorerPid -eq $explorerPid) { $dragFocused = $true; break } }; Start-Sleep -Milliseconds 25 }; if (-not $dragFocused) { throw 'Drag source foreground mismatch' }; $dragDistance = [int][Math]::Ceiling([System.Windows.SystemParameters]::MinimumHorizontalDragDistance + 1); [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null; Start-Sleep -Milliseconds 25; for ($step = 1; $step -le 12; $step++) { [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null; Start-Sleep -Milliseconds 25 }; ${exactWindowRootAtPointScript("EtherA02Pointer", "$targetX", "$targetY", "$etherHwnd", "Drag target")}; [EtherA02Pointer]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $down = $false; ${exactEtherForegroundTransitionScript("EtherA02Pointer", "native Explorer drag")}; Write-Output ('native-explorer-drag sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' source=(' + $sourceX + ',' + $sourceY + ') target=(' + $targetX + ',' + $targetY + ')') } finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
   ].join("; ");
-  return compactNativeExplorerDragScript(script);
+  return compactNativeExplorerDragScript(script, input.diagnostic !== undefined);
 }
 
 /** Keeps the approval-gated native drag below Windows' encoded-command limit. */
-function compactNativeExplorerDragScript(script: string): string {
+function compactNativeExplorerDragScript(script: string, diagnostic: boolean): string {
   const readCursor = (stage: string) => `$cursor = New-Object EtherA02Pointer+POINT; if (-not [EtherA02Pointer]::GetCursorPos([ref]$cursor)) { throw '${stage}: cursor read failed' }`;
   const actualRoot = "function P($x,$y,$ex,$ey,$h,$g){if($x-ne$ex-or$y-ne$ey){throw($g+': cursor readback mismatch')};$q=New-Object EtherA02Pointer+POINT;$q.X=$x;$q.Y=$y;$w=[EtherA02Pointer]::WindowFromPoint($q);if($w -eq [intptr]::Zero -or [EtherA02Pointer]::GetAncestor($w,2)-ne $h){throw($g+': WindowFromPoint root was not the exact expected HWND')}}";
+  const stage = (code: string, down: 0 | 1, releaseAttempted: 0 | 1) => diagnostic ? `Write-Output 'A02D|${code}|${down}|${releaseAttempted}'` : "";
   return script
     // SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW: preserve size/position and show it without activation.
     .replace("0x0040", "0x0054")
-    .replace("$down = $false", `${actualRoot}; $down = $false`)
+    .replace("$down = $false", `${actualRoot}; ${diagnostic ? `${stage("p", 0, 0)}; W; ` : ""}$down = $false`)
     .replace("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos($sourceX,$sourceY)) { throw 'Drag source: cursor placement failed' }")
-    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $sourceX $sourceY $explorerHwnd 'Drag source actual cursor'; $activationStartedAt =`)
-    .replace("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null", `if (-not [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)) { throw 'Drag threshold: cursor placement failed' }; ${readCursor("Drag threshold")}; P $cursor.X $cursor.Y ($sourceX+$dragDistance) $sourceY $explorerHwnd 'Drag threshold actual cursor'`)
+    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $sourceX $sourceY $explorerHwnd 'Drag source actual cursor'; ${diagnostic ? `${stage("a", 0, 0)}; ` : ""}$activationStartedAt =`)
+    .replace("$down = $true; $dragFocusDeadline", `$down = $true; ${diagnostic ? `${stage("m", 1, 0)}; ` : ""}$dragFocusDeadline`)
+    .replace("$dragFocused = $true; break", `$dragFocused = $true; ${diagnostic ? `${stage("f", 1, 0)}; ` : ""}break`)
+    .replace("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null", `if (-not [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)) { throw 'Drag threshold: cursor placement failed' }; ${readCursor("Drag threshold")}; P $cursor.X $cursor.Y ($sourceX+$dragDistance) $sourceY $explorerHwnd 'Drag threshold actual cursor'; ${diagnostic ? stage("h", 1, 0) : ""}`)
     .replace("[EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12)))) { throw 'Drag progression: cursor placement failed' }")
-    .replace("; [EtherA02Pointer]::mouse_event(0x0004", `; ${readCursor("Drag target")}; P $cursor.X $cursor.Y $targetX $targetY $etherHwnd 'Drag target actual cursor'; [EtherA02Pointer]::mouse_event(0x0004`)
+    .replace("; [EtherA02Pointer]::mouse_event(0x0004", `; ${readCursor("Drag target")}; P $cursor.X $cursor.Y $targetX $targetY $etherHwnd 'Drag target actual cursor'; ${diagnostic ? `${stage("t", 1, 0)}; ${stage("u", 1, 1)}; ` : ""}[EtherA02Pointer]::mouse_event(0x0004`)
+    .replace("$down = $false; $activationDeadline", `$down = $false; ${diagnostic ? `${stage("r", 0, 1)}; ` : ""}$activationDeadline`)
+    .replace("$transitionLatencyMs = [int]", `${diagnostic ? `${stage("v", 0, 1)}; ` : ""}$transitionLatencyMs = [int]`)
+    .replace("finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }", `finally { if ($down) { ${diagnostic ? `${stage("u", 1, 1)}; ` : ""}[EtherA02Pointer]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $down = $false; ${diagnostic ? `${stage("r", 0, 1)}; ` : ""} }`)
     .replaceAll("$documentFullPath", "$d")
     .replaceAll("$documentLeaf", "$l")
     .replaceAll("$folderNamespace", "$ns")
@@ -805,7 +1032,19 @@ function compactNativeExplorerDragScript(script: string): string {
     .replaceAll("$explorerRoot", "$er")
     .replaceAll("$dragFocusDeadline", "$fd")
     .replaceAll("$dragFocused", "$df")
-    .replaceAll("$foregroundExplorerPid", "$fp");
+    .replaceAll("$foregroundExplorerPid", "$fp")
+    .replaceAll("$activationDeadline", "$ad")
+    .replaceAll("$foregroundTransitioned", "$ft")
+    .replaceAll("$foregroundHwnd", "$fh")
+    .replaceAll("$foregroundPid", "$fpid")
+    .replaceAll("$transitionLatencyMs", "$lm")
+    .replaceAll("$activationStartedAt", "$as")
+    .replaceAll("$explorerHwnd", "$xh")
+    .replaceAll("$etherHwnd", "$th")
+    .replaceAll("$explorerPid", "$ep")
+    .replaceAll("$etherPid", "$tp")
+    .replaceAll("$item", "$it")
+    .replaceAll("$source", "$so");
 }
 
 /**
@@ -818,7 +1057,7 @@ export async function invokeJumpListRecentDocumentWithUia(input: {
   etherPid: number;
   taskbarAppName: string;
 }): Promise<string> {
-  requireShellUiApproval();
+  requireJumpListRouteApproval();
   if (!/^Ether Recovery [a-f0-9]{8}$/u.test(input.taskbarAppName)) {
     throw new Error("Jump List interaction requires a unique recovery taskbar identity.");
   }
@@ -1419,10 +1658,10 @@ async function execReg(args: string[]): Promise<{ stdout: string; stderr: string
   return execFileAsync("reg.exe", args, { windowsHide: true });
 }
 
-async function runPowerShell(script: string): Promise<string> {
+async function runPowerShell(script: string, timeout?: number): Promise<string> {
   assertPowerShellEncodedCommandLength(script);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
-  const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], { windowsHide: true });
+  const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], { timeout, windowsHide: true });
   return stdout.trim();
 }
 

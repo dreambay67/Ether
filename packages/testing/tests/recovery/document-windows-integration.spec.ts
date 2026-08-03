@@ -22,6 +22,8 @@ import {
   type RecoveryJourneySession
 } from "../../recovery/journeyDriver.js";
 import {
+  A02_APPROVED_ROUTE,
+  A02_ROUTE_TITLES,
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
   SHELL_UI_APPROVAL,
@@ -31,6 +33,7 @@ import {
   assertExactPackagedProcess,
   assertExactWindowForegroundWithUia,
   applyReversibleAssociation,
+  applyReversibleAssociationForJumpList,
   associationArtifactsMayBeCleaned,
   assertWindowsShellCheckpointStable,
   assertWindowsShellClassificationClean,
@@ -77,10 +80,15 @@ const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const thisSource = fileURLToPath(import.meta.url);
 const packagedExecutable = path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
 
+function routeIsExactly(route: "normal" | "association" | "explorer-drag" | "jump-list"): boolean {
+  return process.env[A02_APPROVED_ROUTE] === route;
+}
+
 test.skip(process.platform !== "win32", "A02 Windows integration runs only on Windows.");
 test.skip(process.env[WINDOWS_INTEGRATION_MODE] !== "packaged", `Set ${WINDOWS_INTEGRATION_MODE}=packaged after a reviewed package exists.`);
 
-test("records the scoped A02 packaged native-picker, identity, lease, and association dry-run journey", async () => {
+test(A02_ROUTE_TITLES.normal, async () => {
+  test.skip(!routeIsExactly("normal"), `Set ${A02_APPROVED_ROUTE}=normal; route approvals never select normal implicitly.`);
   await assertAuthoringJourneySourceSafety(await readFile(thisSource, "utf8"), "A02 Windows integration journey");
   const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
   const root = await createWindowsIntegrationRoot();
@@ -312,10 +320,10 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   }
 });
 
-test("runs the separately approved reversible Explorer association route", async () => {
+test(A02_ROUTE_TITLES.association, async () => {
   test.skip(
-    process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
-    `Main must explicitly authorize both ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE} and ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
+    !routeIsExactly("association") || process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
+    `Main must explicitly select ${A02_APPROVED_ROUTE}=association and authorize ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE} plus ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
   );
   const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
   const root = await createWindowsIntegrationRoot();
@@ -367,7 +375,7 @@ test("runs the separately approved reversible Explorer association route", async
       const activation = await invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid });
       await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
       await assertExactPackagedProcess(executable, primaryPid);
-      session.input.observe("Explorer UIA association", "The same native Explorer interaction proves a foreground transition from its exact source HWND/PID to the pre-resolved minimized Ether HWND/PID after invoking the unique selected test document.", activation);
+      session.input.observe("Explorer keyboard association", "UIA proves the exact focused selected item; native Enter then proves a foreground transition from its exact Explorer HWND/PID to the pre-resolved minimized Ether HWND/PID.", activation);
     } finally {
       const restorePlan = plan;
       const restoreWatchdog = watchdog;
@@ -470,10 +478,10 @@ test("runs the separately approved reversible Explorer association route", async
   }
 });
 
-test("runs the separately approved Explorer pointer drag/drop route", async () => {
+test(A02_ROUTE_TITLES["explorer-drag"], async () => {
   test.skip(
-    process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
-    `Main must explicitly authorize ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
+    !routeIsExactly("explorer-drag") || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
+    `Main must explicitly select ${A02_APPROVED_ROUTE}=explorer-drag and authorize ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
   );
   const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
   const root = await createWindowsIntegrationRoot();
@@ -491,6 +499,14 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
   let postS1ShellClassified = false;
   let journeyFailedAfterCheckpoint = false;
   let exactProcessAbsenceProven = false;
+  let dragDiagnosticsProven = false;
+  const dragDiagnostic = {
+    armPath: path.join(root, "drag-release.arm"),
+    deadlineEpochMs: Date.now() + 50_000,
+    parentPid: process.pid,
+    sidecarPath: path.join(root, "drag-diagnostic.json"),
+    token: shellToken
+  };
   const shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-explorer-drag", "explorer-drag");
   const finalizationFailures: unknown[] = [];
   try {
@@ -521,7 +537,12 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     shellS1TargetShortcuts = await snapshotS1TargetShortcuts({ documentPaths: [sourcePath, targetPath], profile, root });
     session.input.observe("S1 exact target-link checkpoint", "Both real and isolated S1 Recent roots contain zero links resolving to the exact Explorer documents.", "S1 matching target links=0.");
     const target = await nativeScreenPointForCanvas(session);
-    const drag = await dragDocumentFromExplorerWithNativePointer({ documentPath: sourcePath, etherPid: primaryPid, target });
+    const drag = await dragDocumentFromExplorerWithNativePointer({ diagnostic: dragDiagnostic, documentPath: sourcePath, etherPid: primaryPid, target });
+    const diagnostic = JSON.parse(await readFile(dragDiagnostic.sidecarPath, "utf8")) as { childPid?: number; down?: boolean; parentPid?: number; releaseAttempted?: boolean; stage?: string; token?: string };
+    if (diagnostic.token !== shellToken || diagnostic.parentPid !== process.pid || !Number.isSafeInteger(diagnostic.childPid) || diagnostic.childPid! <= 0 || diagnostic.stage !== "transition-proven" || diagnostic.down !== false || diagnostic.releaseAttempted !== true) {
+      throw new Error("Explorer drag did not durably prove the exact child-owned release and foreground transition.");
+    }
+    dragDiagnosticsProven = true;
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(sourcePath), { timeout: 30_000 });
     await expect(session.page.locator(".react-flow__node")).toHaveCount(1);
     await assertExactPackagedProcess(executable, primaryPid);
@@ -590,7 +611,7 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
       journeyFailedAfterCheckpoint,
       sidecarDurabilityProven: shellFinalizationSidecar.durabilityProven && !shellFinalizationSidecar.durabilityFailureObserved,
       shellCheckpointRestored: shellStateRestored
-    })) {
+    }) && dragDiagnosticsProven && exactProcessAbsenceProven) {
       try {
         await cleanupIsolatedJourneyProfile(profile);
         await cleanupWindowsIntegrationRoot(root);
@@ -598,7 +619,7 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
         finalizationFailures.push(error);
       }
     } else {
-      finalizationFailures.push(new Error(`Preserved recovery artifacts after unproven shell cleanup: root=${root}; profile=${profile.root}.`));
+      finalizationFailures.push(new Error(`Preserved recovery artifacts after unproven drag release, process absence, or shell cleanup: root=${root}; profile=${profile.root}.`));
     }
   }
   if (dragJourneyFailure !== null) {
@@ -612,10 +633,10 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
   }
 });
 
-test("runs the separately approved Windows Jump List known-and-missing target route", async () => {
+test(A02_ROUTE_TITLES["jump-list"], async () => {
   test.skip(
-    process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE || process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE,
-    `Main must explicitly authorize both ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE} and ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE}.`
+    !routeIsExactly("jump-list") || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE || process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE,
+    `Main must explicitly select ${A02_APPROVED_ROUTE}=jump-list and authorize ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE} plus ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE}.`
   );
   const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
   const root = await createWindowsIntegrationRoot();
@@ -696,7 +717,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     watchdog = await startAssociationRestorationWatchdog(plan);
     try {
       associationMayBeMutated = true;
-      await applyReversibleAssociation(plan);
+      await applyReversibleAssociationForJumpList(plan);
       await minimizeExactWindowWithUia(primaryPid);
       const knownTarget = await invokeJumpListRecentDocumentWithUia({ documentPath, etherPid: primaryPid, taskbarAppName: taskbarName });
       await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });

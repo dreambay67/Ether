@@ -17,6 +17,9 @@ import { removeRecoveryShellAutomaticDestinations } from "../recovery/windowsShe
 
 import {
   A02_WINDOWS_INTEGRATION_COVERAGE,
+  A02_APPROVED_ROUTE,
+  A02_APPROVED_ROUTES,
+  A02_ROUTE_TITLES,
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
   associationArtifactsMayBeCleaned,
@@ -30,6 +33,7 @@ import {
   compareWindowsShellState,
   buildNativeExplorerDragScript,
   buildExplorerAssociationInvokeScript,
+  a02ApprovalFreeListCommand,
   deriveWindowsShellDeletionCandidate,
   describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
@@ -42,6 +46,9 @@ import {
   recoveryArtifactsMayBeCleanedAfterShellCheckpoint,
   requireNoTestOwnedRecentShortcuts,
   requireAssociationMutationApproval,
+  requireAssociationRouteApproval,
+  requireExplorerDragRouteApproval,
+  requireJumpListRouteApproval,
   requireShellUiApproval
 } from "../recovery/windowsIntegration.js";
 
@@ -133,29 +140,47 @@ describe("A02 Windows integration harness contracts", () => {
     });
     expect(encodedPowerShellCommandLength(associationScript)).toBeLessThanOrEqual(29_500);
     expect(encodedPowerShellCommandLength(dragScript)).toBeLessThanOrEqual(29_500);
-    expect(dragScript).toContain("SetWindowPos($explorerHwnd, [intptr]::Zero, $moveX, 0, 440, 520, 0x0054)");
+    expect(dragScript).toContain("SetWindowPos($xh, [intptr]::Zero, $moveX, 0, 440, 520, 0x0054)");
     expect(dragScript).not.toContain("0x0040");
+    const diagnosticDragScript = buildNativeExplorerDragScript({
+      diagnostic: { armPath: "C:\\Temp\\drag.arm", deadlineEpochMs: Date.now() + 50_000, parentPid: process.pid, sidecarPath: "C:\\Temp\\drag.json", token: "0123456789abcdef0123456789abcdef" },
+      documentPath,
+      etherPid: 1234,
+      target: { x: 960, y: 540 }
+    });
+    expect(encodedPowerShellCommandLength(diagnosticDragScript)).toBeLessThanOrEqual(30_000);
+    for (const stage of ["p", "a", "m", "f", "h", "t", "u", "r", "v"]) {
+      expect(diagnosticDragScript).toContain(`A02D|${stage}|`);
+    }
+    expect(diagnosticDragScript.indexOf("A02D|a|0|0")).toBeLessThan(diagnosticDragScript.indexOf("mouse_event(0x0002"));
+    expect(diagnosticDragScript).toContain("Drag watchdog was not armed before native mouse-down");
   });
 
-  it("keeps user-realistic Explorer focus proofs adjacent to Invoke and native drag", () => {
+  it("keeps user-realistic Explorer focus proofs adjacent to native Enter and drag", () => {
     const associationScript = buildExplorerAssociationInvokeScript({
       documentPath: "C:\\Ether Recovery\\Association Žltý.ether",
       etherPid: 1234
     });
     const chromeClick = associationScript.indexOf("[EtherA02Native]::mouse_event(0x0002");
     const associationForeground = associationScript.indexOf("After association chrome click: exact Explorer HWND was not foreground", chromeClick);
-    const associationSelection = associationScript.indexOf("A 'Immediately before association Invoke'", associationForeground);
+    const associationSelection = associationScript.indexOf("A 'Immediately before association Enter'", associationForeground);
     const associationMinimized = associationScript.indexOf("if (-not [EtherA02Native]::IsIconic($etherHwnd))");
-    const associationFinalForeground = associationScript.indexOf("Immediately before association Invoke: exact Explorer HWND was not foreground", associationMinimized);
+    const associationFinalForeground = associationScript.indexOf("Immediately before association Enter: exact Explorer HWND was not foreground", associationMinimized);
     const associationStarted = associationScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", associationFinalForeground);
-    const associationInvoke = associationScript.indexOf("[System.Windows.Automation.InvokePattern]$pattern).Invoke()", associationStarted);
+    const associationEnter = associationScript.indexOf("[EtherA02Native]::keybd_event(0x0D,0,0", associationStarted);
     expect(chromeClick).toBeGreaterThanOrEqual(0);
     expect(associationForeground).toBeGreaterThan(chromeClick);
     expect(associationSelection).toBeGreaterThan(associationForeground);
     expect(associationMinimized).toBeGreaterThan(associationSelection);
     expect(associationFinalForeground).toBeGreaterThan(associationMinimized);
     expect(associationStarted).toBeGreaterThan(associationFinalForeground);
-    expect(associationInvoke).toBeGreaterThan(associationStarted);
+    expect(associationEnter).toBeGreaterThan(associationStarted);
+    expect(associationScript).toContain("$item.SetFocus()");
+    expect(associationScript).toContain("$item.Current.HasKeyboardFocus");
+    expect(associationScript).toContain("[System.Windows.Automation.AutomationElement]::FocusedElement");
+    expect(associationScript).toContain("GetRuntimeId()");
+    expect(associationScript).not.toContain("InvokePattern]$pattern).Invoke()");
+    expect(associationScript).toContain("if ($rd) { [EtherA02Native]::keybd_event(0x0D,0,2");
     expect(associationScript).toContain("ClientToScreen($explorerHwnd,[ref]$co)");
     expect(associationScript).toContain("$cx -ge $co.X");
     expect(associationScript).toContain("Association chrome: click is not non-client frame");
@@ -176,15 +201,15 @@ describe("A02 Windows integration harness contracts", () => {
     const cursorPositioned = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos($sx,$sy)");
     const cursorSettled = dragScript.indexOf("Start-Sleep -Milliseconds 100", cursorPositioned);
     const sourceHit = dragScript.indexOf("Drag source: WindowFromPoint root was not the exact expected HWND", cursorSettled);
-    const actualSourceHit = dragScript.indexOf("P $cursor.X $cursor.Y $sx $sy $explorerHwnd 'Drag source actual cursor'", sourceHit);
-    const dragStarted = dragScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", actualSourceHit);
+    const actualSourceHit = dragScript.indexOf("P $cursor.X $cursor.Y $sx $sy $xh 'Drag source actual cursor'", sourceHit);
+    const dragStarted = dragScript.indexOf("$as = [DateTime]::UtcNow", actualSourceHit);
     const mouseDown = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0002", dragStarted);
     const foregroundWhileHeld = dragScript.indexOf("Drag source foreground mismatch", mouseDown);
     const dragThreshold = dragScript.indexOf("MinimumHorizontalDragDistance + 1", foregroundWhileHeld);
     const thresholdMove = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos(($sx + $dd),$sy)", dragThreshold);
     const targetHit = dragScript.indexOf("Drag target: WindowFromPoint root was not the exact expected HWND", thresholdMove);
-    const actualThresholdHit = dragScript.indexOf("P $cursor.X $cursor.Y ($sx+$dd) $sy $explorerHwnd 'Drag threshold actual cursor'", thresholdMove);
-    const actualTargetHit = dragScript.indexOf("P $cursor.X $cursor.Y $tx $ty $etherHwnd 'Drag target actual cursor'", targetHit);
+    const actualThresholdHit = dragScript.indexOf("P $cursor.X $cursor.Y ($sx+$dd) $sy $xh 'Drag threshold actual cursor'", thresholdMove);
+    const actualTargetHit = dragScript.indexOf("P $cursor.X $cursor.Y $tx $ty $th 'Drag target actual cursor'", targetHit);
     const mouseUp = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0004", actualTargetHit);
     expect(cursorPositioned).toBeGreaterThanOrEqual(0);
     expect(cursorSettled).toBeGreaterThan(cursorPositioned);
@@ -199,8 +224,8 @@ describe("A02 Windows integration harness contracts", () => {
     expect(targetHit).toBeGreaterThan(thresholdMove);
     expect(actualTargetHit).toBeGreaterThan(targetHit);
     expect(mouseUp).toBeGreaterThan(actualTargetHit);
-    expect(dragScript).toContain("P $cursor.X $cursor.Y ($sx+$dd) $sy $explorerHwnd 'Drag threshold actual cursor'");
-    expect(dragScript).toContain("P $cursor.X $cursor.Y $tx $ty $etherHwnd 'Drag target actual cursor'");
+    expect(dragScript).toContain("P $cursor.X $cursor.Y ($sx+$dd) $sy $xh 'Drag threshold actual cursor'");
+    expect(dragScript).toContain("P $cursor.X $cursor.Y $tx $ty $th 'Drag target actual cursor'");
     expect(dragScript).toContain("function P($x,$y,$ex,$ey,$h,$g){if($x-ne$ex-or$y-ne$ey)");
     expect(dragScript).toContain("if (-not [EtherA02Pointer]::SetCursorPos($sx,$sy))");
     expect(dragScript).toContain("GetCursorPos([ref]$cursor)");
@@ -215,15 +240,15 @@ describe("A02 Windows integration harness contracts", () => {
       readFile(path.join(repositoryRoot, "packages/testing/tests/recovery/document-windows-integration.spec.ts"), "utf8")
     ]);
     const associationRoute = integrationSpec.slice(
-      integrationSpec.indexOf('test("runs the separately approved reversible Explorer association route"'),
-      integrationSpec.indexOf('test("runs the separately approved Explorer pointer drag/drop route"')
+      integrationSpec.indexOf("test(A02_ROUTE_TITLES.association"),
+      integrationSpec.indexOf('test(A02_ROUTE_TITLES["explorer-drag"]')
     );
     const dragRoute = integrationSpec.slice(
-      integrationSpec.indexOf('test("runs the separately approved Explorer pointer drag/drop route"'),
-      integrationSpec.indexOf('test("runs the separately approved Windows Jump List known-and-missing target route"')
+      integrationSpec.indexOf('test(A02_ROUTE_TITLES["explorer-drag"]'),
+      integrationSpec.indexOf('test(A02_ROUTE_TITLES["jump-list"]')
     );
     expect(windowsIntegration).toContain("exactEtherTopLevelWindowScript");
-    expect(windowsIntegration).toContain("Exact Ether target did not remain minimized before association Invoke");
+    expect(windowsIntegration).toContain("Enter:minimized");
     const explorerInteractions = windowsIntegration.slice(
       windowsIntegration.indexOf("export async function invokeDocumentFromExplorerWithUia"),
       windowsIntegration.indexOf("export async function invokeJumpListRecentDocumentWithUia")
@@ -243,9 +268,12 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration.split("if ($nativePid -eq 0) { throw 'Exact Explorer HWND PID was zero' }")).toHaveLength(3);
     expect(windowsIntegration).toContain("$foregroundExplorerPid = 0");
     expect(windowsIntegration).toContain("Explorer HWND PID mismatch immediately before action");
-    expect(windowsIntegration).toContain("requireAssociationMutationApproval();\n  requireShellUiApproval();");
+    expect(windowsIntegration).toContain("requireAssociationRouteApproval();");
     expect(associationRoute).toContain("invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid })");
-    expect(associationRoute).toContain("process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE");
+    expect(associationRoute).toContain('!routeIsExactly("association")');
+    expect(dragRoute).toContain('!routeIsExactly("explorer-drag")');
+    expect(dragRoute).toContain("dragDiagnosticsProven");
+    expect(dragRoute).toContain("deadlineEpochMs: Date.now() + 50_000");
     expect(associationRoute).not.toContain("document.hasFocus()");
     expect(associationRoute).not.toContain("assertExactWindowForegroundWithUia(primaryPid)");
     expect(dragRoute).not.toContain("document.hasFocus()");
@@ -266,6 +294,31 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => requireAssociationMutationApproval({})).toThrow(/dry-run only/u);
     expect(isAssociationMutationApproved({ [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE })).toBe(true);
     expect(() => requireAssociationMutationApproval({ [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE })).not.toThrow();
+  });
+
+  it("requires one exact case-sensitive route in addition to each route's approvals", () => {
+    expect(A02_APPROVED_ROUTES).toEqual(["normal", "association", "explorer-drag", "jump-list"]);
+    const allApprovals = {
+      [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE,
+      [SHELL_UI_APPROVAL]: SHELL_UI_APPROVAL_VALUE
+    };
+    expect(() => requireAssociationRouteApproval(allApprovals)).toThrow(A02_APPROVED_ROUTE);
+    expect(() => requireAssociationRouteApproval({ ...allApprovals, [A02_APPROVED_ROUTE]: "Association" })).toThrow(A02_APPROVED_ROUTE);
+    expect(() => requireAssociationRouteApproval({ ...allApprovals, [A02_APPROVED_ROUTE]: "association" })).not.toThrow();
+    expect(() => requireExplorerDragRouteApproval({ [A02_APPROVED_ROUTE]: "explorer-drag", [SHELL_UI_APPROVAL]: SHELL_UI_APPROVAL_VALUE })).not.toThrow();
+    expect(() => requireExplorerDragRouteApproval({ ...allApprovals, [A02_APPROVED_ROUTE]: "association" })).toThrow(A02_APPROVED_ROUTE);
+    expect(() => requireJumpListRouteApproval({ ...allApprovals, [A02_APPROVED_ROUTE]: "jump-list" })).not.toThrow();
+  });
+
+  it("publishes an approval-free, exact one-worker Playwright list command for every route", () => {
+    for (const route of A02_APPROVED_ROUTES) {
+      const command = a02ApprovalFreeListCommand(route);
+      expect(command).toContain(`ETHER_A02_APPROVED_ROUTE=${route}`);
+      expect(command).toContain(`--grep "^${A02_ROUTE_TITLES[route].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$"`);
+      expect(command).toContain("--list --workers=1");
+      expect(command).not.toContain(ASSOCIATION_APPROVAL);
+      expect(command).not.toContain(SHELL_UI_APPROVAL);
+    }
   });
 
   it("preserves association recovery artifacts unless no mutation was armed or restoration is proven", () => {

@@ -28,7 +28,7 @@
     "test:document-lifecycle-recovery:source": "cross-env ETHER_DOCUMENT_LIFECYCLE_MODE=source-electron playwright test --config playwright.document-lifecycle-recovery.config.ts",
     "test:document-lifecycle-recovery:packaged": "cross-env ETHER_DOCUMENT_LIFECYCLE_MODE=packaged playwright test --config playwright.document-lifecycle-recovery.config.ts",
     "test:visible-recovery:packaged": "playwright test --config playwright.visible-recovery-packaged.config.ts",
-    "test:document-windows-integration:packaged": "cross-env ETHER_WINDOWS_INTEGRATION_MODE=packaged playwright test --config playwright.document-windows-integration.config.ts",
+    "test:document-windows-integration:packaged": "cross-env ETHER_WINDOWS_INTEGRATION_MODE=packaged ETHER_A02_APPROVED_ROUTE=normal playwright test --config playwright.document-windows-integration.config.ts",
     "test:desktop": "playwright test --config playwright.desktop.config.ts",
     "test:packaged": "playwright test --config playwright.packaged.config.ts",
     "test:acceptance": "pnpm --workspace-root test:acceptance"
