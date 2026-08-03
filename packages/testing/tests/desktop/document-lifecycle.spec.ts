@@ -876,25 +876,50 @@ describe("desktop document lifecycle", () => {
     const filePath = path.join(root, "Campaign.ether");
     await writeFile(filePath, "fixture");
     const opened: string[] = [];
+    const observed: string[] = [];
     let focused = 0;
     const coordinator = new OpenDocumentCoordinator({
-      focus: () => { focused += 1; },
-      open: async (canonicalPath) => { opened.push(canonicalPath); }
+      focus: () => { focused += 1; observed.push("focus"); },
+      open: async (canonicalPath) => { opened.push(canonicalPath); observed.push("open"); }
     });
 
-    const openedOutcome = await coordinator.request(filePath);
+    const openedOutcome = await coordinator.request(filePath, {
+      onHandled: (handled) => { observed.push(`handled:${handled.disposition}`); }
+    });
     let focusAttempted = 0;
     const focusedOutcome = await coordinator.request(path.join(root, ".", "Campaign.ether"), {
-      onFocusAttempt: () => { focusAttempted += 1; }
+      onFocusAttempt: () => { focusAttempted += 1; observed.push("focus-attempt"); },
+      onHandled: (handled) => { observed.push(`handled:${handled.disposition}`); }
     });
 
     expect(opened).toHaveLength(1);
     expect(focused).toBe(1);
     expect(focusAttempted).toBe(1);
-    expect(openedOutcome.disposition).toBe("opened");
-    expect(focusedOutcome.disposition).toBe("focused");
-    await expect(coordinator.request(filePath, { onFocusAttempt: () => { throw new Error("diagnostic hook failure"); } })).resolves.toMatchObject({ disposition: "focused" });
+    expect(openedOutcome).toBeUndefined();
+    expect(focusedOutcome).toBeUndefined();
+    expect(observed).toEqual(["open", "handled:opened", "focus-attempt", "focus", "handled:focused"]);
+    await expect(coordinator.request(filePath, {
+      onFocusAttempt: () => { throw new Error("diagnostic hook failure"); },
+      onHandled: () => { throw new Error("diagnostic hook failure"); }
+    })).resolves.toBeUndefined();
     expect(focused).toBe(2);
+  });
+
+  it("retains boolean controller results while exposing only observational open hooks", async () => {
+    const root = await tempRoot("ether-open-controller-");
+    const filePath = path.join(root, "Campaign.ether");
+    await writeFile(filePath, "fixture");
+    const coordinator = new OpenDocumentCoordinator({ focus: () => {}, open: async () => {} });
+    const cancelled = new OpenDocumentController(coordinator, async () => null);
+    expect(await cancelled.request("picker")).toBe(false);
+
+    const handled: string[] = [];
+    const selected = new OpenDocumentController(coordinator, async () => filePath);
+    expect(await selected.request("picker", undefined, {
+      onHandled: (outcome) => { handled.push(outcome.disposition); }
+    })).toBe(true);
+    expect(handled).toEqual(["opened"]);
+    expect(await selected.request("drop", filePath)).toBe(true);
   });
 
   it("records token-bound recovery association receipt, disposition, focus state, and failure ordering", () => {
@@ -922,7 +947,7 @@ describe("desktop document lifecycle", () => {
       candidatePath
     ], candidatePath);
     trace.focusAttempt();
-    trace.handled({ canonicalPath: candidatePath, disposition: "focused", kind: "handled" });
+    trace.handled({ canonicalPath: candidatePath, disposition: "focused" });
     deferred.forEach((callback) => callback());
     trace.failed(Object.assign(new Error("C:\\private\\secret"), { code: "ENOENT" }));
 

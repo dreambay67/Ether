@@ -539,18 +539,15 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     const trace = recoveryAssociationDiagnostics?.received(argv, requested);
     if (requested === null) {
       mainWindow.focus();
-      trace?.handled({ kind: "cancelled" });
       return;
     }
     void openController.request("second-instance", requested, {
-      onFocusAttempt: () => trace?.focusAttempt()
-    }).then(
-      (outcome) => trace?.handled(outcome),
-      (error) => {
-        trace?.failed(error);
-        return reportFailure(error, trace?.correlationId);
-      }
-    );
+      onFocusAttempt: () => trace?.focusAttempt(),
+      onHandled: (handled) => trace?.handled(handled)
+    }).catch((error) => {
+      trace?.failed(error);
+      return reportFailure(error, trace?.correlationId);
+    });
   });
   app.on("open-file", (event, filePath) => {
     event.preventDefault();

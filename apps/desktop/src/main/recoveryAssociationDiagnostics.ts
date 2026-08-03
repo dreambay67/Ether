@@ -3,7 +3,7 @@ import path from "node:path";
 
 import type { DiagnosticRecord } from "./diagnostics/localDiagnostics.js";
 import type { RecoveryShellIdentity } from "./recoveryShellIdentity.js";
-import type { OpenDocumentRequestOutcome } from "./services/applicationService.js";
+import type { OpenDocumentHandled } from "./services/applicationService.js";
 
 type RecoveryWindowState = {
   isFocused(): boolean;
@@ -15,7 +15,7 @@ export type RecoveryAssociationOpenTrace = {
   correlationId: string;
   failed(error: unknown): void;
   focusAttempt(): void;
-  handled(outcome: OpenDocumentRequestOutcome): void;
+  handled(handled: OpenDocumentHandled): void;
 };
 
 export function createRecoveryAssociationDiagnostics(input: {
@@ -112,16 +112,14 @@ export function createRecoveryAssociationDiagnostics(input: {
             // Diagnostics must never affect document activation.
           }
         },
-        handled(outcome) {
+        handled(handled) {
           try {
-            const handledDetails = outcome.kind === "handled"
-              ? {
-                  ...details,
-                  canonicalBasenameHash: safeDigest(`${input.recoveryShell!.token}\0${path.basename(outcome.canonicalPath)}`),
-                  canonicalPathHash: safeDigest(`${input.recoveryShell!.token}\0${outcome.canonicalPath.toLocaleLowerCase("en-US")}`),
-                  disposition: outcome.disposition
-                }
-              : { ...details, disposition: "cancelled" };
+            const handledDetails = {
+              ...details,
+              canonicalBasenameHash: safeDigest(`${input.recoveryShell!.token}\0${path.basename(handled.canonicalPath)}`),
+              canonicalPathHash: safeDigest(`${input.recoveryShell!.token}\0${handled.canonicalPath.toLocaleLowerCase("en-US")}`),
+              disposition: handled.disposition
+            };
             emit({
               correlationId,
               details: handledDetails,

@@ -201,18 +201,22 @@ export class AutosaveCoordinator {
 
 export type OpenDocumentDisposition = "focused" | "opened";
 
-export type OpenDocumentRequestOutcome =
-  | { kind: "cancelled" }
-  | { canonicalPath: string; disposition: OpenDocumentDisposition; kind: "handled" };
+export type OpenDocumentHandled = {
+  canonicalPath: string;
+  disposition: OpenDocumentDisposition;
+};
 
-export type OpenDocumentRequestHooks = { onFocusAttempt?: () => void };
+export type OpenDocumentRequestHooks = {
+  onFocusAttempt?: () => void;
+  onHandled?: (handled: OpenDocumentHandled) => void;
+};
 
 export class OpenDocumentCoordinator {
   private activeIdentity: string | null = null;
 
   constructor(private readonly port: { focus(): void; open(canonicalPath: string): Promise<void> }) {}
 
-  async request(filePath: string, hooks: OpenDocumentRequestHooks = {}): Promise<{ canonicalPath: string; disposition: OpenDocumentDisposition }> {
+  async request(filePath: string, hooks: OpenDocumentRequestHooks = {}): Promise<void> {
     const canonicalPath = await realpath(filePath);
     const identity = process.platform === "win32" ? canonicalPath.toLocaleLowerCase() : canonicalPath;
     if (this.activeIdentity === identity) {
@@ -220,11 +224,12 @@ export class OpenDocumentCoordinator {
         // Observational hooks must not affect document activation.
       }
       this.port.focus();
-      return { canonicalPath, disposition: "focused" };
+      notifyHandled(hooks, { canonicalPath, disposition: "focused" });
+      return;
     }
     await this.port.open(canonicalPath);
     this.activeIdentity = identity;
-    return { canonicalPath, disposition: "opened" };
+    notifyHandled(hooks, { canonicalPath, disposition: "opened" });
   }
 
   markOpen(canonicalPath: string): void {
@@ -246,13 +251,20 @@ export class OpenDocumentController {
     private readonly selectDocument: () => Promise<string | null>
   ) {}
 
-  async request(source: OpenDocumentSource, filePath?: string, hooks: OpenDocumentRequestHooks = {}): Promise<OpenDocumentRequestOutcome> {
+  async request(source: OpenDocumentSource, filePath?: string, hooks: OpenDocumentRequestHooks = {}): Promise<boolean> {
     const requestedPath = source === "picker" ? await this.selectDocument() : filePath;
-    if (requestedPath === null) return { kind: "cancelled" };
+    if (requestedPath === null) return false;
     if (requestedPath === undefined) {
       throw codedError("INVALID_DOCUMENT_PATH", `The ${source} open request has no document path.`);
     }
-    return { kind: "handled", ...(await this.coordinator.request(requestedPath, hooks)) };
+    await this.coordinator.request(requestedPath, hooks);
+    return true;
+  }
+}
+
+function notifyHandled(hooks: OpenDocumentRequestHooks, handled: OpenDocumentHandled): void {
+  try { hooks.onHandled?.(handled); } catch {
+    // Observational hooks must not affect document activation.
   }
 }
 
