@@ -72,3 +72,26 @@ Approved association, Explorer drag, and Jump List journeys now distinguish an i
 - `S1` is captured only after the ordinary UI/native-save setup is complete, then immediately rechecked before association mutation, Explorer gesture, or approved Recent mode.
 - The final invariant is exact byte-level equality to `S1`. Any post-`S1` unrelated delta fails closed and preserves the disposable profile and test root for diagnosis.
 - The Jump List route creates and saves its document in an ordinary-recovery session with Recent disabled, exits that session, records `S0→S1`, and only then starts the exact approved Recent-mode session against the existing document. Its COM/recycle proof therefore permits only one post-`S1` recovery AutomaticDestinations delta and returns to `S1` exactly.
+
+## 2026-08-03 second controlled packaged lifecycle failure
+
+Status: failed safely at the writer-lock contender launch; excluded from packaged evidence. The primary packaged UI/native lifecycle completed its setup actions before the contender route reached the tightened recovery-shell resolver. No approval-gated association, Explorer, Jump List, COM, or destination-cleanup route was enabled.
+
+The attempt started at `2026-08-03T01:05:23.181Z` and finished at `2026-08-03T01:05:38.463Z`, from HEAD `78b062ffe2d21012b5bae89cd22088a39ee23cf0` with unchanged package artifacts:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `release/windows/win-unpacked/Ether.exe` | `03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f` |
+| `release/windows/win-unpacked/resources/app.asar` | `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e` |
+
+The contender selected `userData=<primaryRoot>\contender-user-data`, whose basename is not `Ether-Recovery-Profile`; the tightened packaged resolver rejected that non-disposable profile shape before the contender could prove the writer lock. The harness now uses the non-colliding nested test-owned path `<primaryRoot>\contender\Ether-Recovery-Profile`, retaining its own `4.0\leases` junction to the primary lease root.
+
+Read-only post-failure inspection found no exact packaged Fixer `Ether.exe` process. Driver cleanup removed the second attempt's disposable profile; the earlier preserved profile `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-4QHhOI` remains unchanged.
+
+The ordinary native Save changed the same pre-existing real shell MRU file again. It is preserved in place; no restore, deletion, overwrite, or timestamp repair was attempted:
+
+| Relative path under `%APPDATA%\Microsoft\Windows\Recent` | Size | Before SHA-256 | After SHA-256 | Last written UTC |
+| --- | ---: | --- | --- | --- |
+| `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `341f541efc7457b9f89e1deeb054883442238d1449183bba5d25f24c0e9a744a` | `6ae9b25b15c6a7023ca3c0aacecd741133738e23bf91ffa69f95ec5749e63e35` | `2026-08-03T01:05:37.9730910Z` |
+
+No controlled rerun was performed for this correction.

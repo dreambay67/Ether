@@ -126,6 +126,9 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => assertPackagedJourneyArgs([`${RECOVERY_SHELL_JOURNEY_ARGUMENT}${RECOVERY_SHELL_JUMP_LIST_JOURNEY}`])).toThrow(/driver-owned isolation/u);
 
     const profile = { root, appData, localAppData: path.join(root, "AppData", "Local"), userData, kind: "fresh-isolated" as const };
+    const contenderUserData = path.join(root, "contender", "Ether-Recovery-Profile");
+    expect(resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData: contenderUserData })?.token).toBe(token);
+    expect(() => resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData: path.join(root, "contender-user-data") })).toThrow(/non-disposable profile/u);
     const permitted = { ...packagedJourneyConfig("C:\\repo", "a02-windows-jump-list"), profile, cleanupProfile: false, recoveryShellRecent: true };
     expect(() => assertRecoveryShellRecentAdmission(permitted, approvals)).not.toThrow();
     expect(() => assertRecoveryShellRecentAdmission({ ...permitted, journeyId: "other" }, approvals)).toThrow(/restricted/u);

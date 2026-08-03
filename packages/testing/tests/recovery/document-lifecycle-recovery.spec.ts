@@ -99,7 +99,7 @@ test("records a blank-UI authored document through save, document actions, close
       expect(leaseFiles).toHaveLength(1);
       const leaseRecord = JSON.parse(await readFile(path.join(leaseRoot, leaseFiles[0]!), "utf8")) as { pid?: unknown; pathHash?: unknown };
       input.observe("Writer lease before contender", "The Save As destination retains one AppData writer lease before the competing process opens it.", `Observed one lease for PID ${String(leaseRecord.pid)} and path hash ${String(leaseRecord.pathHash)}.`);
-      const contenderUserData = path.join(first.profile.root, "contender-user-data");
+      const contenderUserData = path.join(first.profile.root, "contender", "Ether-Recovery-Profile");
       const contenderAppData = path.join(contenderUserData, "4.0");
       await mkdir(contenderAppData, { recursive: true });
       await symlink(leaseRoot, path.join(contenderAppData, "leases"), "junction");

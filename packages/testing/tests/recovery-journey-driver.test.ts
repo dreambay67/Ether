@@ -167,6 +167,15 @@ describe("Ether recovery journey driver", () => {
       expect(journeyProfileCleanupPolicy(true, false)).toBe(false);
       await expect(assertReusableJourneyProfile(profile)).resolves.toBeUndefined();
 
+      const contenderUserData = path.join(profile.root, "contender", "Ether-Recovery-Profile");
+      await mkdir(contenderUserData, { recursive: true });
+      await expect(assertReusableJourneyProfile({ ...profile, userData: contenderUserData })).resolves.toBeUndefined();
+      expect(contenderUserData).not.toBe(profile.userData);
+
+      const badUserData = path.join(profile.root, "contender-user-data");
+      await mkdir(badUserData, { recursive: true });
+      await expect(assertReusableJourneyProfile({ ...profile, userData: badUserData })).rejects.toThrow(/Ether-Recovery-Profile/u);
+
       const outsideProfile = {
         ...profile,
         root: outside,

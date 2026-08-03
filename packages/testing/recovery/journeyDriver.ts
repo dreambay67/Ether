@@ -251,6 +251,9 @@ export async function assertReusableJourneyProfile(profile: JourneyProfile): Pro
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative) || !path.basename(profileRoot).startsWith(PROFILE_PREFIX)) {
     throw new Error(`Refusing to reuse a profile outside the scoped temp root: ${profile.root}`);
   }
+  if (path.basename(userData) !== "Ether-Recovery-Profile") {
+    throw new Error("Only an Ether-Recovery-Profile user-data directory can be reused.");
+  }
   for (const [label, candidate] of [["APPDATA", appData], ["LOCALAPPDATA", localAppData], ["user-data", userData]] as const) {
     const relativeCandidate = path.relative(profileRoot, candidate);
     if (relativeCandidate === "" || relativeCandidate.startsWith("..") || path.isAbsolute(relativeCandidate)) {
