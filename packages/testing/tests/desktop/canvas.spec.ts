@@ -26,6 +26,24 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(firstLibraryCopy.getByText("Prompt", { exact: true })).toBeVisible();
   await expect.poll(async () => (await firstLibraryCopy.boundingBox())?.width ?? 0).toBeGreaterThan(80);
   await expect(page.locator(".ether-node")).toHaveCount(2);
+  const promptNode = page.locator('[data-testid="rf__node-prompt"]');
+  const imageNode = page.locator('[data-testid="rf__node-image"]');
+  await promptNode.locator(".ether-node-main p").click();
+  const imageBox = await imageNode.boundingBox();
+  const groupBeforeMarquee = await page.locator(".react-flow__node-group").boundingBox();
+  expect(imageBox).not.toBeNull();
+  expect(groupBeforeMarquee).not.toBeNull();
+  const marqueeStart = { x: imageBox!.x - 12, y: groupBeforeMarquee!.y + groupBeforeMarquee!.height + 12 };
+  const marqueeEnd = { x: imageBox!.x + imageBox!.width + 12, y: imageBox!.y - 12 };
+  await page.keyboard.down("Shift");
+  await page.mouse.move(marqueeStart.x, marqueeStart.y);
+  await page.mouse.down();
+  await page.mouse.move(marqueeEnd.x, marqueeEnd.y, { steps: 8 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await expect(promptNode.locator(".ether-node")).toHaveClass(/is-selected/);
+  await expect(imageNode.locator(".ether-node")).toHaveClass(/is-selected/);
+  await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   const addWithRealMouse = async (definitionId: string) => {
     const button = page.locator(`.node-library-item[data-node-definition='${definitionId}'] .node-library-add`);
     await button.scrollIntoViewIfNeeded();

@@ -226,6 +226,8 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         nodesConnectable={!readOnly}
         elementsSelectable
         selectionOnDrag
+        selectionKeyCode={null}
+        multiSelectionKeyCode="Shift"
         panOnDrag={[2]}
         selectionMode={SelectionMode.Partial}
         selectNodesOnDrag={false}
