@@ -436,7 +436,8 @@ describe("A02 Windows integration harness contracts", () => {
     for (const route of A02_APPROVED_ROUTES) {
       const command = a02ApprovalFreeListCommand(route);
       expect(command).toContain(`ETHER_A02_APPROVED_ROUTE=${route}`);
-      expect(command).toContain(`--grep "^${A02_ROUTE_TITLES[route].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$"`);
+      expect(command).toContain("playwright test tests/recovery/document-windows-integration.spec.ts");
+      expect(command).toContain(`--grep "${A02_ROUTE_TITLES[route].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$"`);
       expect(command).toContain("--list --workers=1");
       expect(command).not.toContain(ASSOCIATION_APPROVAL);
       expect(command).not.toContain(SHELL_UI_APPROVAL);

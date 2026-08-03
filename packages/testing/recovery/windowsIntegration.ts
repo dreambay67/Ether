@@ -22,7 +22,7 @@ export const A02_ROUTE_TITLES: Readonly<Record<A02ApprovedRoute, string>> = Obje
 /** Discovery only: this command has no mutation/shell approvals and Playwright --list never executes a test body. */
 export function a02ApprovalFreeListCommand(route: A02ApprovedRoute): string {
   const title = A02_ROUTE_TITLES[route].replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return `pnpm.cmd -C packages/testing exec cross-env ETHER_WINDOWS_INTEGRATION_MODE=packaged ${A02_APPROVED_ROUTE}=${route} playwright test --config playwright.document-windows-integration.config.ts --grep "^${title}$" --list --workers=1`;
+  return `pnpm.cmd -C packages/testing exec cross-env ETHER_WINDOWS_INTEGRATION_MODE=packaged ${A02_APPROVED_ROUTE}=${route} playwright test tests/recovery/document-windows-integration.spec.ts --config playwright.document-windows-integration.config.ts --grep "${title}$" --list --workers=1`;
 }
 export const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
 export const ASSOCIATION_APPROVAL_VALUE = "approved-by-main";
