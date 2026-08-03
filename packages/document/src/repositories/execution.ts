@@ -130,15 +130,30 @@ export type CompletionAcceptance = {
 };
 
 export type ReviewCheckpoint = {
+  candidateOutputVersionIds: string[];
   createdAt: string;
   completedAt: string | null;
   completion: Record<string, unknown> | null;
   id: string;
+  minimumSelections: number;
   planId: string;
   selectedOutputVersionIds: string[];
+  selectionMode: "one" | "many";
   state: "waiting-review" | "completed" | "rejected" | "needs-attention" | "cancelled";
   stepId: string;
   workItemId: string | null;
+};
+
+type ReviewCheckpointPolicy = {
+  candidateOutputVersionIds: string[];
+  minimumSelections: number;
+  selectionMode: "one" | "many";
+};
+
+type ReviewCheckpointCompletionEnvelope = {
+  decision: Record<string, unknown> | null;
+  policy: ReviewCheckpointPolicy;
+  version: 1;
 };
 
 export type ExecutionTimelineEvent = {
@@ -1126,6 +1141,7 @@ export class ExecutionRepository {
   }
 
   createReviewCheckpoint(input: {
+    candidateOutputVersionIds?: string[];
     checkpointId?: string;
     claim?: ClaimedExecution;
     minimumSelections?: number;
@@ -1160,7 +1176,16 @@ export class ExecutionRepository {
       throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Only running work can wait for review.");
     }
     const selectedOutputVersionIds = input.selectedOutputVersionIds ?? [];
+    assertUniqueReviewOutputVersionIds(selectedOutputVersionIds, "DUPLICATE_REVIEW_SELECTION");
     for (const outputVersionId of selectedOutputVersionIds) this.requireOutputVersion(outputVersionId);
+    const policy = reviewCheckpointPolicy(input);
+    assertUniqueReviewOutputVersionIds(policy.candidateOutputVersionIds, "DUPLICATE_REVIEW_CANDIDATE");
+    for (const outputVersionId of policy.candidateOutputVersionIds) this.requireOutputVersion(outputVersionId);
+    for (const outputVersionId of selectedOutputVersionIds) {
+      if (!policy.candidateOutputVersionIds.includes(outputVersionId)) {
+        throw new ExecutionRepositoryError("REVIEW_SELECTION_NOT_CANDIDATE", "Compare selections must be checkpoint candidates.");
+      }
+    }
     const now = this.context.now();
     const checkpointId = input.checkpointId ?? this.context.createId("review-checkpoint");
     this.context.database
@@ -1168,9 +1193,17 @@ export class ExecutionRepository {
         `INSERT INTO review_checkpoints (
            checkpoint_id, plan_id, step_id, work_item_id, state, selected_output_version_ids_json,
            completion_json, created_at, completed_at
-         ) VALUES (?, ?, ?, ?, 'waiting-review', ?, NULL, ?, NULL)`
+         ) VALUES (?, ?, ?, ?, 'waiting-review', ?, ?, ?, NULL)`
       )
-      .run(checkpointId, plan.id, stepId, workItemId, JSON.stringify(selectedOutputVersionIds), now);
+      .run(
+        checkpointId,
+        plan.id,
+        stepId,
+        workItemId,
+        JSON.stringify(selectedOutputVersionIds),
+        JSON.stringify(reviewCheckpointEnvelope(policy, null)),
+        now
+      );
     const waiting = this.context.database
       .prepare(
         `UPDATE work_items SET status = 'waiting-review', updated_at = ?
@@ -1187,7 +1220,7 @@ export class ExecutionRepository {
       attemptId: this.runningAttemptId(work.id),
       eventName: "review.waiting",
       state: "waiting-review",
-      payload: { checkpointId, selectedOutputVersionIds },
+      payload: { checkpointId, selectedOutputVersionIds, ...policy },
       occurredAt: now
     });
     this.recordOutbox("workItem.stateChanged", checkpointId, {
@@ -1203,6 +1236,7 @@ export class ExecutionRepository {
   }
 
   createCompareCheckpoint(input: {
+    candidateOutputVersionIds?: string[];
     checkpointId?: string;
     claim?: ClaimedExecution;
     minimumSelections?: number;
@@ -1230,9 +1264,12 @@ export class ExecutionRepository {
     if (checkpoint.state !== "waiting-review" || checkpoint.workItemId === null) {
       throw new ExecutionRepositoryError("TRANSITION_CONFLICT", "Review checkpoint is not waiting for completion.");
     }
-    if (input.selectedOutputVersionIds.length === 0) {
+    if (input.selectedOutputVersionIds.length === 0 && checkpoint.candidateOutputVersionIds.length === 0) {
       throw new ExecutionRepositoryError("EMPTY_REVIEW", "A Compare checkpoint requires at least one selected output.");
     }
+    assertUniqueReviewOutputVersionIds(input.selectedOutputVersionIds, "DUPLICATE_REVIEW_SELECTION");
+    const policy = checkpointPolicyFromCheckpoint(checkpoint);
+    if (policy !== null) validateReviewSelection(policy, input.selectedOutputVersionIds);
     for (const outputVersionId of input.selectedOutputVersionIds) this.requireOutputVersion(outputVersionId);
     const work = this.requireWorkItem(checkpoint.workItemId);
     const attemptId = this.runningAttemptId(work.id);
@@ -1258,7 +1295,12 @@ export class ExecutionRepository {
                 completion_json = ?, completed_at = ?
          WHERE checkpoint_id = ? AND state = 'waiting-review'`
       )
-      .run(JSON.stringify(input.selectedOutputVersionIds), JSON.stringify(input.completion ?? {}), now, checkpoint.id);
+      .run(
+        JSON.stringify(input.selectedOutputVersionIds),
+        JSON.stringify(policy === null ? input.completion ?? {} : reviewCheckpointEnvelope(policy, input.completion ?? {})),
+        now,
+        checkpoint.id
+      );
     this.recomputeJob(work.jobId, now);
     this.recordTimeline({
       jobId: work.jobId,
@@ -1304,6 +1346,7 @@ export class ExecutionRepository {
     const work = this.requireWorkItem(checkpoint.workItemId);
     const attemptId = this.runningAttemptId(work.id);
     const now = this.context.now();
+    const policy = checkpointPolicyFromCheckpoint(checkpoint);
     this.context.database
       .prepare(
         `UPDATE attempts SET status = 'failed', error_json = ?, completed_at = ?
@@ -1321,7 +1364,11 @@ export class ExecutionRepository {
         `UPDATE review_checkpoints SET state = 'rejected', completion_json = ?, completed_at = ?
          WHERE checkpoint_id = ? AND state = 'waiting-review'`
       )
-      .run(JSON.stringify({ reason }), now, checkpoint.id);
+      .run(
+        JSON.stringify(policy === null ? { reason } : reviewCheckpointEnvelope(policy, { reason, outcome: "rejected" })),
+        now,
+        checkpoint.id
+      );
     this.recomputeJob(work.jobId, now);
     return this.requireReviewCheckpoint(checkpoint.id);
   }
@@ -2249,7 +2296,7 @@ export class ExecutionRepository {
       workItemId: row.work_item_id,
       state: row.state,
       selectedOutputVersionIds: JSON.parse(row.selected_output_version_ids_json) as string[],
-      completion: row.completion_json === null ? null : JSON.parse(row.completion_json) as Record<string, unknown>,
+      ...reviewCheckpointFields(row.completion_json, row.state),
       createdAt: row.created_at,
       completedAt: row.completed_at
     };
@@ -2331,6 +2378,112 @@ export class ExecutionRepository {
           sourceOutputVersionId: version.id, metadata: { role: "general" }
         });
       }
+    }
+  }
+}
+
+function reviewCheckpointPolicy(input: {
+  candidateOutputVersionIds?: string[];
+  minimumSelections?: number;
+  selectionMode?: "one" | "many";
+}): ReviewCheckpointPolicy {
+  const selectionMode = input.selectionMode ?? "many";
+  const minimumSelections = input.minimumSelections ?? 1;
+  if (selectionMode !== "one" && selectionMode !== "many") {
+    throw new ExecutionRepositoryError("REVIEW_POLICY_INVALID", "Compare selection mode must be one or many.");
+  }
+  if (!Number.isInteger(minimumSelections) || minimumSelections < 0) {
+    throw new ExecutionRepositoryError("REVIEW_POLICY_INVALID", "Compare minimum selections must be a non-negative integer.");
+  }
+  return {
+    selectionMode,
+    minimumSelections,
+    candidateOutputVersionIds: [...(input.candidateOutputVersionIds ?? [])]
+  };
+}
+
+function reviewCheckpointEnvelope(
+  policy: ReviewCheckpointPolicy,
+  decision: Record<string, unknown> | null
+): ReviewCheckpointCompletionEnvelope {
+  return {
+    version: 1,
+    policy: {
+      selectionMode: policy.selectionMode,
+      minimumSelections: policy.minimumSelections,
+      candidateOutputVersionIds: [...policy.candidateOutputVersionIds]
+    },
+    decision: decision === null ? null : { ...decision }
+  };
+}
+
+function reviewCheckpointFields(
+  completionJson: string | null,
+  state: ReviewCheckpoint["state"]
+): Pick<ReviewCheckpoint, "candidateOutputVersionIds" | "completion" | "minimumSelections" | "selectionMode"> {
+  const completion = completionJson === null ? null : JSON.parse(completionJson) as Record<string, unknown>;
+  const envelope = reviewCheckpointEnvelopeFrom(completion);
+  if (state === "waiting-review" && completion !== null && envelope === null) {
+    throw new ExecutionRepositoryError("REVIEW_POLICY_CORRUPT", "Waiting Compare checkpoint has an invalid policy envelope.");
+  }
+  return {
+    completion,
+    candidateOutputVersionIds: envelope?.policy.candidateOutputVersionIds ?? [],
+    selectionMode: envelope?.policy.selectionMode ?? "many",
+    minimumSelections: envelope?.policy.minimumSelections ?? 1
+  };
+}
+
+function checkpointPolicyFromCheckpoint(checkpoint: ReviewCheckpoint): ReviewCheckpointPolicy | null {
+  return reviewCheckpointEnvelopeFrom(checkpoint.completion)?.policy ?? null;
+}
+
+function reviewCheckpointEnvelopeFrom(completion: Record<string, unknown> | null): ReviewCheckpointCompletionEnvelope | null {
+  if (completion === null || completion.version !== 1 || completion.policy === null || typeof completion.policy !== "object" || Array.isArray(completion.policy)) {
+    return null;
+  }
+  const policy = completion.policy as Record<string, unknown>;
+  if (
+    (policy.selectionMode !== "one" && policy.selectionMode !== "many") ||
+    !Number.isInteger(policy.minimumSelections) ||
+    typeof policy.minimumSelections !== "number" ||
+    policy.minimumSelections < 0 ||
+    !Array.isArray(policy.candidateOutputVersionIds) ||
+    !policy.candidateOutputVersionIds.every((id) => typeof id === "string" && id.length > 0)
+  ) return null;
+  const decision = completion.decision;
+  if (decision !== null && (typeof decision !== "object" || Array.isArray(decision))) return null;
+  return {
+    version: 1,
+    policy: {
+      selectionMode: policy.selectionMode,
+      minimumSelections: policy.minimumSelections,
+      candidateOutputVersionIds: [...policy.candidateOutputVersionIds]
+    },
+    decision: decision === null ? null : { ...(decision as Record<string, unknown>) }
+  };
+}
+
+function assertUniqueReviewOutputVersionIds(ids: readonly string[], code: string): void {
+  if (new Set(ids).size !== ids.length) {
+    throw new ExecutionRepositoryError(code, "Compare output version IDs must not contain duplicates.");
+  }
+}
+
+function validateReviewSelection(policy: ReviewCheckpointPolicy, selectedOutputVersionIds: readonly string[]): void {
+  if (policy.selectionMode === "one" && selectedOutputVersionIds.length !== 1) {
+    throw new ExecutionRepositoryError("REVIEW_SELECTION_COUNT_INVALID", "A one-mode Compare checkpoint requires exactly one selected candidate.");
+  }
+  if (policy.selectionMode === "many" && selectedOutputVersionIds.length < policy.minimumSelections) {
+    throw new ExecutionRepositoryError(
+      "REVIEW_SELECTION_COUNT_INVALID",
+      `This Compare checkpoint requires at least ${policy.minimumSelections} selected candidates.`
+    );
+  }
+  const candidates = new Set(policy.candidateOutputVersionIds);
+  for (const outputVersionId of selectedOutputVersionIds) {
+    if (!candidates.has(outputVersionId)) {
+      throw new ExecutionRepositoryError("REVIEW_SELECTION_NOT_CANDIDATE", "Compare selections must be checkpoint candidates.");
     }
   }
 }

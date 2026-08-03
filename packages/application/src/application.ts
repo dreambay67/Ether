@@ -2061,18 +2061,27 @@ async function planningCapabilities(
       ? graph.nodes.map((node) => node.id)
       : resolveScope(graph, scope)
   );
-  const needsReasoning = graph.nodes.some((node) =>
+  const needsWorker = graph.nodes.some((node) =>
     scopedNodeIds.has(node.id) &&
-    (node.config.kind === "prompt.worker" || node.config.kind === "review.evaluate")
+    node.config.kind === "prompt.worker"
+  );
+  const needsEvaluation = graph.nodes.some((node) =>
+    scopedNodeIds.has(node.id) && node.config.kind === "review.evaluate"
   );
   const reasoning = all.find((capability) => capability.operation === "llm" || capability.operation === "interpret");
-  if (needsReasoning && (reasoning === undefined || reasoning.providerId === "ether-local")) {
+  if (needsWorker && (reasoning === undefined || reasoning.providerId === "ether-local")) {
     throw new ApplicationServiceError(
       "PROVIDER_CAPABILITY_UNAVAILABLE",
-      "This graph requires an injected Worker or evaluation provider capability."
+      "This graph requires an injected Worker provider capability."
     );
   }
-  const primary = needsReasoning
+  if (needsEvaluation && !all.some((capability) => capability.operation === "evaluate")) {
+    throw new ApplicationServiceError(
+      "PROVIDER_CAPABILITY_UNAVAILABLE",
+      "This graph requires an injected evaluation provider capability."
+    );
+  }
+  const primary = needsWorker
     ? reasoning!
     : all.find((capability) => capability.providerId !== "ether-local") ?? local;
   return { all, primary };

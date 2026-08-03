@@ -144,6 +144,10 @@ export class WorkerExecutor implements StepExecutor {
         ? context.step.parameters.reasoningEffort
         : null
     });
+    const evaluationItemFor = (input: PayloadEnvelope) => result.items.find((item) =>
+      item.id === input.id ||
+      (input.content.kind === "artifact" && item.assetId === input.content.artifactId)
+    );
     return {
       kind: "complete",
       outputs: [{
@@ -158,12 +162,20 @@ export class WorkerExecutor implements StepExecutor {
         metadata: provenance
       }, ...context.inputs
         .filter((input) => input.channel !== "text" && input.channel !== "data")
-        .map((input) => ({
+        .map((input) => {
+          const item = evaluationItemFor(input);
+          return {
           channel: input.channel,
           role: input.role,
           content: input.content,
-          metadata: { ...input.metadata, ...provenance, evaluationPassthrough: true }
-        }))]
+          metadata: {
+            ...input.metadata,
+            ...provenance,
+            evaluationPassthrough: true,
+            ...(item === undefined ? {} : { evaluationItem: item })
+          }
+        };
+        })]
     };
   }
 }

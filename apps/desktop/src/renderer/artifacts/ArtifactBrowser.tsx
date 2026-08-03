@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
 import { Columns3, Download, Film, GitFork, Grid3X3, ListFilter, RefreshCcw, Search, Sparkles } from "lucide-react";
-import type { ArtifactDetail, Collection, EtherNode, PayloadChannel, ReviewEvaluateConfig, ReviewFilterConfig } from "@ether/schema";
+import type { Artifact, ArtifactDetail, Collection, EtherNode, PayloadChannel, ReviewEvaluateConfig, ReviewFilterConfig } from "@ether/schema";
 
 import { CompareStage } from "../review/CompareStage";
 import { EvaluationPanel } from "../review/EvaluationPanel";
@@ -18,6 +18,13 @@ import "../styles/review-workspace.css";
 
 type View = "grid" | "filmstrip" | "lineage" | "collections" | "compare" | "evaluate" | "filter" | "live";
 const channels: PayloadChannel[] = ["text", "image", "mask", "data", "video", "audio"];
+type CompareCheckpoint = {
+  candidateOutputVersionIds: string[];
+  id: string;
+  minimumSelections: number;
+  selectedOutputVersionIds: string[];
+  selectionMode: "one" | "many";
+};
 
 export function ArtifactBrowser({ documentId }: { documentId: string }) {
   const [draft, setDraft] = useState<ArtifactFilters>(emptyArtifactFilters);
@@ -29,7 +36,8 @@ export function ArtifactBrowser({ documentId }: { documentId: string }) {
   const [advanced, setAdvanced] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [message, setMessage] = useState("Review is local and document-backed.");
-  const [checkpoint, setCheckpoint] = useState<{ id: string; selectedOutputVersionIds: string[] } | null>(null);
+  const [checkpoint, setCheckpoint] = useState<CompareCheckpoint | null>(null);
+  const [checkpointArtifacts, setCheckpointArtifacts] = useState<Artifact[]>([]);
   const [reviewNodes, setReviewNodes] = useState<Array<{ graphId: string; node: EtherNode }>>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [evaluationDetails, setEvaluationDetails] = useState<ArtifactDetail[]>([]);
@@ -57,6 +65,24 @@ export function ArtifactBrowser({ documentId }: { documentId: string }) {
     } catch { setReviewNodes([]); }
   }, [documentId]);
   useEffect(() => { void loadReviewContext(); }, [loadReviewContext]);
+  useEffect(() => {
+    if (checkpoint === null) {
+      setCheckpointArtifacts([]);
+      return;
+    }
+    let cancelled = false;
+    void window.ether.application.query({
+      kind: "query",
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      documentId,
+      name: "artifact.search",
+      payload: { ...emptyArtifactFilters, outputVersionIds: checkpoint.candidateOutputVersionIds, limit: 500 }
+    }).then((response) => {
+      if (!cancelled && response.name === "artifact.search") setCheckpointArtifacts(response.payload.artifacts);
+    }).catch(() => { if (!cancelled) setCheckpointArtifacts([]); });
+    return () => { cancelled = true; };
+  }, [checkpoint, documentId]);
   useEffect(() => {
     if (view !== "evaluate") return;
     let cancelled = false;
@@ -89,7 +115,7 @@ export function ArtifactBrowser({ documentId }: { documentId: string }) {
       {view === "filmstrip" ? <ArtifactFilmstrip documentId={documentId} artifacts={artifacts} selectedIds={selected} onToggle={toggle} onOpen={(artifact) => setDetailId(artifact.id)} onDragStart={drag} onNearEnd={() => void loadMore()} /> : null}
       {view === "lineage" ? <LineageView documentId={documentId} artifact={selectedArtifact} onStatus={setMessage} /> : null}
       {view === "collections" ? <CollectionView documentId={documentId} selectedArtifactIds={selectedIds} onStatus={setMessage} /> : null}
-      {view === "compare" ? checkpoint ? <CompareStage documentId={documentId} checkpointId={checkpoint.id} artifacts={artifacts} selectionMode="many" initialSelectedOutputVersionIds={checkpoint.selectedOutputVersionIds} onStatus={setMessage} onCompleted={loadReviewContext} /> : <div className="review-empty"><h2>No waiting Compare checkpoint</h2><p>Run a graph with a Compare node to create a durable human checkpoint.</p></div> : null}
+      {view === "compare" ? checkpoint ? <CompareStage documentId={documentId} checkpointId={checkpoint.id} artifacts={checkpointArtifacts} candidateOutputVersionIds={checkpoint.candidateOutputVersionIds} selectionMode={checkpoint.selectionMode} minimumSelections={checkpoint.minimumSelections} initialSelectedOutputVersionIds={checkpoint.selectedOutputVersionIds} onStatus={setMessage} onCompleted={loadReviewContext} /> : <div className="review-empty"><h2>No waiting Compare checkpoint</h2><p>Run a graph with a Compare node to create a durable human checkpoint.</p></div> : null}
       {view === "evaluate" ? evaluationNode && evaluationEntry ? <EvaluationPanel documentId={documentId} graphId={evaluationEntry.graphId} node={evaluationNode} artifactDetails={evaluationDetails} onStatus={setMessage} /> : <div className="review-empty"><h2>No Evaluate node in this document</h2><p>Add an Evaluate node to reveal its Codex instruction, rubric, and run provenance here.</p></div> : null}
       {view === "filter" ? <FilterRules config={filterNode?.config ?? fallbackFilter} artifacts={artifacts.slice(0, 50)} /> : null}
       {view === "live" ? <LiveOutputPanel documentId={documentId} onStatus={setMessage} /> : null}

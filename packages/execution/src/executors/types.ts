@@ -75,7 +75,14 @@ export type ExecutorResult =
       expectedOutputCount: number;
     }
   | { kind: "local-media"; outputs: LocalMediaOutput[] }
-  | { kind: "waiting-review"; checkpoint: { selectionMode: "one" | "many"; minimumSelections: number } };
+  | {
+      kind: "waiting-review";
+      checkpoint: {
+        candidateOutputVersionIds: string[];
+        selectionMode: "one" | "many";
+        minimumSelections: number;
+      };
+    };
 
 export type WorkerFacet = Pick<AssistantProvider, "run">;
 export type EvaluationFacet = Pick<VisionEvaluationProvider, "evaluate">;

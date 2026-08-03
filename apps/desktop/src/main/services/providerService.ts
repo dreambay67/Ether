@@ -246,7 +246,7 @@ export function createProviderService(options: {
             profileId: `evaluation:${modelId}`,
             modelId,
             reasoningEfforts,
-            operation: "llm",
+            operation: "evaluate",
             inputChannels: ["text", "image", "data"],
             outputChannels: ["data"],
             aspectRatios: [],

@@ -9,6 +9,16 @@ export class ReviewExecutor implements StepExecutor {
     if ((selectionMode !== "one" && selectionMode !== "many") || typeof minimumSelections !== "number") {
       throw new ExecutorFailure("REVIEW_CONFIGURATION_INVALID", "Compare requires a valid selection mode and minimum selection count.");
     }
-    return { kind: "waiting-review", checkpoint: { selectionMode, minimumSelections } };
+    if (!Number.isInteger(minimumSelections) || minimumSelections < 0) {
+      throw new ExecutorFailure("REVIEW_CONFIGURATION_INVALID", "Compare minimum selections must be a non-negative integer.");
+    }
+    return {
+      kind: "waiting-review",
+      checkpoint: {
+        selectionMode,
+        minimumSelections,
+        candidateOutputVersionIds: [...new Set(context.inputs.map((input) => input.source.outputVersionId))]
+      }
+    };
   }
 }

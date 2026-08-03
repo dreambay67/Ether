@@ -1188,7 +1188,7 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
       return binding;
     }
     case "review.evaluate":
-      return makeProviderBinding(input, input.capability.providerId, config.model, config);
+      return makeEvaluationProviderBinding(input, config);
     case "edit.mask":
       if (config.mode === "provider") {
         throw new PlanCompilationError(
@@ -1270,6 +1270,26 @@ function makeProviderBinding(
     settings: settings as JsonObject,
     capabilitySnapshot: capability
   };
+}
+
+function makeEvaluationProviderBinding(
+  input: CompilePlanInput,
+  config: Extract<PlannerNode["config"], { kind: "review.evaluate" }>
+): ProviderBinding {
+  const capabilities = [...(input.providerCapabilities ?? []), input.capability];
+  const evaluation = capabilities.find((capability) =>
+    capability.operation === "evaluate" &&
+    capability.outputChannels.includes("data") &&
+    (capability.modelId === undefined || capability.modelId === config.model)
+  );
+  if (evaluation === undefined) {
+    throw new PlanCompilationError(
+      "PROVIDER_CAPABILITY_UNAVAILABLE",
+      "Review Evaluate requires a verified evaluation capability, not a generic Worker/LLM capability.",
+      { modelId: config.model, requiredOperation: "evaluate" }
+    );
+  }
+  return makeProviderBinding(input, evaluation.providerId, config.model, config, evaluation.profileId);
 }
 
 function compatibilityProvider(capability: ProviderCapability, settings: unknown): PlanStep["provider"] {

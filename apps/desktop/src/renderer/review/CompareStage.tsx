@@ -10,6 +10,7 @@ export type CompareStageProps = {
   documentId: string;
   checkpointId: string;
   artifacts: readonly Artifact[];
+  candidateOutputVersionIds: readonly string[];
   selectionMode?: "one" | "many";
   minimumSelections?: number;
   initialSelectedOutputVersionIds?: readonly string[];
@@ -24,6 +25,7 @@ export function CompareStage({
   documentId,
   checkpointId,
   artifacts,
+  candidateOutputVersionIds,
   selectionMode = "one",
   minimumSelections = 1,
   initialSelectedOutputVersionIds = EMPTY_SELECTION,
@@ -32,9 +34,10 @@ export function CompareStage({
   onCompleted,
   onStatus
 }: CompareStageProps) {
-  const candidateIds = useMemo(
-    () => new Set(artifacts.map((artifact) => artifact.source.outputVersionId)),
-    [artifacts]
+  const candidateIds = useMemo(() => new Set(candidateOutputVersionIds), [candidateOutputVersionIds]);
+  const candidateArtifacts = useMemo(
+    () => artifacts.filter((artifact) => candidateIds.has(artifact.source.outputVersionId)),
+    [artifacts, candidateIds]
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     validInitialSelection(initialSelectedOutputVersionIds, candidateIds, selectionMode)
@@ -105,11 +108,11 @@ export function CompareStage({
 
       <p className="compare-stage-disclosure">No AI runs here. Your selected output versions and review note are stored on the durable checkpoint.</p>
 
-      {artifacts.length === 0 ? (
-        <p className="artifact-empty">No artifacts are available for this checkpoint.</p>
+      {candidateArtifacts.length === 0 ? (
+        <p className="artifact-empty">No renderable artifacts are available for this checkpoint&apos;s sealed candidates.</p>
       ) : (
         <div className="compare-review-grid" role={selectionMode === "one" ? "radiogroup" : "group"} aria-label="Compare candidates">
-          {artifacts.map((artifact) => {
+          {candidateArtifacts.map((artifact) => {
             const outputVersionId = artifact.source.outputVersionId;
             const selected = selectedIds.includes(outputVersionId);
             const title = artifactTitle(artifact);

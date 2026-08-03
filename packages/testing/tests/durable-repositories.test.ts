@@ -81,7 +81,8 @@ function plan(head: { documentRevisionId: string; graphRevisions: Record<string,
   const steps = [
     ["step-source", "source", "deterministic"],
     ["step-target", "target", "deterministic"],
-    ["step-compare", "compare", "human-checkpoint"]
+    ["step-compare", "compare", "human-checkpoint"],
+    ["step-compare-many", "compare", "human-checkpoint"]
   ].map(([id, nodeId, executor], index) => ({
     id,
     nodeId,
@@ -114,7 +115,8 @@ function plan(head: { documentRevisionId: string; graphRevisions: Record<string,
     workItems: [
       { id: "work-1", stepId: "step-source", ordinal: 0, inputs: [], parameters: [] },
       { id: "work-2", stepId: "step-target", ordinal: 1, inputs: [], parameters: [], dependencyWorkItemIds: ["work-1"] },
-      { id: "work-3", stepId: "step-compare", ordinal: 2, inputs: [], parameters: [], dependencyWorkItemIds: ["work-2"] }
+      { id: "work-3", stepId: "step-compare", ordinal: 2, inputs: [], parameters: [], dependencyWorkItemIds: ["work-2"] },
+      { id: "work-4", stepId: "step-compare-many", ordinal: 3, inputs: [], parameters: [], dependencyWorkItemIds: ["work-2"] }
     ],
     providerCapabilitySnapshots: [capability],
     estimatedCalls: 0,
@@ -231,16 +233,101 @@ describe("durable document repositories", () => {
 
       const compareClaim = await store.transaction(({ execution }) => execution.claimNext(job.id, "worker-compare"));
       expect(compareClaim?.workItem.plannedWorkItemId).toBe("work-3");
+      await expect(store.transaction(({ execution }) => execution.createCompareCheckpoint({
+        planId: executionPlan.id,
+        stepId: "step-compare",
+        workItemId: compareClaim!.workItem.id,
+        candidateOutputVersionIds: [outputTwo.version.id],
+        selectedOutputVersionIds: [outputTwo.version.id, outputTwo.version.id],
+        selectionMode: "one",
+        minimumSelections: 1
+      }))).rejects.toMatchObject({ code: "DUPLICATE_REVIEW_SELECTION" });
+      await expect(store.transaction(({ execution }) => execution.createCompareCheckpoint({
+        planId: executionPlan.id,
+        stepId: "step-compare",
+        workItemId: compareClaim!.workItem.id,
+        candidateOutputVersionIds: [outputTwo.version.id],
+        selectedOutputVersionIds: [outputOne.version.id],
+        selectionMode: "one",
+        minimumSelections: 1
+      }))).rejects.toMatchObject({ code: "REVIEW_SELECTION_NOT_CANDIDATE" });
       const checkpoint = await store.transaction(({ execution }) => execution.createCompareCheckpoint({
         planId: executionPlan.id,
         stepId: "step-compare",
-        workItemId: compareClaim!.workItem.id
+        workItemId: compareClaim!.workItem.id,
+        candidateOutputVersionIds: [outputTwo.version.id],
+        selectedOutputVersionIds: [outputTwo.version.id],
+        selectionMode: "one",
+        minimumSelections: 1
       }));
+      expect(checkpoint).toMatchObject({
+        state: "waiting-review",
+        candidateOutputVersionIds: [outputTwo.version.id],
+        selectionMode: "one",
+        minimumSelections: 1,
+        completion: {
+          version: 1,
+          policy: { candidateOutputVersionIds: [outputTwo.version.id], selectionMode: "one", minimumSelections: 1 },
+          decision: null
+        }
+      });
+      await expect(store.transaction(({ execution }) => execution.completeCompareCheckpoint({
+        checkpointId: checkpoint.id,
+        selectedOutputVersionIds: [outputTwo.version.id, outputTwo.version.id]
+      }))).rejects.toMatchObject({ code: "DUPLICATE_REVIEW_SELECTION" });
+      await expect(store.transaction(({ execution }) => execution.completeCompareCheckpoint({
+        checkpointId: checkpoint.id,
+        selectedOutputVersionIds: [outputOne.version.id]
+      }))).rejects.toMatchObject({ code: "REVIEW_SELECTION_NOT_CANDIDATE" });
+      await expect(store.transaction(({ execution }) => execution.completeCompareCheckpoint({
+        checkpointId: checkpoint.id,
+        selectedOutputVersionIds: []
+      }))).rejects.toMatchObject({ code: "REVIEW_SELECTION_COUNT_INVALID" });
       const completed = await store.transaction(({ execution }) => execution.completeCompareCheckpoint({
         checkpointId: checkpoint.id,
-        selectedOutputVersionIds: [outputTwo.version.id]
+        selectedOutputVersionIds: [outputTwo.version.id],
+        completion: { note: "best candidate" }
       }));
-      expect(completed.state).toBe("completed");
+      expect(completed).toMatchObject({
+        state: "completed",
+        candidateOutputVersionIds: [outputTwo.version.id],
+        completion: {
+          version: 1,
+          policy: { candidateOutputVersionIds: [outputTwo.version.id], selectionMode: "one", minimumSelections: 1 },
+          decision: { note: "best candidate" }
+        }
+      });
+      await expect(store.transaction(({ execution }) => execution.completeCompareCheckpoint({
+        checkpointId: checkpoint.id,
+        selectedOutputVersionIds: [outputTwo.version.id]
+      }))).resolves.toMatchObject({ completion: completed.completion });
+
+      const manyClaim = await store.transaction(({ execution }) => execution.claimNext(job.id, "worker-compare-many"));
+      expect(manyClaim?.workItem.plannedWorkItemId).toBe("work-4");
+      const manyCheckpoint = await store.transaction(({ execution }) => execution.createCompareCheckpoint({
+        planId: executionPlan.id,
+        stepId: "step-compare-many",
+        workItemId: manyClaim!.workItem.id,
+        candidateOutputVersionIds: [outputOne.version.id, outputTwo.version.id],
+        selectedOutputVersionIds: [outputOne.version.id],
+        selectionMode: "many",
+        minimumSelections: 2
+      }));
+      const database = (store as unknown as { database: { prepare(sql: string): { run(...values: unknown[]): unknown } } }).database;
+      database.prepare("UPDATE review_checkpoints SET completion_json = ? WHERE checkpoint_id = ?")
+        .run(JSON.stringify({ version: 1, policy: { candidateOutputVersionIds: [] } }), manyCheckpoint.id);
+      await expect(store.read(({ execution }) => execution.searchReviewCheckpoints({ state: "waiting-review" })))
+        .rejects.toMatchObject({ code: "REVIEW_POLICY_CORRUPT" });
+      database.prepare("UPDATE review_checkpoints SET completion_json = ? WHERE checkpoint_id = ?")
+        .run(JSON.stringify(manyCheckpoint.completion), manyCheckpoint.id);
+      await expect(store.transaction(({ execution }) => execution.completeCompareCheckpoint({
+        checkpointId: manyCheckpoint.id,
+        selectedOutputVersionIds: [outputOne.version.id]
+      }))).rejects.toMatchObject({ code: "REVIEW_SELECTION_COUNT_INVALID" });
+      await expect(store.transaction(({ execution }) => execution.completeCompareCheckpoint({
+        checkpointId: manyCheckpoint.id,
+        selectedOutputVersionIds: [outputOne.version.id, outputTwo.version.id]
+      }))).resolves.toMatchObject({ state: "completed", minimumSelections: 2, selectionMode: "many" });
 
       const manualAt = new Date().toISOString();
       const manual = (id: string, parentOutputVersionId: string, payloadId: string, text: string, relation: "manual-edit" | "restored") => ({
@@ -310,6 +397,38 @@ describe("durable document repositories", () => {
           metadata: { title: "Child artifact" }
         }
       }, { appDataRoot: root });
+      const evaluationVersion = (id: string, payloadId: string): NodeOutputVersion => ({
+        ...outputOne.version,
+        id,
+        nodeId: "source",
+        stepId: "step-source",
+        outputPayloadIds: [payloadId],
+        createdAt: manualAt
+      });
+      await store.transaction(({ outputs }) => {
+        outputs.insert(evaluationVersion("evaluation-data-output", "evaluation-data-payload"), [{
+          id: "evaluation-data-payload",
+          channel: "data",
+          role: "general",
+          content: { kind: "object", schemaId: "ether.evaluation.v1", value: { summary: "Durable evaluation.", items: [{ id: "artifact-durable", score: 4 }] } },
+          source: { nodeId: "source", outputVersionId: "evaluation-data-output", lineageKey: "evaluation-data" },
+          metadata: { evaluationProviderId: "fake-evaluator", evaluationModelId: "fake-evaluation-v1", evaluationInstruction: "Score durability.", evaluationRubric: [] }
+        }]);
+        outputs.insert(evaluationVersion("evaluation-media-output", "evaluation-media-payload"), [{
+          id: "evaluation-media-payload",
+          channel: "text",
+          role: "general",
+          content: { kind: "artifact", artifactId: "artifact-durable" },
+          source: { nodeId: "source", outputVersionId: "evaluation-media-output", lineageKey: "evaluation-media" },
+          metadata: { evaluationPassthrough: true }
+        }]);
+      });
+      await expect(store.read(({ artifacts }) => artifacts.detail("artifact-durable")!.evaluation)).resolves.toMatchObject({
+        providerId: "fake-evaluator",
+        modelId: "fake-evaluation-v1",
+        summary: "Durable evaluation.",
+        items: [expect.objectContaining({ score: 4 })]
+      });
       await store.transaction(({ artifacts }) => artifacts.addLineage({
         artifactId: "artifact-child",
         parentArtifactId: "artifact-durable",

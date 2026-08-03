@@ -80,7 +80,12 @@ export type SchedulerPersistence = {
     plannedWorkItem: import("@ether/schema").PlannedWorkItem;
     stagingDirectory: string;
   }): Promise<PayloadEnvelope[]>;
-  waitForReview(input: { claim: ExecutorClaim; selectionMode: "one" | "many"; minimumSelections: number }): Promise<void>;
+  waitForReview(input: {
+    candidateOutputVersionIds: string[];
+    claim: ExecutorClaim;
+    selectionMode: "one" | "many";
+    minimumSelections: number;
+  }): Promise<void>;
 };
 
 export type DocumentStoreLike = {

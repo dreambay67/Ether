@@ -338,7 +338,7 @@ export class ArtifactRepository {
       role: lineageRole(entry.metadata.role, sourcePayload.role),
       createdAt: typeof entry.metadata.createdAt === "string" ? entry.metadata.createdAt : artifact.createdAt
     }));
-    const evaluation = evaluationProvenance(sourcePayload);
+    const evaluation = evaluationProvenance(sourcePayload) ?? evaluationForArtifact(this.context, artifact.id);
     return ArtifactDetailSchema.parse({
       artifact,
       outputVersion,
@@ -741,4 +741,25 @@ function evaluationProvenance(payload: import("@ether/schema").PayloadEnvelope) 
     summary: typeof value.summary === "string" ? value.summary : "",
     items: Array.isArray(value.items) ? value.items : []
   };
+}
+
+function evaluationForArtifact(context: RepositoryTransactionContext, artifactId: string) {
+  const row = context.database
+    .prepare(
+      `SELECT evaluation.payload_id
+       FROM node_output_payloads passthrough
+       JOIN node_output_versions passthrough_version ON passthrough_version.output_version_id = passthrough.output_version_id
+       JOIN node_output_versions evaluation_version
+         ON evaluation_version.attempt_id = passthrough_version.attempt_id
+        AND evaluation_version.work_item_id = passthrough_version.work_item_id
+        AND evaluation_version.step_id = passthrough_version.step_id
+       JOIN node_output_payloads evaluation ON evaluation.output_version_id = evaluation_version.output_version_id
+       WHERE passthrough.artifact_id = ?
+         AND json_extract(evaluation.content_json, '$.schemaId') = 'ether.evaluation.v1'
+       ORDER BY evaluation.created_at DESC, evaluation.payload_id DESC LIMIT 1`
+    )
+    .get(artifactId) as { payload_id: string } | undefined;
+  if (row === undefined) return null;
+  const payload = new OutputRepository(context).getPayload(row.payload_id);
+  return payload === undefined ? null : evaluationProvenance(payload);
 }

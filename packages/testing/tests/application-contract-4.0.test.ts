@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
+import { importBlob } from "@ether/document";
 import { ExecutorRegistry, type ExecutionProviderFacets } from "@ether/execution";
 import { nodeDefinitions } from "@ether/graph-kernel";
 import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider, type GenerationProvider } from "@ether/providers";
@@ -12,6 +13,7 @@ import {
   EtherGraphSchema,
   type EtherGraph,
   type GraphTransaction,
+  type NodeOutputVersion,
   type PayloadEnvelope,
   type ProviderCapability
 } from "@ether/schema";
@@ -544,25 +546,38 @@ describe("Ether 4.0 application boundary", () => {
   it("previews and runs Worker, evaluation, and local-only graphs with per-step provider routing", async () => {
     const root = await temporaryRoot();
     const routed: Array<{ modelId: string; providerId: string }> = [];
-    const reasoningCapability: ProviderCapability = {
-      providerId: "reasoning-provider", profileId: "reasoning-default", operation: "llm",
+    const workerCapability: ProviderCapability = {
+      providerId: "worker-provider", profileId: "worker-default", operation: "llm",
       inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"],
       aspectRatios: [], resolutions: [], maxReferences: 8, maxOutputsPerCall: 1,
       modelId: "gpt-5", reasoningEfforts: ["medium"],
       supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
     };
-    const facets: ExecutionProviderFacets = {
-      worker: { run: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["assistant.text"], text: "Rewritten launch prompt" }) },
-      evaluation: { evaluate: async () => ({ providerId: "reasoning-provider", providerName: "Reasoning", capabilities: ["evaluation.vision"], items: [], summary: "No inputs to score" }) }
+    const evaluationCapability: ProviderCapability = {
+      providerId: "evaluation-provider", profileId: "evaluation-default", operation: "evaluate",
+      inputChannels: ["text", "image", "data"], outputChannels: ["data"],
+      aspectRatios: [], resolutions: [], maxReferences: 8, maxOutputsPerCall: 1,
+      modelId: "gpt-5", reasoningEfforts: ["medium"],
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
     };
     const app = new EtherApplication({
       appDataRoot: root,
       appVersion: "4.0.0-test",
       provider: new FakeImageProvider(),
-      providerCapabilities: [reasoningCapability],
+      providerCapabilities: [workerCapability, evaluationCapability],
       providerResolver: ({ binding }) => {
         if (binding != null) routed.push({ modelId: binding.modelId, providerId: binding.providerId });
-        return facets;
+        if (binding?.providerId === "worker-provider") {
+          return {
+            worker: { run: async () => ({ providerId: "worker-provider", providerName: "Worker", capabilities: ["assistant.text"], text: "Rewritten launch prompt" }) }
+          } satisfies ExecutionProviderFacets;
+        }
+        if (binding?.providerId === "evaluation-provider") {
+          return {
+            evaluation: { evaluate: async () => ({ providerId: "evaluation-provider", providerName: "Evaluator", capabilities: ["evaluation.vision"], items: [], summary: "No inputs to score" }) }
+          } satisfies ExecutionProviderFacets;
+        }
+        return {};
       }
     });
     const scenarios: Array<{ id: string; graph: EtherGraph }> = [
@@ -600,7 +615,8 @@ describe("Ether 4.0 application boundary", () => {
     }
 
     expect(routed).toEqual(expect.arrayContaining([
-      { providerId: "reasoning-provider", modelId: "gpt-5" }
+      { providerId: "worker-provider", modelId: "gpt-5" },
+      { providerId: "evaluation-provider", modelId: "gpt-5" }
     ]));
   });
 

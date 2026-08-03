@@ -56,6 +56,7 @@ export const ProviderOperationSchema = z.enum([
   "edit-image",
   "upscale-image",
   "llm",
+  "evaluate",
   "interpret",
   "transcribe"
 ]);

@@ -297,8 +297,8 @@ function filter(context: ExecutorContext): ExecutorResult {
   const rules = Array.isArray(context.step.parameters.rules) ? context.step.parameters.rules : [];
   const mode = context.step.parameters.match === "any" ? "any" : "all";
   const routes = Array.isArray(context.step.parameters.routes) ? context.step.parameters.routes : [];
-  const items = context.inputs.map((input) => {
-    const explanations = rules.map((rule, index) => explainRule(input.metadata, rule, index));
+  const items = context.inputs.flatMap((input) => expandFilterItems(input)).map((item) => {
+    const explanations = rules.map((rule, index) => explainRule(item, rule, index));
     const matched = mode === "any" ? explanations.some((rule) => rule.matched) : explanations.every((rule) => rule.matched);
     const routeIds = routes.flatMap((route, index) => {
       if (route === null || typeof route !== "object" || Array.isArray(route)) return [];
@@ -306,7 +306,7 @@ function filter(context: ExecutorContext): ExecutorResult {
       const outcome = value.outcome === "unmatched" ? "unmatched" : "matched";
       return matched === (outcome === "matched") ? [typeof value.id === "string" ? value.id : `route-${index + 1}`] : [];
     });
-    return { input, matched, routeIds, explanations };
+    return { ...item, matched, routeIds, explanations };
   });
   return {
     kind: "complete",
@@ -319,7 +319,13 @@ function filter(context: ExecutorContext): ExecutorResult {
           match: mode,
           matchedPayloadIds: items.filter((item) => item.matched).map((item) => item.input.id),
           unmatchedPayloadIds: items.filter((item) => !item.matched).map((item) => item.input.id),
-          items: items.map((item) => ({ payloadId: item.input.id, matched: item.matched, routeIds: item.routeIds, rules: item.explanations }))
+          items: items.map((item) => ({
+            payloadId: item.input.id,
+            ...(item.itemId === undefined ? {} : { itemId: item.itemId }),
+            matched: item.matched,
+            routeIds: item.routeIds,
+            rules: item.explanations
+          }))
         }),
         schemaId: "ether.filter-result.v1"
       },
@@ -327,9 +333,13 @@ function filter(context: ExecutorContext): ExecutorResult {
     }, ...items.map((item) => ({
       channel: item.input.channel,
       role: item.input.role,
-      content: item.input.content,
+      content: item.content,
       metadata: {
         ...item.input.metadata,
+        filterPassthrough: true,
+        filterSourcePayloadId: item.input.id,
+        filterSourceOutputVersionId: item.input.source.outputVersionId,
+        ...(item.itemId === undefined ? {} : { filterItemId: item.itemId }),
         filterMatched: item.matched,
         filterRouteIds: item.routeIds,
         filterExplanations: item.explanations
@@ -338,7 +348,38 @@ function filter(context: ExecutorContext): ExecutorResult {
   };
 }
 
-function explainRule(metadata: Record<string, unknown>, rule: unknown, index: number) {
+function expandFilterItems(input: PayloadEnvelope): Array<{
+  input: PayloadEnvelope;
+  content: PayloadEnvelope["content"];
+  itemId?: string;
+  structured: Record<string, unknown> | null;
+}> {
+  const contentValue = input.content.kind === "object" && input.content.value !== null && typeof input.content.value === "object" && !Array.isArray(input.content.value)
+    ? input.content.value as Record<string, unknown>
+    : null;
+  const evaluationItem = input.metadata.evaluationItem !== null && typeof input.metadata.evaluationItem === "object" && !Array.isArray(input.metadata.evaluationItem)
+    ? input.metadata.evaluationItem as Record<string, unknown>
+    : null;
+  const structured = contentValue === null && evaluationItem === null
+    ? null
+    : { ...(contentValue ?? {}), ...(evaluationItem ?? {}) };
+  const evaluationItems = Array.isArray(structured?.items)
+    ? structured.items.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
+    : [];
+  if (evaluationItems.length === 0) return [{ input, content: input.content, structured }];
+  return evaluationItems.map((evaluationItem, index) => ({
+    input,
+    content: { kind: "object", value: jsonValue(evaluationItem), schemaId: "ether.evaluation.item.v1" },
+    itemId: typeof evaluationItem.id === "string" ? evaluationItem.id : `${input.id}:${index + 1}`,
+    structured: { ...structured, ...evaluationItem }
+  }));
+}
+
+function explainRule(
+  item: { input: PayloadEnvelope; structured: Record<string, unknown> | null },
+  rule: unknown,
+  index: number
+) {
   if (rule === null || typeof rule !== "object" || Array.isArray(rule)) {
     return { ruleId: `rule-${index + 1}`, field: "", operator: "invalid", matched: false, explanation: "Rule is not an object." };
   }
@@ -347,7 +388,7 @@ function explainRule(metadata: Record<string, unknown>, rule: unknown, index: nu
   if (typeof value.field !== "string" || typeof value.operator !== "string") {
     return { ruleId, field: "", operator: "invalid", matched: false, explanation: "Rule needs a field and operator." };
   }
-  const actual = metadata[value.field];
+  const actual = structuredRuleValue(item, value.field);
   const matched = matchesValue(actual, value.operator, value.value);
   return {
     ruleId,
@@ -356,6 +397,23 @@ function explainRule(metadata: Record<string, unknown>, rule: unknown, index: nu
     matched,
     explanation: `${value.field} ${value.operator} ${displayValue(value.value)}; actual ${displayValue(actual)}: ${matched ? "matched" : "did not match"}.`
   };
+}
+
+function structuredRuleValue(
+  item: { input: PayloadEnvelope; structured: Record<string, unknown> | null },
+  field: string
+): unknown {
+  const structured = item.structured === null ? undefined : propertyAt(item.structured, field);
+  return structured === undefined ? propertyAt(item.input.metadata, field) : structured;
+}
+
+function propertyAt(value: Record<string, unknown>, field: string): unknown {
+  if (Object.hasOwn(value, field)) return value[field];
+  return field.split(".").reduce<unknown>((current, segment) =>
+    current !== null && typeof current === "object" && !Array.isArray(current)
+      ? (current as Record<string, unknown>)[segment]
+      : undefined,
+  value);
 }
 
 function matchesValue(actual: unknown, operator: string, expected: unknown): boolean {
