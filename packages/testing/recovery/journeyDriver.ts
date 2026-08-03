@@ -69,6 +69,11 @@ export type JourneyBuildIdentity = {
   artifacts: BuildArtifactIdentity[];
 };
 
+const PACKAGED_IDENTITY_ARTIFACTS = [
+  "release/windows/win-unpacked/Ether.exe",
+  "release/windows/win-unpacked/resources/app.asar"
+] as const;
+
 export type JourneyAction = {
   sequence: number;
   kind: JourneyInputKind;
@@ -286,6 +291,19 @@ export async function collectJourneyBuildIdentity(
     sha256: await hashIfFile(artifactPath)
   })));
   return { gitCommit, mode, artifacts };
+}
+
+/** A shell-finalization sidecar must never present partial packaged identity as exact evidence. */
+export function assertExactPackagedBuildIdentity(identity: JourneyBuildIdentity): void {
+  if (identity.mode !== "packaged") throw new Error("Shell finalization requires a packaged build identity.");
+  if (!/^[a-f0-9]{40}$/u.test(identity.gitCommit)) throw new Error("Shell finalization lacks an exact Git commit.");
+  const artifactHashes = new Map<string, string | null>(identity.artifacts.map((artifact) => [artifact.path.replaceAll("\\", "/"), artifact.sha256]));
+  for (const artifactPath of PACKAGED_IDENTITY_ARTIFACTS) {
+    const sha256 = artifactHashes.get(artifactPath);
+    if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(sha256)) {
+      throw new Error(`Shell finalization lacks an exact SHA-256 for packaged artifact: ${artifactPath}.`);
+    }
+  }
 }
 
 function defaultArtifactPaths(workspaceRoot: string, mode: JourneyMode): string[] {

@@ -234,9 +234,10 @@ export function recoveryArtifactsMayBeCleanedAfterShellCheckpoint(input: {
   exactProcessAbsenceProven: boolean;
   finalizationFailuresAbsent: boolean;
   journeyFailedAfterCheckpoint: boolean;
+  sidecarDurabilityProven: boolean;
   shellCheckpointRestored: boolean;
 }): boolean {
-  return input.exactProcessAbsenceProven && input.finalizationFailuresAbsent && !input.journeyFailedAfterCheckpoint && (!input.checkpointCaptured || input.shellCheckpointRestored);
+  return input.exactProcessAbsenceProven && input.finalizationFailuresAbsent && input.sidecarDurabilityProven && !input.journeyFailedAfterCheckpoint && (!input.checkpointCaptured || input.shellCheckpointRestored);
 }
 
 export type AssociationRestorationWatchdog = {

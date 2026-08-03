@@ -67,9 +67,16 @@ describe("A02 Windows integration harness contracts", () => {
     expect(integrationSpec).toContain("let exactProcessAbsenceProven = false");
     expect(integrationSpec.match(/afterLaunchFailureApplicationExit/g)?.length).toBeGreaterThanOrEqual(5);
     expect(integrationSpec).toContain("shell-finalization.json");
+    expect(integrationSpec).toContain("assertExactPackagedBuildIdentity(identity)");
     expect(integrationSpec).toContain("recordShellFinalizationAttempt");
     expect(integrationSpec).toContain("recordShellFinalizationBlocked");
     expect(integrationSpec).toContain("Refusing shell sanitation without exact process-absence proof");
+    expect(integrationSpec).toContain("ensureShellFinalizationSidecarDurable");
+    expect(integrationSpec).toContain("durabilityFailureObserved");
+    expect(integrationSpec).toContain("Shell finalization sidecar durability was not proven for this journey.");
+    expect(integrationSpec).toContain("jumpTransitions");
+    expect(integrationSpec).toContain("COM invocation #");
+    expect(integrationSpec).toContain("Recycle invocation #");
     expect(integrationSpec).toContain("Shell sanitation and durable finalization evidence both failed");
   });
 
@@ -178,11 +185,12 @@ describe("A02 Windows integration harness contracts", () => {
   });
 
   it("requires explicit exact-process proof, failure-free finalization, and S1 cleanup before deletion", () => {
-    const base = { checkpointCaptured: true, exactProcessAbsenceProven: true, finalizationFailuresAbsent: true, journeyFailedAfterCheckpoint: false, shellCheckpointRestored: true };
+    const base = { checkpointCaptured: true, exactProcessAbsenceProven: true, finalizationFailuresAbsent: true, journeyFailedAfterCheckpoint: false, shellCheckpointRestored: true, sidecarDurabilityProven: true };
     expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, exactProcessAbsenceProven: false })).toBe(false);
     expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, finalizationFailuresAbsent: false })).toBe(false);
     expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, shellCheckpointRestored: false })).toBe(false);
     expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, journeyFailedAfterCheckpoint: true })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, sidecarDurabilityProven: false })).toBe(false);
     expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint(base)).toBe(true);
     expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, checkpointCaptured: false, shellCheckpointRestored: false })).toBe(true);
   });

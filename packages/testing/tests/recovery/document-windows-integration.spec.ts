@@ -9,6 +9,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   assertAuthoringJourneySourceSafety,
+  assertExactPackagedBuildIdentity,
   blankAuthoringJourney,
   cleanupIsolatedJourneyProfile,
   collectJourneyBuildIdentity,
@@ -269,12 +270,18 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
         finalizationFailures.push(error);
       }
     }
+    try {
+      await ensureShellFinalizationSidecarDurable(shellFinalizationSidecar);
+    } catch (error) {
+      finalizationFailures.push(error);
+    }
     const shellS1Restored = shellS1 === null || postS1ShellClassified;
     if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
       exactProcessAbsenceProven,
       finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
+      sidecarDurabilityProven: shellFinalizationSidecar.durabilityProven && !shellFinalizationSidecar.durabilityFailureObserved,
       shellCheckpointRestored: shellS1Restored
     })) {
       try {
@@ -421,9 +428,9 @@ test("runs the separately approved reversible Explorer association route", async
         }
       }
     }).catch((error) => finalizationFailures.push(error));
-    if (associationJourneyFailure !== null && session === null && shellFinalizationSidecar.attempts.length === 0) {
+    if (associationJourneyFailure !== null && shellFinalizationSidecar.attempts.length === 0) {
       try {
-        await recordShellFinalizationBlockedOnce({ action: "association no-session finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+        await recordShellFinalizationBlockedOnce({ action: "association finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
       } catch (error) {
         finalizationFailures.push(error);
       }
@@ -431,11 +438,17 @@ test("runs the separately approved reversible Explorer association route", async
     if (shellS1 === null) {
       finalizationFailures.push(new Error("S1 shell checkpoint was not captured before association mutation."));
     } else shellStateRestored = postS1ShellClassified;
+    try {
+      await ensureShellFinalizationSidecarDurable(shellFinalizationSidecar);
+    } catch (error) {
+      finalizationFailures.push(error);
+    }
     if (associationRestorationProven && recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
       exactProcessAbsenceProven,
       finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
+      sidecarDurabilityProven: shellFinalizationSidecar.durabilityProven && !shellFinalizationSidecar.durabilityFailureObserved,
       shellCheckpointRestored: shellStateRestored
     })) {
       try {
@@ -559,9 +572,9 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
         finalizationFailures.push(error);
       }
     }
-    if (dragJourneyFailure !== null && session === null && shellFinalizationSidecar.attempts.length === 0) {
+    if (dragJourneyFailure !== null && shellFinalizationSidecar.attempts.length === 0) {
       try {
-        await recordShellFinalizationBlockedOnce({ action: "Explorer drag no-session finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+        await recordShellFinalizationBlockedOnce({ action: "Explorer drag finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
       } catch (error) {
         finalizationFailures.push(error);
       }
@@ -569,11 +582,17 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     if (shellS1 === null) {
       finalizationFailures.push(new Error("S1 shell checkpoint was not captured before Explorer drag."));
     } else shellStateRestored = postS1ShellClassified;
+    try {
+      await ensureShellFinalizationSidecarDurable(shellFinalizationSidecar);
+    } catch (error) {
+      finalizationFailures.push(error);
+    }
     if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
       exactProcessAbsenceProven,
       finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
+      sidecarDurabilityProven: shellFinalizationSidecar.durabilityProven && !shellFinalizationSidecar.durabilityFailureObserved,
       shellCheckpointRestored: shellStateRestored
     })) {
       try {
@@ -805,11 +824,17 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
         finalizationFailures.push(error);
       }
     }
+    try {
+      await ensureShellFinalizationSidecarDurable(shellFinalizationSidecar);
+    } catch (error) {
+      finalizationFailures.push(error);
+    }
     if (associationRestorationProven && recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
       exactProcessAbsenceProven,
       finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
+      sidecarDurabilityProven: shellFinalizationSidecar.durabilityProven && !shellFinalizationSidecar.durabilityFailureObserved,
       shellCheckpointRestored: jumpListShellStateRestored
     })) {
       try {
@@ -904,16 +929,19 @@ async function classifyShellAfterExactExit(input: {
  */
 type JumpListShellCleanupState = {
   candidate?: { appData: string; relativePath: string };
+  comInvocations: number;
   disposition?: string;
   j0?: WindowsShellStateSnapshot;
   j1?: WindowsShellStateSnapshot;
+  recycleInvocations: number;
   removedShortcuts: string[];
   s1ToJ0AllowedOpaque: WindowsShellStateChange[];
   stage: "new" | "j0-captured" | "com-invoked" | "j1-captured" | "recycle-invoked" | "j2-verified" | "no-candidate";
+  transitions: string[];
 };
 
 function createJumpListShellCleanupState(): JumpListShellCleanupState {
-  return { removedShortcuts: [], s1ToJ0AllowedOpaque: [], stage: "new" };
+  return { comInvocations: 0, recycleInvocations: 0, removedShortcuts: [], s1ToJ0AllowedOpaque: [], stage: "new", transitions: [] };
 }
 
 async function restoreApprovedJumpListShellState(input: {
@@ -957,14 +985,22 @@ async function restoreApprovedJumpListShellState(input: {
     const current = await resnapshotWindowsShellState(j0);
     assertWindowsShellCheckpointStable(j0, current, "J0 before first COM invocation");
     input.state.stage = "com-invoked";
+    input.state.comInvocations += 1;
+    input.state.transitions.push(`COM invocation #${input.state.comInvocations}`);
     await removeRecoveryShellAutomaticDestinations(input.token);
   }
   if (input.state.stage === "com-invoked") {
     let j1 = await resnapshotWindowsShellState(j0);
-    if (classifyJumpListComProgress({ candidate, current: j1, j0 }) === "com-not-applied") {
+    let comProgress = classifyJumpListComProgress({ candidate, current: j1, j0 });
+    if (comProgress === "com-not-applied") {
+      input.state.transitions.push(`COM invocation #${input.state.comInvocations} candidate observed not applied; retrying`);
+      input.state.comInvocations += 1;
+      input.state.transitions.push(`COM invocation #${input.state.comInvocations}`);
       await removeRecoveryShellAutomaticDestinations(input.token);
       j1 = await resnapshotWindowsShellState(j0);
+      comProgress = classifyJumpListComProgress({ candidate, current: j1, j0 });
     }
+    input.state.transitions.push(`COM invocation #${input.state.comInvocations} candidate observed ${comProgress === "com-applied" ? "applied" : "not applied"}`);
     input.state.j1 = assertExactJumpListCandidateMutation(j0, j1, candidate);
     input.state.stage = "j1-captured";
   }
@@ -973,11 +1009,15 @@ async function restoreApprovedJumpListShellState(input: {
     if (j1 === undefined) throw new Error("Jump List J1 was not stored before recycle.");
     const current = await resnapshotWindowsShellState(j0);
     if (classifyJumpListRecycleProgress({ candidate, j0, j1, current }) === "candidate-recycled") {
+      input.state.transitions.push("Recycle invocation #0 candidate observed absent");
       input.state.stage = "j2-verified";
       return formatJumpListShellDisposition(input.state);
     }
     const currentCandidate = findExactSnapshotFile(current, candidate);
     input.state.stage = "recycle-invoked";
+    input.state.transitions.push("Recycle candidate observed present");
+    input.state.recycleInvocations += 1;
+    input.state.transitions.push(`Recycle invocation #${input.state.recycleInvocations}`);
     input.state.disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: currentCandidate });
   }
   if (input.state.stage === "recycle-invoked") {
@@ -985,10 +1025,14 @@ async function restoreApprovedJumpListShellState(input: {
     if (j1 === undefined) throw new Error("Jump List J1 was not stored for recycle retry.");
     const current = await resnapshotWindowsShellState(j0);
     if (classifyJumpListRecycleProgress({ candidate, j0, j1, current }) === "candidate-present") {
+      input.state.transitions.push(`Recycle invocation #${input.state.recycleInvocations} candidate observed present; retrying`);
       const currentCandidate = findExactSnapshotFile(current, candidate);
+      input.state.recycleInvocations += 1;
+      input.state.transitions.push(`Recycle invocation #${input.state.recycleInvocations}`);
       input.state.disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: currentCandidate });
       return restoreApprovedJumpListShellState(input);
     }
+    input.state.transitions.push(`Recycle invocation #${input.state.recycleInvocations} candidate observed absent`);
     input.state.stage = "j2-verified";
   }
   return formatJumpListShellDisposition(input.state);
@@ -1017,7 +1061,7 @@ function findExactSnapshotFile(snapshot: WindowsShellStateSnapshot, candidate: {
 
 function formatJumpListShellDisposition(state: JumpListShellCleanupState): string {
   const candidate = state.candidate?.relativePath ?? "(no recovery candidate created before launch failure)";
-  return `${state.disposition ?? "no Recycle action required"}; removed exact post-S1 Recent shortcuts=${state.removedShortcuts.length}${state.removedShortcuts.length === 0 ? "" : `: ${state.removedShortcuts.join(", ")}`}; S1-to-J0 allowed opaque=${formatWindowsShellStateChanges(state.s1ToJ0AllowedOpaque) || "(none)"}; candidate=${candidate}; stage=${state.stage}.`;
+  return `${state.disposition ?? "no Recycle action required"}; removed exact post-S1 Recent shortcuts=${state.removedShortcuts.length}${state.removedShortcuts.length === 0 ? "" : `: ${state.removedShortcuts.join(", ")}`}; S1-to-J0 allowed opaque=${formatWindowsShellStateChanges(state.s1ToJ0AllowedOpaque) || "(none)"}; candidate=${candidate}; Jump transitions=${state.transitions.join(" | ") || "(none)"}; stage=${state.stage}.`;
 }
 
 function requireSingleNewRecoveryAutomaticDestination(
@@ -1060,11 +1104,14 @@ type ShellFinalizationAttempt = {
   finishedAt: string;
   jumpStageAfter: string | null;
   jumpStageBefore: string | null;
+  jumpTransitions: string[] | null;
   outcome: "passed" | "failed" | "blocked";
 };
 
 type ShellFinalizationSidecar = {
   attempts: ShellFinalizationAttempt[];
+  durabilityFailureObserved: boolean;
+  durabilityProven: boolean;
   identity: JourneyBuildIdentity;
   journeyId: string;
   path: string;
@@ -1073,9 +1120,13 @@ type ShellFinalizationSidecar = {
 
 async function createShellFinalizationSidecar(journeyId: string, route: string): Promise<ShellFinalizationSidecar> {
   const evidence = journeyEvidencePaths(workspaceRoot, journeyId, "packaged", "committed", ["phase-0", "document-windows-integration", journeyId]);
+  const identity = await collectJourneyBuildIdentity(workspaceRoot, "packaged");
+  assertExactPackagedBuildIdentity(identity);
   const sidecar: ShellFinalizationSidecar = {
     attempts: [],
-    identity: await collectJourneyBuildIdentity(workspaceRoot, "packaged"),
+    durabilityFailureObserved: false,
+    durabilityProven: false,
+    identity,
     journeyId,
     path: path.join(evidence.root, "shell-finalization.json"),
     route
@@ -1101,6 +1152,7 @@ async function recordShellFinalizationAttempt(input: {
     throw new Error("Refusing shell sanitation without exact process-absence proof.");
   }
   const jumpStageBefore = input.jumpState?.stage ?? null;
+  const jumpTransitionCountBefore = input.jumpState?.transitions.length ?? 0;
   try {
     const disposition = await input.sanitize();
     input.sidecar.attempts.push({
@@ -1112,20 +1164,23 @@ async function recordShellFinalizationAttempt(input: {
       finishedAt: new Date().toISOString(),
       jumpStageAfter: input.jumpState?.stage ?? null,
       jumpStageBefore,
+      jumpTransitions: input.jumpState?.transitions.slice(jumpTransitionCountBefore) ?? null,
       outcome: "passed"
     });
     await writeShellFinalizationSidecar(input.sidecar);
     return disposition;
   } catch (error) {
+    const failure = error instanceof Error ? error.message : String(error);
     input.sidecar.attempts.push({
       action: input.action,
       candidatePath: input.jumpState?.candidate?.relativePath ?? null,
-      disposition: null,
+      disposition: `failed: ${failure}`,
       exactProcessAbsenceProven: input.exactProcessAbsenceProven,
-      failure: error instanceof Error ? error.message : String(error),
+      failure,
       finishedAt: new Date().toISOString(),
       jumpStageAfter: input.jumpState?.stage ?? null,
       jumpStageBefore,
+      jumpTransitions: input.jumpState?.transitions.slice(jumpTransitionCountBefore) ?? null,
       outcome: "failed"
     });
     try {
@@ -1153,6 +1208,7 @@ async function recordShellFinalizationBlocked(input: {
     finishedAt: new Date().toISOString(),
     jumpStageAfter: input.jumpState?.stage ?? null,
     jumpStageBefore: input.jumpState?.stage ?? null,
+    jumpTransitions: null,
     outcome: "blocked"
   });
   await writeShellFinalizationSidecar(input.sidecar);
@@ -1164,14 +1220,30 @@ async function recordShellFinalizationBlockedOnce(input: Parameters<typeof recor
 }
 
 async function writeShellFinalizationSidecar(sidecar: ShellFinalizationSidecar): Promise<void> {
-  await mkdir(path.dirname(sidecar.path), { recursive: true });
-  await writeFile(sidecar.path, `${JSON.stringify({
-    attempts: sidecar.attempts,
-    identity: sidecar.identity,
-    journeyId: sidecar.journeyId,
-    route: sidecar.route,
-    schemaVersion: 1
-  }, null, 2)}\n`, "utf8");
+  sidecar.durabilityProven = false;
+  try {
+    await mkdir(path.dirname(sidecar.path), { recursive: true });
+    await writeFile(sidecar.path, `${JSON.stringify({
+      attempts: sidecar.attempts,
+      durabilityFailureObserved: sidecar.durabilityFailureObserved,
+      identity: sidecar.identity,
+      journeyId: sidecar.journeyId,
+      route: sidecar.route,
+      schemaVersion: 1
+    }, null, 2)}\n`, "utf8");
+    sidecar.durabilityProven = true;
+  } catch (error) {
+    sidecar.durabilityFailureObserved = true;
+    throw error;
+  }
+}
+
+async function ensureShellFinalizationSidecarDurable(sidecar: ShellFinalizationSidecar): Promise<boolean> {
+  await writeShellFinalizationSidecar(sidecar);
+  if (!sidecar.durabilityProven || sidecar.durabilityFailureObserved) {
+    throw new Error("Shell finalization sidecar durability was not proven for this journey.");
+  }
+  return true;
 }
 
 async function nativeScreenPointForCanvas(session: RecoveryJourneySession): Promise<{ x: number; y: number }> {

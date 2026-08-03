@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   JourneyActionRecorder,
   RealPageInput,
+  assertExactPackagedBuildIdentity,
   assertPackagedJourneyArgs,
   assertReusableJourneyProfile,
   createIsolatedJourneyProfile,
@@ -41,6 +42,26 @@ describe("Ether recovery journey driver", () => {
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("rejects incomplete packaged identity before a shell-finalization sidecar can be written", () => {
+    const completeIdentity = {
+      gitCommit: "0123456789abcdef0123456789abcdef01234567",
+      mode: "packaged" as const,
+      artifacts: [
+        { path: "release/windows/win-unpacked/Ether.exe", sha256: "a".repeat(64) },
+        { path: "release/windows/win-unpacked/resources/app.asar", sha256: "b".repeat(64) }
+      ]
+    };
+    expect(() => assertExactPackagedBuildIdentity(completeIdentity)).not.toThrow();
+    expect(() => assertExactPackagedBuildIdentity({
+      ...completeIdentity,
+      artifacts: [completeIdentity.artifacts[0], { ...completeIdentity.artifacts[1], sha256: null }]
+    })).toThrow(/exact SHA-256.*app\.asar/u);
+    expect(() => assertExactPackagedBuildIdentity({
+      ...completeIdentity,
+      gitCommit: "not-an-exact-commit"
+    })).toThrow(/exact Git commit/u);
   });
 
   it("keeps every real input mode distinct in sequential action evidence", async () => {
