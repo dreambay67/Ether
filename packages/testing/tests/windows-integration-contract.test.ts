@@ -71,7 +71,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("/^[a-f0-9]{64}$/iu");
     expect(windowsIntegration).not.toContain("$s1Paths");
     expect(windowsIntegration).not.toContain("s1Root.files.map((file) => file.path)");
-    const powershell51SafeDocumentFolder = "$folder = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($document))";
+    const powershell51SafeDocumentFolder = "$folder = [System.IO.Path]::GetDirectoryName($documentFullPath)";
     expect(windowsIntegration).not.toContain("Split-Path -LiteralPath $document -Parent");
     expect(windowsIntegration.split(powershell51SafeDocumentFolder)).toHaveLength(3);
     expect(driver).toContain("afterLaunchFailureApplicationExit");
@@ -89,6 +89,35 @@ describe("A02 Windows integration harness contracts", () => {
     expect(integrationSpec).toContain("COM invocation #");
     expect(integrationSpec).toContain("Recycle invocation #");
     expect(integrationSpec).toContain("Shell sanitation and durable finalization evidence both failed");
+  });
+
+  it("uses Shell-derived Explorer display identity and exact selected-item paths", async () => {
+    const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+    const windowsIntegration = await readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsIntegration.ts"), "utf8");
+    const explorerHelpers = windowsIntegration.slice(
+      windowsIntegration.indexOf("export async function invokeDocumentFromExplorerWithUia"),
+      windowsIntegration.indexOf("export async function invokeJumpListRecentDocumentWithUia")
+    );
+    const shellDisplayName = "$displayName = [string]$parsedDocument.Name; if ([string]::IsNullOrWhiteSpace($displayName))";
+    const shellParsedPath = "$parsedPath = [string]$parsedDocument.Path; if (-not [string]::Equals($parsedPath, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase))";
+    expect(explorerHelpers).not.toContain("NameProperty, $itemName");
+    expect(explorerHelpers.split("$folderNamespace = $shell.NameSpace($folder)")).toHaveLength(3);
+    expect(explorerHelpers.split("$parsedDocument = $folderNamespace.ParseName($documentLeaf)")).toHaveLength(3);
+    expect(explorerHelpers.split(shellParsedPath)).toHaveLength(3);
+    expect(explorerHelpers.split(shellDisplayName)).toHaveLength(3);
+    expect(explorerHelpers.split("NameProperty, $displayName")).toHaveLength(4);
+    expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Before Invoke\")");
+    expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Before arranging drag window\")");
+    expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"After arranging drag window\")");
+    expect(explorerHelpers).not.toContain("@($matchedWindow.Document.SelectedItems())");
+    expect(explorerHelpers).toContain("$selectedItems = $matchedWindow.Document.SelectedItems()");
+    expect(explorerHelpers).toContain("$selectedItems.Item(0).Path");
+    expect(explorerHelpers).toContain("$selectionMatches = $false");
+    expect(explorerHelpers).toContain("$selectionMatches = $null -ne $selectedItems -and $selectedItems.Count -eq 1");
+    expect(explorerHelpers).toContain("Exact Explorer selected-item path mismatch");
+    expect(windowsIntegration).toContain("const MAX_ENCODED_POWERSHELL_COMMAND_LENGTH = 30_000");
+    expect(windowsIntegration).toContain("Buffer.byteLength(script, \"utf16le\")");
+    expect(windowsIntegration).toContain("assertPowerShellEncodedCommandLength(script)");
   });
 
   it("declares only representative packaged coverage and names the remaining Windows gaps", () => {
