@@ -51,6 +51,7 @@ export const testSuites = {
     "tests/recipe-acceptance.test.ts",
     "tests/recipe-application.test.ts",
     "tests/execution-plan.test.ts",
+    "tests/variables-join.test.ts",
     "tests/export-codec.test.ts",
     "tests/batch-scheduler.test.ts",
     "tests/application-contract-4.0.test.ts",
