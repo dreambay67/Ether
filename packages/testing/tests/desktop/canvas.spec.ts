@@ -80,6 +80,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(page.getByRole("button", { name: "Target channel Data" })).toBeVisible();
   await page.getByTestId("edge-role-chip").getByRole("button", { name: "General" }).click();
   await page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }).click();
+  await expect(page.getByTestId("edge-role-chip")).toContainText("Subject");
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(5);
   await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
   await expect(page.locator(".ether-node")).toHaveCount(5);

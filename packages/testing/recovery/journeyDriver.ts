@@ -577,6 +577,7 @@ export class RealPageInput {
 
   private async point(target: Locator | JourneyPoint): Promise<JourneyPoint> {
     if ("x" in target) return target;
+    await target.scrollIntoViewIfNeeded();
     const bounds = await target.boundingBox();
     if (bounds === null) throw new Error("The requested real-page interaction target has no bounding box.");
     return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };

@@ -154,7 +154,7 @@ export function RegistryConfigFields({ context }: { context: InspectorNodeContex
   const definition = getNodeDefinition(node.definitionId);
   const fields = definition.inspector.sections.flatMap((section) => section.fields).filter((field) => field !== "kind");
   const config = draft.draft as unknown as Record<string, unknown>;
-  const updateField = (field: string, value: unknown) => draft.update({ ...draft.draft, [field]: value } as NodeConfig);
+  const updateField = (field: string, value: unknown) => draft.update((current) => ({ ...current, [field]: value } as NodeConfig));
   const save = async () => {
     if (draft.conflict) { report("Resolve the changed-base warning before saving this draft."); return; }
     const result = definition.configSchema.safeParse(draft.draft);

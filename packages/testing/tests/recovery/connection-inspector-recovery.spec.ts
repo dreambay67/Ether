@@ -9,6 +9,7 @@ import {
   blankAuthoringJourney,
   launchRecoveryJourney,
   packagedJourneyConfig,
+  sourceElectronJourneyConfig,
   type RealPageInput
 } from "../../recovery/journeyDriver.js";
 
@@ -16,15 +17,20 @@ const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 const thisSource = fileURLToPath(import.meta.url);
 const journeyId = "connection-inspector-recovery";
 const channels = ["text", "image", "mask", "data", "video", "audio"] as const;
+const sourceElectronDiagnostic = process.env.ETHER_RECOVERY_SOURCE_ELECTRON === "1";
 
 test.skip(process.platform !== "win32", "The connection and Inspector journey runs against packaged Windows Ether.exe.");
 
 test("authors six-channel lanes, an adapter, and progressive Inspector controls from a blank packaged document", async () => {
   assertAuthoringJourneySourceSafety(await readFile(thisSource, "utf8"), "connection and Inspector recovery spec");
   const session = await launchRecoveryJourney({
-    ...packagedJourneyConfig(workspaceRoot, journeyId),
-    evidenceMode: "committed",
-    committedEvidencePath: ["phase-2", "connection-inspector-authoring"],
+    ...(sourceElectronDiagnostic ? sourceElectronJourneyConfig(workspaceRoot, journeyId) : packagedJourneyConfig(workspaceRoot, journeyId)),
+    evidenceMode: sourceElectronDiagnostic ? "ephemeral" : "committed",
+    ...(sourceElectronDiagnostic ? {} : { committedEvidencePath: ["phase-2", "connection-inspector-authoring"] }),
+    ...(sourceElectronDiagnostic ? {
+      sourceEntrypoint: path.join(workspaceRoot, "packages", "testing", "fixtures", "desktop-main.mjs"),
+      sourceArgs: (profile: { root: string }) => [`--fixture-root=${profile.root}`]
+    } : {}),
     viewport: { width: 1600, height: 1000 },
     declaration: blankAuthoringJourney(journeyId)
   });
@@ -81,6 +87,7 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await input.leftClick(firstRole.getByRole("button", { name: "General" }), "Open the in-place role grid", "All 15 semantic roles are available directly on the lane.");
     await expect(page.getByTestId("edge-role-grid").getByRole("button")).toHaveCount(15);
     await input.leftClick(page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }), "Name the Text lane Subject", "The non-General role becomes a visible lane badge.");
+    await expect(page.getByTestId("canvas-status")).toContainText("Change connection role saved");
     await expect(page.getByTestId("edge-role-chip").getByText("Subject", { exact: true })).toBeVisible();
     await input.screenshot("02-six-channel-lanes-and-role.png", evidence, "Capture six persisted lanes", "Six channel-specific paths coexist between the same node pair and one carries a visible Subject role.");
 
@@ -98,7 +105,7 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await input.leftClick(worker.getByLabel("Text input"), "Complete adapter lane", "The adapter-backed lane persists before any run or provider call.");
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
-    await input.leftClick(page.locator(".ether-edge-hit-target").last(), "Select the adapter lane", "The Project lens can inspect the exact selected connection.");
+    await input.leftClick(page.getByTestId("edge-role-chip").last().getByRole("button", { name: "General" }), "Select the adapter lane", "A visible lane control selects the exact connection for the Project lens.");
     await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Project lens", "Ordinary connection controls appear without covering the completed authoring interaction.");
     const edgeInspector = page.getByTestId("edge-inspector");
     await expect(edgeInspector).toContainText("Adapter · local.data-to-text");

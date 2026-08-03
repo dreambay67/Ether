@@ -83,7 +83,12 @@ describe("Ether recovery journey driver", () => {
       }
     };
     const input = new RealPageInput(page as never, recorder);
+    const locator = {
+      scrollIntoViewIfNeeded: async () => { calls.push("scroll-into-view"); },
+      boundingBox: async () => ({ x: 20, y: 30, width: 40, height: 20 })
+    };
 
+    await input.leftClick(locator as never, "Select a visible control", "The control is brought into view before a left click is sent.");
     await input.leftClick({ x: 10, y: 20 }, "Select a node", "A left click is sent.");
     await input.leftDrag({ x: 10, y: 20 }, { x: 30, y: 40 }, "Move a node", "A left drag is sent.");
     await input.leftMarquee({ x: 12, y: 22 }, { x: 52, y: 62 }, "Marquee", "A left marquee is sent.");
@@ -92,8 +97,9 @@ describe("Ether recovery journey driver", () => {
     await input.pressKey("Control+D", "Duplicate", "The keyboard shortcut is sent.");
 
     expect(recorder.snapshot().actions.map((action) => action.kind)).toEqual([
-      "left-click", "left-drag", "left-marquee", "shift-marquee", "right-drag-pan", "keyboard-command"
+      "left-click", "left-click", "left-drag", "left-marquee", "shift-marquee", "right-drag-pan", "keyboard-command"
     ]);
+    expect(calls[0]).toBe("scroll-into-view");
     expect(calls).toContain("key-down:Shift");
     expect(calls).toContain("key-up:Shift");
     expect(calls).toContain("down:right");
