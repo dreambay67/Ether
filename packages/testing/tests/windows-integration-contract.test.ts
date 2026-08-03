@@ -108,15 +108,15 @@ describe("A02 Windows integration harness contracts", () => {
     expect(explorerHelpers.split("$parsedDocument = $folderNamespace.ParseName($documentLeaf)")).toHaveLength(3);
     expect(explorerHelpers.split(shellParsedPath)).toHaveLength(3);
     expect(explorerHelpers.split(shellDisplayName)).toHaveLength(3);
-    expect(explorerHelpers.split("NameProperty, $displayName")).toHaveLength(4);
+    expect(explorerHelpers).toContain("exactExplorerSelectionFunctionsScript()");
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Immediately before association Invoke\")");
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Before arranging drag window\")");
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"After arranging drag window\")");
     expect(explorerHelpers).not.toContain("@($matchedWindow.Document.SelectedItems())");
     expect(explorerHelpers).toContain("$selectedItems = $matchedWindow.Document.SelectedItems()");
     expect(explorerHelpers).toContain("$selectedItems.Item(0).Path");
-    expect(explorerHelpers).toContain("$selectionMatches = $false");
-    expect(explorerHelpers).toContain("$selectionMatches = $null -ne $selectedItems -and $selectedItems.Count -eq 1");
+    expect(explorerHelpers).toContain("$selectionMatches = Test-ExactExplorerSelection");
+    expect(explorerHelpers).toContain("return $null -ne $selectedItems -and $selectedItems.Count -eq 1");
     expect(explorerHelpers).toContain("Exact Explorer selected-item path mismatch");
     expect(windowsIntegration).toContain("const MAX_ENCODED_POWERSHELL_COMMAND_LENGTH = 30_000");
     expect(windowsIntegration).toContain("Buffer.byteLength(script, \"utf16le\")");
@@ -132,20 +132,24 @@ describe("A02 Windows integration harness contracts", () => {
     expect(encodedPowerShellCommandLength(dragScript)).toBeLessThanOrEqual(30_000);
   });
 
-  it("keeps Explorer foreground proof immediately adjacent to association Invoke and drag mouse-down", () => {
+  it("keeps user-realistic Explorer focus proofs adjacent to Invoke and native drag", () => {
     const associationScript = buildExplorerAssociationInvokeScript({
       documentPath: "C:\\Ether Recovery\\Association Žltý.ether",
       etherPid: 1234
     });
-    const associationSelection = associationScript.indexOf("Immediately before association Invoke: exact Explorer window must expose exactly one selected item");
+    const chromeClick = associationScript.indexOf("[EtherA02Native]::mouse_event(0x0002");
+    const associationForeground = associationScript.indexOf("After association chrome click: exact Explorer HWND was not foreground", chromeClick);
+    const associationSelection = associationScript.indexOf("Assert-ExactExplorerSelection 'Immediately before association Invoke'", associationForeground);
     const associationMinimized = associationScript.indexOf("if (-not [EtherA02Native]::IsIconic($etherHwnd))");
-    const associationForeground = associationScript.indexOf("[EtherA02Native]::SetForegroundWindow($explorerHwnd)", associationMinimized);
-    const associationStarted = associationScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", associationForeground);
+    const associationFinalForeground = associationScript.indexOf("Immediately before association Invoke: exact Explorer HWND was not foreground", associationMinimized);
+    const associationStarted = associationScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", associationFinalForeground);
     const associationInvoke = associationScript.indexOf("[System.Windows.Automation.InvokePattern]$pattern).Invoke()", associationStarted);
-    expect(associationSelection).toBeGreaterThanOrEqual(0);
+    expect(chromeClick).toBeGreaterThanOrEqual(0);
+    expect(associationForeground).toBeGreaterThan(chromeClick);
+    expect(associationSelection).toBeGreaterThan(associationForeground);
     expect(associationMinimized).toBeGreaterThan(associationSelection);
-    expect(associationForeground).toBeGreaterThan(associationMinimized);
-    expect(associationStarted).toBeGreaterThan(associationForeground);
+    expect(associationFinalForeground).toBeGreaterThan(associationMinimized);
+    expect(associationStarted).toBeGreaterThan(associationFinalForeground);
     expect(associationInvoke).toBeGreaterThan(associationStarted);
 
     const dragScript = buildNativeExplorerDragScript({
@@ -155,14 +159,25 @@ describe("A02 Windows integration harness contracts", () => {
     });
     const cursorPositioned = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY)");
     const cursorSettled = dragScript.indexOf("Start-Sleep -Milliseconds 100", cursorPositioned);
-    const dragForeground = dragScript.indexOf("[EtherA02Pointer]::SetForegroundWindow($explorerHwnd)", cursorSettled);
-    const dragStarted = dragScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", dragForeground);
+    const sourceHit = dragScript.indexOf("Drag source: WindowFromPoint root was not the exact expected HWND", cursorSettled);
+    const dragStarted = dragScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", sourceHit);
     const mouseDown = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0002", dragStarted);
+    const foregroundWhileHeld = dragScript.indexOf("Drag source foreground mismatch", mouseDown);
+    const dragThreshold = dragScript.indexOf("MinimumHorizontalDragDistance + 1", foregroundWhileHeld);
+    const thresholdMove = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)", dragThreshold);
+    const targetHit = dragScript.indexOf("Drag target: WindowFromPoint root was not the exact expected HWND", thresholdMove);
+    const mouseUp = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0004", targetHit);
     expect(cursorPositioned).toBeGreaterThanOrEqual(0);
     expect(cursorSettled).toBeGreaterThan(cursorPositioned);
-    expect(dragForeground).toBeGreaterThan(cursorSettled);
-    expect(dragStarted).toBeGreaterThan(dragForeground);
+    expect(sourceHit).toBeGreaterThan(cursorSettled);
+    expect(dragStarted).toBeGreaterThan(sourceHit);
     expect(mouseDown).toBeGreaterThan(dragStarted);
+    expect(foregroundWhileHeld).toBeGreaterThan(mouseDown);
+    expect(dragThreshold).toBeGreaterThan(foregroundWhileHeld);
+    expect(thresholdMove).toBeGreaterThan(dragThreshold);
+    expect(targetHit).toBeGreaterThan(thresholdMove);
+    expect(mouseUp).toBeGreaterThan(targetHit);
+    expect(`${associationScript}\n${dragScript}`).not.toContain("SetForegroundWindow");
   });
 
   it("proves association and drag focus transitions inside their exact Explorer interactions", async () => {
@@ -181,8 +196,13 @@ describe("A02 Windows integration harness contracts", () => {
     );
     expect(windowsIntegration).toContain("exactEtherTopLevelWindowScript");
     expect(windowsIntegration).toContain("Exact Ether target did not remain minimized before association Invoke");
-    expect(windowsIntegration).toContain("SetForegroundWindow($explorerHwnd)");
-    expect(windowsIntegration).not.toContain("SetForegroundWindow($etherHwnd)");
+    const explorerInteractions = windowsIntegration.slice(
+      windowsIntegration.indexOf("export async function invokeDocumentFromExplorerWithUia"),
+      windowsIntegration.indexOf("export async function invokeJumpListRecentDocumentWithUia")
+    );
+    expect(explorerInteractions).toContain("WindowFromPoint");
+    expect(explorerInteractions).toContain("GetAncestor($hitHwnd, 2)");
+    expect(explorerInteractions).not.toContain("SetForegroundWindow");
     expect(windowsIntegration).toContain("exactEtherForegroundTransitionScript");
     expect(windowsIntegration).toContain("foreground did not transition from the exact Explorer HWND to the exact Ether HWND/PID");
     expect(windowsIntegration).toContain("sourceHwnd=");
@@ -194,7 +214,9 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration.split("if ($nativePid -eq 0) { throw 'Exact Explorer HWND PID was zero' }")).toHaveLength(3);
     expect(windowsIntegration).toContain("$foregroundExplorerPid = 0");
     expect(windowsIntegration).toContain("Explorer HWND PID mismatch immediately before action");
+    expect(windowsIntegration).toContain("requireAssociationMutationApproval();\n  requireShellUiApproval();");
     expect(associationRoute).toContain("invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid })");
+    expect(associationRoute).toContain("process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE");
     expect(associationRoute).not.toContain("document.hasFocus()");
     expect(associationRoute).not.toContain("assertExactWindowForegroundWithUia(primaryPid)");
     expect(dragRoute).not.toContain("document.hasFocus()");

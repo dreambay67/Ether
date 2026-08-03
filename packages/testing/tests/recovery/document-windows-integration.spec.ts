@@ -314,8 +314,8 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
 
 test("runs the separately approved reversible Explorer association route", async () => {
   test.skip(
-    process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE,
-    `Main must explicitly authorize ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE}.`
+    process.env[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE || process.env[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE,
+    `Main must explicitly authorize both ${ASSOCIATION_APPROVAL}=${ASSOCIATION_APPROVAL_VALUE} and ${SHELL_UI_APPROVAL}=${SHELL_UI_APPROVAL_VALUE}.`
   );
   const executable = await assertExactPackagedEtherExecutable(packagedExecutable, workspaceRoot);
   const root = await createWindowsIntegrationRoot();

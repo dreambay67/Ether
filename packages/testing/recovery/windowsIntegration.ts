@@ -474,6 +474,7 @@ export async function createAssociationDryRunPlan(input: {
  */
 export async function applyReversibleAssociation(plan: ReversibleAssociationPlan): Promise<void> {
   requireAssociationMutationApproval();
+  requireShellUiApproval();
   if (!plan.testOpenCommand.includes(RECOVERY_SHELL_IDENTITY_ARGUMENT) || !plan.testOpenCommand.includes("--user-data-dir=")) {
     throw new Error("Refusing association mutation without an isolated recovery shell command.");
   }
@@ -558,6 +559,8 @@ export async function triggerAssociationRestorationWatchdog(watchdog: Associatio
 
 /** Uses Windows Explorer plus UI Automation InvokePattern; it never shells the document directly. */
 export async function invokeDocumentFromExplorerWithUia(input: { documentPath: string; etherPid: number }): Promise<string> {
+  requireAssociationMutationApproval();
+  requireShellUiApproval();
   return runPowerShell(buildExplorerAssociationInvokeScript(input));
 }
 
@@ -567,7 +570,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }' -ErrorAction SilentlyContinue",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint p); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); }' -ErrorAction SilentlyContinue",
     `$document = '${ps(input.documentPath)}'`,
     `$etherPid = ${input.etherPid}`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
@@ -575,6 +578,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
     "$documentLeaf = [System.IO.Path]::GetFileName($documentFullPath)",
     exactEtherTopLevelWindowScript("EtherA02Native"),
     "$shell = New-Object -ComObject Shell.Application",
+    exactExplorerSelectionFunctionsScript(),
     "$folderNamespace = $shell.NameSpace($folder); if ($null -eq $folderNamespace) { throw ('Shell namespace unavailable for exact document folder ' + $folder) }",
     "$parsedDocument = $folderNamespace.ParseName($documentLeaf); if ($null -eq $parsedDocument) { throw ('Shell namespace did not expose exact document leaf ' + $documentLeaf) }",
     "$parsedPath = [string]$parsedDocument.Path; if (-not [string]::Equals($parsedPath, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('Shell ParseName path mismatch. Expected ' + $documentFullPath + '; observed ' + $parsedPath) }",
@@ -597,9 +601,8 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
     "  if ($null -eq $item) { Start-Sleep -Milliseconds 150 }",
     "}",
     "if ($null -eq $item) { if ($null -ne $matchedWindow) { $matchedWindow.Quit() }; throw ('A newly created Explorer HWND did not expose exact test-owned display item ' + $displayName) }",
-    "$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
-    "if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern' }",
-    `try { ${exactExplorerSelectedDocumentScript("Immediately before association Invoke")}; if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Exact Ether target did not remain minimized before association Invoke' }; ${exactExplorerForegroundScript("EtherA02Native", "Immediately before association Invoke")}; $activationStartedAt = [DateTime]::UtcNow; ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); ${exactEtherForegroundTransitionScript("EtherA02Native", "association Invoke")}; Write-Output ('uia-invoked sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' folder=' + $folder + ' displayName=' + $displayName) } finally { if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
+    "$buttonDown = $false",
+    `try { $explorerHwnd = [intptr]$matchedWindow.HWND; if ($explorerHwnd -eq [intptr]::Zero) { throw 'Association chrome: exact Explorer HWND is zero' }; if (-not [EtherA02Native]::SetWindowPos($explorerHwnd, [intptr]::Zero, 40, 40, 0, 0, 0x0015)) { throw 'Association chrome: could not arrange exact Explorer HWND without activation' }; Start-Sleep -Milliseconds 150; $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle($explorerHwnd); $explorerBounds = $windowRoot.Current.BoundingRectangle; if ($explorerBounds.Left -lt 0 -or $explorerBounds.Top -lt 0 -or $explorerBounds.Width -le 16 -or $explorerBounds.Height -le 16) { throw 'Association chrome: exact Explorer frame has no positive safe bounds' }; $clickX = [int]($explorerBounds.Left + 8); $clickY = [int]($explorerBounds.Top + 8); ${exactWindowRootAtPointScript("EtherA02Native", "$clickX", "$clickY", "$explorerHwnd", "Association chrome")}; [EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null; [EtherA02Native]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); $buttonDown = $true; [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $buttonDown = $false; ${exactExplorerForegroundIdentityScript("EtherA02Native", "After association chrome click")}; $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -ne 1) { throw 'Association Invoke: exact Explorer HWND no longer exposes one display item' }; $item = $candidates[0]; ${exactExplorerSelectedDocumentScript("Immediately before association Invoke")}; $pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern after chrome click' }; if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Exact Ether target did not remain minimized before association Invoke' }; ${exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Invoke")}; $activationStartedAt = [DateTime]::UtcNow; ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); ${exactEtherForegroundTransitionScript("EtherA02Native", "association Invoke")}; Write-Output ('uia-invoked click=(' + $clickX + ',' + $clickY + ') sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' folder=' + $folder + ' displayName=' + $displayName) } finally { if ($buttonDown) { [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
   ].join("; ");
   return script;
 }
@@ -607,18 +610,17 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
 export type NativeScreenPoint = { x: number; y: number };
 
 function exactExplorerSelectedDocumentScript(stage: string): string {
-  return [
-    "$selectedItems = $matchedWindow.Document.SelectedItems()",
-    `if ($null -eq $selectedItems -or $selectedItems.Count -ne 1) { throw ('${stage}: exact Explorer window must expose exactly one selected item; found ' + $(if ($null -eq $selectedItems) { 0 } else { $selectedItems.Count })) }`,
-    "$selectedPath = [string]$selectedItems.Item(0).Path",
-    "if (-not [string]::Equals($selectedPath, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('Exact Explorer selected-item path mismatch. Expected ' + $documentFullPath + '; observed ' + $selectedPath) }"
-  ].join("; ");
+  return `Assert-ExactExplorerSelection '${stage}'`;
 }
 
 function exactExplorerSelectedDocumentMatchesScript(): string {
+  return "$selectionMatches = Test-ExactExplorerSelection";
+}
+
+function exactExplorerSelectionFunctionsScript(): string {
   return [
-    "$selectionMatches = $false",
-    "try { $selectedItems = $matchedWindow.Document.SelectedItems(); $selectionMatches = $null -ne $selectedItems -and $selectedItems.Count -eq 1 -and [string]::Equals([string]$selectedItems.Item(0).Path, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase) } catch { $selectionMatches = $false }"
+    "function Test-ExactExplorerSelection { try { $selectedItems = $matchedWindow.Document.SelectedItems(); return $null -ne $selectedItems -and $selectedItems.Count -eq 1 -and [string]::Equals([string]$selectedItems.Item(0).Path, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase) } catch { return $false } }",
+    "function Assert-ExactExplorerSelection([string]$stage) { $selectedItems = $matchedWindow.Document.SelectedItems(); if ($null -eq $selectedItems -or $selectedItems.Count -ne 1) { throw ($stage + ': exact Explorer window must expose one selected item') }; $selectedPath = [string]$selectedItems.Item(0).Path; if (-not [string]::Equals($selectedPath, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Exact Explorer selected-item path mismatch' } }"
   ].join("; ");
 }
 
@@ -633,13 +635,20 @@ function exactEtherTopLevelWindowScript(nativeType: string): string {
   ].join("; ");
 }
 
-function exactExplorerForegroundScript(nativeType: string, stage: string): string {
+function exactExplorerForegroundIdentityScript(nativeType: string, stage: string): string {
   return [
     "$explorerHwnd = [intptr]$matchedWindow.HWND",
     `if ($explorerHwnd -eq [intptr]::Zero) { throw '${stage}: exact Explorer HWND is zero' }`,
-    `if (-not [${nativeType}]::SetForegroundWindow($explorerHwnd)) { throw '${stage}: SetForegroundWindow denied exact Explorer HWND' }`,
-    `if ([${nativeType}]::GetForegroundWindow() -ne $explorerHwnd) { throw '${stage}: exact Explorer HWND was not foreground after SetForegroundWindow' }`,
+    `if ([${nativeType}]::GetForegroundWindow() -ne $explorerHwnd) { throw '${stage}: exact Explorer HWND was not foreground' }`,
     `[uint32]$foregroundExplorerPid = 0; [${nativeType}]::GetWindowThreadProcessId($explorerHwnd, [ref]$foregroundExplorerPid) | Out-Null; if ($foregroundExplorerPid -eq 0 -or [int64]$foregroundExplorerPid -ne $explorerPid) { throw '${stage}: Explorer HWND PID mismatch immediately before action' }`
+  ].join("; ");
+}
+
+function exactWindowRootAtPointScript(nativeType: string, x: string, y: string, expectedHwnd: string, stage: string): string {
+  return [
+    `$hitPoint = New-Object ${nativeType}+POINT; $hitPoint.X = [int]${x}; $hitPoint.Y = [int]${y}`,
+    `$hitHwnd = [${nativeType}]::WindowFromPoint($hitPoint); if ($hitHwnd -eq [intptr]::Zero) { throw '${stage}: no hit' }`,
+    `$hitRoot = [${nativeType}]::GetAncestor($hitHwnd, 2); if ($hitRoot -ne ${expectedHwnd}) { throw '${stage}: WindowFromPoint root was not the exact expected HWND' }`
   ].join("; ");
 }
 
@@ -680,7 +689,7 @@ export function buildNativeExplorerDragScript(input: {
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
     "Add-Type -AssemblyName PresentationFramework",
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Pointer { [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int X, int Y, int cx, int cy, uint flags); [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }'",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Pointer { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); }'",
     `$document = '${ps(input.documentPath)}'`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
     "$folder = [System.IO.Path]::GetDirectoryName($documentFullPath)",
@@ -690,6 +699,7 @@ export function buildNativeExplorerDragScript(input: {
     `$targetY = ${Math.round(input.target.y)}`,
     exactEtherTopLevelWindowScript("EtherA02Pointer"),
     "$shell = New-Object -ComObject Shell.Application",
+    exactExplorerSelectionFunctionsScript(),
     "$folderNamespace = $shell.NameSpace($folder); if ($null -eq $folderNamespace) { throw ('Shell namespace unavailable for exact document folder ' + $folder) }",
     "$parsedDocument = $folderNamespace.ParseName($documentLeaf); if ($null -eq $parsedDocument) { throw ('Shell namespace did not expose exact document leaf ' + $documentLeaf) }",
     "$parsedPath = [string]$parsedDocument.Path; if (-not [string]::Equals($parsedPath, $documentFullPath, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('Shell ParseName path mismatch. Expected ' + $documentFullPath + '; observed ' + $parsedPath) }",
@@ -709,7 +719,7 @@ export function buildNativeExplorerDragScript(input: {
     "if ($null -eq $item) { if ($null -ne $matchedWindow) { $matchedWindow.Quit() }; throw ('Explorer UIA did not expose exact drag display source ' + $displayName) }",
     exactExplorerSelectedDocumentScript("Before arranging drag window"),
     "$down = $false",
-    `try { $targetWindow = [System.Windows.Automation.AutomationElement]::FromHandle($etherHwnd).Current.BoundingRectangle; if ($targetX -lt $targetWindow.Left -or $targetX -gt $targetWindow.Right -or $targetY -lt $targetWindow.Top -or $targetY -gt $targetWindow.Bottom) { throw 'Requested drop point is outside the exact Ether window' }; $moveX = if ($targetX -gt 520) { 0 } else { [int]([System.Windows.SystemParameters]::PrimaryScreenWidth - 460) }; [EtherA02Pointer]::SetWindowPos([intptr]$matchedWindow.HWND, [intptr]::Zero, $moveX, 0, 440, 520, 0x0040) | Out-Null; Start-Sleep -Milliseconds 300; $explorerRoot = [System.Windows.Automation.AutomationElement]::FromHandle([intptr]$matchedWindow.HWND); $explorerBounds = $explorerRoot.Current.BoundingRectangle; if ($targetX -ge $explorerBounds.Left -and $targetX -le $explorerBounds.Right -and $targetY -ge $explorerBounds.Top -and $targetY -le $explorerBounds.Bottom) { throw 'Exact Explorer window still covers the requested Ether drop target' }; $item = $null; $deadline = [DateTime]::UtcNow.AddSeconds(10); while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $explorerRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -gt 1) { throw ('Exact Explorer HWND exposed multiple drag sources named ' + $displayName) }; if ($candidates.Count -eq 1) { ${exactExplorerSelectedDocumentMatchesScript()}; if ($selectionMatches) { $item = $candidates[0] } }; if ($null -eq $item) { Start-Sleep -Milliseconds 150 } }; if ($null -eq $item) { throw 'Exact Explorer source disappeared after arranging its matched window' }; ${exactExplorerSelectedDocumentScript("After arranging drag window")}; $source = $item.Current.BoundingRectangle; if ($source.Width -le 0 -or $source.Height -le 0) { throw 'Exact Explorer source has no usable screen bounds after arranging window' }; if ($targetX -ge $source.Left -and $targetX -le $source.Right -and $targetY -ge $source.Top -and $targetY -le $source.Bottom) { throw 'Explorer source and Ether target rectangles overlap' }; $sourceX = [int][Math]::Round($source.Left + ($source.Width / 2)); $sourceY = [int][Math]::Round($source.Top + ($source.Height / 2)); [EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null; Start-Sleep -Milliseconds 100; ${exactExplorerForegroundScript("EtherA02Pointer", "At drag start")}; $activationStartedAt = [DateTime]::UtcNow; [EtherA02Pointer]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); $down = $true; for ($step = 1; $step -le 12; $step++) { [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)), [int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null; Start-Sleep -Milliseconds 25 }; [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); $down = $false; ${exactEtherForegroundTransitionScript("EtherA02Pointer", "native Explorer drag")}; Write-Output ('native-explorer-drag sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' source=(' + $sourceX + ',' + $sourceY + ') target=(' + $targetX + ',' + $targetY + ')') } finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
+    `try { $explorerHwnd = [intptr]$matchedWindow.HWND; $targetWindow = [System.Windows.Automation.AutomationElement]::FromHandle($etherHwnd).Current.BoundingRectangle; if ($targetX -lt $targetWindow.Left -or $targetX -gt $targetWindow.Right -or $targetY -lt $targetWindow.Top -or $targetY -gt $targetWindow.Bottom) { throw 'Drop outside Ether' }; $moveX = if ($targetX -gt 520) { 0 } else { [int]([System.Windows.SystemParameters]::PrimaryScreenWidth - 460) }; [EtherA02Pointer]::SetWindowPos($explorerHwnd, [intptr]::Zero, $moveX, 0, 440, 520, 0x0040) | Out-Null; Start-Sleep -Milliseconds 300; $explorerRoot = [System.Windows.Automation.AutomationElement]::FromHandle($explorerHwnd); $explorerBounds = $explorerRoot.Current.BoundingRectangle; if ($targetX -ge $explorerBounds.Left -and $targetX -le $explorerBounds.Right -and $targetY -ge $explorerBounds.Top -and $targetY -le $explorerBounds.Bottom) { throw 'Explorer covers drop target' }; $item = $null; $deadline = [DateTime]::UtcNow.AddSeconds(10); while ([DateTime]::UtcNow -lt $deadline -and $null -eq $item) { $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $explorerRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -gt 1) { throw ('Exact Explorer HWND exposed multiple drag sources named ' + $displayName) }; if ($candidates.Count -eq 1) { ${exactExplorerSelectedDocumentMatchesScript()}; if ($selectionMatches) { $item = $candidates[0] } }; if ($null -eq $item) { Start-Sleep -Milliseconds 150 } }; if ($null -eq $item) { throw 'Explorer source disappeared' }; ${exactExplorerSelectedDocumentScript("After arranging drag window")}; $source = $item.Current.BoundingRectangle; if ($source.Width -le 0 -or $source.Height -le 0) { throw 'Exact Explorer source has no usable screen bounds after arranging window' }; if ($targetX -ge $source.Left -and $targetX -le $source.Right -and $targetY -ge $source.Top -and $targetY -le $source.Bottom) { throw 'Explorer source and Ether target rectangles overlap' }; $sourceX = [int][Math]::Round($source.Left + ($source.Width / 2)); $sourceY = [int][Math]::Round($source.Top + ($source.Height / 2)); [EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null; Start-Sleep -Milliseconds 100; ${exactWindowRootAtPointScript("EtherA02Pointer", "$sourceX", "$sourceY", "$explorerHwnd", "Drag source")}; $activationStartedAt = [DateTime]::UtcNow; [EtherA02Pointer]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); $down = $true; $dragFocusDeadline = [DateTime]::UtcNow.AddSeconds(2); $dragFocused = $false; while ([DateTime]::UtcNow -lt $dragFocusDeadline -and -not $dragFocused) { if ([EtherA02Pointer]::GetForegroundWindow() -eq $explorerHwnd) { [uint32]$foregroundExplorerPid = 0; [EtherA02Pointer]::GetWindowThreadProcessId($explorerHwnd, [ref]$foregroundExplorerPid) | Out-Null; if ($foregroundExplorerPid -ne 0 -and [int64]$foregroundExplorerPid -eq $explorerPid) { $dragFocused = $true; break } }; Start-Sleep -Milliseconds 25 }; if (-not $dragFocused) { throw 'Drag source foreground mismatch' }; $dragDistance = [int][Math]::Ceiling([System.Windows.SystemParameters]::MinimumHorizontalDragDistance + 1); [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null; Start-Sleep -Milliseconds 25; for ($step = 1; $step -le 12; $step++) { [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null; Start-Sleep -Milliseconds 25 }; ${exactWindowRootAtPointScript("EtherA02Pointer", "$targetX", "$targetY", "$etherHwnd", "Drag target")}; [EtherA02Pointer]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $down = $false; ${exactEtherForegroundTransitionScript("EtherA02Pointer", "native Explorer drag")}; Write-Output ('native-explorer-drag sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' source=(' + $sourceX + ',' + $sourceY + ') target=(' + $targetX + ',' + $targetY + ')') } finally { if ($down) { [EtherA02Pointer]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
   ].join("; ");
   return script;
 }
