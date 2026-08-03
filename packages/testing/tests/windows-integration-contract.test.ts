@@ -28,6 +28,7 @@ import {
   classifyJumpListComProgress,
   classifyJumpListRecycleProgress,
   compareWindowsShellState,
+  deriveWindowsShellDeletionCandidate,
   describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
   SHELL_UI_APPROVAL,
@@ -60,9 +61,13 @@ describe("A02 Windows integration harness contracts", () => {
     expect(cleanup).toMatch(/SetAppID\(appId\).*RemoveAllDestinations/su);
     expect(cleanup).not.toMatch(/SHAddToRecentDocs|setJumpList/u);
     const windowsIntegration = await readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsIntegration.ts"), "utf8");
-    expect(windowsIntegration).toContain("Refusing to delete S1-pre-existing shortcut pathname");
-    expect(windowsIntegration).toContain("Shortcut bytes changed before deletion");
+    expect(windowsIntegration).toContain("Refusing to delete an S1-pre-existing shortcut pathname");
+    expect(windowsIntegration).toContain("Shortcut bytes or target changed before deletion");
     expect(windowsIntegration).toContain("Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256");
+    expect(windowsIntegration).toContain("recentShortcutDeletionScript");
+    expect(windowsIntegration).toContain("assertWindowsShellDeletionCandidatesAbsentAtS1(input.s1");
+    expect(windowsIntegration).not.toContain("$s1Paths");
+    expect(windowsIntegration).not.toContain("s1Root.files.map((file) => file.path)");
     expect(driver).toContain("afterLaunchFailureApplicationExit");
     expect(integrationSpec).toContain("let exactProcessAbsenceProven = false");
     expect(integrationSpec.match(/afterLaunchFailureApplicationExit/g)?.length).toBeGreaterThanOrEqual(5);
@@ -160,6 +165,14 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\isolated", relativePath: "new-target.lnk" }])).not.toThrow();
     expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\missing", relativePath: "new-target.lnk" }])).toThrow(/No S1 shell root/u);
     expect(() => assertWindowsShellDeletionCandidatesAbsentAtS1(s1, [{ appData: "C:\\isolated", relativePath: "not-a-link.txt" }])).toThrow(/non-shortcut/u);
+  });
+
+  it("derives only exact top-level Recent candidates and rejects traversal", () => {
+    const recentRoot = "C:\\owned\\Recent";
+    expect(deriveWindowsShellDeletionCandidate({ appData: "C:\\owned", recentRoot, candidatePath: "C:\\owned\\Recent\\new-target.lnk" })).toEqual({ appData: "C:\\owned", relativePath: "new-target.lnk" });
+    expect(() => deriveWindowsShellDeletionCandidate({ appData: "C:\\owned", recentRoot, candidatePath: "C:\\owned\\Recent\\..\\outside.lnk" })).toThrow(/outside its exact root|path traversal/u);
+    expect(() => deriveWindowsShellDeletionCandidate({ appData: "C:\\owned", recentRoot, candidatePath: "C:\\owned\\Recent\\nested\\new-target.lnk" })).toThrow(/outside its exact root/u);
+    expect(() => deriveWindowsShellDeletionCandidate({ appData: "C:\\owned", recentRoot, candidatePath: "C:\\owned\\Recent\\not-a-link.txt" })).toThrow(/non-shortcut/u);
   });
 
   it("fails every removal and new or changed non-opaque shell file", () => {

@@ -688,8 +688,29 @@ export async function snapshotTestOwnedRecentShortcuts(input: {
   documentPaths: readonly string[];
 }): Promise<string[]> {
   await Promise.all(input.documentPaths.map((candidate) => assertTestOwnedPath(input.root, candidate)));
-  const output = await runPowerShell(recentShortcutScript(input, false));
+  const output = await runPowerShell(recentShortcutScript(input));
   return output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean);
+}
+
+/** Derives a root-relative candidate only from an absolute top-level Recent file. */
+export function deriveWindowsShellDeletionCandidate(input: {
+  appData: string;
+  recentRoot: string;
+  candidatePath: string;
+}): WindowsShellDeletionCandidate {
+  const root = path.win32.normalize(path.win32.resolve(input.recentRoot));
+  const candidate = path.win32.normalize(path.win32.resolve(input.candidatePath));
+  if (!sameWindowsPath(path.win32.dirname(candidate), root)) {
+    throw new Error(`Refusing a Recent deletion candidate outside its exact root: ${input.candidatePath}.`);
+  }
+  const relativePath = path.win32.relative(root, candidate).replaceAll("\\", "/");
+  if (relativePath.length === 0 || relativePath === ".." || relativePath.startsWith("../") || path.posix.isAbsolute(relativePath)) {
+    throw new Error(`Refusing a Recent deletion candidate with path traversal: ${input.candidatePath}.`);
+  }
+  if (!relativePath.toLowerCase().endsWith(".lnk")) {
+    throw new Error(`Refusing a non-shortcut Recent deletion candidate: ${input.candidatePath}.`);
+  }
+  return { appData: input.appData, relativePath };
 }
 
 /**
@@ -707,35 +728,63 @@ export async function cleanupTestOwnedRecentShortcuts(input: {
 }): Promise<string[]> {
   await Promise.all(input.documentPaths.map((candidate) => assertTestOwnedPath(input.root, candidate)));
   const appDataRoots = [...new Set([input.appData, ...(input.additionalAppData ?? [])].map((candidate) => path.resolve(candidate).toLocaleLowerCase("en-US")))];
-  const removed: string[] = [];
+  const discovered: Array<{ candidatePath: string; candidate: WindowsShellDeletionCandidate }> = [];
   for (const normalized of appDataRoots) {
     const appData = [input.appData, ...(input.additionalAppData ?? [])].find((candidate) => path.resolve(candidate).toLocaleLowerCase("en-US") === normalized)!;
-    const s1Root = input.s1.roots.find((snapshotRoot) => sameWindowsPath(snapshotRoot.appData, appData));
-    if (s1Root === undefined) throw new Error(`S1 shell snapshot has no exact root for Recent cleanup: ${appData}.`);
-    const output = await runPowerShell(recentShortcutScript({ ...input, appData, s1Paths: s1Root.files.map((file) => file.path) }, true));
-    if (output.length > 0) removed.push(...output.split(/\r?\n/u).filter(Boolean));
+    const recentRoot = path.win32.join(appData, "Microsoft", "Windows", "Recent");
+    const output = await runPowerShell(recentShortcutScript({ ...input, appData }));
+    for (const candidatePath of output.length === 0 ? [] : output.split(/\r?\n/u).filter(Boolean)) {
+      discovered.push({ candidatePath, candidate: deriveWindowsShellDeletionCandidate({ appData, recentRoot, candidatePath }) });
+    }
+  }
+  assertWindowsShellDeletionCandidatesAbsentAtS1(input.s1, discovered.map(({ candidate }) => candidate));
+
+  const removed: string[] = [];
+  for (const { candidatePath, candidate } of discovered) {
+    const output = await runPowerShell(recentShortcutDeletionScript({ appData: candidate.appData, candidatePath, root: input.root, documentPaths: input.documentPaths }));
+    const fields = output.split("\t");
+    if (fields.length !== 4 || !sameWindowsPath(fields[0] ?? "", candidatePath)) {
+      throw new Error(`Recent deletion proof did not return the exact candidate metadata: ${output || "(empty)"}.`);
+    }
+    if (fields[1] === undefined || fields[2] === undefined || fields[3] === undefined || fields[1].length === 0 || fields[2].length !== 64 || fields[3].length === 0) {
+      throw new Error(`Recent deletion proof returned incomplete candidate metadata for ${candidate.appData}:${candidate.relativePath}.`);
+    }
+    removed.push(candidatePath);
   }
   return removed;
 }
 
-function recentShortcutScript(input: { appData: string; root: string; documentPaths: readonly string[]; s1Paths?: readonly string[] }, remove: boolean): string {
+function recentShortcutScript(input: { appData: string; root: string; documentPaths: readonly string[] }): string {
   const targets = input.documentPaths.map((candidate) => path.resolve(candidate));
-  const s1Paths = input.s1Paths ?? [];
-  const removal = remove
-    ? "if ($s1Paths -contains $relative) { throw ('Refusing to delete S1-pre-existing shortcut pathname: ' + $relative) }; if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { throw ('Shortcut disappeared before deletion: ' + $candidatePath) }; $currentInfo = Get-Item -LiteralPath $candidatePath -Force; $currentHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash; if ($currentInfo.Length -ne $candidateSize -or -not [string]::Equals($currentHash, $candidateHash, [System.StringComparison]::OrdinalIgnoreCase)) { throw ('Shortcut bytes changed before deletion: ' + $candidatePath) }; $currentShortcut = $shell.CreateShortcut($candidatePath); $currentTarget = [System.IO.Path]::GetFullPath($currentShortcut.TargetPath); $currentMatch = @($targets | Where-Object { [string]::Equals($_, $currentTarget, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $currentUnderRoot = $currentTarget.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if (-not ($currentMatch -and $currentUnderRoot)) { throw ('Shortcut target changed before deletion: ' + $candidatePath) }; Remove-Item -LiteralPath $candidatePath -Force; if (Test-Path -LiteralPath $candidatePath -PathType Leaf) { throw ('Shortcut survived deletion: ' + $candidatePath) }; "
-    : "";
   const script = [
     "$ErrorActionPreference = 'Stop'",
     `$appData = '${ps(input.appData)}'`,
     `$root = '${ps(input.root)}'`,
     `$targets = @(${targets.map((target) => `'${ps(target)}'`).join(",")})`,
-    `$s1Paths = @(${s1Paths.map((candidate) => `'${ps(candidate)}'`).join(",")})`,
     "$recent = Join-Path $appData 'Microsoft\\Windows\\Recent'",
     "if (-not (Test-Path -LiteralPath $recent)) { return }",
     "$shell = New-Object -ComObject WScript.Shell",
-    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { $shortcut = $null; try { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath) } catch {}; if ($null -ne $shortcut) { $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { $candidatePath = $_.FullName; $candidateSize = $_.Length; $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash; $relative = [System.IO.Path]::GetRelativePath($recent, $candidatePath).Replace('\\', '/'); ${removal}Write-Output $candidatePath } } }`
+    `Get-ChildItem -LiteralPath $recent -Filter '*.lnk' -File | ForEach-Object { $shortcut = $null; try { $shortcut = $shell.CreateShortcut($_.FullName); $target = [System.IO.Path]::GetFullPath($shortcut.TargetPath) } catch {}; if ($null -ne $shortcut) { $match = @($targets | Where-Object { [string]::Equals($_, $target, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $underRoot = $target.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($match -and $underRoot) { Write-Output $_.FullName } } }`
   ].join("; ");
   return script;
+}
+
+function recentShortcutDeletionScript(input: { appData: string; candidatePath: string; root: string; documentPaths: readonly string[] }): string {
+  const targets = input.documentPaths.map((candidate) => path.resolve(candidate));
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$appData = '${ps(input.appData)}'`,
+    `$candidatePath = '${ps(input.candidatePath)}'`,
+    `$root = '${ps(input.root)}'`,
+    `$targets = @(${targets.map((target) => `'${ps(target)}'`).join(",")})`,
+    "$recent = [System.IO.Path]::GetFullPath((Join-Path $appData 'Microsoft\\Windows\\Recent'))",
+    "if ($null -eq $recent -or -not [string]::Equals([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($candidatePath)), [System.IO.Path]::GetFullPath($recent), [System.StringComparison]::OrdinalIgnoreCase)) { throw ('Recent candidate escaped its exact root: ' + $candidatePath) }",
+    "if (-not $candidatePath.EndsWith('.lnk', [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { throw ('Recent candidate is not an existing shortcut file: ' + $candidatePath) }",
+    "$shell = New-Object -ComObject WScript.Shell",
+    "$beforeInfo = Get-Item -LiteralPath $candidatePath -Force; $beforeHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash; $beforeShortcut = $shell.CreateShortcut($candidatePath); $beforeTarget = [System.IO.Path]::GetFullPath($beforeShortcut.TargetPath); $beforeMatch = @($targets | Where-Object { [string]::Equals($_, $beforeTarget, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $beforeUnderRoot = $beforeTarget.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if (-not ($beforeMatch -and $beforeUnderRoot)) { throw ('Shortcut target is not an exact random-root target: ' + $candidatePath) }",
+    "$afterInfo = Get-Item -LiteralPath $candidatePath -Force; $afterHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash; $afterShortcut = $shell.CreateShortcut($candidatePath); $afterTarget = [System.IO.Path]::GetFullPath($afterShortcut.TargetPath); $afterMatch = @($targets | Where-Object { [string]::Equals($_, $afterTarget, [System.StringComparison]::OrdinalIgnoreCase) }).Count -eq 1; $afterUnderRoot = $afterTarget.StartsWith($root.TrimEnd('\\') + '\\', [System.StringComparison]::OrdinalIgnoreCase); if ($afterInfo.Length -ne $beforeInfo.Length -or -not [string]::Equals($afterHash, $beforeHash, [System.StringComparison]::OrdinalIgnoreCase) -or -not [string]::Equals($afterTarget, $beforeTarget, [System.StringComparison]::OrdinalIgnoreCase) -or -not ($afterMatch -and $afterUnderRoot)) { throw ('Shortcut bytes or target changed before deletion: ' + $candidatePath) }",
+    "Remove-Item -LiteralPath $candidatePath -Force; if (Test-Path -LiteralPath $candidatePath -PathType Leaf) { throw ('Shortcut survived deletion: ' + $candidatePath) }; Write-Output (@($candidatePath, [string]$beforeInfo.Length, $beforeHash, $beforeTarget) -join \"`t\")"
+  ].join("; ");
 }
 
 export async function assertExactPackagedProcess(executablePath: string, expectedPid: number): Promise<void> {

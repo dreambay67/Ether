@@ -169,3 +169,33 @@ Status: both individual journey records passed, but the combined attempt is **ex
 The normal native UI changed the same pre-existing real shell MRU file. Its recorded digest changed from `73f204...d5ec7` to `333b840...e243`, with last-write time `2026-08-03T01:28:16.1461844Z`. This opaque pre-existing file remains in place: no restore, deletion, overwrite, or timestamp repair was attempted.
 
 Read-only post-failure inspection found no exact packaged Fixer `Ether.exe` process. The failed-attempt root `C:\Users\deny7\AppData\Local\Temp\ether-a02-windows-integration-8ILUcl` and profile `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-FMILz4` are deliberately preserved and must not be treated as accepted evidence or cleanup targets.
+
+## 2026-08-03 fourth controlled packaged lifecycle failure
+
+Status: **failed safely and excluded from packaged evidence**. The reviewed run at
+HEAD `391dc2739886b0df941573511fff408f94ddd5f6` reached after-exit link sanitation,
+where the cleanup command exceeded Windows' command-line length limit (`spawn
+ENAMETOOLONG`). No Electron, shell UI, COM, registry mutation, or cleanup route was
+rerun for this correction.
+
+| Disposable root | Profile | Failure point |
+| --- | --- | --- |
+| `C:\Users\deny7\AppData\Local\Temp\ether-a02-windows-integration-5Npx0P` | `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-vAkplp` | after-exit link sanitation (`spawn ENAMETOOLONG`) |
+
+Read-only post-failure inspection found zero exact packaged Fixer `Ether.exe` processes.
+The aggregate Recent snapshot remained 209 files, but its digest changed from
+`21a9ba0e88d3b614fddaf98bcec4f712375e4182a20fd7529d8435075f4c4ea6` before the
+attempt to `120881c26e2eb09eb37d305945b7a3097503faf783c1e612a6f16db96310f80f`
+after. The preserved shell delta is diagnostic only and is not a restoration claim.
+
+The pre-existing real MRU file below was recorded in place. Its post-run SHA-256 and
+timestamp are retained for diagnosis; no restore, deletion, overwrite, or timestamp
+repair was attempted:
+
+| Relative path under `%APPDATA%\Microsoft\Windows\Recent` | Size | Post-run SHA-256 | Last written UTC |
+| --- | ---: | --- | --- |
+| `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `d739c7a9a45a883f3e3f10916623919e523f69f19ad3d95bdf7483b2385bfec2` | `2026-08-03T02:29:36.2977216Z` |
+
+The failed evidence and both disposable paths remain diagnostic only. The follow-up
+cleanup refactor removes full S1 path-set embedding from `-EncodedCommand`; it does
+not authorize a rerun or close the remaining Windows shell evidence gaps.
