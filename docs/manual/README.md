@@ -1,11 +1,17 @@
-# Ether manual release pipeline
+# Ether manual evidence pipeline
 
-This folder deliberately renders the manual only after a Windows release candidate exists. It never uses a Vite/dev renderer screenshot.
+The recovery candidate manual uses two packaged, blank-document action journeys. Both launch `release/windows/win-unpacked/Ether.exe` with isolated `APPDATA`, `LOCALAPPDATA`, and user-data roots. They use visible pointer and keyboard input and do not install Ether, mutate Windows associations, seed a graph, edit a database, or call a provider.
 
-1. Build the installer with `pnpm.cmd run desktop:package:win`.
-2. Set `ETHER_RELEASE_EXE` to the installed `Ether.exe` (not an unpacked development executable).
-3. Run `node docs/manual/capture-release.mjs`. It starts that executable with fresh disposable `APPDATA`, `LOCALAPPDATA`, and `USERPROFILE` roots plus a loopback renderer CDP port. For the two native Codex consent images, the installed child also chooses an ephemeral loopback main-process inspector. The harness discovers that endpoint from the exact child's stderr, validates and invokes one of two fixed registered menu items, closes the socket before native capture, and never writes the endpoint to the manifest or disk.
-4. Run `node docs/manual/build-pdf.mjs`; it prints the Markdown plus release capture inventory to `docs/product/ether-4.0-user-manual.pdf` through Chromium.
-5. Run `pnpm.cmd run manual:verify`; it requires the PDF, all required labeled images, no placeholder images, searchable required text, PDF links, a nonzero page count, and a rendered PNG QA pass for every page.
+Run the recovery route after packaging an exact committed candidate:
 
-The capture target list names every required release state. Some stateful views require the release-acceptance fixture/document to be opened with Ether before capture; the script intentionally fails instead of fabricating those states.
+1. `pnpm.cmd test:gui-checkpoint:packaged`
+2. `pnpm.cmd test:manual-recovery:packaged`
+3. `pnpm.cmd manual:manifest`
+4. `pnpm.cmd manual:build`
+5. `pnpm.cmd manual:verify`
+
+The manifest step rejects stale package hashes, failed journeys, captured runtime errors, missing screenshot actions, substituted files, and mismatched image hashes. The PDF verifier checks tagged structure, bookmarks, links, text size, image bounds, page rendering, and blank-page signals. It renders each page to `tmp/pdfs/ether-4.0-manual` for visual review.
+
+## Original installed-app route
+
+`capture-release.mjs`, `capture-native-dialog.ps1`, and `create-release-fixture.mjs` belong to the original installed-app audit. They include installer, registry, native dialog, seeded-fixture, and provider-adapter work. The GUI recovery task must not run them. The original review task may use that route under its own owner authorization after the fixer hands off the exact final package.

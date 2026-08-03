@@ -110,6 +110,7 @@ export const testSuites = {
   recoveryGuiCheckpoint: ["tests/recovery/gui-checkpoint.spec.ts"],
   recoveryModuleAuthoring: ["tests/recovery/module-authoring-recovery.spec.ts"],
   recoveryConnectionInspector: ["tests/recovery/connection-inspector-recovery.spec.ts"],
+  recoveryManual: ["tests/recovery/manual-recovery.spec.ts"],
   recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
   recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],
   recoveryWindowsIntegration: ["tests/recovery/document-windows-integration.spec.ts"],

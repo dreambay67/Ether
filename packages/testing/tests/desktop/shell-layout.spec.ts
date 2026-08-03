@@ -264,6 +264,15 @@ test("passes shell accessibility invariants and exposes keyboard help and channe
   await page.keyboard.press("Escape");
   await expect(tooltip).toHaveAttribute("data-open", "false");
 
+  await page.getByRole("button", { name: "Keyboard and pointer reference" }).click();
+  const shortcuts = page.getByRole("dialog", { name: "Keyboard and pointer reference" });
+  await expect(shortcuts).toBeVisible();
+  await expect(shortcuts.getByText("Shift + left drag", { exact: true })).toBeVisible();
+  await expect(shortcuts.getByText("Ctrl+G", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(shortcuts).toBeHidden();
+  await expect(page.getByRole("button", { name: "Keyboard and pointer reference" })).toBeFocused();
+
   const prompt = page.locator('[data-testid="rf__node-shell-prompt"]');
   const image = page.locator('[data-testid="rf__node-shell-image"]');
   await prompt.getByLabel("Text output").focus();

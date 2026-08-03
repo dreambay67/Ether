@@ -335,7 +335,8 @@
   text-transform: uppercase;
 }
 .empty-canvas-actions strong { margin-top: 8px; color: #f0f8fa; font-size: 19px; letter-spacing: -.01em; }
-.empty-canvas-actions p { max-width: 330px; margin: 7px 0 16px; color: #8fa4b0; font-size: 11px; line-height: 1.5; }
+.empty-canvas-actions p { max-width: 350px; margin: 7px 0 16px; color: #8fa4b0; font-size: 11px; line-height: 1.5; }
+.empty-canvas-actions ol { display: grid; gap: 4px; margin: 10px 0 0; padding-left: 20px; color: #c9d7dd; font-size: 11px; line-height: 1.35; }
 .empty-canvas-actions button {
   display: inline-flex;
   align-items: center;

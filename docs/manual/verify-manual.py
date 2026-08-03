@@ -14,47 +14,32 @@ from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCT = ROOT / "docs" / "product"
-ASSETS = PRODUCT / "assets" / "ether-4.0"
-MANIFEST_PATH = ASSETS / "manifest.json"
+MANIFEST_PATH = (
+    ROOT
+    / "docs"
+    / "evidence"
+    / "ether-4.0-recovery"
+    / "phase-5"
+    / "manual-packaged"
+    / "packaged"
+    / "manifest.json"
+)
 PDF_PATH = PRODUCT / "ether-4.0-user-manual.pdf"
 RENDER_DIRECTORY = ROOT / "tmp" / "pdfs" / "ether-4.0-manual"
 EXPECTED_LABELS = [
-    "start",
-    "build",
-    "focus",
-    "run",
-    "review",
-    "reference-desk",
-    "batch-matrix",
-    "job-center",
-    "artifact-observatory",
-    "recipes",
+    "first-run",
+    "shortcuts",
+    "direct-editing",
+    "all-17-nodes",
     "channels-roles",
-    "inspector-catalog",
-    "provider-health",
-    "settings",
-    "recovery",
-    "saving",
-    "export",
-    "plugin-edit-permit",
-    "plugin-run-permit",
-    "inspector-prompt-text",
-    "inspector-prompt-worker",
-    "inspector-reference-set",
-    "inspector-generation-image",
-    "inspector-edit-image",
-    "inspector-edit-mask",
-    "inspector-edit-transform",
-    "inspector-review-compare",
-    "inspector-review-evaluate",
-    "inspector-review-filter",
-    "inspector-flow-variables",
-    "inspector-flow-batch",
-    "inspector-flow-join",
-    "inspector-output-collection",
-    "inspector-output-export",
-    "inspector-canvas-note",
-    "inspector-canvas-drawing",
+    "locked-module",
+    "reference-setup",
+    "batch-run",
+    "review-empty",
+    "export-setup",
+    "provider-guard",
+    "recipes",
+    "recovery-settings",
 ]
 REQUIRED_BOOKMARKS = {
     "Ether 4.0 User Manual",
@@ -67,7 +52,6 @@ REQUIRED_BOOKMARKS = {
     "Providers and intelligent work",
     "Recipes and Codex plugin",
     "Settings, accessibility, and privacy",
-    "Inspector atlas",
 }
 REQUIRED_TEXT = (
     "ETHER by DreamBay",
@@ -86,7 +70,8 @@ REQUIRED_TEXT = (
     "legacy Ether folder projects",
     "Node, channel, and role flow",
     "Recovery decision flow",
-    "Inspector atlas",
+    "Start in three moves",
+    "Keyboard and pointer reference",
 )
 
 
@@ -96,45 +81,48 @@ def fail(message: str) -> None:
 
 def load_manifest() -> dict:
     if not MANIFEST_PATH.is_file():
-        fail("Release capture manifest is missing.")
+        fail("Recovery capture manifest is missing.")
     try:
         manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        fail(f"Release capture manifest is unreadable: {error}")
+        fail(f"Recovery capture manifest is unreadable: {error}")
     if not isinstance(manifest, dict):
-        fail("Release capture manifest must be an object.")
+        fail("Recovery capture manifest must be an object.")
     if (
+        manifest.get("schemaVersion") != 1
+        or
         manifest.get("version") != "4.0.0"
-        or manifest.get("source") != "installed-packaged-exe"
-        or manifest.get("sourceProfile") != "disposable-scoped-profile"
+        or manifest.get("source") != "packaged-blank-document-journeys"
+        or manifest.get("sourceProfile") != "fresh-isolated"
     ):
-        fail("Manifest must identify the installed Ether 4.0.0 disposable-profile capture.")
+        fail("Manifest must identify the isolated packaged blank-document journeys.")
     if manifest.get("labels") != EXPECTED_LABELS:
-        fail("Manifest labels do not match the frozen Task 28 capture inventory.")
+        fail("Manifest labels do not match the T25 capture inventory.")
     captures = manifest.get("captures")
     if not isinstance(captures, list) or len(captures) != len(EXPECTED_LABELS):
-        fail("Manifest capture evidence does not match the frozen inventory.")
-    fixture = manifest.get("fixture")
+        fail("Manifest capture evidence does not match the T25 inventory.")
+    package = manifest.get("package")
+    if not isinstance(package, dict) or re.fullmatch(r"[a-f0-9]{40}", str(package.get("gitCommit", ""))) is None:
+        fail("Manifest lacks an exact product commit.")
+    artifacts = package.get("artifacts")
+    expected_artifacts = {
+        "release/windows/win-unpacked/Ether.exe",
+        "release/windows/win-unpacked/resources/app.asar",
+    }
     if (
-        not isinstance(fixture, dict)
-        or fixture.get("nodeCount") != 17
-        or not isinstance(fixture.get("referenceCount"), int)
-        or fixture["referenceCount"] < 1
+        not isinstance(artifacts, list)
+        or len(artifacts) != len(expected_artifacts)
+        or not all(isinstance(item, dict) for item in artifacts)
+        or {item.get("path") for item in artifacts} != expected_artifacts
     ):
-        fail("Manifest fixture evidence must include all 17 nodes and an embedded reference.")
-    permits = manifest.get("permitEvidence")
-    if (
-        not isinstance(permits, dict)
-        or permits.get("editPermit") != "active"
-        or permits.get("runPermit") != "active-exact-plan"
-    ):
-        fail("Manifest is missing native Edit and exact-plan Run Permit evidence.")
-    if manifest.get("installer", {}).get("fileName") != "Ether-4.0.0-Setup.exe":
-        fail("Manifest must identify the reviewed Ether 4.0.0 NSIS installer.")
-    for label in ("installer", "executable", "fixture"):
-        digest = manifest.get(label, {}).get("sha256")
+        fail("Manifest lacks the exact packaged executable identities.")
+    for artifact in artifacts:
+        digest = artifact.get("sha256")
         if not isinstance(digest, str) or re.fullmatch(r"[a-f0-9]{64}", digest) is None:
-            fail(f"Manifest is missing {label} SHA-256 evidence.")
+            fail(f"Manifest is missing package SHA-256 evidence: {artifact.get('path')}.")
+        artifact_path = safe_repository_path(str(artifact.get("path", "")))
+        if sha256(artifact_path.read_bytes()).hexdigest() != digest:
+            fail(f"Manual package evidence is stale: {artifact.get('path')}.")
     captured_at = manifest.get("capturedAt")
     try:
         datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
@@ -176,24 +164,63 @@ def verify_captures(manifest: dict) -> None:
     }
     if set(evidence) != set(EXPECTED_LABELS):
         fail("Manifest capture evidence has missing or unexpected labels.")
-    for item in ASSETS.iterdir():
-        if item.suffix.lower() == ".png" and any(
-            token in item.name.lower() for token in ("placeholder", "fake", "mock", "dev")
-        ):
-            fail(f"Placeholder or development screenshot found: {item.name}")
     for label in EXPECTED_LABELS:
-        image = ASSETS / f"{label}.png"
+        record = evidence[label]
+        image = safe_repository_path(str(record.get("path", "")))
         if not image.is_file():
-            fail(f"Packaged-release capture is missing: {image.name}")
+            fail(f"Packaged action capture is missing: {image}")
+        if any(token in image.name.lower() for token in ("placeholder", "fake", "mock", "dev")):
+            fail(f"Placeholder or development screenshot found: {image.name}")
         raw = image.read_bytes()
         width, height = png_dimensions(raw)
-        record = evidence[label]
         if (
             record.get("sha256") != sha256(raw).hexdigest()
             or record.get("width") != width
             or record.get("height") != height
         ):
             fail(f"Capture {label} does not match its manifest evidence.")
+        result_path = safe_repository_path(str(record.get("sourceResult", "")))
+        expected_image = result_path.parent / str(record.get("screenshotPath", ""))
+        if expected_image.resolve() != image.resolve():
+            fail(f"Capture {label} path does not match its journey screenshot path.")
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            fail(f"Capture {label} has no readable action result: {error}")
+        if (
+            result.get("mode") != "packaged"
+            or result.get("outcome") != "passed"
+            or result.get("profile", {}).get("kind") != "fresh-isolated"
+            or result.get("identity", {}).get("gitCommit") != manifest["package"]["gitCommit"]
+            or result.get("errors") != []
+        ):
+            fail(f"Capture {label} is not backed by a clean passing packaged journey.")
+        result_artifacts = {
+            item.get("path"): item.get("sha256")
+            for item in result.get("identity", {}).get("artifacts", [])
+            if isinstance(item, dict)
+        }
+        manifest_artifacts = {item["path"]: item["sha256"] for item in manifest["package"]["artifacts"]}
+        if any(result_artifacts.get(path) != digest for path, digest in manifest_artifacts.items()):
+            fail(f"Capture {label} journey package hashes diverge from the manifest.")
+        action = next(
+            (candidate for candidate in result.get("actions", []) if candidate.get("sequence") == record.get("actionSequence")),
+            None,
+        )
+        if (
+            not isinstance(action, dict)
+            or action.get("kind") != "screenshot"
+            or action.get("label") != record.get("actionLabel")
+            or action.get("screenshotPath") != record.get("screenshotPath")
+        ):
+            fail(f"Capture {label} does not match a recorded screenshot action.")
+        action_log = result_path.with_name("action-log.md")
+        try:
+            action_log_text = action_log.read_text(encoding="utf-8")
+        except OSError as error:
+            fail(f"Capture {label} has no readable action log: {error}")
+        if "Outcome: passed" not in action_log_text or str(action.get("label")) not in action_log_text:
+            fail(f"Capture {label} action log does not contain its passing screenshot action.")
         if width < 300 or height < 100 or image.stat().st_size < 2_048:
             fail(f"Capture {label} is too small for a legible manual figure.")
         luminance_range, luminance_bins = visual_signal(image)
@@ -202,6 +229,18 @@ def verify_captures(manifest: dict) -> None:
                 f"Capture {label} is blank or near-blank "
                 f"(luminance range {luminance_range}, bins {luminance_bins})."
             )
+
+
+def safe_repository_path(relative: str) -> Path:
+    normalized = relative.replace("\\", "/")
+    if not normalized or normalized.startswith("/") or ".." in normalized.split("/"):
+        fail(f"Unsafe manual evidence path: {relative}")
+    candidate = (ROOT / Path(*normalized.split("/"))).resolve()
+    try:
+        candidate.relative_to(ROOT.resolve())
+    except ValueError:
+        fail(f"Manual evidence escapes the repository: {relative}")
+    return candidate
 
 
 def png_dimensions(raw: bytes) -> tuple[int, int]:

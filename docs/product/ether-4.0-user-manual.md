@@ -2,11 +2,11 @@
 
 **Version 4.0.0 | Windows | DreamBay**
 
-> **Historical rejected-candidate manual:** This manual describes capabilities that the 2026-08-02 product-owner audit found were not all reachable through the shipped interface. Do not use it as current acceptance evidence. It will be regenerated from the recovered packaged application.
+> **Recovery candidate manual:** The screenshots in this edition come from scripted actions in the packaged executable under a fresh, isolated profile. The capture record binds each image to the package hashes and the action that produced it. The original review task still owns the installed-app audit.
 
 Ether is a local-first creative production canvas. An Ether project is one portable `.ether` document containing its graphs, revisions, embedded media, runs, collections, and review decisions. It is designed around a simple visible model: a **node** does work, a **channel** carries a kind of payload, and a **role** tells the receiving node how to use it.
 
-> Release-candidate images are inserted only by `docs/manual/capture-release.mjs`, which launches the installed Ether executable under a disposable Windows profile. This source manual deliberately contains no substitute development-renderer captures.
+> `docs/manual/create-recovery-manifest.mjs` accepts screenshots only from the blank-document GUI and manual journeys. Both journeys use visible pointer and keyboard actions. They do not seed a graph, edit a database, invoke a provider, install Ether, or change Windows file associations.
 
 ## Contents
 
@@ -25,6 +25,8 @@ Ether is a local-first creative production canvas. An Ether project is one porta
 ## Start safely
 
 Choose **New document** to start an untitled usable canvas, or **Open document** to select one supported `.ether` file. Press `Ctrl+S` to name a new document. After a name exists, Save flushes pending work and creates a manual milestone; it does not create a project folder.
+
+A blank canvas gives you three starting steps: add a node from the 17-node Library, connect its named channel to a compatible input, then preview the plan before you run. Press `N` or double-click the canvas to open quick add at the pointer. The keyboard button in the Canvas toolbar opens the complete command and gesture reference.
 
 Ether opens maximized so the canvas and its supporting panes use the available desktop. The standard Windows title-bar controls remain available to minimize, restore, resize, or close the app.
 
@@ -82,9 +84,27 @@ Open .ether
 
 ## Canvas, nodes, connections, and Inspector
 
-Select a node or lane to open the contextual Inspector. Empty-canvas click clears selection; left-drag selects, right-drag pans, and selected nodes move as a group. Undo/redo applies graph transactions, including changes from recipes and the plugin. A Group is visual organization only; a Module is a collapsible subgraph with declared inputs, outputs, and exposed parameters.
+Select a node or lane to open the contextual Inspector. Empty-canvas click clears selection; left-drag selects, Shift with left-drag adds to the selection, and right-drag pans. Dragging one selected node moves the selected nodes together. Undo and redo apply graph transactions, including changes from recipes and the plugin.
+
+Ether uses one organizational container: the **Module**. Press `Ctrl+G` with one or more nodes selected to move them into a locked Module. The Module Inspector edits its title, description, and accent. Collapse changes presentation without removing ports or content. Enter opens the internal graph; Leave returns to the parent. Unlock permits parent-canvas movement, membership changes, and dissolution. Relock protects the result. `Ctrl+Shift+G` dissolves an unlocked selected Module in one undoable transaction.
 
 Each node has an editable **Title**, but its canonical kind is fixed. The card shows connected ports at rest, status when queued/running/blocked/failed/recently done, and one primary action only if the node can actually perform one. **Advanced** disclosures hold diagnostics, provenance, and expert controls. A Prompt deliberately has no Run button.
+
+### Canvas commands
+
+| Input | Action |
+|---|---|
+| `Delete` | Delete the selected nodes or connection |
+| `Ctrl+D` | Duplicate selected nodes and their internal lanes |
+| `Ctrl+C`, `Ctrl+X`, `Ctrl+V` | Copy, cut, and paste graph selections |
+| `Ctrl+A` | Select all nodes in the current graph |
+| `Ctrl+Z`, `Ctrl+Y` | Undo and redo graph transactions |
+| `F2` | Rename the selected node or Module |
+| `Enter` | Edit primary node content or enter the selected Module |
+| `Ctrl+G`, `Ctrl+Shift+G` | Create or dissolve a Module |
+| `Ctrl+Enter` | Preview the selected run; provider work starts only after a valid plan and confirmation |
+| `Ctrl+K` | Open the command palette |
+| `Home` | Fit the current graph |
 
 ### Channels and roles
 
@@ -162,10 +182,8 @@ Execution policies are precise:
 
 - **Generate Output** runs one LLM Worker from selected/cached upstream versions.
 - **Generate Image / Generate Edit** runs one selected provider node from selected/cached inputs.
-- **Run Selected** runs selected runnable nodes in dependency order; outside dependencies stay pinned unless Preview says otherwise.
-- **Run Branch** runs the downstream scope from a node or module.
-- **Refresh Upstream** deliberately re-runs stale dependencies before a target.
-- **Run Recipe** follows its declared scope and checkpoints.
+- **Preview selected run** compiles selected runnable nodes. Where the Inspector offers scope, choose Node only, Branch, or Downstream before previewing.
+- A recipe inserts its declared graph first. You then preview and run the resulting visible nodes through the same plan controls.
 
 Job Center groups queued, active, completed, blocked, and failed jobs. Open a job for its timeline, work items, attempts, correlation/provenance details, and error action. **Cancel** marks queued work cancelled and asks an active provider to interrupt when supported. **Retry** creates a new attempt for failed work under the same work item and preserves the failed attempt. Ether recovers interrupted queued work when you reopen the document. Terminal jobs do not show a misleading Resume button.
 
@@ -243,7 +261,7 @@ Use the desktop menu to grant an Edit Permit or approve the exact latest Codex p
 
 Settings and Provider Health expose capability, diagnostics, recent-document, local layout, protected Gemini connection state, and the persisted Antigravity overage confirmation without granting the renderer unrestricted file or shell access. The optional `--connect-gemini` launch opens only the credential connector and does not start a document workspace or provider background discovery. Gemini credentials are main-process-only Windows-protected values, never document or preference data. Folder choices create scoped grants. Media is delivered through authorized `ether-asset://` document/artifact URLs; arbitrary local paths are not rendered.
 
-Keyboard users can reach document commands, workspace switcher, canvas selection, node/channel controls, Inspector, and Job Center in normal focus order. Use the canvas toolbar for Quick prompt, Quick image, Group, Module, Undo, and Redo. Channel shape is never color-only. Tooltips explain icon commands, nodes, provider limits, policies, presets, and advanced controls. The workspace fills the live Windows content area and smoothly follows maximize, restore, resize, and full-screen changes. Respect Windows scaling at 100%, 125%, 150%, and 200%; reduced-motion settings remove nonessential pulsing/interpolation.
+Keyboard users can reach document commands, workspace switcher, canvas selection, node/channel controls, Inspector, and Job Center in normal focus order. The Canvas toolbar exposes Duplicate, Delete, Create module, Preview selected run, Undo, Redo, the command palette, and the keyboard/pointer reference. Channel shape is never color-only. Focusable Help buttons explain commands, nodes, provider limits, policies, presets, and advanced controls. The workspace fills the live Windows content area and follows maximize, restore, resize, and full-screen changes. Ether supports Windows scaling at 100%, 125%, 150%, and 200%; reduced-motion settings remove nonessential motion.
 
 Ether is local-first. Documents, generated artifacts, embedded references, and run evidence stay on the machine. AppData holds only Ether-managed recovery, staging, cache, temporary drag-export, and log material. Logs are bounded/redacted; no telemetry leaves the computer in 4.0. Deleting caches or a Live Output mirror cannot delete document contents.
 
@@ -281,7 +299,7 @@ Ether is local-first. Documents, generated artifacts, embedded references, and r
 **D**: Data channel; document; Drawing.\
 **E**: Edit; Embed; Ether document; Evaluate; execution policies; Export.\
 **F**: Filter; Focus.\
-**G**: Generate; graph; Group.\
+**G**: Generate; graph.\
 **I**: Image; Inspector; immutable output.\
 **J**: Job Center.\
 **L**: legacy folder projects; Live Output.\

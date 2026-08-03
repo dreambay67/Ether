@@ -1,115 +1,37 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { chromium } from "@playwright/test";
+import { validateRecoveryManualEvidence } from "./recovery-evidence.mjs";
 
 const root = path.resolve(import.meta.dirname, "..", "..");
 const productDirectory = path.join(root, "docs", "product");
 const manualPath = path.join(productDirectory, "ether-4.0-user-manual.md");
-const assetsDirectory = path.join(productDirectory, "assets", "ether-4.0");
-const manifestPath = path.join(assetsDirectory, "manifest.json");
 const pdfPath = path.join(productDirectory, "ether-4.0-user-manual.pdf");
 const etherLogoPath = path.join(root, "packages", "brand", "src", "assets", "Ether_logo.png");
 const dreamBayLogoPath = path.join(root, "packages", "brand", "src", "assets", "DB_logo.png");
-const expectedLabels = [
-  "start",
-  "build",
-  "focus",
-  "run",
-  "review",
-  "reference-desk",
-  "batch-matrix",
-  "job-center",
-  "artifact-observatory",
-  "recipes",
-  "channels-roles",
-  "inspector-catalog",
-  "provider-health",
-  "settings",
-  "recovery",
-  "saving",
-  "export",
-  "plugin-edit-permit",
-  "plugin-run-permit",
-  "inspector-prompt-text",
-  "inspector-prompt-worker",
-  "inspector-reference-set",
-  "inspector-generation-image",
-  "inspector-edit-image",
-  "inspector-edit-mask",
-  "inspector-edit-transform",
-  "inspector-review-compare",
-  "inspector-review-evaluate",
-  "inspector-review-filter",
-  "inspector-flow-variables",
-  "inspector-flow-batch",
-  "inspector-flow-join",
-  "inspector-output-collection",
-  "inspector-output-export",
-  "inspector-canvas-note",
-  "inspector-canvas-drawing"
-];
-const captureTitles = {
-  "start": "Start screen on a clean profile",
-  "build": "Build workspace with the release atlas",
-  "focus": "Focus workspace",
-  "run": "Run workspace",
-  "review": "Review workspace",
-  "reference-desk": "Reference Desk with an embedded reference",
-  "batch-matrix": "Batch Matrix with a five-item work set and separated concurrency controls",
-  "job-center": "Job Center with durable run evidence",
-  "artifact-observatory": "Artifact Observatory",
-  "recipes": "Recipe Gallery",
-  "channels-roles": "Channel lane and role chooser",
-  "inspector-catalog": "Canvas containing all 17 canonical nodes",
-  "provider-health": "Provider Health with installed runtime evidence",
-  "settings": "Settings with protected Gemini API and fail-closed Antigravity safety",
-  "recovery": "Production recovery status",
-  "saving": "Document saving state",
-  "export": "Artifact export dialog",
-  "plugin-edit-permit": "Native Edit Permit confirmation",
-  "plugin-run-permit": "Native exact-plan Run Permit confirmation",
-  "inspector-prompt-text": "Prompt Inspector",
-  "inspector-prompt-worker": "LLM Worker Inspector",
-  "inspector-reference-set": "Reference Set Inspector",
-  "inspector-generation-image": "Image Generator Inspector",
-  "inspector-edit-image": "Image Edit Inspector",
-  "inspector-edit-mask": "Mask Inspector",
-  "inspector-edit-transform": "Transform Inspector",
-  "inspector-review-compare": "Compare Inspector",
-  "inspector-review-evaluate": "Evaluate Inspector",
-  "inspector-review-filter": "Filter Inspector",
-  "inspector-flow-variables": "Variables Inspector",
-  "inspector-flow-batch": "Batch Inspector",
-  "inspector-flow-join": "Join Inspector",
-  "inspector-output-collection": "Collection Inspector",
-  "inspector-output-export": "Export Inspector",
-  "inspector-canvas-note": "Note Inspector",
-  "inspector-canvas-drawing": "Drawing Inspector"
-};
 const headingCaptures = {
-  "start safely": ["start"],
-  "workspaces": ["build", "focus"],
-  "documents, references, and recovery": ["reference-desk", "recovery"],
-  "canvas, nodes, connections, and inspector": ["inspector-catalog", "channels-roles"],
-  "run plans, batches, and job center": ["run", "batch-matrix", "job-center"],
-  "review, collections, and export": ["review", "artifact-observatory", "export"],
-  "providers and intelligent work": ["provider-health"],
-  "recipes and codex plugin": ["recipes", "plugin-edit-permit", "plugin-run-permit"],
-  "settings, accessibility, and privacy": ["settings", "saving"]
+  "start safely": ["first-run"],
+  "documents, references, and recovery": ["reference-setup"],
+  "canvas, nodes, connections, and inspector": ["shortcuts", "direct-editing", "all-17-nodes", "channels-roles", "locked-module"],
+  "run plans, batches, and job center": ["batch-run"],
+  "review, collections, and export": ["review-empty", "export-setup"],
+  "providers and intelligent work": ["provider-guard"],
+  "recipes and codex plugin": ["recipes"],
+  "settings, accessibility, and privacy": ["recovery-settings"]
 };
 
-const [markdown, rawManifest, etherLogoBytes, dreamBayLogoBytes] = await Promise.all([
+const [markdown, evidence, etherLogoBytes, dreamBayLogoBytes] = await Promise.all([
   readFile(manualPath, "utf8"),
-  readFile(manifestPath, "utf8"),
+  validateRecoveryManualEvidence(root),
   readFile(etherLogoPath),
   readFile(dreamBayLogoPath)
 ]);
 const etherLogoHref = pngDataUrl(etherLogoBytes);
 const dreamBayLogoHref = pngDataUrl(dreamBayLogoBytes);
-const manifest = parseManifest(rawManifest);
-const captures = await loadCaptures(manifest);
+const manifest = evidence.manifest;
+const captures = evidence.captures.map((capture) => ({ ...capture, href: pngDataUrl(capture.bytes) }));
 const firstHeading = /^# Ether 4\.0 User Manual\s*$/mu;
 if (!firstHeading.test(markdown)) {
   throw new Error("The source manual must start with the frozen Ether 4.0 User Manual title.");
@@ -125,10 +47,6 @@ const renderedManual = renderMarkdown(bodyMarkdown, {
     return labels.map((label) => captureFigure(requireCapture(captureMap, label), "feature-capture")).join("");
   }
 });
-const inspectorCaptures = expectedLabels
-  .filter((label) => label.startsWith("inspector-") && !usedCaptures.has(label))
-  .map((label) => requireCapture(captureMap, label));
-for (const capture of inspectorCaptures) usedCaptures.add(capture.label);
 const uncategorized = captures.filter((capture) => !usedCaptures.has(capture.label));
 if (uncategorized.length > 0) {
   throw new Error(`The manual does not place release captures: ${uncategorized.map((capture) => capture.label).join(", ")}.`);
@@ -159,24 +77,18 @@ const html = `<!doctype html>
       <p class="cover-deck">Build, run, review, and deliver local-first creative work from one portable <code>.ether</code> document.</p>
       <dl class="cover-facts">
         <div><dt>Product</dt><dd>ETHER by DreamBay</dd></div>
-        <div><dt>Edition</dt><dd>4.0.0 release manual</dd></div>
-        <div><dt>Capture source</dt><dd>Installed packaged application</dd></div>
+        <div><dt>Edition</dt><dd>4.0.0 recovery candidate</dd></div>
+        <div><dt>Capture source</dt><dd>Packaged blank-document journeys</dd></div>
       </dl>
     </section>
     <aside class="release-provenance" aria-label="Release capture provenance">
-      <strong>Release evidence</strong>
-      <p>Every application image in this manual comes from Ether 4.0.0 installed through the reviewed Windows installer under a disposable profile. The capture manifest records SHA-256 hashes for the installer, executable, fixture, and each image.</p>
-      <p>Installer SHA-256: <code>${escapeHtml(manifest.installer.sha256)}</code></p>
+      <strong>Candidate evidence</strong>
+      <p>Every application image comes from visible pointer and keyboard actions in a fresh isolated profile. The journeys begin with blank documents and record the product commit, packaged executable, application archive, action sequence, and image hash.</p>
+      <p>Product commit: <code>${escapeHtml(manifest.package.gitCommit)}</code></p>
+      <p>Ether.exe SHA-256: <code>${escapeHtml(manifest.package.artifacts.find((artifact) => artifact.path.endsWith("Ether.exe")).sha256)}</code></p>
     </aside>
     <main class="manual-content">
       ${renderedManual}
-      <section class="inspector-atlas" aria-labelledby="inspector-atlas-title">
-        <h2 id="inspector-atlas-title">Inspector atlas</h2>
-        <p>These installed-release captures show the ordinary controls for every canonical node. Advanced sections stay subordinate to each node's primary setup and action controls.</p>
-        <div class="inspector-grid">
-          ${inspectorCaptureRows(inspectorCaptures)}
-        </div>
-      </section>
     </main>
   </article>
 </body>
@@ -230,110 +142,18 @@ try {
 }
 
 process.stdout.write(
-  `Built tagged Ether 4.0.0 user manual from ${captures.length} installed-release captures: ${pdfPath}\n`
+  `Built tagged Ether 4.0.0 user manual from ${captures.length} packaged blank-document captures: ${pdfPath}\n`
 );
-
-function parseManifest(raw) {
-  let value;
-  try {
-    value = JSON.parse(raw);
-  } catch (error) {
-    throw new Error("Release capture manifest is not valid JSON.", { cause: error });
-  }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Release capture manifest must be an object.");
-  }
-  if (
-    value.version !== "4.0.0" ||
-    value.source !== "installed-packaged-exe" ||
-    value.sourceProfile !== "disposable-scoped-profile"
-  ) {
-    throw new Error("Release capture manifest must identify the installed Ether 4.0.0 disposable-profile workflow.");
-  }
-  if (
-    !Array.isArray(value.labels) ||
-    JSON.stringify(value.labels) !== JSON.stringify(expectedLabels) ||
-    !Array.isArray(value.captures) ||
-    value.captures.length !== expectedLabels.length
-  ) {
-    throw new Error("Release capture manifest does not contain the frozen Task 28 capture inventory.");
-  }
-  for (const [label, evidence] of [
-    ["installer", value.installer],
-    ["executable", value.executable],
-    ["fixture", value.fixture]
-  ]) {
-    if (
-      evidence === null ||
-      typeof evidence !== "object" ||
-      !/^[a-f0-9]{64}$/u.test(evidence.sha256 ?? "")
-    ) {
-      throw new Error(`Release capture manifest is missing ${label} SHA-256 evidence.`);
-    }
-  }
-  if (value.fixture.nodeCount !== 17 || value.fixture.referenceCount < 1) {
-    throw new Error("Release fixture evidence must contain all 17 canonical nodes and an embedded reference.");
-  }
-  if (
-    value.permitEvidence?.editPermit !== "active" ||
-    value.permitEvidence?.runPermit !== "active-exact-plan"
-  ) {
-    throw new Error("Release capture manifest is missing native Edit and exact-plan Run Permit evidence.");
-  }
-  return value;
-}
-
-async function loadCaptures(manifest) {
-  const evidenceByLabel = new Map(manifest.captures.map((entry) => [entry.label, entry]));
-  return Promise.all(expectedLabels.map(async (label) => {
-    if (!/^[a-z0-9-]+$/u.test(label)) throw new Error(`Unsafe capture label: ${label}.`);
-    const evidence = evidenceByLabel.get(label);
-    if (evidence === undefined) throw new Error(`Capture manifest is missing evidence for ${label}.`);
-    const source = path.join(assetsDirectory, `${label}.png`);
-    const bytes = await readFile(source);
-    const dimensions = pngDimensions(bytes);
-    const digest = sha256(bytes);
-    if (
-      digest !== evidence.sha256 ||
-      dimensions.width !== evidence.width ||
-      dimensions.height !== evidence.height
-    ) {
-      throw new Error(`Capture ${label} does not match its installed-release manifest evidence.`);
-    }
-    if (dimensions.width < 300 || dimensions.height < 100) {
-      throw new Error(`Capture ${label} is too small for a legible manual figure.`);
-    }
-    return {
-      label,
-      title: captureTitles[label],
-      href: pngDataUrl(bytes)
-    };
-  }));
-}
 
 function pngDataUrl(bytes) {
   return `data:image/png;base64,${bytes.toString("base64")}`;
-}
-
-function inspectorCaptureRows(captures) {
-  const rows = [];
-  for (let index = 0; index < captures.length; index += 2) {
-    rows.push(
-      `<div class="inspector-row">${
-        captures.slice(index, index + 2)
-          .map((capture) => captureFigure(capture, "inspector-capture"))
-          .join("")
-      }</div>`
-    );
-  }
-  return rows.join("");
 }
 
 function captureFigure(capture, className) {
   const title = escapeHtml(capture.title);
   return `<figure class="${className}" data-capture-id="${capture.label}">
     <img src="${escapeAttribute(capture.href)}" alt="${escapeAttribute(capture.title)}" loading="eager">
-    <figcaption>Packaged Ether release capture - ${title}</figcaption>
+    <figcaption>Packaged blank-document action capture: ${title}</figcaption>
   </figure>`;
 }
 
@@ -518,23 +338,6 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value).replaceAll('"', "&quot;");
-}
-
-function pngDimensions(bytes) {
-  if (
-    bytes.length < 24 ||
-    !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-  ) {
-    throw new Error("Manual capture is not a valid PNG.");
-  }
-  return {
-    width: bytes.readUInt32BE(16),
-    height: bytes.readUInt32BE(20)
-  };
-}
-
-function sha256(bytes) {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 async function replaceFileAtomically(source, destination) {

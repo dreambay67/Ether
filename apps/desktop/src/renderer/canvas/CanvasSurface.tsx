@@ -428,8 +428,9 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       {graph.nodes.length === 0 && quickAdd === null ? (
         <div className="empty-canvas-actions">
           <span>Blank workflow</span>
-          <strong>Make the first move.</strong>
-          <p>Choose any canonical node from the Library, or open quick add where you want to work.</p>
+          <strong>Start in three moves.</strong>
+          <ol><li>Add a node from the Library.</li><li>Connect its named channel to a compatible input.</li><li>Preview the plan before you run.</li></ol>
+          <p>Press N or double-click the canvas to add at the pointer. The keyboard button in the Canvas toolbar lists every command and gesture.</p>
           <button type="button" disabled={readOnly || catalog.length === 0} onClick={() => {
             const bounds = surfaceRef.current?.getBoundingClientRect();
             if (bounds !== undefined) openQuickAdd(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
