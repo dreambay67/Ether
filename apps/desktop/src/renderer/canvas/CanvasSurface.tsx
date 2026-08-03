@@ -240,7 +240,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         onMove={updateSemanticZoom}
         onSelectionStart={(event) => interaction.beginMarquee(event.shiftKey)}
         onSelectionChange={({ nodes: selected }) => {
-          if (interaction.mode === "marquee") interaction.updateMarquee(
+          interaction.updateMarquee(
             selected.filter((node) => graph.nodes.some((item) => item.id === node.id)).map((node) => node.id)
           );
         }}

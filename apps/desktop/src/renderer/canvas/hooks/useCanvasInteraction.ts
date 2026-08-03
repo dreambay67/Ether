@@ -15,6 +15,7 @@ export function useCanvasInteraction(selectedIds: readonly string[], onSelected:
   const currentSelection = useRef<string[]>([...selectedIds]);
   const marqueeBase = useRef<string[]>([]);
   const marqueeAdditive = useRef(false);
+  const marqueeActive = useRef(false);
 
   useEffect(() => {
     currentSelection.current = [...selectedIds];
@@ -42,13 +43,16 @@ export function useCanvasInteraction(selectedIds: readonly string[], onSelected:
     const start = marqueeSelectionStart(currentSelection.current, additive);
     marqueeBase.current = start.base;
     marqueeAdditive.current = additive;
+    marqueeActive.current = true;
     setMode("marquee");
     commit(start.selection);
   }, [commit]);
   const updateMarquee = useCallback((ids: readonly string[]) => {
-    commit(marqueeAdditive.current ? [...marqueeBase.current, ...ids] : ids);
+    if (!marqueeActive.current) return;
+    commit(marqueeSelectionUpdate(marqueeBase.current, ids, marqueeAdditive.current));
   }, [commit]);
   const endMarquee = useCallback(() => {
+    marqueeActive.current = false;
     marqueeBase.current = [];
     marqueeAdditive.current = false;
     settle();
@@ -56,6 +60,7 @@ export function useCanvasInteraction(selectedIds: readonly string[], onSelected:
   const cancel = useCallback(() => {
     if (mode === "marquee") commit(marqueeBase.current);
     if (mode === "idle" || mode === "selecting") commit([]);
+    marqueeActive.current = false;
     marqueeBase.current = [];
     marqueeAdditive.current = false;
     settle();
@@ -88,6 +93,10 @@ export function toggleId(ids: readonly string[], id: string) {
 export function marqueeSelectionStart(ids: readonly string[], additive: boolean) {
   const base = [...ids];
   return { base, selection: additive ? base : [] };
+}
+
+export function marqueeSelectionUpdate(base: readonly string[], hits: readonly string[], additive: boolean) {
+  return unique(additive ? [...base, ...hits] : hits);
 }
 
 function unique(ids: readonly string[]) {

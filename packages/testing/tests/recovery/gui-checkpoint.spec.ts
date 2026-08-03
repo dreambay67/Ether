@@ -49,11 +49,16 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await addDefinition(page, input, "prompt.worker", 2);
     const prompt = page.locator(".ether-node[data-node-definition='prompt.text']").first();
     const worker = page.locator(".ether-node[data-node-definition='prompt.worker']").first();
-    const workerBefore = await requiredBox(worker, "Worker before movement");
-    await input.leftDrag(center(workerBefore), { x: workerBefore.x + workerBefore.width / 2 + 300, y: workerBefore.y + workerBefore.height / 2 + 90 }, "Move Worker with ordinary left drag", "The Worker moves once and preserves its graph identity.");
-    await expect.poll(async () => (await requiredBox(worker, "Worker after movement")).x).toBeGreaterThan(workerBefore.x + 180);
-
     const canvasBox = await requiredBox(canvas, "authoring canvas");
+    const workerBefore = await requiredBox(worker, "Worker before movement");
+    const workerCenter = center(workerBefore);
+    const safeWorkerTarget = {
+      x: Math.max(canvasBox.x + workerBefore.width / 2 + 12, workerCenter.x - 220),
+      y: workerCenter.y
+    };
+    await input.leftDrag(workerCenter, safeWorkerTarget, "Move Worker with ordinary left drag", "The Worker moves once and preserves its graph identity.");
+    await expect.poll(async () => (await requiredBox(worker, "Worker after movement")).x).toBeLessThan(workerBefore.x - 100);
+
     const promptBox = await requiredBox(prompt, "Prompt for marquee");
     await input.leftMarquee(...marqueeAround(promptBox, canvasBox), "Marquee-select Prompt", "A left-drag marquee selects the intersected Prompt.");
     await expect.poll(() => selectedNodeCount(page)).toBe(1);
