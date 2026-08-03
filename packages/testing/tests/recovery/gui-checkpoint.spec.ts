@@ -61,10 +61,10 @@ test("authors the practical phase-one journey from a blank packaged document", a
 
     const promptBox = await requiredBox(prompt, "Prompt for marquee");
     await input.leftMarquee(...marqueeAround(promptBox, canvasBox), "Marquee-select Prompt", "A left-drag marquee selects the intersected Prompt.");
-    await expect.poll(() => selectedNodeCount(page)).toBe(1);
+    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     const workerBox = await requiredBox(worker, "Worker for additive marquee");
     await input.shiftMarquee(...marqueeAround(workerBox, canvasBox), "Add Worker with Shift marquee", "Shift marquee preserves Prompt and adds Worker.");
-    await expect.poll(() => selectedNodeCount(page)).toBe(2);
+    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text", "prompt.worker"]);
     await input.screenshot("02-marquee-and-movement.png", evidence, "Capture movement and additive marquee", "The separated nodes show one reliable movement and two-node additive selection state.");
 
     await input.pressKey("Control+D", "Duplicate selected nodes", "Ctrl+D duplicates the two selected nodes with a visible offset.");
@@ -156,4 +156,12 @@ function marqueeAround(box: { x: number; y: number; width: number; height: numbe
 
 async function selectedNodeCount(page: Page) {
   return page.getByTestId("ether-node").evaluateAll((nodes) => nodes.filter((node) => node.classList.contains("is-selected")).length);
+}
+
+async function selectedNodeDefinitions(page: Page) {
+  return page.getByTestId("ether-node").evaluateAll((nodes) => nodes
+    .filter((node) => node.classList.contains("is-selected"))
+    .map((node) => node.getAttribute("data-node-definition"))
+    .filter((definition): definition is string => definition !== null)
+    .sort());
 }

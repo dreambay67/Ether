@@ -244,7 +244,12 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
             selected.filter((node) => graph.nodes.some((item) => item.id === node.id)).map((node) => node.id)
           );
         }}
-        onSelectionEnd={interaction.endMarquee}
+        onSelectionEnd={() => {
+          interaction.updateMarquee(
+            flow.getNodes().filter((node) => node.selected && graph.nodes.some((item) => item.id === node.id)).map((node) => node.id)
+          );
+          interaction.endMarquee();
+        }}
         onNodeClick={(event, node) => {
           if (graph.nodes.some((item) => item.id === node.id)) {
             onModuleSelected(null);
