@@ -277,6 +277,9 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
   const targetPath = path.join(root, `Explorer drag target ${shellToken.slice(0, 8)} \u017dlt\u00fd.ether`);
   let session: RecoveryJourneySession | null = null;
   let primaryPid: number | null = null;
+  let dragJourneyFailure: unknown = null;
+  let shellStateRestored = false;
+  const finalizationFailures: unknown[] = [];
   try {
     session = await launch(executable, "a02-windows-explorer-drag", profile);
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [sourcePath, targetPath] });
@@ -306,6 +309,8 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await session.close("passed");
     session = null;
+  } catch (error) {
+    dragJourneyFailure = error;
   } finally {
     if (session !== null && primaryPid !== null) {
       try {
@@ -314,13 +319,38 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
         finalizationFailures.push(error);
       }
     }
-    if (session !== null) await session.close("failed");
+    if (session !== null) {
+      try {
+        await session.close("failed");
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     try {
       await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [sourcePath, targetPath] });
-    } finally {
-      await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
-      await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
+      shellStateRestored = true;
+    } catch (error) {
+      finalizationFailures.push(error);
     }
+    if (shellStateRestored) {
+      try {
+        await cleanupIsolatedJourneyProfile(profile);
+        await cleanupWindowsIntegrationRoot(root);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    } else {
+      finalizationFailures.push(new Error(`Preserved recovery artifacts after unproven shell cleanup: root=${root}; profile=${profile.root}.`));
+    }
+  }
+  if (dragJourneyFailure !== null) {
+    if (finalizationFailures.length > 0) {
+      throw new AggregateError([dragJourneyFailure, ...finalizationFailures], "Explorer drag route and safe finalization failed.", { cause: finalizationFailures.at(-1) });
+    }
+    throw dragJourneyFailure;
+  }
+  if (finalizationFailures.length > 0) {
+    throw new AggregateError(finalizationFailures, "Explorer drag finalization did not prove safe cleanup.", { cause: finalizationFailures.at(-1) });
   }
 });
 
