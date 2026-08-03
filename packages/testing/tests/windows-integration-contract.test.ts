@@ -156,36 +156,54 @@ describe("A02 Windows integration harness contracts", () => {
     expect(associationFinalForeground).toBeGreaterThan(associationMinimized);
     expect(associationStarted).toBeGreaterThan(associationFinalForeground);
     expect(associationInvoke).toBeGreaterThan(associationStarted);
-    expect(associationScript).toContain("ClientToScreen($explorerHwnd,[ref]$clientOrigin)");
-    expect(associationScript).toContain("$clickY -ge $clientOrigin.Y");
+    expect(associationScript).toContain("ClientToScreen($explorerHwnd,[ref]$co)");
+    expect(associationScript).toContain("$cx -ge $co.X");
     expect(associationScript).toContain("Association chrome: click is not non-client frame");
-    expect(associationScript).toContain("$explorerBounds.Left + 2");
+    expect(associationScript).toContain("$eb.Left + 2");
+    expect(associationScript).toContain("GetCursorPos([ref]$cu)");
+    expect(associationScript).toContain("if (-not [EtherA02Native]::SetCursorPos($cx,$cy))");
+    expect(associationScript).toContain("Association chrome actual cursor: WindowFromPoint root was not the exact expected HWND");
+    expect(associationScript).toContain("SendMessage($explorerHwnd,0x84");
+    expect(associationScript).toContain("$hit -in 1,3,8,9,20");
+    expect(associationScript).toContain("$hit -notin 10,11,12,13,14,15,16,17");
 
     const dragScript = buildNativeExplorerDragScript({
       documentPath: "C:\\Ether Recovery\\Explorer drag Žltý.ether",
       etherPid: 1234,
       target: { x: 960, y: 540 }
     });
-    const cursorPositioned = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY)");
+    const cursorPositioned = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos($sx,$sy)");
     const cursorSettled = dragScript.indexOf("Start-Sleep -Milliseconds 100", cursorPositioned);
     const sourceHit = dragScript.indexOf("Drag source: WindowFromPoint root was not the exact expected HWND", cursorSettled);
-    const dragStarted = dragScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", sourceHit);
+    const actualSourceHit = dragScript.indexOf("P $cursor.X $cursor.Y $explorerHwnd 'Drag source actual cursor'", sourceHit);
+    const dragStarted = dragScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", actualSourceHit);
     const mouseDown = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0002", dragStarted);
     const foregroundWhileHeld = dragScript.indexOf("Drag source foreground mismatch", mouseDown);
     const dragThreshold = dragScript.indexOf("MinimumHorizontalDragDistance + 1", foregroundWhileHeld);
-    const thresholdMove = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)", dragThreshold);
+    const thresholdMove = dragScript.indexOf("[EtherA02Pointer]::SetCursorPos(($sx + $dd),$sy)", dragThreshold);
     const targetHit = dragScript.indexOf("Drag target: WindowFromPoint root was not the exact expected HWND", thresholdMove);
-    const mouseUp = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0004", targetHit);
+    const actualThresholdHit = dragScript.indexOf("P $cursor.X $cursor.Y $explorerHwnd 'Drag threshold actual cursor'", thresholdMove);
+    const actualTargetHit = dragScript.indexOf("P $cursor.X $cursor.Y $etherHwnd 'Drag target actual cursor'", targetHit);
+    const mouseUp = dragScript.indexOf("[EtherA02Pointer]::mouse_event(0x0004", actualTargetHit);
     expect(cursorPositioned).toBeGreaterThanOrEqual(0);
     expect(cursorSettled).toBeGreaterThan(cursorPositioned);
     expect(sourceHit).toBeGreaterThan(cursorSettled);
-    expect(dragStarted).toBeGreaterThan(sourceHit);
+    expect(actualSourceHit).toBeGreaterThan(sourceHit);
+    expect(dragStarted).toBeGreaterThan(actualSourceHit);
     expect(mouseDown).toBeGreaterThan(dragStarted);
     expect(foregroundWhileHeld).toBeGreaterThan(mouseDown);
     expect(dragThreshold).toBeGreaterThan(foregroundWhileHeld);
     expect(thresholdMove).toBeGreaterThan(dragThreshold);
+    expect(actualThresholdHit).toBeGreaterThan(thresholdMove);
     expect(targetHit).toBeGreaterThan(thresholdMove);
-    expect(mouseUp).toBeGreaterThan(targetHit);
+    expect(actualTargetHit).toBeGreaterThan(targetHit);
+    expect(mouseUp).toBeGreaterThan(actualTargetHit);
+    expect(dragScript).toContain("P $cursor.X $cursor.Y $explorerHwnd 'Drag threshold actual cursor'");
+    expect(dragScript).toContain("P $cursor.X $cursor.Y $etherHwnd 'Drag target actual cursor'");
+    expect(dragScript).toContain("function P($x,$y,$h,$g)");
+    expect(dragScript).toContain("if (-not [EtherA02Pointer]::SetCursorPos($sx,$sy))");
+    expect(dragScript).toContain("GetCursorPos([ref]$cursor)");
+    expect(dragScript).toContain("Drag progression: cursor placement failed");
     expect(`${associationScript}\n${dragScript}`).not.toContain("SetForegroundWindow");
   });
 

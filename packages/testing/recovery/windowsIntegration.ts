@@ -570,7 +570,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint p); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); [DllImport(\"user32.dll\")] public static extern bool ClientToScreen(IntPtr h,ref POINT p); }' -ErrorAction SilentlyContinue",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint p); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern bool GetCursorPos(out POINT p); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); [DllImport(\"user32.dll\")] public static extern bool ClientToScreen(IntPtr h,ref POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l); }' -ErrorAction SilentlyContinue",
     `$document = '${ps(input.documentPath)}'`,
     `$etherPid = ${input.etherPid}`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
@@ -604,7 +604,48 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
     "$buttonDown = $false",
     `try { $explorerHwnd = [intptr]$matchedWindow.HWND; if ($explorerHwnd -eq [intptr]::Zero) { throw 'Association chrome: exact Explorer HWND is zero' }; if (-not [EtherA02Native]::SetWindowPos($explorerHwnd, [intptr]::Zero, 40, 40, 0, 0, 0x0015)) { throw 'Association chrome: could not arrange exact Explorer HWND without activation' }; Start-Sleep -Milliseconds 150; $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle($explorerHwnd); $explorerBounds = $windowRoot.Current.BoundingRectangle; if ($explorerBounds.Left -lt 0 -or $explorerBounds.Top -lt 0 -or $explorerBounds.Width -le 4 -or $explorerBounds.Height -le 4) { throw 'Association chrome: exact Explorer frame has no positive safe bounds' }; $clickX = [int]($explorerBounds.Left + 2); $clickY = [int]($explorerBounds.Top + 2); $clientOrigin = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::ClientToScreen($explorerHwnd,[ref]$clientOrigin) -or $clickY -ge $clientOrigin.Y) { throw 'Association chrome: click is not non-client frame' }; ${exactWindowRootAtPointScript("EtherA02Native", "$clickX", "$clickY", "$explorerHwnd", "Association chrome")}; [EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null; [EtherA02Native]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); $buttonDown = $true; [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $buttonDown = $false; ${exactExplorerForegroundIdentityScript("EtherA02Native", "After association chrome click")}; $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -ne 1) { throw 'Association Invoke: exact Explorer HWND no longer exposes one display item' }; $item = $candidates[0]; ${exactExplorerSelectedDocumentScript("Immediately before association Invoke")}; $pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern after chrome click' }; if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Exact Ether target did not remain minimized before association Invoke' }; ${exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Invoke")}; $activationStartedAt = [DateTime]::UtcNow; ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); ${exactEtherForegroundTransitionScript("EtherA02Native", "association Invoke")}; Write-Output ('uia-invoked click=(' + $clickX + ',' + $clickY + ') sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' folder=' + $folder + ' displayName=' + $displayName) } finally { if ($buttonDown) { [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
   ].join("; ");
-  return script;
+  return compactAssociationScript(hardenAssociationPointerScript(script));
+}
+
+function hardenAssociationPointerScript(script: string): string {
+  const actualPointCheck = exactWindowRootAtPointScript("EtherA02Native", "$cursor.X", "$cursor.Y", "$explorerHwnd", "Association chrome actual cursor");
+  return script
+    .replace("$clickX = [int]($explorerBounds.Left + 2); $clickY = [int]($explorerBounds.Top + 2)", "$clickX = [int]($explorerBounds.Left + 2); $clickY = [int][Math]::Round($explorerBounds.Top + ($explorerBounds.Height / 2))")
+    .replace("$clickY -ge $clientOrigin.Y", "$clickX -ge $clientOrigin.X")
+    .replace(
+      "[EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null",
+      `if (-not [EtherA02Native]::SetCursorPos($clickX,$clickY)) { throw 'Association chrome: cursor placement failed' }; $cursor = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::GetCursorPos([ref]$cursor)) { throw 'Association chrome: cursor read failed' }; ${actualPointCheck}; $lParam = [intptr](($cursor.Y -shl 16) -bor ($cursor.X -band 0xffff)); $hit = [int][EtherA02Native]::SendMessage($explorerHwnd,0x84,[intptr]::Zero,$lParam); if ($hit -in 1,3,8,9,20) { throw 'Association chrome: interactive hit test rejected' }; if ($hit -notin 10,11,12,13,14,15,16,17) { throw 'Association chrome: non-inert hit test rejected' }`
+    );
+}
+
+function compactAssociationScript(script: string): string {
+  return script
+    .replaceAll("$documentFullPath", "$d")
+    .replaceAll("$documentLeaf", "$l")
+    .replaceAll("$folderNamespace", "$ns")
+    .replaceAll("$parsedDocument", "$pd")
+    .replaceAll("$parsedPath", "$pp")
+    .replaceAll("$displayName", "$n")
+    .replaceAll("$existingHwnd", "$eh")
+    .replaceAll("$matchedWindow", "$mw")
+    .replaceAll("$windowRoot", "$wr")
+    .replaceAll("$explorerBounds", "$eb")
+    .replaceAll("$explorerPid", "$ep")
+    .replaceAll("$condition", "$c")
+    .replaceAll("$candidates", "$cs")
+    .replaceAll("$clientOrigin", "$co")
+    .replaceAll("$clickX", "$cx")
+    .replaceAll("$clickY", "$cy")
+    .replaceAll("$cursor", "$cu")
+    .replaceAll("$resolvedEtherPid", "$rp")
+    .replaceAll("$etherCondition", "$ec")
+    .replaceAll("$etherWindows", "$ew")
+    .replaceAll("$activationDeadline", "$ad")
+    .replaceAll("$foregroundTransitioned", "$ft")
+    .replaceAll("$foregroundHwnd", "$fh")
+    .replaceAll("$foregroundExplorerPid", "$fp")
+    .replaceAll("$foregroundPid", "$fpid")
+    .replaceAll("$transitionLatencyMs", "$lm");
 }
 
 export type NativeScreenPoint = { x: number; y: number };
@@ -689,7 +730,7 @@ export function buildNativeExplorerDragScript(input: {
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
     "Add-Type -AssemblyName PresentationFramework",
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Pointer { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); }'",
+    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Pointer { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern bool GetCursorPos(out POINT p); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); }'",
     `$document = '${ps(input.documentPath)}'`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
     "$folder = [System.IO.Path]::GetDirectoryName($documentFullPath)",
@@ -726,9 +767,39 @@ export function buildNativeExplorerDragScript(input: {
 
 /** Keeps the approval-gated native drag below Windows' encoded-command limit. */
 function compactNativeExplorerDragScript(script: string): string {
+  const readCursor = (stage: string) => `$cursor = New-Object EtherA02Pointer+POINT; if (-not [EtherA02Pointer]::GetCursorPos([ref]$cursor)) { throw '${stage}: cursor read failed' }`;
+  const actualRoot = "function P($x,$y,$h,$g){$q=New-Object EtherA02Pointer+POINT;$q.X=$x;$q.Y=$y;$w=[EtherA02Pointer]::WindowFromPoint($q);if($w -eq [intptr]::Zero -or [EtherA02Pointer]::GetAncestor($w,2)-ne $h){throw($g+': WindowFromPoint root was not the exact expected HWND')}}";
   return script
     // SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW: preserve size/position and show it without activation.
     .replace("0x0040", "0x0054")
+    .replace("$down = $false", `${actualRoot}; $down = $false`)
+    .replace("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos($sourceX,$sourceY)) { throw 'Drag source: cursor placement failed' }")
+    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $explorerHwnd 'Drag source actual cursor'; $activationStartedAt =`)
+    .replace("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null", `if (-not [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)) { throw 'Drag threshold: cursor placement failed' }; ${readCursor("Drag threshold")}; P $cursor.X $cursor.Y $explorerHwnd 'Drag threshold actual cursor'`)
+    .replace("[EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12))) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos([int]($sourceX + (($targetX - $sourceX) * $step / 12)),[int]($sourceY + (($targetY - $sourceY) * $step / 12)))) { throw 'Drag progression: cursor placement failed' }")
+    .replace("; [EtherA02Pointer]::mouse_event(0x0004", `; ${readCursor("Drag target")}; P $cursor.X $cursor.Y $etherHwnd 'Drag target actual cursor'; [EtherA02Pointer]::mouse_event(0x0004`)
+    .replaceAll("$documentFullPath", "$d")
+    .replaceAll("$documentLeaf", "$l")
+    .replaceAll("$folderNamespace", "$ns")
+    .replaceAll("$parsedDocument", "$pd")
+    .replaceAll("$parsedPath", "$pp")
+    .replaceAll("$displayName", "$n")
+    .replaceAll("$existingHwnd", "$eh")
+    .replaceAll("$matchedWindow", "$mw")
+    .replaceAll("$windowRoot", "$wr")
+    .replaceAll("$explorerPid", "$ep")
+    .replaceAll("$condition", "$c")
+    .replaceAll("$candidates", "$cs")
+    .replaceAll("$resolvedEtherPid", "$rp")
+    .replaceAll("$etherCondition", "$ec")
+    .replaceAll("$etherWindows", "$ew")
+    .replaceAll("$nativePid", "$np")
+    .replaceAll("$deadline", "$dl")
+    .replaceAll("$sourceX", "$sx")
+    .replaceAll("$sourceY", "$sy")
+    .replaceAll("$targetX", "$tx")
+    .replaceAll("$targetY", "$ty")
+    .replaceAll("$dragDistance", "$dd")
     .replaceAll("$targetWindow", "$tw")
     .replaceAll("$explorerBounds", "$eb")
     .replaceAll("$explorerRoot", "$er")
