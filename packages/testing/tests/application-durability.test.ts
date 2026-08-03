@@ -214,6 +214,66 @@ afterEach(async () => {
 });
 
 describe("durable application execution", () => {
+  it("moves an existing parent node into a new module through one application transaction", async () => {
+    const documentsRoot = await temp("ether-module-create-doc-");
+    const appDataRoot = await temp("ether-module-create-appdata-");
+    const documentPath = path.join(documentsRoot, "Module-create.ether");
+    const node = {
+      id: "selected-node",
+      definitionId: "prompt.text" as const,
+      title: "Selected prompt",
+      position: { x: 120, y: 100 },
+      size: { width: 220, height: 140 },
+      config: { kind: "prompt.text" as const, body: "Move me", assembly: "append" as const },
+      presentation: { collapsed: false, accent: "default", previewMode: "content" as const }
+    };
+    const root = { ...blankGraph(), nodes: [node] };
+    const internal: EtherGraph = {
+      ...blankGraph(),
+      id: "graph-new-module",
+      title: "Module",
+      kind: "module",
+      nodes: [{ ...node, position: { x: 20, y: 20 } }]
+    };
+    const module = {
+      id: "new-module",
+      title: "Module",
+      description: "",
+      accent: "#37e6ea",
+      locked: true,
+      graphId: internal.id,
+      position: { x: 100, y: 80 },
+      size: { width: 260, height: 180 },
+      interface: { inputs: [], outputs: [], parameters: [] },
+      collapsed: false
+    };
+    const application = new EtherApplication({ appDataRoot, appVersion: "4.0.0-test", provider: new FakeImageProvider(), dispatchMode: "manual" });
+    let documentOpen = false;
+    try {
+      const created = await application.createDocument({ path: documentPath, title: "Module create", initialGraph: root });
+      documentOpen = true;
+      await application.applyGraphTransaction({
+        commandId: "application-create-module-with-existing-node",
+        transaction: {
+          id: "application-create-module-with-existing-node",
+          baseDocumentRevisionId: created.documentRevisionId,
+          baseGraphRevisions: created.graphRevisions,
+          title: "Create locked module",
+          actor: "user",
+          layoutPolicy: "preserve",
+          operations: [
+            { type: "createModule", graphId: root.id, module, subtree: { rootGraphId: internal.id, graphs: [internal] } },
+            { type: "removeNode", graphId: root.id, nodeId: node.id }
+          ]
+        }
+      });
+      await expect(application.queryGraph(root.id)).resolves.toMatchObject({ nodes: [], modules: [expect.objectContaining({ id: module.id, locked: true })] });
+      await expect(application.queryGraph(internal.id)).resolves.toMatchObject({ nodes: [expect.objectContaining({ id: node.id })] });
+    } finally {
+      if (documentOpen) await application.closeDocument();
+    }
+  });
+
   it("dissolves a module across graph ownership, history, and reopen", async () => {
     const documentsRoot = await temp("ether-module-removal-doc-");
     const appDataRoot = await temp("ether-module-removal-appdata-");

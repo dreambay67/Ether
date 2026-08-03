@@ -20,6 +20,7 @@
     "test:recovery-baseline:source": "pnpm --filter @ether/testing test:recovery-baseline:source",
     "test:recovery-baseline:packaged": "pnpm --filter @ether/testing test:recovery-baseline:packaged",
     "test:gui-checkpoint:packaged": "pnpm --filter @ether/testing test:gui-checkpoint:packaged",
+    "test:module-authoring-recovery:packaged": "pnpm --filter @ether/testing test:module-authoring-recovery:packaged",
     "test:document-lifecycle-recovery:source": "pnpm --filter @ether/testing test:document-lifecycle-recovery:source",
     "test:document-lifecycle-recovery:packaged": "pnpm --filter @ether/testing test:document-lifecycle-recovery:packaged",
     "test:visible-recovery:packaged": "pnpm --filter @ether/testing test:visible-recovery:packaged",

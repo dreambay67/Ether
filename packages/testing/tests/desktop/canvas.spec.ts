@@ -24,6 +24,11 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   });
   await page.goto("/");
   await expect(page.getByTestId("ether-canvas-surface")).toBeVisible();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
+  await page.keyboard.press("Control+K");
+  await expect(page.getByRole("dialog", { name: "Canvas command palette" })).toBeVisible();
+  await page.keyboard.press("Escape");
   const firstLibraryCopy = page.locator(".node-library-item-copy").first();
   await expect(firstLibraryCopy.getByText("Prompt", { exact: true })).toBeVisible();
   await expect.poll(async () => (await firstLibraryCopy.boundingBox())?.width ?? 0).toBeGreaterThan(80);

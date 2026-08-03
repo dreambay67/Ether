@@ -43,6 +43,23 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     setSemanticOverview(largeGraph && initialViewport.zoom < 0.4);
   }, [graph.id, initialViewport.zoom, largeGraph]);
   useEffect(() => {
+    const handleWorkspaceShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isTextEditingTarget(event.target)) return;
+      const commandId = commandIdForKeyboard(event);
+      const command = commandId === null ? undefined : commands.find((item) => item.id === commandId);
+      if (command === undefined) return;
+      event.preventDefault();
+      if (!command.enabled) {
+        if (command.disabledReason) onCommandUnavailable(command.disabledReason);
+        return;
+      }
+      if (commandPreservesCanvasFocus(command.id)) surfaceRef.current?.focus({ preventScroll: true });
+      void command.execute();
+    };
+    document.addEventListener("keydown", handleWorkspaceShortcut);
+    return () => document.removeEventListener("keydown", handleWorkspaceShortcut);
+  }, [commands, onCommandUnavailable]);
+  useEffect(() => {
     const surface = surfaceRef.current;
     if (!surface || typeof ResizeObserver === "undefined") return;
     let frame: number | null = null;

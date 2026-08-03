@@ -101,6 +101,7 @@ export const testSuites = {
   ],
   recoveryBaseline: ["tests/recovery/authoring-baseline.spec.ts"],
   recoveryGuiCheckpoint: ["tests/recovery/gui-checkpoint.spec.ts"],
+  recoveryModuleAuthoring: ["tests/recovery/module-authoring-recovery.spec.ts"],
   recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
   recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],
   recoveryWindowsIntegration: ["tests/recovery/document-windows-integration.spec.ts"],
