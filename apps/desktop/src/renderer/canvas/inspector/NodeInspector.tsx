@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react";
 import { getNodeDefinition } from "@ether/graph-kernel";
-import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
+import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditMaskGeometry, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
 import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
 import { StrokeCanvas, buildDrawingSvg } from "../drawing/StrokeCanvas";
 import { channelLabel } from "../ports/channelRegistry";
 import { EditWorkspace, type ImageEditCapability, type ImageEditCommit, type ImageEditSource } from "../edit/EditWorkspace";
+import { MaskWorkspace } from "../edit/MaskWorkspace";
+import type { MaskCommitResult, MaskGeometry } from "../edit/MaskCanvas";
 import { documentCommand, documentQuery, globalQuery } from "./applicationRequests";
 import { DraftConflict } from "./DraftConflict";
 import { Help, InspectorSection, NodeSetup } from "./NodeSetup";
@@ -413,6 +415,118 @@ function ImageEditFields({ context }: { context: InspectorNodeContext }) {
   </InspectorSection>;
 }
 
+function MaskFields({ context }: { context: InspectorNodeContext }) {
+  const { node, graph, document, apply, report } = context;
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [sourceId, setSourceId] = useState("");
+  const incoming = useMemo(() => graph.edges.filter((edge) => edge.enabled && edge.to.kind === "node" && edge.to.nodeId === node.id), [graph.edges, node.id]);
+  const imageEdges = useMemo(() => incoming.filter((edge) => edge.from.kind === "node" && edge.to.channel === "image"), [incoming]);
+
+  useEffect(() => {
+    if (node.config.kind !== "edit.mask") return;
+    let current = true;
+    const upstreamNodeIds = [...new Set(imageEdges.flatMap((edge) => edge.from.kind === "node" ? [edge.from.nodeId] : []))];
+    void (async () => {
+      const upstreamResponses = await Promise.all(upstreamNodeIds.map(async (nodeId) => {
+        const response = await app()?.query(documentQuery("node.outputs", document.documentId, { nodeId }));
+        return [nodeId, (response?.payload?.outputs as NodeOutputVersion[] | undefined) ?? []] as const;
+      }));
+      const upstreamOutputs = new Map(upstreamResponses);
+      const selectedOutputIds = [...new Set(imageEdges.flatMap((edge) => edge.from.kind === "node" ? selectedOutputVersions(edge, upstreamOutputs.get(edge.from.nodeId) ?? []) : []))];
+      const artifactResponse = await app()?.query(documentQuery("artifact.search", document.documentId, {
+        text: "", channels: ["image"], collectionIds: [], tags: [], minimumRating: null,
+        providerId: null, modelId: null, runId: null, graphId: null, outputVersionIds: selectedOutputIds,
+        createdAfter: null, createdBefore: null, limit: Math.max(1, selectedOutputIds.length)
+      }));
+      if (!current) return;
+      const nextArtifacts = ((artifactResponse?.payload?.artifacts as Artifact[] | undefined) ?? []).filter((artifact) => artifact.mediaType.startsWith("image/") && selectedOutputIds.includes(artifact.source.outputVersionId));
+      setArtifacts(nextArtifacts);
+      setSourceId((selected) => {
+        if (nextArtifacts.some((artifact) => artifact.id === selected)) return selected;
+        const persisted = node.config.kind === "edit.mask" ? node.config.workspace?.sourceArtifactId : undefined;
+        return nextArtifacts.some((artifact) => artifact.id === persisted) ? persisted! : nextArtifacts[0]?.id ?? "";
+      });
+    })().catch((error: unknown) => { if (current) report(error instanceof Error ? error.message : "The Mask workspace could not load its source catalog."); });
+    return () => { current = false; };
+  }, [document.documentId, imageEdges, node.config, node.id, report]);
+
+  if (node.config.kind !== "edit.mask") return null;
+  const config = node.config;
+  const sourceArtifact = artifacts.find((artifact) => artifact.id === sourceId);
+  const source = sourceArtifact ? artifactEditSource(document.documentId, sourceArtifact) : undefined;
+  const persistedWorkspace = config.workspace?.sourceArtifactId === sourceId ? config.workspace : undefined;
+  const writable = document.mode === "writable";
+  const persistWorkspace = async (sourceArtifactId: string, geometry: EditMaskGeometry, maskArtifactId?: string, title = "Update mask workspace") => {
+    const workspace = {
+      sourceArtifactId,
+      ...(maskArtifactId ? { maskArtifactId } : {}),
+      geometry
+    };
+    const saved = await apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: { ...config, workspace } } as EtherNode }] as GraphOperation[], title);
+    if (saved) report("Mask workspace saved.");
+  };
+  const selectSource = (nextSourceId: string) => {
+    setSourceId(nextSourceId);
+    const nextSource = artifacts.find((artifact) => artifact.id === nextSourceId);
+    if (!nextSource) return;
+    const width = numericMetadata(nextSource.metadata.width, 1024);
+    const height = numericMetadata(nextSource.metadata.height, 1024);
+    void persistWorkspace(nextSourceId, { width, height, strokes: [] }, undefined, "Change mask source");
+  };
+  const persistGeometry = (next: MaskGeometry) => {
+    const geometry = next as EditMaskGeometry;
+    void persistWorkspace(sourceId, geometry, persistedWorkspace?.maskArtifactId, "Update mask geometry");
+  };
+  const save = async (payload: MaskCommitResult) => {
+    if (!source) {
+      report("Connect an image source before publishing a mask.");
+      return;
+    }
+    try {
+      const content = payload.raster.content;
+      const width = payload.raster.width;
+      const height = payload.raster.height;
+      const response = await app()?.command(documentCommand("editWorkspace.commit", document.documentId, {
+        graphId: graph.id,
+        nodeId: node.id,
+        kind: "mask",
+        channel: "mask",
+        mediaType: payload.raster.mimeType,
+        width,
+        height,
+        byteLength: new TextEncoder().encode(content).byteLength,
+        content: { encoding: "utf8", data: content },
+        geometry: payload.geometry,
+        editState: {
+          sourceArtifactId: source.artifactId,
+          recipeId: "freeform",
+          frame: { mode: "source", x: 0, y: 0, width, height },
+          maskGeometry: payload.geometry,
+          capability: {
+            providerId: "ether-local",
+            profileId: "local-mask",
+            mode: "native-inpainting",
+            detail: "Locally authored mask; no provider call."
+          }
+        }
+      }));
+      const committed = response?.payload as { artifact?: Artifact } | undefined;
+      if (!committed?.artifact) throw new Error("The Mask workspace did not return its immutable artifact.");
+      await persistWorkspace(source.artifactId, payload.geometry as EditMaskGeometry, committed.artifact.id, "Bind committed mask artifact");
+      report(`Mask artifact ${committed.artifact.id} committed for ${node.title}.`);
+    } catch (error) {
+      report(error instanceof Error ? error.message : "The mask could not be published.");
+    }
+  };
+
+  return <InspectorSection title="Mask workspace" help="Paint, erase, and publish an immutable mask artifact. Connected Image outputs are the only accepted sources; geometry remains saved with this node.">
+    <div className="edit-input-summary" data-testid="mask-input-summary"><span>{imageEdges.length} Image</span><span>Mode - {config.mode}</span><span>Feather - {config.feather}</span></div>
+    {imageEdges.length === 0 ? <p className="inspector-unavailable" data-testid="mask-no-source">Connect an enabled Image lane with an available output to begin mask authoring.</p> : null}
+    {artifacts.length > 0 ? <label>Source image<select aria-label="Mask source image" value={sourceId} onChange={(event) => selectSource(event.target.value)} disabled={!writable}>{artifacts.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifactTitle(artifact)}</option>)}</select></label> : null}
+    <MaskWorkspace source={source} initialGeometry={persistedWorkspace?.geometry} disabled={!writable} onGeometryChange={persistGeometry} onCommit={(payload) => void save(payload)} />
+  </InspectorSection>;
+}
+
 function selectedOutputVersions(edge: EtherEdge, outputs: NodeOutputVersion[]) {
   if (edge.selector.kind === "pinned") {
     const outputVersionId = edge.selector.outputVersionId;
@@ -517,5 +631,5 @@ function NodeChannels({ context }: { context: InspectorNodeContext }) {
 export function NodeInspector({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, apply, report } = context; const roles = useMemo(() => outgoingRoles(graph, node), [graph, node]);
   const update = async (next: EtherNode, title: string) => { if (!next.title.trim()) { report("A node title cannot be empty."); return false; } return apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: next }] as GraphOperation[], title); };
-  return <div className="ether-inspector" data-testid="node-inspector"><NodeSetup node={node} disabled={document.mode !== "writable"} onUpdate={update} /><NodeChannels context={context} /><PromptFields context={context} /><WorkerFields context={context} /><ProviderFields context={context} /><DrawingFields context={context} /><ImageEditFields context={context} /><ReferenceFields context={context} /><RegistryConfigFields context={context} />{roles.length ? <InspectorSection title="Outgoing roles" help="Roles describe how every receiver interprets an outgoing channel."><div className="inspector-role-list">{roles.map(({ edge, target }) => <span key={edge.id}><strong>{roleLabels[edge.role]}</strong> · {channelLabel(edge.from.channel)} → {channelLabel(edge.to.channel)} · {edge.selector.kind} · {target}</span>)}</div></InspectorSection> : null}<RunControls node={node} graphId={graph.id} documentId={document.documentId} disabled={document.mode !== "writable"} hasDownstream={graph.edges.some((edge) => edge.enabled && edge.from.kind === "node" && edge.from.nodeId === node.id)} report={report} /><OutputVersions context={context} /><InspectorSection advanced title="Diagnostics & provenance" help={controlHelp.advanced}><p>Node ID: {node.id}</p><p>Definition: {node.definitionId}</p><p>Graph: {graph.id}</p></InspectorSection></div>;
+  return <div className="ether-inspector" data-testid="node-inspector"><NodeSetup node={node} disabled={document.mode !== "writable"} onUpdate={update} /><NodeChannels context={context} /><PromptFields context={context} /><WorkerFields context={context} /><ProviderFields context={context} /><DrawingFields context={context} /><ImageEditFields context={context} /><MaskFields context={context} /><ReferenceFields context={context} /><RegistryConfigFields context={context} />{roles.length ? <InspectorSection title="Outgoing roles" help="Roles describe how every receiver interprets an outgoing channel."><div className="inspector-role-list">{roles.map(({ edge, target }) => <span key={edge.id}><strong>{roleLabels[edge.role]}</strong> · {channelLabel(edge.from.channel)} → {channelLabel(edge.to.channel)} · {edge.selector.kind} · {target}</span>)}</div></InspectorSection> : null}<RunControls node={node} graphId={graph.id} documentId={document.documentId} disabled={document.mode !== "writable"} hasDownstream={graph.edges.some((edge) => edge.enabled && edge.from.kind === "node" && edge.from.nodeId === node.id)} report={report} /><OutputVersions context={context} /><InspectorSection advanced title="Diagnostics & provenance" help={controlHelp.advanced}><p>Node ID: {node.id}</p><p>Definition: {node.definitionId}</p><p>Graph: {graph.id}</p></InspectorSection></div>;
 }

@@ -267,14 +267,34 @@ export const EditImageConfigSchema = z
   .strict();
 export type EditImageConfig = z.infer<typeof EditImageConfigSchema>;
 
+export type EditMaskWorkspace = {
+  sourceArtifactId: string;
+  maskArtifactId?: string;
+  geometry: EditMaskGeometry;
+};
+const editMaskWorkspaceSchema = z
+  .object({
+    sourceArtifactId: z.string().min(1),
+    maskArtifactId: z.string().min(1).optional(),
+    geometry: EditMaskGeometrySchema
+  })
+  .strict();
+export const EditMaskWorkspaceSchema = editMaskWorkspaceSchema as z.ZodType<EditMaskWorkspace>;
+
+export type EditMaskConfig = {
+  kind: "edit.mask";
+  mode: "local" | "manual" | "provider";
+  feather: number;
+  workspace?: EditMaskWorkspace;
+};
 export const EditMaskConfigSchema = z
   .object({
     kind: z.literal("edit.mask"),
     mode: z.enum(["local", "manual", "provider"]),
-    feather: z.number().nonnegative()
+    feather: z.number().nonnegative(),
+    workspace: EditMaskWorkspaceSchema.optional()
   })
   .strict();
-export type EditMaskConfig = z.infer<typeof EditMaskConfigSchema>;
 
 export const EditTransformConfigSchema = z
   .object({

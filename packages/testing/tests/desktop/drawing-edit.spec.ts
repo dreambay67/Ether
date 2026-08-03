@@ -18,10 +18,12 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
         { id: "bubble", definitionId: "canvas.note", title: "Bubble", position: { x: 340, y: 50 }, size: { width: 260, height: 170 }, config: { kind: "canvas.note", body: "A concrete callout", style: "bubble" }, presentation: { collapsed: false, accent: "default", previewMode: "content" } },
         { id: "drawing", definitionId: "canvas.drawing", title: "Sketch", position: { x: 40, y: 280 }, size: { width: 300, height: 210 }, config: { kind: "canvas.drawing", width: 640, height: 420, background: "#07111b", strokes: [] }, presentation: { collapsed: false, accent: "default", previewMode: "content" } },
         { id: "edit", definitionId: "edit.image", title: "Product edit", position: { x: 420, y: 280 }, size: { width: 300, height: 190 }, config: { kind: "edit.image", providerId: "edit-guidance", profileId: "guidance", strength: .7, outputCount: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "mask", definitionId: "edit.mask", title: "Standalone mask", position: { x: 760, y: 520 }, size: { width: 300, height: 190 }, config: { kind: "edit.mask", mode: "manual", feather: 0 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
         { id: "source", definitionId: "generation.image", title: "Source generator", position: { x: 780, y: 280 }, size: { width: 280, height: 190 }, config: { kind: "generation.image", providerId: "image-provider", profileId: "studio", aspectRatio: "3:2", resolution: { width: 900, height: 600 }, outputCount: 2 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
       ],
       edges: [
         { id: "source-image-lane", from: { kind: "node", nodeId: "source", channel: "image" }, to: { kind: "node", nodeId: "edit", channel: "image" }, role: "product", order: 0, selector: { kind: "all" }, adapter: { kind: "auto" }, enabled: true },
+        { id: "source-mask-lane", from: { kind: "node", nodeId: "source", channel: "image" }, to: { kind: "node", nodeId: "mask", channel: "image" }, role: "general", order: 1, selector: { kind: "all" }, adapter: { kind: "auto" }, enabled: true },
         { id: "drawing-mask-lane", from: { kind: "node", nodeId: "drawing", channel: "image" }, to: { kind: "node", nodeId: "edit", channel: "mask" }, role: "general", order: 1, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true },
         { id: "cloud-text-lane", from: { kind: "node", nodeId: "cloud", channel: "text" }, to: { kind: "node", nodeId: "edit", channel: "text" }, role: "general", order: 2, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true }
       ], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
@@ -69,17 +71,18 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
         },
         query: async (query: { name: string; payload?: { nodeId?: string } }) => {
           queries.push(query as { name: string; payload?: Record<string, unknown> });
-          if (query.name === "graph.snapshot") return { payload: { graph, documentRevisionId: `document-revision-${revision}`, graphRevisionId: `graph-revision-${revision}` } };
-          if (query.name === "provider.capabilities") return { payload: { capabilities } };
-          if (query.name === "artifact.search") return { payload: { artifacts, total: artifacts.length, nextCursor: null } };
-          if (query.name === "node.outputs" && query.payload?.nodeId === "source") return { payload: { outputs: [
+          if (query.name === "node.catalog") return { name: query.name, payload: { nodes: [] } };
+          if (query.name === "graph.snapshot") return { name: query.name, payload: { graph, documentRevisionId: `document-revision-${revision}`, graphRevisionId: `graph-revision-${revision}` } };
+          if (query.name === "provider.capabilities") return { name: query.name, payload: { capabilities } };
+          if (query.name === "artifact.search") return { name: query.name, payload: { artifacts, total: artifacts.length, nextCursor: null } };
+          if (query.name === "node.outputs" && query.payload?.nodeId === "source") return { name: query.name, payload: { outputs: [
             { id: "source-output-a", approval: { state: "approved" }, outputPayloadIds: ["source-payload-a"], createdAt: "2026-07-23T00:00:00.000Z" },
             { id: "source-output-b", approval: { state: "unreviewed" }, outputPayloadIds: ["source-payload-b"], createdAt: "2026-07-23T00:00:30.000Z" }
           ] } };
-          if (query.name === "node.outputs" && query.payload?.nodeId === "edit") return { payload: { outputs: [{ id: "edit-output-v1", approval: { state: "unreviewed" }, outputPayloadIds: ["edit-payload"], createdAt: "2026-07-23T00:01:00.000Z" }] } };
-          if (query.name === "node.outputs") return { payload: { outputs: [] } };
-          if (query.name === "job.list") return { payload: { jobs: [] } };
-          return { payload: {} };
+          if (query.name === "node.outputs" && query.payload?.nodeId === "edit") return { name: query.name, payload: { outputs: [{ id: "edit-output-v1", approval: { state: "unreviewed" }, outputPayloadIds: ["edit-payload"], createdAt: "2026-07-23T00:01:00.000Z" }] } };
+          if (query.name === "node.outputs") return { name: query.name, payload: { outputs: [] } };
+          if (query.name === "job.list") return { name: query.name, payload: { jobs: [] } };
+          return { name: query.name, payload: {} };
         }
       },
       artifacts: { search: async () => artifacts, generateFake: async () => [] }, references: { list: async () => [], act: async () => [] }, runtime: { versions: async () => ({ electron: "43", node: "24" }) }
@@ -280,6 +283,30 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
   await page.getByRole("button", { name: "Save provider settings" }).click();
   await expect(page.getByText("Unsupported:", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "Commit mask" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Dismiss" }).click();
+  await page.locator('[data-node-id="mask"] .ether-node-primary').dispatchEvent("click");
+  await expect(page.getByTestId("mask-workspace")).toBeVisible();
+  await expect(page.getByTestId("mask-input-summary")).toContainText("1 Image");
+  await expect(page.getByLabel("Mask source image").locator("option")).toHaveCount(2);
+  const standaloneMask = page.getByTestId("mask-canvas-overlay");
+  await standaloneMask.scrollIntoViewIfNeeded();
+  const standaloneMaskBox = await standaloneMask.boundingBox();
+  if (!standaloneMaskBox) throw new Error("Standalone mask canvas geometry unavailable");
+  await page.mouse.move(standaloneMaskBox.x + standaloneMaskBox.width * .25, standaloneMaskBox.y + standaloneMaskBox.height * .25);
+  await page.mouse.down();
+  await page.mouse.move(standaloneMaskBox.x + standaloneMaskBox.width * .7, standaloneMaskBox.y + standaloneMaskBox.height * .65, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => graphCommandCount(page)).toBe(22);
+  await expect(page.getByText("1 mask stroke", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Commit mask" }).click();
+  await expect(page.getByTestId("canvas-status")).toContainText("Mask artifact mask-artifact committed for Standalone mask");
+  const standaloneCommit = await page.evaluate(() => {
+    const commands = (window as typeof window & { __drawingCommands: Array<{ name: string; payload?: Record<string, unknown> }> }).__drawingCommands;
+    return commands.filter((command) => command.name === "editWorkspace.commit" && command.payload?.nodeId === "mask").at(-1)?.payload as { nodeId: string; kind: string; channel: string; geometry: { strokes: unknown[] }; editState: { sourceArtifactId: string } };
+  });
+  expect(standaloneCommit).toMatchObject({ nodeId: "mask", kind: "mask", channel: "mask", editState: { sourceArtifactId: "source-image" } });
+  expect(standaloneCommit.geometry.strokes).toHaveLength(1);
 });
 
 async function graphCommandCount(page: import("@playwright/test").Page) {
