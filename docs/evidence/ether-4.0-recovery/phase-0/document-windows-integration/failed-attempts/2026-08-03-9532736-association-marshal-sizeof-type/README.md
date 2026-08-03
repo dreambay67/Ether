@@ -30,7 +30,7 @@ which is consistent with failing before Enter submission.
 | --- | --- |
 | `release/windows/win-unpacked/Ether.exe` | `329340612560c625450600616c8b5c8643b7b77063b411984d3d359f93c57cef` |
 | `release/windows/win-unpacked/resources/app.asar` | `ecff49c42130b4f3f11be2c42d8665ef472fcdba0524843daecfcdb9cb7f5b97` |
-| `release/windows/Ether-4.0.0-Setup.exe` | `60ba0f...0ac56` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `60ba0f6d4ffc30e0dd160e5f2894b6a894aca071b433c99d30a9d3c0f9f0ac56` |
 
 The installer hash above is the successful package-audit inventory value supplied
 for this run; the retained route result and shell sidecar contain the two package
@@ -52,4 +52,3 @@ used to explain this route's exact `Marshal.SizeOf` exception.
 `MANIFEST.sha256` records the SHA-256 of every archived non-empty evidence file.
 The empty generated `screenshots/` directory is retained. No opaque Windows shell
 file or external disposable artifact is included in this archive.
-

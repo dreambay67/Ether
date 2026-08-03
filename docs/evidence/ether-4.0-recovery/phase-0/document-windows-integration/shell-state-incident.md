@@ -102,11 +102,11 @@ Package-audit inventory for the run:
 | --- | --- |
 | `release/windows/win-unpacked/Ether.exe` | `329340612560c625450600616c8b5c8643b7b77063b411984d3d359f93c57cef` |
 | `release/windows/win-unpacked/resources/app.asar` | `ecff49c42130b4f3f11be2c42d8665ef472fcdba0524843daecfcdb9cb7f5b97` |
-| `release/windows/Ether-4.0.0-Setup.exe` | `60ba0f...0ac56` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `60ba0f6d4ffc30e0dd160e5f2894b6a894aca071b433c99d30a9d3c0f9f0ac56` |
 
-The installer value is retained in the supplied abbreviated package-audit form;
-the route's committed result and shell sidecar identify the executable and asar
-hashes consumed by the test. A prior orchestrator timeout/staging `ENOENT` is
+The installer value is retained as the full package-audit SHA-256; the route's
+committed result and shell sidecar identify the executable and asar hashes
+consumed by the test. A prior orchestrator timeout/staging `ENOENT` is
 retained only as an excluded packaging incident; it is not a product failure and
 does not explain this route's exact `SizeOf` exception.
 
@@ -120,7 +120,7 @@ Read-only shell/process facts were:
 | Left/Return high-bit state | up | up |
 | Exact Explorer route window | no route window | no Explorer window |
 | Recent files / readable files | `209 / 209` | `209 / 209` |
-| Recent aggregate SHA-256 | `32702af01e09cc1c0fcff920725510c98dbf8bab4de3136f74215438aa77d3` | `4b1086...c4e7` |
+| Recent aggregate SHA-256 | `32702af01e09cc1c1c0fcff920725510c98dbf8bab4de3136f74215438aa77d3` | `4b1086a54187e40ff826f3195c47045c9520af8a40f376fe6f2e2c2fdaabc4e7` |
 
 The only observed shell delta was the allowed in-place mutation of the pre-existing
 opaque file
@@ -129,7 +129,7 @@ opaque file
 | Field | Preflight | Postflight |
 | --- | --- | --- |
 | Last written UTC | `2026-08-03T05:46:13.833Z` | `2026-08-03T06:45:02.615Z` |
-| SHA-256 | `af3dc1...1f0` | `4c5ff7...a1f0` |
+| SHA-256 | `af3dc1243c5d8a3b764ab8a0bfaa08cda3ac21f7f0dbc2f525a2502feb4f725c` | `4c5ff7584b5a320fe6ba549d9a38f1d557a6c53c967db5c1f080da29c977a1f0` |
 
 Finalization passed exact process absence and shell classification, removed zero
 target links, and recorded only the permitted opaque in-place delta. The opaque
