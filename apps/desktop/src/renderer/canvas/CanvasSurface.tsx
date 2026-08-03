@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
-import { Background, Controls, MiniMap, ReactFlow, SelectionMode, useReactFlow, type Connection, type Node, type NodeProps, type OnNodeDrag, type Viewport, type XYPosition } from "@xyflow/react";
+import { Background, Controls, MiniMap, ReactFlow, SelectionMode, useReactFlow, useUpdateNodeInternals, type Connection, type Node, type NodeProps, type OnNodeDrag, type Viewport, type XYPosition } from "@xyflow/react";
 import { validateConnection } from "@ether/graph-kernel";
 import { NodeDefinitionIdSchema, type EtherGraph, type NodeDefinitionId, type NodeLibraryItem, type NodePosition, type PayloadChannel } from "@ether/schema";
 import { EtherEdge, type EtherFlowEdgeData } from "./edges/EtherEdge";
@@ -26,6 +26,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
 }) {
   markPerformance("canvas:projection:start");
   const flow = useReactFlow();
+  const updateNodeInternals = useUpdateNodeInternals();
   const surfaceRef = useRef<HTMLDivElement>(null);
   const marqueeGesture = useRef<{ start: { x: number; y: number } } | null>(null);
   const previousSurfaceSize = useRef<{ width: number; height: number } | null>(null);
@@ -40,6 +41,11 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const [dragConnectionIntent, setDragConnectionIntent] = useState<ConnectionIntent | null>(null);
   const [clickConnectionIntent, setClickConnectionIntent] = useState<ConnectionIntent | null>(null);
   const connectionIntent = clickConnectionIntent ?? dragConnectionIntent;
+  const internalNodeIds = [...graph.nodes.map((node) => node.id), ...graph.modules.map((module) => `module:${module.id}`)].join("\u001f");
+  const handleLayoutVersion = [
+    ...graph.nodes.map((node) => `${node.id}:${node.definitionId}`),
+    ...graph.modules.map((module) => `${module.id}:${module.interface.inputs.map((port) => port.id).join(",")}:${module.interface.outputs.map((port) => port.id).join(",")}`)
+  ].join("\u001e");
   const { onDrop: handleReferenceDrop } = useDropCommands(onCommandUnavailable, onReferenceDrop);
   const showSemanticOverview = largeGraph && semanticOverview;
   useEffect(() => {
@@ -49,6 +55,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   useEffect(() => {
     setSemanticOverview(largeGraph && initialViewport.zoom < 0.4);
   }, [graph.id, initialViewport.zoom, largeGraph]);
+  useEffect(() => {
+    if (internalNodeIds === "") return;
+    updateNodeInternals(internalNodeIds.split("\u001f"));
+  }, [handleLayoutVersion, internalNodeIds, updateNodeInternals]);
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isTextEditingTarget(event.target)) return;
@@ -220,9 +230,6 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   ], [activeEditor, activateHandle, activity, graph.modules, graph.nodes, intentChannelsFor, interaction.beginResize, interaction.selectNode, interaction.settle, nodeStatuses, onDelete, onEditCancel, onEditCommit, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectedIds, selectedModuleId, showSemanticOverview]);
   const edgeCount = graph.edges.length;
   const edges = useMemo(() => showSemanticOverview || edgeCount === 0 ? [] : graph.edges.map((edge) => ({ id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, selected: selectedEdgeId === edge.id, data: { edge, readOnly, compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel } satisfies EtherFlowEdgeData })), [compatibleChannels, edgeCount, graph.edges, onChannel, onDeleteEdge, onRole, readOnly, selectedEdgeId, showSemanticOverview]);
-  useEffect(() => {
-    flow.setEdges(edges);
-  }, [edges, flow]);
   markPerformance("canvas:projection:end");
   measurePerformance("canvas:projection", "canvas:projection:start", "canvas:projection:end");
   const onConnectFlow = useCallback((connection: Connection) => { setDragConnectionIntent(null); setClickConnectionIntent(null); if (readOnly || !connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return; onConnect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle); }, [onConnect, readOnly]);
@@ -398,7 +405,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         minZoom={0.1}
         maxZoom={1.25}
         fitView={fitViewOnMount.current.enabled}
-        onlyRenderVisibleElements={largeGraph && !showSemanticOverview}
+        onlyRenderVisibleElements={!showSemanticOverview}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable
