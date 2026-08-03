@@ -89,6 +89,21 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(promptNode.locator(".ether-node")).toHaveClass(/is-selected/);
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(7);
 
+  const authoredPrompt = page.locator(".ether-node[data-node-definition='prompt.text']").nth(1);
+  const authoredImage = page.locator(".ether-node[data-node-definition='generation.image']").nth(1);
+  for (const panel of ["Reference Desk", "Build tools", "Project lens"]) {
+    await page.getByRole("button", { name: `Hide ${panel}`, exact: true }).click();
+  }
+  await authoredPrompt.getByLabel("Text output").hover();
+  await authoredPrompt.getByLabel("Text output").click();
+  await expect(authoredImage.getByTestId("channel-zone-input-text")).toHaveAttribute("data-compatible", "true");
+  await authoredImage.getByLabel("Text input").click();
+  await expect(page.getByTestId("edge-role-chip")).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(8);
+  for (const panel of ["Reference Desk", "Build tools", "Project lens"]) {
+    await page.getByRole("button", { name: `Show ${panel}`, exact: true }).click();
+  }
+
   await expect(page.getByLabel("Output output-1 text")).toBeVisible();
   const moduleCard = page.getByTestId("ether-module-node");
   await expect(moduleCard).toHaveAttribute("data-module-locked", "true");
@@ -115,7 +130,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.getByTestId("module-inspector").getByRole("button", { name: "Collapse" }).click();
   await expect(page.getByTestId("ether-module-node")).toContainText("Collapsed");
   await expect(page.getByTestId("ether-module-node").getByRole("button", { name: "Expand" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(13);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(14);
 
   const rootImage = page.locator('[data-testid="rf__node-image"]');
   await page.locator(".react-flow__node-etherNode").nth(2).locator(".ether-node-main p").click();
@@ -126,12 +141,12 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" }).click();
   await expect(page.getByTestId("canvas-status")).toContainText("Selected run started: selected-job");
   await page.getByRole("button", { name: "Undo graph transaction" }).click(); await page.getByRole("button", { name: "Redo graph transaction" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(18);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(19);
   const duplicateSelection = page.getByRole("button", { name: "Duplicate", exact: true });
   await expect(duplicateSelection).toBeEnabled();
   await duplicateSelection.click();
   await expect(page.locator(".ether-node")).toHaveCount(7);
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(19);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(20);
 });
 
 test("keeps node creation disabled while a new document with the same graph id hydrates", async ({ page }) => {

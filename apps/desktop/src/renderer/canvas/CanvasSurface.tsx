@@ -247,6 +247,17 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     const nextOverview = graph.nodes.length >= 500 && nextViewport.zoom < 0.4;
     setSemanticOverview((current) => current === nextOverview ? current : nextOverview);
   }, [graph.nodes.length]);
+  const beginConnection = useCallback((params: { nodeId: string | null; handleId: string | null; handleType: "source" | "target" | null }) => {
+    interaction.beginConnect();
+    const channel = params.handleId === null ? null : PAYLOAD_CHANNELS.find((candidate) => candidate === params.handleId) ?? null;
+    if (params.nodeId !== null && channel !== null && params.handleType !== null) {
+      setConnectionIntent({ nodeId: params.nodeId, handleId: channel, handleType: params.handleType });
+    }
+  }, [interaction]);
+  const endConnection = useCallback(() => {
+    setConnectionIntent(null);
+    interaction.settle();
+  }, [interaction]);
   return (
     <div
       ref={surfaceRef}
@@ -367,14 +378,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         onEdgeClick={(_event, edge) => { interaction.clearSelection(); onModuleSelected(null); onEdgeSelected(edge.id); }}
         onNodeDragStart={(_event, node) => interaction.beginMove(graph.nodes.some((item) => item.id === node.id) ? node.id : undefined)}
         onNodeDragStop={onNodeDragStop}
-        onConnectStart={(_event, params) => {
-          interaction.beginConnect();
-          const channel = params.handleId === null ? null : PAYLOAD_CHANNELS.find((candidate) => candidate === params.handleId) ?? null;
-          if (params.nodeId !== null && channel !== null && (params.handleType === "source" || params.handleType === "target")) {
-            setConnectionIntent({ nodeId: params.nodeId, handleId: channel, handleType: params.handleType });
-          }
-        }}
-        onConnectEnd={() => { setConnectionIntent(null); interaction.settle(); }}
+        onConnectStart={(_event, params) => beginConnection(params)}
+        onConnectEnd={endConnection}
+        onClickConnectStart={(_event, params) => beginConnection(params)}
+        onClickConnectEnd={endConnection}
         onConnect={onConnectFlow}
         onMoveStart={(event) => {
           if (event instanceof MouseEvent && event.button === 2) interaction.beginPan();
