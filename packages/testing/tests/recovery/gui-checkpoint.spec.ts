@@ -97,7 +97,9 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await input.screenshot("03-direct-editing.png", evidence, "Capture controlled direct editing", "The selected Prompt visibly owns the only bounded on-canvas editor.");
     await input.pressKey("Control+Enter", "Commit primary content edit", "Ctrl+Enter commits text while the editor owns focus.");
     await expect(primaryEditor).toBeHidden();
+    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await input.leftClick(renamedTitle, "Restore Prompt command focus", "The directly edited Prompt remains the primary graph selection.");
+    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await input.pressKey("Control+Enter", "Preview the selected run", "Ctrl+Enter prepares the selected-node plan without starting provider work.");
     await expect(page.getByTestId("canvas-status")).toContainText("Selected plan ready");
 
