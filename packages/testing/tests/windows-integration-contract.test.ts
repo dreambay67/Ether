@@ -113,23 +113,28 @@ describe("A02 Windows integration harness contracts", () => {
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Before arranging drag window\")");
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"After arranging drag window\")");
     expect(explorerHelpers).not.toContain("@($matchedWindow.Document.SelectedItems())");
-    expect(explorerHelpers).toContain("$selectedItems = $matchedWindow.Document.SelectedItems()");
-    expect(explorerHelpers).toContain("$selectedItems.Item(0).Path");
-    expect(explorerHelpers).toContain("$selectionMatches = Test-ExactExplorerSelection");
-    expect(explorerHelpers).toContain("return $null -ne $selectedItems -and $selectedItems.Count -eq 1");
+    expect(explorerHelpers).toContain("$s = $matchedWindow.Document.SelectedItems()");
+    expect(explorerHelpers).toContain("$s.Item(0).Path");
+    expect(explorerHelpers).toContain("$selectionMatches = T");
+    expect(explorerHelpers).toContain("return $null -ne $s -and $s.Count -eq 1");
     expect(explorerHelpers).toContain("Exact Explorer selected-item path mismatch");
     expect(windowsIntegration).toContain("const MAX_ENCODED_POWERSHELL_COMMAND_LENGTH = 30_000");
     expect(windowsIntegration).toContain("Buffer.byteLength(script, \"utf16le\")");
     expect(windowsIntegration).toContain("assertPowerShellEncodedCommandLength(script)");
   });
 
-  it("keeps the generated native Explorer drag command inside the encoded-command ceiling", () => {
+  it("keeps long recovery-path Explorer commands below the encoded-command margin", () => {
+    const documentPath = "C:\\Users\\deny7\\AppData\\Local\\Temp\\ether-a02-windows-integration-123456\\Association 12345678 Žltý.ether";
+    const associationScript = buildExplorerAssociationInvokeScript({ documentPath, etherPid: 1234 });
     const dragScript = buildNativeExplorerDragScript({
-      documentPath: "C:\\Ether Recovery\\Explorer drag Žltý.ether",
+      documentPath,
       etherPid: 1234,
       target: { x: 960, y: 540 }
     });
-    expect(encodedPowerShellCommandLength(dragScript)).toBeLessThanOrEqual(30_000);
+    expect(encodedPowerShellCommandLength(associationScript)).toBeLessThanOrEqual(29_500);
+    expect(encodedPowerShellCommandLength(dragScript)).toBeLessThanOrEqual(29_500);
+    expect(dragScript).toContain("SetWindowPos($explorerHwnd, [intptr]::Zero, $moveX, 0, 440, 520, 0x0054)");
+    expect(dragScript).not.toContain("0x0040");
   });
 
   it("keeps user-realistic Explorer focus proofs adjacent to Invoke and native drag", () => {
@@ -139,7 +144,7 @@ describe("A02 Windows integration harness contracts", () => {
     });
     const chromeClick = associationScript.indexOf("[EtherA02Native]::mouse_event(0x0002");
     const associationForeground = associationScript.indexOf("After association chrome click: exact Explorer HWND was not foreground", chromeClick);
-    const associationSelection = associationScript.indexOf("Assert-ExactExplorerSelection 'Immediately before association Invoke'", associationForeground);
+    const associationSelection = associationScript.indexOf("A 'Immediately before association Invoke'", associationForeground);
     const associationMinimized = associationScript.indexOf("if (-not [EtherA02Native]::IsIconic($etherHwnd))");
     const associationFinalForeground = associationScript.indexOf("Immediately before association Invoke: exact Explorer HWND was not foreground", associationMinimized);
     const associationStarted = associationScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", associationFinalForeground);
@@ -151,6 +156,10 @@ describe("A02 Windows integration harness contracts", () => {
     expect(associationFinalForeground).toBeGreaterThan(associationMinimized);
     expect(associationStarted).toBeGreaterThan(associationFinalForeground);
     expect(associationInvoke).toBeGreaterThan(associationStarted);
+    expect(associationScript).toContain("ClientToScreen($explorerHwnd,[ref]$clientOrigin)");
+    expect(associationScript).toContain("$clickY -ge $clientOrigin.Y");
+    expect(associationScript).toContain("Association chrome: click is not non-client frame");
+    expect(associationScript).toContain("$explorerBounds.Left + 2");
 
     const dragScript = buildNativeExplorerDragScript({
       documentPath: "C:\\Ether Recovery\\Explorer drag Žltý.ether",
@@ -203,6 +212,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(explorerInteractions).toContain("WindowFromPoint");
     expect(explorerInteractions).toContain("GetAncestor($hitHwnd, 2)");
     expect(explorerInteractions).not.toContain("SetForegroundWindow");
+    expect(windowsIntegration).toContain("SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW");
     expect(windowsIntegration).toContain("exactEtherForegroundTransitionScript");
     expect(windowsIntegration).toContain("foreground did not transition from the exact Explorer HWND to the exact Ether HWND/PID");
     expect(windowsIntegration).toContain("sourceHwnd=");
