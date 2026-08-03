@@ -9,7 +9,10 @@ const RECOVERY_SHELL_TOKEN = /^[a-f0-9]{32}$/u;
  * AUMID. IApplicationDestinations is deliberately used instead of Electron's
  * global Recent/Frequent clearing API, which affects every application.
  */
-export async function removeRecoveryShellAutomaticDestinations(token: string): Promise<void> {
+export async function removeRecoveryShellAutomaticDestinations(
+  token: string,
+  environment: NodeJS.ProcessEnv = process.env
+): Promise<void> {
   if (!RECOVERY_SHELL_TOKEN.test(token)) {
     throw new Error("Recovery shell identity token must be 32 lowercase hexadecimal characters.");
   }
@@ -53,6 +56,7 @@ export async function removeRecoveryShellAutomaticDestinations(token: string): P
   ].join("; ");
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", encoded], {
+    env: environment,
     timeout: 30_000,
     windowsHide: true
   });

@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
-  RECOVERY_SHELL_CLEANUP_ARGUMENT,
   RECOVERY_SHELL_IDENTITY_ARGUMENT,
+  RECOVERY_SHELL_RECENT_ARGUMENT,
   resolveRecoveryShellIdentity
 } from "../../../apps/desktop/src/main/recoveryShellIdentity.js";
 import { assertPackagedJourneyArgs } from "../recovery/journeyDriver.js";
@@ -27,7 +27,7 @@ import {
 } from "../recovery/windowsIntegration.js";
 
 describe("A02 Windows integration harness contracts", () => {
-  it("isolates recovery AUMIDs without custom or globally cleared Jump Lists", async () => {
+  it("keeps normal recovery journeys out of Recent and custom Jump List APIs", async () => {
     const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
     const [bootstrap, main, cleanup] = await Promise.all([
       readFile(path.join(repositoryRoot, "apps/desktop/src/main/bootstrap.ts"), "utf8"),
@@ -35,6 +35,7 @@ describe("A02 Windows integration harness contracts", () => {
       readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsShellDestinations.ts"), "utf8")
     ]);
     expect(bootstrap).not.toMatch(/setJumpList|clearRecentDocuments/u);
+    expect(main).toContain('if (recoveryShell === null || recoveryShell.recentEnabled) app.addRecentDocument(documentPath);');
     expect(main).toContain('if (!credentialOnly && recoveryShell === null) app.setJumpList([{ type: "recent" }]);');
     expect(main).not.toContain("clearRecentDocuments");
     expect(cleanup).toMatch(/12337d35-94c6-48a0-bce7-6a9c69d4d600/iu);
@@ -71,13 +72,14 @@ describe("A02 Windows integration harness contracts", () => {
     const userData = path.join(root, "AppData", "Local", "Ether-Recovery-Profile");
     expect(resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData })).toEqual({
       appUserModelId: `com.dreambay.ether.recovery.${token}`,
-      cleanupOnly: false,
+      recentEnabled: false,
       taskbarName: "Ether Recovery 01234567",
       token
     });
-    expect(resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_CLEANUP_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData })?.cleanupOnly).toBe(true);
+    expect(resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData })?.recentEnabled).toBe(true);
     expect(() => resolveRecoveryShellIdentity({ appData: process.env.APPDATA, argv: [`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData: path.join(os.tmpdir(), "Ether") })).toThrow(/non-disposable profile/u);
     expect(() => assertPackagedJourneyArgs([`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`])).toThrow(/driver-owned isolation/u);
+    expect(() => assertPackagedJourneyArgs([`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`])).toThrow(/driver-owned isolation/u);
   });
 
   it("deletes only named disposable roots below a driver-created test root", async () => {

@@ -93,7 +93,6 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     argv: launchArgv,
     userData: app.getPath("userData")
   });
-  if (recoveryShell?.cleanupOnly) throw new Error("Recovery shell cleanup must run through the bootstrap cleanup route.");
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     throw Object.assign(new Error("Another Ether instance owns the application lock."), {
@@ -204,7 +203,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     const documentPath = service.activePath();
     const snapshot = service.snapshot();
     if (documentPath !== null && snapshot.named) {
-      app.addRecentDocument(documentPath);
+      if (recoveryShell === null || recoveryShell.recentEnabled) app.addRecentDocument(documentPath);
       await settings.remember({
         documentId: snapshot.documentId,
         displayName: snapshot.displayName,
@@ -572,6 +571,9 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   }
   rendererLoaded = true;
   if (recoveryShell !== null) mainWindow.setTitle(recoveryShell.taskbarName);
+  // Recovery Recent mode exercises app.addRecentDocument only. Calling
+  // setJumpList creates/reset a shell-owned custom-list tombstone in the real
+  // profile, which an isolated APPDATA cannot contain.
   if (!credentialOnly && recoveryShell === null) app.setJumpList([{ type: "recent" }]);
   if (!credentialOnly && rememberAfterRendererLoad) {
     rememberWhenRendererLoaded();

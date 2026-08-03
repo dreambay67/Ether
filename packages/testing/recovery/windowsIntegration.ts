@@ -5,8 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { removeRecoveryShellAutomaticDestinations } from "./windowsShellDestinations.js";
-
 const execFileAsync = promisify(execFile);
 
 export const WINDOWS_INTEGRATION_MODE = "ETHER_WINDOWS_INTEGRATION_MODE";
@@ -18,7 +16,7 @@ export const TEST_ROOT_PREFIX = "ether-a02-windows-integration-";
 export const ASSOCIATION_ROOT = "HKCU\\Software\\Classes";
 export const ETHER_EXTENSION_KEY = `${ASSOCIATION_ROOT}\\.ether`;
 export const RECOVERY_SHELL_IDENTITY_ARGUMENT = "--ether-recovery-shell-identity=";
-export const RECOVERY_SHELL_CLEANUP_ARGUMENT = "--ether-recovery-shell-cleanup=";
+export const RECOVERY_SHELL_RECENT_ARGUMENT = "--ether-recovery-shell-recent=";
 
 /**
  * This is deliberately a declared slice, not a claim of completed evidence.
@@ -84,6 +82,12 @@ export type WindowsShellStateSnapshot = {
   roots: Array<{ appData: string; files: Array<{ path: string; sha256: string; size: number }> }>;
 };
 
+export type WindowsShellStateChange = {
+  after: { path: string; sha256: string; size: number } | null;
+  appData: string;
+  before: { path: string; sha256: string; size: number } | null;
+};
+
 export type AssociationRestorationWatchdog = {
   child: ChildProcess;
   completePath: string;
@@ -139,45 +143,83 @@ export async function snapshotWindowsShellState(isolatedAppData: string): Promis
 }
 
 export async function assertWindowsShellStateRestored(before: WindowsShellStateSnapshot): Promise<void> {
-  const after: WindowsShellStateSnapshot = {
+  const after = await resnapshotWindowsShellState(before);
+  if (JSON.stringify(after) !== JSON.stringify(before)) {
+    throw new Error(`Windows Recent/Jump List state was not restored exactly: ${formatWindowsShellStateChanges(compareWindowsShellState(before, after))}`);
+  }
+}
+
+export async function resnapshotWindowsShellState(before: WindowsShellStateSnapshot): Promise<WindowsShellStateSnapshot> {
+  return {
     roots: await Promise.all(before.roots.map(async ({ appData }) => ({
       appData,
       files: await snapshotTree(path.join(appData, "Microsoft", "Windows", "Recent"))
     })))
   };
-  if (JSON.stringify(after) !== JSON.stringify(before)) {
-    const changes = before.roots.flatMap((root, index) => {
-      const next = after.roots[index]!;
-      const priorMap = new Map(root.files.map((file) => [file.path, `${file.size}:${file.sha256}`]));
-      const nextMap = new Map(next.files.map((file) => [file.path, `${file.size}:${file.sha256}`]));
-      return [...new Set([...priorMap.keys(), ...nextMap.keys()])]
-        .filter((file) => priorMap.get(file) !== nextMap.get(file))
-        .map((file) => `${root.appData}:${file}`);
-    });
-    throw new Error(`Windows Recent/Jump List state was not restored exactly: ${changes.join(", ")}`);
-  }
 }
 
-/** Runs the packaged cleanup-only route for one unique recovery AUMID. */
-export async function cleanupRecoveryShellIdentity(input: {
-  executablePath: string;
-  profile: { appData: string; localAppData: string; root: string; userData: string };
-  token: string;
+/** Returns every added, removed, or byte-changed file across the exact prior roots. */
+export function compareWindowsShellState(before: WindowsShellStateSnapshot, after: WindowsShellStateSnapshot): WindowsShellStateChange[] {
+  if (before.roots.length !== after.roots.length || before.roots.some((root, index) => root.appData !== after.roots[index]?.appData)) {
+    throw new Error("Windows shell snapshots do not describe the same roots.");
+  }
+  return before.roots.flatMap((root, index) => {
+    const next = after.roots[index]!;
+    const prior = new Map(root.files.map((file) => [file.path, file]));
+    const current = new Map(next.files.map((file) => [file.path, file]));
+    return [...new Set([...prior.keys(), ...current.keys()])]
+      .sort((left, right) => left.localeCompare(right))
+      .flatMap((file) => {
+        const beforeFile = prior.get(file) ?? null;
+        const afterFile = current.get(file) ?? null;
+        return beforeFile?.size === afterFile?.size && beforeFile?.sha256 === afterFile?.sha256
+          ? []
+          : [{ appData: root.appData, before: beforeFile, after: afterFile }];
+      });
+  });
+}
+
+export function formatWindowsShellStateChanges(changes: readonly WindowsShellStateChange[]): string {
+  return changes.map((change) => `${change.appData}:${change.after?.path ?? change.before?.path ?? "(unknown)"}`).join(", ");
+}
+
+/** Recycles one post-cleanup AutomaticDestinations file only after byte identity is proven. */
+export async function recycleProvenRecoveryAutomaticDestination(input: {
+  appData: string;
+  file: { path: string; sha256: string; size: number };
 }): Promise<string> {
-  assertRecoveryShellToken(input.token);
-  await assertDisposableRecoveryProfile(input.profile);
-  const environment = Object.fromEntries(Object.entries({
-    ...process.env,
-    APPDATA: input.profile.appData,
-    LOCALAPPDATA: input.profile.localAppData
-  }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  const { stdout, stderr } = await execFileAsync(input.executablePath, [
-    `--user-data-dir=${input.profile.userData}`,
-    `${RECOVERY_SHELL_CLEANUP_ARGUMENT}${input.token}`,
-    "--disable-gpu"
-  ], { env: environment, timeout: 30_000, windowsHide: true });
-  await removeRecoveryShellAutomaticDestinations(input.token);
-  return `cleanup-only token=${input.token.slice(0, 8)} stdout=${stdout.trim()} stderr=${stderr.trim()}`;
+  const root = path.resolve(input.appData, "Microsoft", "Windows", "Recent", "AutomaticDestinations");
+  const target = path.resolve(input.appData, "Microsoft", "Windows", "Recent", input.file.path);
+  const relative = path.relative(root, target);
+  if (
+    relative === "" || relative.startsWith("..") || path.isAbsolute(relative) ||
+    !/^[a-f0-9]+\.automaticDestinations-ms$/iu.test(path.basename(target))
+  ) {
+    throw new Error("Refusing to delete a shell artifact outside AutomaticDestinations.");
+  }
+  const actual = await snapshotExactFile(target);
+  if (actual === null || actual.size !== input.file.size || actual.sha256 !== input.file.sha256) {
+    throw new Error("Refusing to delete an AutomaticDestinations artifact whose byte identity changed after proof.");
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$path = '${ps(target)}'`,
+    `$expectedSize = ${input.file.size}`,
+    `$expectedSha256 = '${input.file.sha256}'`,
+    "$item = Get-Item -LiteralPath $path -Force",
+    "if ($item.Length -ne $expectedSize) { throw 'AutomaticDestinations byte length changed before recycle.' }",
+    "$actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()",
+    "if ($actualSha256 -ne $expectedSha256) { throw 'AutomaticDestinations hash changed before recycle.' }",
+    "Add-Type -AssemblyName Microsoft.VisualBasic",
+    "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($path, [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)",
+    "if (Test-Path -LiteralPath $path) { throw 'The proven AutomaticDestinations artifact remained after recycle.' }"
+  ].join("; ");
+  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
+    timeout: 30_000,
+    windowsHide: true
+  });
+  if (await snapshotExactFile(target) !== null) throw new Error("The proven AutomaticDestinations artifact remained after recycle.");
+  return `Sent ${path.basename(target)} to Recycle Bin after exact byte recheck.`;
 }
 
 export async function createWindowsIntegrationRoot(): Promise<string> {
@@ -736,26 +778,6 @@ async function assertTestOwnedPath(root: string, candidate: string): Promise<voi
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Expected a test-owned path below ${root}: ${candidate}`);
 }
 
-async function assertDisposableRecoveryProfile(profile: { appData: string; localAppData: string; root: string; userData: string }): Promise<void> {
-  const [tempRoot, root, appData, localAppData, userData] = await Promise.all([
-    realpath(os.tmpdir()),
-    realpath(profile.root),
-    realpath(profile.appData),
-    realpath(profile.localAppData),
-    realpath(profile.userData)
-  ]);
-  const relativeRoot = path.relative(tempRoot, root);
-  if (relativeRoot === "" || relativeRoot.startsWith("..") || path.isAbsolute(relativeRoot) || !path.basename(root).startsWith("ether-recovery-journey-")) {
-    throw new Error("Recovery shell cleanup refused a non-disposable profile root.");
-  }
-  for (const candidate of [appData, localAppData, userData]) {
-    const relative = path.relative(root, candidate);
-    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-      throw new Error("Recovery shell cleanup refused a profile path outside its disposable root.");
-    }
-  }
-}
-
 async function snapshotTree(root: string): Promise<Array<{ path: string; sha256: string; size: number }>> {
   if (!await isDirectory(root)) return [];
   const files: Array<{ path: string; sha256: string; size: number }> = [];
@@ -776,6 +798,17 @@ async function snapshotTree(root: string): Promise<Array<{ path: string; sha256:
   };
   await visit(root);
   return files.sort((left, right) => left.path.localeCompare(right.path, "en-US"));
+}
+
+async function snapshotExactFile(filePath: string): Promise<{ sha256: string; size: number } | null> {
+  try {
+    const [information, bytes] = await Promise.all([stat(filePath), readFile(filePath)]);
+    if (!information.isFile()) return null;
+    return { sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 async function assertAssociationStillOriginal(plan: ReversibleAssociationPlan): Promise<void> {

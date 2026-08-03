@@ -28,7 +28,6 @@ import {
   assertExactWindowForegroundWithUia,
   applyReversibleAssociation,
   assertWindowsShellStateRestored,
-  cleanupRecoveryShellIdentity,
   cleanupWindowsIntegrationRoot,
   closeExactWindowWithNativeKeyboard,
   completeNativeFileDialogWithUia,
@@ -44,8 +43,12 @@ import {
   readAndCloseExactOwnedNativeDialogWithUia,
   removeTestOwnedDisposableRoots,
   cleanupTestOwnedRecentShortcuts,
+  compareWindowsShellState,
+  recycleProvenRecoveryAutomaticDestination,
+  formatWindowsShellStateChanges,
   recoveryShellIdentityArgument,
   recoveryShellTaskbarName,
+  resnapshotWindowsShellState,
   restoreReversibleAssociation,
   startAssociationRestorationWatchdog,
   snapshotWindowsShellState,
@@ -55,6 +58,7 @@ import {
   type ReversibleAssociationPlan,
   type WindowsShellStateSnapshot
 } from "../../recovery/windowsIntegration.js";
+import { removeRecoveryShellAutomaticDestinations } from "../../recovery/windowsShellDestinations.js";
 
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const thisSource = fileURLToPath(import.meta.url);
@@ -74,7 +78,6 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   let reopened: RecoveryJourneySession | null = null;
   const primaryProfile = await createIsolatedJourneyProfile();
   const shellBefore = await snapshotWindowsShellState(primaryProfile.appData);
-  const shellToken = recoveryShellTokenForProfile(primaryProfile);
 
   try {
     primary = await launch(executable, "a02-windows-primary", primaryProfile);
@@ -146,7 +149,7 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     if (reopened !== null) await reopened.close("failed");
     if (primary !== null) await primary.close("failed");
     try {
-      await restoreShellJourneyState({ executablePath: executable, profile: primaryProfile, root, shellBefore, shellToken, documentPaths: [documentPath, renamedPath, copyPath] });
+      await restoreShellJourneyState({ profile: primaryProfile, root, shellBefore, documentPaths: [documentPath, renamedPath, copyPath] });
     } finally {
       await cleanupIsolatedJourneyProfile(primaryProfile).catch(() => undefined);
       await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
@@ -215,7 +218,7 @@ test("runs the separately approved reversible Explorer association route", async
     if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
     if (session !== null) await session.close("failed");
     try {
-      await restoreShellJourneyState({ executablePath: executable, profile, root, shellBefore, shellToken, documentPaths: [documentPath] });
+      await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
     } finally {
       await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
       await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
@@ -270,7 +273,7 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
     if (session !== null) await session.close("failed");
     try {
-      await restoreShellJourneyState({ executablePath: executable, profile, root, shellBefore, shellToken, documentPaths: [sourcePath, targetPath] });
+      await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [sourcePath, targetPath] });
     } finally {
       await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
       await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
@@ -295,8 +298,13 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   let plan: ReversibleAssociationPlan | null = null;
   let watchdog: AssociationRestorationWatchdog | null = null;
   let associationMayBeMutated = false;
+  let jumpListShellStateRestored = false;
+  let recentModeLaunched = false;
+  let jumpListFailure: unknown = null;
+  const finalizationFailures: unknown[] = [];
   try {
-    session = await launch(executable, "a02-windows-jump-list", profile);
+    recentModeLaunched = true;
+    session = await launch(executable, "a02-windows-jump-list", profile, undefined, true);
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create unique Jump List document", "Saving it lets Ether register the unique target with app.addRecentDocument and its recent Jump List category.");
@@ -336,24 +344,56 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     const closeAction = await closeExactWindowWithNativeKeyboard(primaryPid);
     session.input.observe("Close isolated Jump List journey", "A native Alt+F4 closes only the exact recovery-AUMID Ether window before shell-state verification.", closeAction);
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
+    const shellDisposition = await restoreApprovedJumpListShellState({
+      before: shellBefore,
+      documentPaths: [documentPath],
+      profile,
+      root,
+      token: shellToken
+    });
+    session.input.observe("Jump List app-scoped cleanup", "Only the exact 2560-byte recovery-AUMID AutomaticDestinations artifact is recycled after COM cleanup, then the complete real and isolated shell state matches baseline.", shellDisposition);
+    jumpListShellStateRestored = true;
     await session.close("passed");
     session = null;
+  } catch (error) {
+    jumpListFailure = error;
   } finally {
-    if (associationMayBeMutated && plan !== null && watchdog !== null) {
-      const restorePlan = plan;
-      const restoreWatchdog = watchdog;
-      await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
-    } else if (watchdog !== null) {
-      await disarmAssociationRestorationWatchdog(watchdog);
+    try {
+      if (associationMayBeMutated && plan !== null && watchdog !== null) {
+        const restorePlan = plan;
+        const restoreWatchdog = watchdog;
+        await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
+      } else if (watchdog !== null) {
+        await disarmAssociationRestorationWatchdog(watchdog);
+      }
+    } catch (error) {
+      finalizationFailures.push(error);
     }
     if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
     if (session !== null) await session.close("failed");
     try {
-      await restoreShellJourneyState({ executablePath: executable, profile, root, shellBefore, shellToken, documentPaths: [documentPath] });
+      if (!jumpListShellStateRestored) {
+        if (recentModeLaunched) {
+          await restoreApprovedJumpListShellState({ before: shellBefore, documentPaths: [documentPath], profile, root, token: shellToken });
+        } else {
+          await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
+        }
+      }
+    } catch (error) {
+      finalizationFailures.push(error);
     } finally {
       await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
       await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
     }
+  }
+  if (jumpListFailure !== null) {
+    if (finalizationFailures.length > 0) {
+      throw new AggregateError([jumpListFailure, ...finalizationFailures], "Jump List route and its exact shell cleanup both failed.", { cause: finalizationFailures.at(-1) });
+    }
+    throw jumpListFailure;
+  }
+  if (finalizationFailures.length > 0) {
+    throw new AggregateError(finalizationFailures, "Jump List finalization failed.", { cause: finalizationFailures.at(-1) });
   }
 });
 
@@ -378,18 +418,11 @@ async function restoreAssociationWithWatchdog(
 
 async function restoreShellJourneyState(input: {
   documentPaths: readonly string[];
-  executablePath: string;
   profile: RecoveryJourneySession["profile"];
   root: string;
   shellBefore: WindowsShellStateSnapshot;
-  shellToken: string;
 }): Promise<void> {
   const failures: unknown[] = [];
-  try {
-    await cleanupRecoveryShellIdentity({ executablePath: input.executablePath, profile: input.profile, token: input.shellToken });
-  } catch (error) {
-    failures.push(error);
-  }
   try {
     await cleanupTestOwnedRecentShortcuts({
       appData: input.profile.appData,
@@ -406,6 +439,72 @@ async function restoreShellJourneyState(input: {
     failures.push(error);
   }
   if (failures.length > 0) throw new AggregateError(failures, "The isolated Windows shell state did not restore completely.");
+}
+
+/**
+ * The sole COM cleanup route is deliberately local to the separately approved
+ * Jump List journey. It proves that every affected real/isolated Recent file
+ * is one new recovery-AUMID AutomaticDestinations artifact before deleting it.
+ */
+async function restoreApprovedJumpListShellState(input: {
+  before: WindowsShellStateSnapshot;
+  documentPaths: readonly string[];
+  profile: RecoveryJourneySession["profile"];
+  root: string;
+  token: string;
+}): Promise<string> {
+  const realAppData = process.env.APPDATA;
+  if (realAppData === undefined) throw new Error("Jump List cleanup requires the real APPDATA snapshot root.");
+  await cleanupTestOwnedRecentShortcuts({
+    appData: input.profile.appData,
+    additionalAppData: [realAppData],
+    root: input.root,
+    documentPaths: input.documentPaths
+  });
+  const preCleanup = await resnapshotWindowsShellState(input.before);
+  const createdByJourney = compareWindowsShellState(input.before, preCleanup);
+  const candidate = requireSingleRecoveryAutomaticDestination(createdByJourney, path.resolve(realAppData), "practical Jump List route");
+
+  await removeRecoveryShellAutomaticDestinations(input.token);
+
+  const postCleanup = await resnapshotWindowsShellState(input.before);
+  const cleanupChanges = compareWindowsShellState(preCleanup, postCleanup);
+  const cleanupCandidate = requireSingleRecoveryAutomaticDestination(cleanupChanges, path.resolve(realAppData), "app-scoped COM cleanup", candidate.relativePath, false);
+  const postFile = postCleanup.roots
+    .find((root) => root.appData === path.resolve(realAppData))?.files
+    .find((file) => file.path === candidate.relativePath);
+  if (postFile === undefined || postFile.size !== 2560) {
+    throw new Error(`Jump List cleanup did not leave the expected empty/test-created artifact: ${candidate.relativePath}.`);
+  }
+  if (cleanupCandidate.relativePath !== candidate.relativePath) {
+    throw new Error("Jump List cleanup changed a different AutomaticDestinations artifact than the practical route.");
+  }
+
+  const disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: postFile });
+  await assertWindowsShellStateRestored(input.before);
+  return disposition;
+}
+
+function requireSingleRecoveryAutomaticDestination(
+  changes: ReturnType<typeof compareWindowsShellState>,
+  realAppData: string,
+  stage: string,
+  expectedPath?: string,
+  requireNewFile = true
+): { relativePath: string } {
+  if (changes.length !== 1) {
+    throw new Error(`${stage} changed an ambiguous Windows shell state: ${formatWindowsShellStateChanges(changes) || "(none)"}.`);
+  }
+  const [change] = changes;
+  const relativePath = change?.after?.path ?? change?.before?.path;
+  if (
+    change === undefined || change.appData !== realAppData || (requireNewFile && change.before !== null) || change.after === null ||
+    !/^AutomaticDestinations[\\/][a-f0-9]+\.automaticDestinations-ms$/iu.test(relativePath ?? "") ||
+    (expectedPath !== undefined && relativePath !== expectedPath)
+  ) {
+    throw new Error(`${stage} did not produce one new exact recovery AutomaticDestinations artifact: ${formatWindowsShellStateChanges(changes)}.`);
+  }
+  return { relativePath: change.after.path };
 }
 
 async function nativeScreenPointForCanvas(session: RecoveryJourneySession): Promise<{ x: number; y: number }> {
@@ -428,7 +527,13 @@ async function nativeScreenPointForCanvas(session: RecoveryJourneySession): Prom
   };
 }
 
-async function launch(executablePath: string, journeyId: string, profile?: RecoveryJourneySession["profile"], openPath?: string): Promise<RecoveryJourneySession> {
+async function launch(
+  executablePath: string,
+  journeyId: string,
+  profile?: RecoveryJourneySession["profile"],
+  openPath?: string,
+  recoveryShellRecent = false
+): Promise<RecoveryJourneySession> {
   return launchRecoveryJourney({
     ...packagedJourneyConfig(workspaceRoot, journeyId),
     executablePath,
@@ -436,6 +541,7 @@ async function launch(executablePath: string, journeyId: string, profile?: Recov
     evidenceMode: "committed",
     committedEvidencePath: ["phase-0", "document-windows-integration", journeyId],
     ...(profile === undefined ? { cleanupProfile: false } : { profile, cleanupProfile: false }),
+    ...(recoveryShellRecent ? { recoveryShellRecent: true } : {}),
     packagedArgs: () => openPath === undefined ? [] : [openPath]
   });
 }

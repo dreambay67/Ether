@@ -14,13 +14,11 @@ import {
   type Page
 } from "@playwright/test";
 
-import { removeRecoveryShellAutomaticDestinations } from "./windowsShellDestinations.js";
-
 const execFileAsync = promisify(execFile);
 const PROFILE_PREFIX = "ether-recovery-journey-";
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 const RECOVERY_SHELL_IDENTITY_ARGUMENT = "--ether-recovery-shell-identity=";
-const RECOVERY_SHELL_CLEANUP_ARGUMENT = "--ether-recovery-shell-cleanup=";
+const RECOVERY_SHELL_RECENT_ARGUMENT = "--ether-recovery-shell-recent=";
 
 export type JourneyMode = "source-electron" | "packaged";
 export type EvidenceMode = "ephemeral" | "committed";
@@ -118,6 +116,8 @@ export type SourceElectronJourneyConfig = JourneyProfileReuse & {
   sourceEntrypoint?: string;
   sourceArgs?: (profile: JourneyProfile) => readonly string[];
   electronExecutable?: string;
+  /** Enables Windows Recent/Jump List APIs only for the separately approved shell route. */
+  recoveryShellRecent?: boolean;
   viewport?: { width: number; height: number };
 };
 
@@ -135,6 +135,8 @@ export type PackagedJourneyConfig = JourneyProfileReuse & {
    * by the driver and cannot be overridden by callers.
    */
   packagedArgs?: (profile: JourneyProfile) => readonly string[];
+  /** Enables Windows Recent/Jump List APIs only for the separately approved shell route. */
+  recoveryShellRecent?: boolean;
   viewport?: { width: number; height: number };
 };
 
@@ -585,8 +587,6 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   );
   const viewport = config.viewport ?? DEFAULT_VIEWPORT;
   let sourceApp: ElectronApplication | null = null;
-  let sourceCleanupEntrypointPath = "";
-  let sourceElectronPath = "";
   let packagedBrowser: Browser | null = null;
   let packagedProcess: ChildProcess | null = null;
   let packagedExecutablePath = "";
@@ -606,19 +606,15 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     let page: Page;
     if (config.mode === "source-electron") {
       const sourceEntrypoint = config.sourceEntrypoint ?? path.join(workspaceRoot, "apps", "desktop", "dist-electron", "main", "bootstrap.js");
-      const sourceCleanupEntrypoint = path.join(workspaceRoot, "apps", "desktop", "dist-electron", "main", "bootstrap.js");
       const electronExecutable = config.electronExecutable ?? path.join(workspaceRoot, "node_modules", "electron", "dist", "electron.exe");
-      sourceCleanupEntrypointPath = sourceCleanupEntrypoint;
-      sourceElectronPath = electronExecutable;
       await requireFile(sourceEntrypoint, "Source Electron entrypoint");
-      await requireFile(sourceCleanupEntrypoint, "Source Electron recovery cleanup entrypoint");
       await requireFile(electronExecutable, "Electron executable");
       sourceApp = await electron.launch({
         executablePath: electronExecutable,
         args: [
           sourceEntrypoint,
           `--user-data-dir=${profile.userData}`,
-          `${RECOVERY_SHELL_IDENTITY_ARGUMENT}${recoveryShellTokenForProfile(profile)}`,
+          recoveryShellIdentityArgumentFor(config, profile),
           ...(config.sourceArgs?.(profile) ?? [])
         ],
         env: environment
@@ -635,7 +631,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         "--remote-debugging-port=0",
         `--user-data-dir=${profile.userData}`,
         "--disable-gpu",
-        `${RECOVERY_SHELL_IDENTITY_ARGUMENT}${recoveryShellTokenForProfile(profile)}`,
+        recoveryShellIdentityArgumentFor(config, profile),
         ...packagedArgs
       ], { env: environment, stdio: "pipe", windowsHide: true });
       processOutput = captureProcessOutput(packagedProcess);
@@ -666,21 +662,10 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         try {
           if (sourceApp !== null) {
             await closeSourceElectron(sourceApp);
-            await cleanupRecoveryShellIdentityProcess({
-              environment,
-              executablePath: sourceElectronPath,
-              prefixArguments: [sourceCleanupEntrypointPath],
-              profile
-            });
-            recorder.record({ kind: "observation", label: "Disposable Windows shell identity cleanup", expected: "The recovery-only AUMID resets its app-scoped Jump List without invoking Windows' global Recent/Frequent clearing API.", actual: `Cleanup-only route completed for ${recoveryShellTokenForProfile(profile).slice(0, 8)}.`, durationMs: 0 });
           }
           if (packagedBrowser !== null) await packagedBrowser.close();
           if (packagedProcess !== null && packagedProcess.exitCode === null) {
             await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses);
-          }
-          if (packagedExecutablePath !== "") {
-            await cleanupRecoveryShellIdentityProcess({ environment, executablePath: packagedExecutablePath, prefixArguments: [], profile });
-            recorder.record({ kind: "observation", label: "Disposable Windows shell identity cleanup", expected: "The recovery-only AUMID resets its app-scoped Jump List without invoking Windows' global Recent/Frequent clearing API.", actual: `Cleanup-only route completed for ${recoveryShellTokenForProfile(profile).slice(0, 8)}.`, durationMs: 0 });
           }
         } finally {
           recorder.captureMainProcessOutput(processOutput());
@@ -693,16 +678,10 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     };
   } catch (error) {
     if (sourceApp !== null) await closeSourceElectron(sourceApp).catch(() => undefined);
-    if (sourceElectronPath !== "" && sourceCleanupEntrypointPath !== "") {
-      await cleanupRecoveryShellIdentityProcess({ environment: Object.fromEntries(Object.entries({ ...process.env, APPDATA: profile.appData, LOCALAPPDATA: profile.localAppData }).filter((entry): entry is [string, string] => typeof entry[1] === "string")), executablePath: sourceElectronPath, prefixArguments: [sourceCleanupEntrypointPath], profile }).catch(() => undefined);
-    }
     await packagedBrowser?.close().catch(() => undefined);
     if (packagedProcess !== null && packagedProcess.exitCode === null) {
       await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses).catch(() => undefined);
       if (packagedProcess.exitCode === null) packagedProcess.kill();
-    }
-    if (packagedExecutablePath !== "") {
-      await cleanupRecoveryShellIdentityProcess({ environment: Object.fromEntries(Object.entries({ ...process.env, APPDATA: profile.appData, LOCALAPPDATA: profile.localAppData }).filter((entry): entry is [string, string] => typeof entry[1] === "string")), executablePath: packagedExecutablePath, prefixArguments: [], profile }).catch(() => undefined);
     }
     if (cleanupProfile) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
     throw error;
@@ -721,26 +700,18 @@ export function assertPackagedJourneyArgs(argumentsToValidate: readonly string[]
       normalized === "--user-data-dir" ||
       normalized.startsWith("--user-data-dir=") ||
       normalized.startsWith(RECOVERY_SHELL_IDENTITY_ARGUMENT) ||
-      normalized.startsWith(RECOVERY_SHELL_CLEANUP_ARGUMENT)
+      normalized.startsWith(RECOVERY_SHELL_RECENT_ARGUMENT)
     ) {
       throw new Error(`Packaged journey argument ${argument} would override driver-owned isolation.`);
     }
   }
 }
 
-async function cleanupRecoveryShellIdentityProcess(input: {
-  environment: NodeJS.ProcessEnv;
-  executablePath: string;
-  prefixArguments: readonly string[];
-  profile: JourneyProfile;
-}): Promise<void> {
-  await execFileAsync(input.executablePath, [
-    ...input.prefixArguments,
-    `--user-data-dir=${input.profile.userData}`,
-    `${RECOVERY_SHELL_CLEANUP_ARGUMENT}${recoveryShellTokenForProfile(input.profile)}`,
-    "--disable-gpu"
-  ], { env: input.environment, timeout: 30_000, windowsHide: true });
-  await removeRecoveryShellAutomaticDestinations(recoveryShellTokenForProfile(input.profile));
+function recoveryShellIdentityArgumentFor(config: RecoveryJourneyConfig, profile: JourneyProfile): string {
+  const prefix = config.recoveryShellRecent === true
+    ? RECOVERY_SHELL_RECENT_ARGUMENT
+    : RECOVERY_SHELL_IDENTITY_ARGUMENT;
+  return `${prefix}${recoveryShellTokenForProfile(profile)}`;
 }
 
 async function requireFile(filePath: string, label: string): Promise<void> {
