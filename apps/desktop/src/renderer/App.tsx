@@ -65,6 +65,7 @@ export function App() {
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
   const applicationAvailable = typeof window.ether.application?.onEvent === "function";
+  const graphReady = document !== null && graph !== null && graph.id === document.graphId;
   const closeRecipes = useCallback(() => {
     setRecipesOpen(false);
     globalThis.requestAnimationFrame(() => recipesButtonRef.current?.focus());
@@ -347,8 +348,8 @@ export function App() {
         <div className="document-tool-rail" aria-label="Graph tools">
           <NodeLibrary
             catalog={nodeCatalog}
-            error={nodeCatalogError}
-            readOnly={document.mode === "read-only"}
+            error={!graphReady ? "Loading the document canvas..." : nodeCatalogError}
+            readOnly={document.mode === "read-only" || !graphReady || nodeCatalog.length === 0}
             onAdd={(definitionId) => canvasRef.current?.addNode(definitionId)}
           />
           <aside className="node-library-utilities" aria-label="Library utilities">
@@ -366,10 +367,12 @@ export function App() {
           </aside>
         </div>
       )}
-      canvas={<EtherCanvas ref={canvasRef} graph={graph} catalog={nodeCatalog} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
+      canvas={!graphReady
+        ? <div className="canvas-loading" role="status">Loading document canvas...</div>
+        : <EtherCanvas ref={canvasRef} graph={graph} catalog={nodeCatalog} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
       inspector={<InspectorPanel context={inspectorContext} />}
-      referenceDesk={applicationAvailable && graph ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graph ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
-      batchMatrix={applicationAvailable && graph ? <Suspense fallback={<p>Loading batch plan…</p>}><BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /></Suspense> : <p>{graph ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
+      referenceDesk={applicationAvailable && graphReady ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graphReady ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
+      batchMatrix={applicationAvailable && graphReady ? <Suspense fallback={<p>Loading batch plan…</p>}><BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /></Suspense> : <p>{graphReady ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
       jobCenter={applicationAvailable ? <Suspense fallback={<p>Loading Job Center…</p>}><JobCenter documentId={document.documentId} onStatus={setMessage} /></Suspense> : <p>Job Center is unavailable in this compatibility session.</p>}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
