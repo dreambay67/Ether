@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react";
 import { getNodeDefinition } from "@ether/graph-kernel";
 import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
 import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
@@ -19,7 +19,8 @@ const app = () => (window.ether as unknown as { application?: AppBridge }).appli
 
 function OutputVersions({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, report } = context;
-  const [outputs, setOutputs] = useState<NodeOutputVersion[]>([]); const [compare, setCompare] = useState<string[]>([]);
+  const [outputs, setOutputs] = useState<NodeOutputVersion[]>([]);
+  const [compare, setCompare] = useState<string[]>([]);
   const [editDrafts, setEditDrafts] = useState<Record<string, string>>({});
   const [pinEdges, setPinEdges] = useState<Record<string, string>>({});
   const refresh = useCallback(async () => { try { const response = await app()?.query(documentQuery("node.outputs", document.documentId, { nodeId: node.id })); setOutputs((response?.payload?.outputs as NodeOutputVersion[] | undefined) ?? []); } catch (error) { report(error instanceof Error ? error.message : "Output versions could not be loaded."); } }, [document.documentId, node.id, report]);
@@ -38,9 +39,24 @@ function OutputVersions({ context }: { context: InspectorNodeContext }) {
     } catch (error) { report(error instanceof Error ? error.message : "The current lane revision could not be loaded."); return false; }
   };
   return <InspectorSection title="Output versions" help="Every executable run creates an immutable version. Review and manual changes preserve earlier versions."><div className="inspector-output-versions" data-testid="output-versions">{outputs.map((output) => {
-    const selected = compare.includes(output.id); const approval = output.approval.state === "approved" ? "Approved" : output.approval.state === "rejected" ? "Rejected" : "Unreviewed";
+    const selected = compare.includes(output.id);
+    const approval = output.approval.state === "approved" ? "Approved" : output.approval.state === "rejected" ? "Rejected" : "Unreviewed";
     const editDraft = editDrafts[output.id] ?? "";
-    return <article key={output.id} className="inspector-output-version"><header><strong>{approval}</strong><span>{output.outputPayloadIds.length} payload{output.outputPayloadIds.length === 1 ? "" : "s"}</span></header><small>{new Date(output.createdAt).toLocaleString()}</small><label>Manual descendant<input aria-label={`Manual output text ${output.id}`} value={editDraft} placeholder="Optional edited text" onChange={(event) => setEditDrafts((current) => ({ ...current, [output.id]: event.target.value }))} /></label>{outgoing.length > 1 ? <label>Pin lane<select aria-label={`Pin lane ${output.id}`} value={pinEdges[output.id] ?? outgoing[0]!.id} onChange={(event) => setPinEdges((current) => ({ ...current, [output.id]: event.target.value }))}>{outgoing.map((edge) => <option key={edge.id} value={edge.id}>{edge.role} to {edge.to.kind === "node" ? (() => { const targetId = edge.to.kind === "node" ? edge.to.nodeId : ""; return graph.nodes.find((target) => target.id === targetId)?.title ?? targetId; })() : edge.to.portId}</option>)}</select></label> : null}<div className="inspector-actions"><button type="button" title="Approve this version for latest-approved selectors." onClick={() => void command("review.approve", { outputVersionId: output.id, approved: true })}>Approve</button><button type="button" title="Reject this version without deleting it." onClick={() => void command("review.reject", { outputVersionId: output.id })}>Reject</button><button type="button" disabled={!editDraft.trim()} title="Create a manual descendant; the original remains immutable." onClick={() => void (async () => { if (await command("output.edit", { outputVersionId: output.id, payload: { text: editDraft }, note: "Edited in Inspector" })) setEditDrafts((current) => ({ ...current, [output.id]: "" })); })()}>Edit</button><button type="button" aria-pressed={selected} title="Pick two versions for a side-by-side provenance comparison." onClick={() => setCompare((current) => current.includes(output.id) ? current.filter((id) => id !== output.id) : [...current.slice(-1), output.id])}>Compare</button>{outgoing.length ? <button type="button" title="Pin this version to the selected outgoing lane." onClick={() => void pin(output.id)}>Pin</button> : null}<button type="button" title="Restore this as a new immutable descendant." onClick={() => void command("output.restore", { outputVersionId: output.id, note: "Restored in Inspector" })}>Restore</button></div></article>;
+    const producer = output.producer?.kind === "provider"
+      ? `${output.producer.providerId} · ${output.producer.modelId}`
+      : output.producer?.kind === "local"
+        ? `Local · ${output.producer.executor}`
+        : output.producer?.kind === "manual"
+          ? `Manual · ${output.producer.actor}`
+          : "Producer unavailable";
+    return <article key={output.id} className="inspector-output-version">
+      <header><strong>{approval}</strong><span>{output.outputPayloadIds.length} payload{output.outputPayloadIds.length === 1 ? "" : "s"}</span></header>
+      <small>{new Date(output.createdAt).toLocaleString()} · {output.id.slice(0, 12)}</small>
+      <details><summary>Version provenance</summary><div className="inspector-output-provenance"><span>{producer}</span><span>{output.runId ? `Run · ${output.runId}` : "No provider run"}</span><span>{output.inputPayloadIds?.length ?? 0} inputs · {output.selectedOutputVersionIds?.length ?? 0} selected versions</span><span>Lineage · {output.lineage?.relation ?? (output.parentOutputVersionId ? "descendant" : "generated")}</span>{output.selectedBy ? <span>Selected by {output.selectedBy.selector} on {output.selectedBy.edgeId}</span> : null}{output.failure ? <em>{output.failure.code} · {output.failure.message}</em> : null}</div></details>
+      <label>Manual descendant<input aria-label={`Manual output text ${output.id}`} value={editDraft} placeholder="Optional edited text" onChange={(event) => setEditDrafts((current) => ({ ...current, [output.id]: event.target.value }))} /></label>
+      {outgoing.length > 1 ? <label>Pin lane<select aria-label={`Pin lane ${output.id}`} value={pinEdges[output.id] ?? outgoing[0]!.id} onChange={(event) => setPinEdges((current) => ({ ...current, [output.id]: event.target.value }))}>{outgoing.map((edge) => <option key={edge.id} value={edge.id}>{edge.role} to {edge.to.kind === "node" ? (() => { const targetId = edge.to.kind === "node" ? edge.to.nodeId : ""; return graph.nodes.find((target) => target.id === targetId)?.title ?? targetId; })() : edge.to.portId}</option>)}</select></label> : null}
+      <div className="inspector-actions"><button type="button" title="Approve this version for latest-approved selectors." onClick={() => void command("review.approve", { outputVersionId: output.id, approved: true })}>Approve</button><button type="button" title="Reject this version without deleting it." onClick={() => void command("review.reject", { outputVersionId: output.id })}>Reject</button><button type="button" disabled={!editDraft.trim()} title="Create a manual descendant; the original remains immutable." onClick={() => void (async () => { if (await command("output.edit", { outputVersionId: output.id, payload: { text: editDraft }, note: "Edited in Inspector" })) setEditDrafts((current) => ({ ...current, [output.id]: "" })); })()}>Edit</button><button type="button" aria-pressed={selected} title="Pick two versions for a side-by-side provenance comparison." onClick={() => setCompare((current) => current.includes(output.id) ? current.filter((id) => id !== output.id) : [...current.slice(-1), output.id])}>Compare</button>{outgoing.length ? <button type="button" title="Pin this version to the selected outgoing lane." onClick={() => void pin(output.id)}>Pin</button> : null}<button type="button" title="Restore this as a new immutable descendant." onClick={() => void command("output.restore", { outputVersionId: output.id, note: "Restored in Inspector" })}>Restore</button></div>
+    </article>;
   })}</div>{compare.length === 2 ? <div className="inspector-compare-strip" data-testid="output-compare"><strong>Compare</strong><span>{compare.map((id) => id.slice(0, 8)).join(" vs ")}</span><button type="button" onClick={() => setCompare([])}>Clear</button></div> : null}</InspectorSection>;
 }
 
@@ -73,14 +89,18 @@ function PromptFields({ context }: { context: InspectorNodeContext }) {
 function WorkerFields({ context }: { context: InspectorNodeContext }) {
   const { node, apply, graph, report } = context;
   const [capabilities, setCapabilities] = useState<ProviderCapability[]>([]);
-  const source = node.config.kind === "prompt.worker" ? node.config : { kind: "prompt.worker" as const, behavior: "rewrite" as const, instruction: "", profile: "balanced" as const, model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8_000 }, memoryPolicy: { mode: "stateless" as const }, outputContract: { channel: "text" as const, count: 1, selectionPolicy: "latest" as const } };
-  const draft = useInspectorDraft<PromptWorkerConfig>(`${node.id}:worker`, source);
+  type WorkerConfigWithReview = PromptWorkerConfig & { reviewPolicy: "inspect-first" | "auto-apply" };
+  const savedReviewPolicy = node.config.kind === "prompt.worker"
+    ? (node.config as PromptWorkerConfig & { reviewPolicy?: WorkerConfigWithReview["reviewPolicy"] }).reviewPolicy
+    : undefined;
+  const source = (node.config.kind === "prompt.worker" ? { ...node.config, reviewPolicy: savedReviewPolicy ?? "inspect-first" } : { kind: "prompt.worker" as const, behavior: "rewrite" as const, instruction: "", profile: "balanced" as const, model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8_000 }, memoryPolicy: { mode: "stateless" as const }, outputContract: { channel: "text" as const, count: 1, selectionPolicy: "latest" as const }, reviewPolicy: "inspect-first" as const }) as WorkerConfigWithReview;
+  const draft = useInspectorDraft<WorkerConfigWithReview>(`${node.id}:worker`, source);
   useEffect(() => {
     const refresh = () => {
       void app()?.query(globalQuery("provider.capabilities", {}))
         .then((response) => setCapabilities(
           ((response.payload?.capabilities as ProviderCapability[] | undefined) ?? [])
-            .filter((capability) => capability.operation === "llm")
+            .filter((capability) => capability.operation === "llm" && capability.profileId.startsWith("worker:"))
         ))
         .catch((error: unknown) => report(
           error instanceof Error ? error.message : "Worker provider capabilities are unavailable."
@@ -96,7 +116,37 @@ function WorkerFields({ context }: { context: InspectorNodeContext }) {
     capability.profileId === draft.draft.profileId
   ) ?? capabilities.find((capability) => capability.profileId.endsWith(`:${draft.draft.model}`)) ?? capabilities[0];
   const save = async () => { if (!draft.dirty) return; if (draft.conflict) { report("Resolve the changed-base warning before saving this worker."); return; } const saved = await apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: draft.draft } as EtherNode }] as GraphOperation[], "Update worker"); if (saved) draft.markCommitted(); };
-  return <><InspectorSection title="Worker" help="Codex worker behavior is explicit. It makes output versions; it never overwrites another node instruction.">{draft.conflict ? <DraftConflict onLatest={draft.useLatest} onRebase={draft.rebaseDraft} /> : null}<label>Instruction<textarea aria-label="Worker instruction" value={draft.draft.instruction} onChange={(event) => draft.update((current) => ({ ...current, instruction: event.target.value }))} /></label><label>Behavior <Help label="Behavior" text={controlHelp.behavior} /><select aria-label="Worker behavior" value={draft.draft.behavior} onChange={(event) => draft.update((current) => ({ ...current, behavior: event.target.value as PromptWorkerConfig["behavior"] }))}>{["brainstorm", "rewrite", "mutate", "expand", "reinforce", "extract", "critique", "custom"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label>AI profile <Help label="AI profile" text={controlHelp.profile} /><select aria-label="AI profile" value={draft.draft.profile} onChange={(event) => draft.update((current) => ({ ...current, profile: event.target.value as PromptWorkerConfig["profile"] }))}>{["fast", "balanced", "deep", "custom"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label><div className="inspector-actions"><button type="button" disabled={!draft.dirty || draft.conflict} onClick={() => void save()}>Save worker</button></div></InspectorSection><InspectorSection advanced title="Advanced worker settings" help={controlHelp.advanced}>{selectedCapability ? <label>Provider and model<select aria-label="Worker provider and model" value={`${selectedCapability.providerId}\u0000${selectedCapability.profileId}`} onChange={(event) => { const capability = capabilities.find((candidate) => `${candidate.providerId}\u0000${candidate.profileId}` === event.target.value); if (!capability) return; const separator = capability.profileId.indexOf(":"); const model = separator >= 0 ? capability.profileId.slice(separator + 1) : capability.profileId; draft.update((current) => ({ ...current, providerId: capability.providerId, profileId: capability.profileId, model })); }}>{capabilities.map((capability) => <option key={`${capability.providerId}:${capability.profileId}`} value={`${capability.providerId}\u0000${capability.profileId}`}>{capability.providerId} · {capability.profileId}</option>)}</select></label> : <p className="inspector-unavailable">No verified Worker provider/model is available.</p>}<label>Model<input aria-label="Worker model" value={draft.draft.model} onChange={(event) => draft.update((current) => ({ ...current, model: event.target.value }))} /></label><label>Reasoning effort<input aria-label="Reasoning effort" value={draft.draft.reasoningEffort} onChange={(event) => draft.update((current) => ({ ...current, reasoningEffort: event.target.value }))} /></label><label>Variation<input aria-label="Variation" type="range" min="0" max="1" step="0.05" value={draft.draft.variation} onChange={(event) => draft.update((current) => ({ ...current, variation: Number(event.target.value) }))} /></label><div className="inspector-actions"><button type="button" disabled={!draft.dirty || draft.conflict} onClick={() => void save()}>Save advanced settings</button></div></InspectorSection></>;
+  const resolvedRoute = selectedCapability
+    ? `${selectedCapability.providerId} · ${selectedCapability.modelId ?? draft.draft.model} · ${draft.draft.reasoningEffort}`
+    : `${draft.draft.model} · ${draft.draft.reasoningEffort} · unavailable until runtime discovery`;
+  return <>
+    <InspectorSection title="Worker" help="Worker transforms connected material into immutable output versions. It never overwrites another node's instruction or configuration.">
+      {draft.conflict ? <DraftConflict onLatest={draft.useLatest} onRebase={draft.rebaseDraft} /> : null}
+      <label>Instruction<textarea aria-label="Worker instruction" value={draft.draft.instruction} onChange={(event) => draft.update((current) => ({ ...current, instruction: event.target.value }))} /></label>
+      <label>Behavior <Help label="Behavior" text={controlHelp.behavior} /><select aria-label="Worker behavior" value={draft.draft.behavior} onChange={(event) => draft.update((current) => ({ ...current, behavior: event.target.value as PromptWorkerConfig["behavior"] }))}>{["brainstorm", "rewrite", "mutate", "expand", "reinforce", "extract", "critique", "custom"].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label>AI profile <Help label="AI profile" text={controlHelp.profile} /><select aria-label="AI profile" value={draft.draft.profile} onChange={(event) => draft.update((current) => ({ ...current, profile: event.target.value as PromptWorkerConfig["profile"] }))}>{["fast", "balanced", "deep", "custom"].map((value) => <option key={value} value={value}>{value}</option>)}</select><small>Resolved at preview from active runtime: {resolvedRoute}</small></label>
+      <label>Result handling<select aria-label="Worker result handling" value={draft.draft.reviewPolicy} onChange={(event) => draft.update((current) => ({ ...current, reviewPolicy: event.target.value as WorkerConfigWithReview["reviewPolicy"] }))}><option value="inspect-first">Inspect first · leave unreviewed</option><option value="auto-apply">Auto-apply · approve valid results</option></select><small>Auto-apply accepts validated output versions only. It never edits downstream node settings.</small></label>
+      <div className="inspector-actions"><button type="button" disabled={!draft.dirty || draft.conflict} onClick={() => void save()}>Save worker</button></div>
+    </InspectorSection>
+    <InspectorSection title="Context and output" help="Ordinary policy controls define what the Worker may read, remember, and publish.">
+      <label className="inspector-checkbox"><input aria-label="Include upstream context" type="checkbox" checked={draft.draft.contextPolicy.includeUpstream} onChange={(event) => draft.update((current) => ({ ...current, contextPolicy: { ...current.contextPolicy, includeUpstream: event.target.checked } }))} />Include connected upstream context</label>
+      <label className="inspector-checkbox"><input aria-label="Include downstream capabilities" type="checkbox" checked={draft.draft.contextPolicy.includeDownstreamCapabilities} onChange={(event) => draft.update((current) => ({ ...current, contextPolicy: { ...current.contextPolicy, includeDownstreamCapabilities: event.target.checked } }))} />Inform the Worker about downstream capabilities</label>
+      <label>Context budget<input aria-label="Worker context token budget" type="number" min="256" step="256" value={draft.draft.contextPolicy.maxTokens} onChange={(event) => draft.update((current) => ({ ...current, contextPolicy: { ...current.contextPolicy, maxTokens: Math.max(256, Number(event.target.value) || 256) } }))} /></label>
+      <label>Memory<select aria-label="Worker memory" value={draft.draft.memoryPolicy.mode} onChange={(event) => draft.update((current) => ({ ...current, memoryPolicy: { mode: event.target.value as PromptWorkerConfig["memoryPolicy"]["mode"] } }))}><option value="stateless">Stateless</option><option value="per-node">Remember per node</option><option value="per-branch">Remember per branch</option></select></label>
+      <label>Output channel<select aria-label="Worker output channel" value={draft.draft.outputContract.channel} onChange={(event) => draft.update((current) => ({ ...current, outputContract: { ...current.outputContract, channel: event.target.value as PromptWorkerConfig["outputContract"]["channel"], ...(event.target.value === "text" ? { schemaId: undefined } : {}) } }))}><option value="text">Text</option><option value="data">Structured data</option></select></label>
+      {draft.draft.outputContract.channel === "data" ? <label>Schema ID<input aria-label="Worker output schema ID" value={draft.draft.outputContract.schemaId ?? ""} placeholder="Optional registered schema" onChange={(event) => draft.update((current) => ({ ...current, outputContract: { ...current.outputContract, schemaId: event.target.value.trim() || undefined } }))} /></label> : null}
+      <label>Result count<input aria-label="Worker result count" type="number" min="1" max={selectedCapability?.maxOutputsPerCall ?? 16} value={draft.draft.outputContract.count} onChange={(event) => draft.update((current) => ({ ...current, outputContract: { ...current.outputContract, count: Math.max(1, Math.min(selectedCapability?.maxOutputsPerCall ?? 16, Number(event.target.value) || 1)) } }))} /></label>
+      <label>Selection policy<select aria-label="Worker output selection policy" value={draft.draft.outputContract.selectionPolicy} onChange={(event) => draft.update((current) => ({ ...current, outputContract: { ...current.outputContract, selectionPolicy: event.target.value as PromptWorkerConfig["outputContract"]["selectionPolicy"] } }))}><option value="latest">Latest</option><option value="all">All results</option><option value="best">Best result</option></select></label>
+      <div className="inspector-actions"><button type="button" disabled={!draft.dirty || draft.conflict} onClick={() => void save()}>Save worker policy</button></div>
+    </InspectorSection>
+    <InspectorSection advanced title="Advanced worker settings" help={controlHelp.advanced}>
+      {selectedCapability ? <label>Provider and model<select aria-label="Worker provider and model" value={`${selectedCapability.providerId}\u0000${selectedCapability.profileId}`} onChange={(event) => { const capability = capabilities.find((candidate) => `${candidate.providerId}\u0000${candidate.profileId}` === event.target.value); if (!capability) return; const model = capability.modelId ?? capability.profileId.slice(capability.profileId.indexOf(":") + 1); draft.update((current) => ({ ...current, profile: "custom", providerId: capability.providerId, profileId: capability.profileId, model })); }}>{capabilities.map((capability) => <option key={`${capability.providerId}:${capability.profileId}`} value={`${capability.providerId}\u0000${capability.profileId}`}>{capability.providerId} · {capability.modelId ?? capability.profileId}</option>)}</select></label> : <p className="inspector-unavailable">No runtime-discovered Worker provider/model is available.</p>}
+      <label>Model<input aria-label="Worker model" value={draft.draft.model} onChange={(event) => draft.update((current) => ({ ...current, profile: "custom", model: event.target.value }))} /></label>
+      <label>Reasoning effort<input aria-label="Reasoning effort" value={draft.draft.reasoningEffort} onChange={(event) => draft.update((current) => ({ ...current, profile: "custom", reasoningEffort: event.target.value }))} /></label>
+      <label>Variation<input aria-label="Variation" type="range" min="0" max="1" step="0.05" value={draft.draft.variation} onChange={(event) => draft.update((current) => ({ ...current, variation: Number(event.target.value) }))} /></label>
+      <div className="inspector-actions"><button type="button" disabled={!draft.dirty || draft.conflict} onClick={() => void save()}>Save advanced settings</button></div>
+    </InspectorSection>
+  </>;
 }
 
 function resolutionsForAspect(capability: ProviderCapability, aspectRatio: string) {
@@ -403,9 +453,53 @@ function imageEditCapability(providerId: string, profileId: string, capability: 
 }
 
 function ReferenceFields({ context }: { context: InspectorNodeContext }) {
-  const { node, document, refreshGraph, report } = context; const [members, setMembers] = useState(""); if (node.config.kind !== "reference.set") return null;
+  const { node, graph, document, refreshGraph, report } = context;
+  const [members, setMembers] = useState("");
+  const [dropStorage, setDropStorage] = useState<"link" | "embed">("link");
+  const [importing, setImporting] = useState(false);
+  if (node.config.kind !== "reference.set") return null;
   const assign = async (replace: boolean) => { const ids = members.split(/[\s,]+/).filter(Boolean); if (!ids.length) { report("Enter one or more reference IDs first."); return; } try { await app()?.command(documentCommand("reference.assignToSet", document.documentId, { nodeId: node.id, members: ids.map((referenceId) => ({ kind: "linked-reference", referenceId, enabled: true })), replace })); const refreshed = await refreshGraph(); if (!refreshed) throw new Error("The updated Reference Set could not be refreshed."); setMembers(""); report(replace ? "Reference Set replaced." : "References added to the set."); } catch (error) { report(error instanceof Error ? error.message : "Reference assignment needs attention."); } };
-  return <InspectorSection title="Reference Set" help="Add and Replace are explicit actions. Ether never silently replaces a source set."><label>Reference IDs <Help label="Reference IDs" text={controlHelp.references} /><textarea aria-label="Reference IDs" value={members} placeholder="reference-id, another-reference-id" onChange={(event) => setMembers(event.target.value)} /></label><div className="inspector-actions"><button type="button" onClick={() => void assign(false)}>Add references</button><button type="button" onClick={() => void assign(true)}>Replace set</button></div><small>{(node.config.members ?? node.config.artifactIds ?? []).length} saved member{(node.config.members ?? node.config.artifactIds ?? []).length === 1 ? "" : "s"}; ordered {node.config.ordering}.</small></InspectorSection>;
+  const choose = async (storage: "link" | "embed") => {
+    setImporting(true);
+    try {
+      const result = await window.ether.references.chooseAndLink({ documentId: document.documentId, graphId: graph.id, nodeId: node.id, role: "general", storage });
+      if (!result.cancelled) {
+        await refreshGraph();
+        report(`${storage === "embed" ? "Embedded" : "Linked"} file added to ${node.title}.`);
+      }
+    } catch (error) {
+      report(error instanceof Error ? error.message : "The reference picker needs attention.");
+    } finally {
+      setImporting(false);
+    }
+  };
+  const importDropped = async (event: ReactDragEvent<HTMLElement>) => {
+    if (event.dataTransfer.files.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setImporting(true);
+    try {
+      let imported = 0;
+      for (const file of [...event.dataTransfer.files]) {
+        const result = await window.ether.references.importDropped(file, { documentId: document.documentId, graphId: graph.id, nodeId: node.id, role: "general", storage: dropStorage });
+        if (!result.cancelled) imported += 1;
+      }
+      await refreshGraph();
+      report(`${imported} file${imported === 1 ? "" : "s"} ${dropStorage === "embed" ? "embedded in" : "linked to"} ${node.title}.`);
+    } catch (error) {
+      report(error instanceof Error ? error.message : "Dropped references could not be imported.");
+    } finally {
+      setImporting(false);
+    }
+  };
+  return <InspectorSection title="Reference Set" help="Link external files or embed portable copies. Add and Replace are explicit actions; Ether never silently replaces a source set.">
+    <div className="inspector-actions"><button type="button" disabled={importing} onClick={() => void choose("link")}>Link file</button><button type="button" disabled={importing} onClick={() => void choose("embed")}>Embed copy</button></div>
+    <label>Drop behavior<select aria-label="Reference Set drop behavior" value={dropStorage} onChange={(event) => setDropStorage(event.target.value as "link" | "embed")}><option value="link">Link dropped files</option><option value="embed">Embed dropped files</option></select></label>
+    <div className="inspector-reference-drop" aria-label="Drop files into Reference Set" onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDrop={(event) => void importDropped(event)}>{importing ? "Importing references…" : "Drop one or more files here"}</div>
+    <label>Existing Reference IDs <Help label="Reference IDs" text={controlHelp.references} /><textarea aria-label="Reference IDs" value={members} placeholder="reference-id, another-reference-id" onChange={(event) => setMembers(event.target.value)} /></label>
+    <div className="inspector-actions"><button type="button" onClick={() => void assign(false)}>Add references</button><button type="button" onClick={() => void assign(true)}>Replace set</button></div>
+    <small>{(node.config.members ?? node.config.artifactIds ?? []).length} saved member{(node.config.members ?? node.config.artifactIds ?? []).length === 1 ? "" : "s"}; ordered {node.config.ordering}.</small>
+  </InspectorSection>;
 }
 
 function NodeChannels({ context }: { context: InspectorNodeContext }) {

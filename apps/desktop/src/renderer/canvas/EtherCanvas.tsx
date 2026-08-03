@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { getViewportForBounds, ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
-import type { EtherGraph, EtherNode, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition } from "@ether/schema";
+import type { EtherGraph, EtherNode, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition, ReferenceSetConfig } from "@ether/schema";
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import { CanvasSidePanels } from "./CanvasSidePanels";
 import { CanvasSurface } from "./CanvasSurface";
@@ -233,23 +233,25 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
         return;
       }
       const ordinal = graph.nodes.filter((node) => node.definitionId === "reference.set").length + 1;
-      const node: EtherNode = {
+      const node: EtherNode<ReferenceSetConfig> = {
         id: crypto.randomUUID(),
         definitionId: "reference.set",
         title: `${definition.title} ${ordinal}`,
         position,
         size: { width: definition.presentation.width, height: definition.presentation.height },
-        config: structuredClone(definition.defaultConfig) as EtherNode["config"],
+        config: structuredClone(definition.defaultConfig) as ReferenceSetConfig,
         presentation: { collapsed: false, accent: "default", previewMode: definition.presentation.previewMode }
-      } as EtherNode;
+      };
       if (!await applyTransaction([{ type: "addNode", graphId: graph.id, node }], "Add Reference Set")) return;
       nodeId = node.id;
       report("Created a Reference Set. Linking dropped files by default; use Reference Desk to embed copies.");
     }
+    const referenceSetId = nodeId;
+    if (referenceSetId === undefined) return;
     const results = await importReferenceFilesSequentially(files, (file) => window.ether.references.importDropped(file, {
         documentId: document.documentId,
         graphId: graph.id,
-        nodeId,
+        nodeId: referenceSetId,
         role: "general",
         storage: "link"
       }));

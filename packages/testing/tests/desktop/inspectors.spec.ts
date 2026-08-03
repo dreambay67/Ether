@@ -11,7 +11,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
       id: "inspector-graph", title: "Inspector fixture", kind: "root", createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z",
       nodes: [
         { id: "prompt", definitionId: "prompt.text", title: "Direction", position: { x: 80, y: 100 }, size: { width: 250, height: 150 }, config: { kind: "prompt.text", body: "A quiet editorial still life", assembly: "append" }, presentation: { collapsed: false, accent: "default", previewMode: "content" } },
-        { id: "worker", definitionId: "prompt.worker", title: "Prompt polish", position: { x: 390, y: 100 }, size: { width: 250, height: 150 }, config: { kind: "prompt.worker", behavior: "rewrite", instruction: "Make the direction vivid", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: .2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "worker", definitionId: "prompt.worker", title: "Prompt polish", position: { x: 390, y: 100 }, size: { width: 250, height: 150 }, config: { kind: "prompt.worker", behavior: "rewrite", instruction: "Make the direction vivid", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: .2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" }, reviewPolicy: "inspect-first" }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
         { id: "image", definitionId: "generation.image", title: "Image", position: { x: 690, y: 100 }, size: { width: 250, height: 150 }, config: { kind: "generation.image", providerId: "fake-image", profileId: "studio", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
         { id: "references", definitionId: "reference.set", title: "Reference desk", position: { x: 390, y: 340 }, size: { width: 250, height: 150 }, config: { kind: "reference.set", members: [], enabledChannels: ["image"], ordering: "manual" }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
       ], edges: [{ id: "lane", from: { kind: "node", nodeId: "worker", channel: "text" }, to: { kind: "node", nodeId: "image", channel: "text" }, role: "style", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true }, { id: "lane-two", from: { kind: "node", nodeId: "worker", channel: "data" }, to: { kind: "node", nodeId: "references", channel: "data" }, role: "general", order: 1, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true }], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
@@ -19,12 +19,13 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
     const descriptor = () => ({ documentId: "inspector-document", displayName: "Inspector", named: true, mode: "writable", readOnlyReason: null, commands: { save: true, saveAs: true, saveCopy: true, compact: true, makePortable: true }, saveState: "saved", documentRevisionId: `revision-${documentRevision}`, graphId: "inspector-graph", graphRevisionId: `graph-revision-${documentRevision}`, simulationEnabled: false, revision: documentRevision });
     const catalog = [
       { definitionId: "prompt.text", family: "prompt", title: "Prompt", description: "Write reusable text instructions.", example: "Describe a quiet studio portrait.", synonyms: ["instruction", "text"], inputChannels: [], outputChannels: ["text"], defaultConfig: { kind: "prompt.text", body: "", assembly: "append" }, inspector: { sections: [{ id: "main", title: "Prompt", fields: ["body", "assembly"] }] }, executor: "deterministic-assembly", presentation: { width: 250, height: 150, previewMode: "content" }, setupRequirement: "none" },
-      { definitionId: "prompt.worker", family: "prompt", title: "Worker", description: "Transform prompt material with a configured assistant.", example: "Rewrite the direction.", synonyms: ["assistant", "rewrite"], inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], defaultConfig: { kind: "prompt.worker", behavior: "rewrite", instruction: "", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" } }, inspector: { sections: [{ id: "main", title: "Worker", fields: ["behavior", "instruction", "profile", "model", "reasoningEffort", "variation", "contextPolicy", "memoryPolicy", "outputContract"] }] }, executor: "codex-llm", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "provider-capability" },
+      { definitionId: "prompt.worker", family: "prompt", title: "Worker", description: "Transform prompt material with a configured assistant.", example: "Rewrite the direction.", synonyms: ["assistant", "rewrite"], inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], defaultConfig: { kind: "prompt.worker", behavior: "rewrite", instruction: "", profile: "balanced", model: "gpt-5", reasoningEffort: "medium", variation: 0.2, contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 8000 }, memoryPolicy: { mode: "stateless" }, outputContract: { channel: "text", count: 1, selectionPolicy: "latest" }, reviewPolicy: "inspect-first" }, inspector: { sections: [{ id: "main", title: "Worker", fields: ["behavior", "instruction", "profile", "model", "reasoningEffort", "variation", "contextPolicy", "memoryPolicy", "outputContract", "reviewPolicy"] }] }, executor: "codex-llm", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "provider-capability" },
       { definitionId: "generation.image", family: "generation", title: "Image Generator", description: "Generate images from text direction.", example: "Create a studio image.", synonyms: ["image", "render"], inputChannels: ["text", "image", "data"], outputChannels: ["image", "data"], defaultConfig: { kind: "generation.image", providerId: "fake-image", profileId: "studio", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 }, inspector: { sections: [{ id: "main", title: "Image Generator", fields: ["providerId", "profileId"] }] }, executor: "image-provider", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "provider-capability" },
       { definitionId: "reference.set", family: "reference", title: "Reference Set", description: "Collect reusable reference material.", example: "Group visual references.", synonyms: ["reference", "assets"], inputChannels: ["image", "data"], outputChannels: ["image", "data"], defaultConfig: { kind: "reference.set", members: [], enabledChannels: ["image"], ordering: "manual" }, inspector: { sections: [{ id: "main", title: "Reference Set", fields: ["members", "enabledChannels", "ordering"] }] }, executor: "non-runnable", presentation: { width: 250, height: 150, previewMode: "summary" }, setupRequirement: "none" }
     ];
     const commands: Array<{ name: string; payload: Record<string, unknown> }> = []; const queries: unknown[] = [];
     const capabilities = [
+      { providerId: "codex-vision-assistant", profileId: "worker:gpt-5", modelId: "gpt-5", operation: "llm", inputChannels: ["text", "image", "data"], outputChannels: ["text", "data"], aspectRatios: [], resolutions: [], maxReferences: 32, maxOutputsPerCall: 4, maxParallelism: 4, supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: [] },
       { providerId: "fake-image", profileId: "studio", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1", "16:9"], resolutions: [{ id: "1024", width: 1024, height: 1024, label: "1024 square" }, { id: "wide", width: 1536, height: 864, label: "1536 x 864" }], maxReferences: 4, maxOutputsPerCall: 3, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: ["No seed support"] },
       { providerId: "fake-image", profileId: "cinematic", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["21:9", "16:9"], resolutions: [{ id: "cinema", width: 2048, height: 878, label: "2K · 21:9", aspectRatio: "21:9", tier: "2K" }, { id: "cinema-4k", width: 4096, height: 1755, label: "4K · 21:9", aspectRatio: "21:9", tier: "4K" }, { id: "hd", width: 1920, height: 1080, label: "2K · 16:9", aspectRatio: "16:9", tier: "2K" }, { id: "uhd", width: 3840, height: 2160, label: "4K · 16:9", aspectRatio: "16:9", tier: "4K" }], maxReferences: 6, maxOutputsPerCall: 2, supportsCancellation: true, supportsSeed: true, provenance: "conformance-verified", limitations: [] }
     ];
@@ -97,6 +98,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
         query: async (request: { name: string; payload: Record<string, unknown> }) => {
           queries.push(request);
           if (request.name === "node.catalog") return { name: request.name, payload: { nodes: catalog } };
+          if (request.name === "reference.list") return { name: request.name, payload: { references: [] } };
           if (request.name === "provider.capabilities") return { name: request.name, payload: { capabilities } };
           if (request.name === "node.compiledInputPreview") return { name: request.name, payload: { nodeId: request.payload.nodeId, instruction: "A quiet editorial still life\n\n[assembled reference context]", contextHash: "context-hash-123456789" } };
           if (request.name === "node.outputs") return { name: request.name, payload: { outputs: request.payload.nodeId === "worker" ? outputs : [] } };
@@ -177,13 +179,32 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   };
 
   await selectWorker();
-  await expect(page.getByText("Style to Image", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("node-inspector")).toContainText("Style · Text → Text · latest-approved · Image");
+  await expect(page.getByTestId("node-inspector")).toContainText("codex-vision-assistant · gpt-5 · medium");
   const beforeWorker = await commandCount();
   await page.getByRole("textbox", { name: "Worker instruction" }).fill("Make the direction tactile and restrained");
   await page.getByRole("combobox", { name: "Worker behavior" }).selectOption("critique");
+  await expect(page.getByRole("combobox", { name: "Worker result handling" })).toHaveValue("inspect-first");
+  await page.getByRole("combobox", { name: "Worker result handling" }).selectOption("auto-apply");
+  await page.getByRole("checkbox", { name: "Include upstream context" }).uncheck();
+  await page.getByRole("combobox", { name: "Worker memory" }).selectOption("per-branch");
+  await page.getByRole("combobox", { name: "Worker output channel" }).selectOption("data");
+  await page.getByRole("textbox", { name: "Worker output schema ID" }).fill("campaign-brief");
+  await page.getByRole("spinbutton", { name: "Worker result count" }).fill("2");
+  await page.getByRole("combobox", { name: "Worker output selection policy" }).selectOption("all");
   expect(await commandCount()).toBe(beforeWorker);
   await page.getByRole("button", { name: "Save worker" }).click();
   await expect.poll(commandCount).toBe(beforeWorker + 1);
+  const savedWorkerPolicy = await page.evaluate(() => {
+    const commands = (window as typeof window & { __inspectorCommands: Array<{ name: string; payload: { transaction?: { operations?: Array<{ node?: { config?: Record<string, unknown> } }> } } }> }).__inspectorCommands;
+    return commands.filter((command) => command.name === "graph.applyTransaction").at(-1)?.payload.transaction?.operations?.[0]?.node?.config;
+  });
+  expect(savedWorkerPolicy).toMatchObject({
+    reviewPolicy: "auto-apply",
+    contextPolicy: { includeUpstream: false },
+    memoryPolicy: { mode: "per-branch" },
+    outputContract: { channel: "data", schemaId: "campaign-brief", count: 2, selectionPolicy: "all" }
+  });
   await page.getByRole("button", { name: "Generate Output" }).click();
   await expect.poll(async () => (await commandNames()).includes("run.preview")).toBeTruthy();
   await expect(page.getByRole("button", { name: "Start 1 call" })).toBeVisible();
