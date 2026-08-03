@@ -56,6 +56,11 @@ function queryResponse(query: ApplicationQuery, payload: unknown): QueryResponse
   });
 }
 
+export function executeGlobalApplicationQuery(query: ApplicationQuery): ApplicationQueryResponse | null {
+  if (query.name === "node.catalog") return queryResponse(query, { nodes: nodeLibraryItems });
+  return null;
+}
+
 function assertDocument(command: ApplicationCommand | ApplicationQuery, store: DocumentStore): void {
   if ("documentId" in command && command.documentId !== store.documentId) {
     const error = new Error("The request targets a different Ether document.") as Error & { code: string };
@@ -532,7 +537,7 @@ export async function executeApplicationQuery(
 ): Promise<QueryResponse> {
   // The canonical registry is process-global and must be available on the blank start screen,
   // before any document boundary exists.
-  if (query.name === "node.catalog") return queryResponse(query, { nodes: nodeLibraryItems });
+  if (query.name === "node.catalog") return executeGlobalApplicationQuery(query)!;
   const store = app.boundaryStore();
   if ("documentId" in query) assertDocument(query, store);
 

@@ -16,6 +16,7 @@ import path from "node:path";
 import {
   EtherApplication,
   ExecutionConcurrencyDomains,
+  executeGlobalApplicationQuery,
   type ApplicationDiagnosticRecord
 } from "@ether/application";
 import type {
@@ -1206,6 +1207,10 @@ export class DesktopApplicationService {
 
   async executeApplicationQuery(query: ApplicationQuery): Promise<ApplicationQueryResponse> {
     const parsed = ApplicationQuerySchema.parse(query);
+    const globalResponse = executeGlobalApplicationQuery(parsed);
+    if (globalResponse !== null) {
+      return redactApplicationQueryResponse(ApplicationQueryResponseSchema.parse(globalResponse));
+    }
     if ("documentId" in parsed) this.assertScope(parsed.documentId);
     const response = await this.requireApplication().query(parsed);
     if (response.kind === "error") throw boundaryError(response.error);

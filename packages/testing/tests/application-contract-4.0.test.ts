@@ -15,6 +15,8 @@ import {
 } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { DesktopApplicationService } from "../../../apps/desktop/src/main/services/applicationService";
+
 const roots: string[] = [];
 const timestamp = "2026-07-22T10:00:00.000Z";
 
@@ -131,6 +133,34 @@ describe("Ether 4.0 application boundary", () => {
       expect(item.defaultConfig.kind).toBe(item.definitionId);
       expect(item.description.length).toBeGreaterThan(24);
       expect(item.presentation.width).toBeGreaterThanOrEqual(220);
+    }
+
+    const desktop = new DesktopApplicationService({
+      appDataRoot: path.join(root, "desktop"),
+      appVersion: "4.0.0-test",
+      dialogs: {
+        openDocument: async () => null,
+        saveDocument: async () => null,
+        locateReference: async () => null,
+        searchReferenceFolder: async () => null,
+        confirmPortable: async () => true
+      },
+      provider: new FakeImageProvider()
+    });
+    try {
+      const processGlobalResponse = await desktop.executeApplicationQuery({
+        kind: "query",
+        id: "desktop-node-catalog",
+        correlationId: "desktop-node-catalog",
+        name: "node.catalog",
+        payload: {}
+      });
+      expect(processGlobalResponse.name).toBe("node.catalog");
+      if (processGlobalResponse.name !== "node.catalog") throw new Error("Expected desktop node catalog response.");
+      expect(processGlobalResponse.payload.nodes.map((item) => item.definitionId))
+        .toEqual(nodeDefinitions.map((item) => item.id));
+    } finally {
+      await desktop.close();
     }
   });
 
