@@ -71,6 +71,9 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("/^[a-f0-9]{64}$/iu");
     expect(windowsIntegration).not.toContain("$s1Paths");
     expect(windowsIntegration).not.toContain("s1Root.files.map((file) => file.path)");
+    const powershell51SafeDocumentFolder = "$folder = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($document))";
+    expect(windowsIntegration).not.toContain("Split-Path -LiteralPath $document -Parent");
+    expect(windowsIntegration.split(powershell51SafeDocumentFolder)).toHaveLength(3);
     expect(driver).toContain("afterLaunchFailureApplicationExit");
     expect(integrationSpec).toContain("let exactProcessAbsenceProven = false");
     expect(integrationSpec.match(/afterLaunchFailureApplicationExit/g)?.length).toBeGreaterThanOrEqual(5);
