@@ -1,0 +1,34 @@
+{
+  "attempts": [
+    {
+      "action": "failed association close sanitation",
+      "candidatePath": null,
+      "disposition": "removed exact post-S1 target links=0; S0→final=C:\\Users\\deny7\\AppData\\Roaming:CustomDestinations/590aee7bdd69b59b.customDestinations-ms; S1→final allowed opaque=C:\\Users\\deny7\\AppData\\Roaming:CustomDestinations/590aee7bdd69b59b.customDestinations-ms",
+      "exactProcessAbsenceProven": true,
+      "failure": null,
+      "finishedAt": "2026-08-03T03:36:33.022Z",
+      "jumpStageAfter": null,
+      "jumpStageBefore": null,
+      "jumpTransitions": null,
+      "outcome": "passed"
+    }
+  ],
+  "durabilityFailureObserved": false,
+  "identity": {
+    "gitCommit": "84f86011c4657e4a24a0e1aa0608d56cbf840b58",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "journeyId": "a02-windows-association",
+  "route": "association",
+  "schemaVersion": 1
+}
