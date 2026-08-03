@@ -13,7 +13,7 @@ export const batchVariationsContactSheetRecipe = manifest({
   id: "batch-variations-contact-sheet", title: "Batch Variations and Contact Sheet", description: "Expand an intentional variation matrix, rejoin the results, and make the review decision in one place.",
   parameters: [briefParameter("A minimal lamp on a mirrored plinth, controlled materials and clear product silhouette")],
   graph: graph(graphRef, "Batch Variations and Contact Sheet", [prompt, batch, image, join, compare, collection], [edge("prompt-image", "prompt", "image", "text"), edge("batch-image", "batch", "image", "data"), edge("image-contact-sheet", "image", "contact-sheet", "image"), edge("contact-sheet-compare", "contact-sheet", "compare", "image"), edge("compare-collection", "compare", "collection", "image")]),
-  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve batch selects")], calls: 6, workItems: 18,
+  requirements: [generate], checkpoints: [checkpoint(graphRef, "compare", "Approve batch selects")], calls: 6, workItems: 24,
   scenario: { id: "batch-variations-contact-sheet-fake", steps: [
     { kind: "success", requirementId: "image", latencyMs: 4, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "batch-daylight-wide", mediaType: "image/png" }] },
     { kind: "success", requirementId: "image", latencyMs: 4, outputs: [{ graphRef, nodeRef: "image", channel: "image", fixtureId: "batch-daylight-close", mediaType: "image/png" }] },

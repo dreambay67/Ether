@@ -21,6 +21,7 @@ import type {
   ResolvedRecipeParameter
 } from "./types.js";
 import { validateRecipe } from "./validateRecipe.js";
+import { EXPORT_GRANT_SETUP_SENTINEL } from "./builtins/shared.js";
 
 function parameterDefault(parameter: RecipeParameter): JsonValue | undefined {
   switch (parameter.type) {
@@ -357,7 +358,19 @@ export function instantiateRecipe(input: InstantiateRecipeInput): RecipeInstanti
   if (target === undefined) return { kind: "blocked", manifest: input.manifest, blockers: [{ code: "TARGET_GRAPH_MISSING", message: `Target graph ${input.targetGraphId} does not exist.` }] };
   const parameters = resolveParameters(input.manifest, input.parameters ?? []);
   const providers = resolveProviders(input.manifest, input.providerCapabilities);
-  const blockers = [...parameters.blockers, ...providers.blockers];
+  const configuredParameterValues = new Map(parameters.values.map((item) => [item.parameterId, item.value]));
+  const exportGrant = configuredParameterValues.get("exportPathGrantId");
+  const needsExportGrant = input.manifest.graph.nodes.some((node) =>
+    node.definitionId === "output.export"
+    && (node.config.pathGrantId === EXPORT_GRANT_SETUP_SENTINEL || node.config.pathGrantId === "{{exportPathGrantId}}")
+  );
+  const blockers = [
+    ...parameters.blockers,
+    ...providers.blockers,
+    ...(needsExportGrant && exportGrant === EXPORT_GRANT_SETUP_SENTINEL
+      ? [{ code: "PATH_GRANT_REQUIRED" as const, message: "Choose an export folder before inserting this recipe." }]
+      : [])
+  ];
   if (blockers.length > 0) return { kind: "blocked", manifest: input.manifest, blockers };
   const prefix = uniquePrefix(input.graphs, input.idPrefix ?? input.manifest.id);
   const transaction = {

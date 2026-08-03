@@ -36,6 +36,7 @@ type TemplateGalleryProps = {
   onLoadSetup(recipeId: string, version: string): Promise<RecipeSetup>;
   onPreviewRecipe(request: RecipeSetupRequest): Promise<RecipePreview>;
   onInstantiateRecipe(request: RecipeSetupRequest): Promise<void>;
+  onRequestPathGrant?(): Promise<{ grantId: string; displayName: string } | null>;
   onInserted?(): void;
 };
 
@@ -87,20 +88,24 @@ function capabilityStateLabel(state: RecipeCapabilitySetup["state"]): string {
   }
 }
 
-export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe, onInserted }: TemplateGalleryProps) {
+export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe, onRequestPathGrant, onInserted }: TemplateGalleryProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [parameters, setParameters] = useState<readonly RecipeParameter[]>([]);
   const [capabilities, setCapabilities] = useState<readonly RecipeCapabilitySetup[]>([]);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
+  const [pathGrantDisplayName, setPathGrantDisplayName] = useState<string | null>(null);
   const [busy, setBusy] = useState<"setup" | "preview" | "insert" | null>(null);
   const [status, setStatus] = useState("Choose a recipe to inspect its setup.");
   const setupRequest = useRef(0);
   const selected = useMemo(() => recipes.find((recipe) => `${recipe.id}@${recipe.version}` === selectedKey) ?? null, [recipes, selectedKey]);
+  const pathGrantParameter = parameters.find((parameter) => parameter.id === "exportPathGrantId");
+  const pathGrantReady = pathGrantParameter === undefined || values[pathGrantParameter.id] !== pathGrantParameter.defaultValue;
   const ready = selected !== null
     && busy === null
     && parameters.length > 0
     && parameters.every((parameter) => parameterReady(parameter, values[parameter.id]))
-    && capabilities.every((capability) => capability.state !== "missing");
+    && capabilities.every((capability) => capability.state !== "missing")
+    && pathGrantReady;
 
   useEffect(() => {
     if (selectedKey !== null && !recipes.some((recipe) => `${recipe.id}@${recipe.version}` === selectedKey)) {
@@ -108,6 +113,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
       setParameters([]);
       setCapabilities([]);
       setValues({});
+      setPathGrantDisplayName(null);
     }
   }, [recipes, selectedKey]);
 
@@ -117,6 +123,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
     setParameters([]);
     setCapabilities([]);
     setValues({});
+    setPathGrantDisplayName(null);
     setBusy("setup");
     setStatus(`Loading ${recipe.title} setup…`);
     try {
@@ -124,11 +131,23 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
       if (requestId !== setupRequest.current) return;
       setParameters(setup.parameters);
       setCapabilities(setup.capabilities);
-      setValues(valuesFor(setup.parameters));
+      const initialValues = valuesFor(setup.parameters);
+      const grantParameter = setup.parameters.find((parameter) => parameter.id === "exportPathGrantId");
+      if (grantParameter !== undefined && onRequestPathGrant !== undefined) {
+        const grant = await onRequestPathGrant();
+        if (requestId !== setupRequest.current) return;
+        if (grant !== null) {
+          initialValues[grantParameter.id] = grant.grantId;
+          setPathGrantDisplayName(grant.displayName);
+        }
+      }
+      setValues(initialValues);
       const missing = setup.capabilities.filter((capability) => capability.state === "missing").length;
       const substitutions = setup.capabilities.filter((capability) => capability.state === "substitution").length;
       setStatus(missing > 0
         ? `Blocked: ${missing} provider requirement${missing === 1 ? "" : "s"} need configuration.`
+        : grantParameter !== undefined && initialValues[grantParameter.id] === grantParameter.defaultValue
+          ? "Blocked: choose an export folder so Ether can issue a document-scoped path grant."
         : substitutions > 0
           ? `${recipe.title} setup is ready with ${substitutions} declared substitution${substitutions === 1 ? "" : "s"}.`
           : `${recipe.title} setup is ready.`);
@@ -207,7 +226,20 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
               <span>{parameter.title}{parameter.required ? " *" : ""}</span>
               <small>{parameter.description}</small>
               {parameter.type === "string" ? (
+                parameter.id === "exportPathGrantId" ? (
+                  <div className="recipe-path-grant-field">
+                    <button type="button" onClick={() => void (onRequestPathGrant === undefined
+                      ? Promise.resolve(null)
+                      : onRequestPathGrant()).then((grant) => {
+                        if (grant === null || grant === undefined) return;
+                        setValues((current) => ({ ...current, [parameter.id]: grant.grantId }));
+                        setPathGrantDisplayName(grant.displayName);
+                      })}>{pathGrantDisplayName ?? "Choose export folder…"}</button>
+                    {values[parameter.id] === parameter.defaultValue ? <em>Required before insertion</em> : <small>Opaque grant: {pathGrantDisplayName ?? "selected folder"}</small>}
+                  </div>
+                ) : (
                 <textarea value={typeof values[parameter.id] === "string" ? values[parameter.id] as string : ""} minLength={parameter.minLength} maxLength={parameter.maxLength} onChange={(event) => setValues((current) => ({ ...current, [parameter.id]: event.target.value }))} />
+                )
               ) : parameter.type === "number" ? (
                 <input type="number" value={typeof values[parameter.id] === "number" ? values[parameter.id] as number : parameter.minimum} min={parameter.minimum} max={parameter.maximum} step={parameter.step} onChange={(event) => setValues((current) => ({ ...current, [parameter.id]: event.target.valueAsNumber }))} />
               ) : parameter.type === "boolean" ? (

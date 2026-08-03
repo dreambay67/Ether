@@ -7,7 +7,7 @@ const evaluate = node("evaluate", "review.evaluate", "Evaluate quality", 610, 82
 const filter = node("filter", "review.filter", "Route decisions", 888, 82, { kind: "review.filter", match: "all", rules: [{ id: "approved", field: "approval", operator: "eq", value: "approved" }], routes: [{ id: "selects", label: "Selects", outcome: "matched" }, { id: "rework", label: "Needs rework", outcome: "unmatched" }] });
 const selects = node("selects", "output.collection", "Selects", 1166, 36, { kind: "output.collection", collectionId: "selects", membershipMode: "add", makePrimary: true });
 const rework = node("rework", "output.collection", "Needs rework", 1166, 210, { kind: "output.collection", collectionId: "needs-rework", membershipMode: "add", makePrimary: false });
-const llm = requirement("evaluate", "llm", ["image", "data"], ["data"], 1);
+const llm = requirement("evaluate", "evaluate", ["image", "data"], ["data"], 1);
 
 export const evaluateAndRouteRecipe = manifest({
   id: "evaluate-and-route", title: "Evaluate and Route", description: "Pair a visible human comparison with transparent evaluation rules and non-destructive collection routes.",

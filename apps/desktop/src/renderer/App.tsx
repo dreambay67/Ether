@@ -337,6 +337,11 @@ export function App() {
     if (focusNodeId !== null) window.setTimeout(() => canvasRef.current?.focusNode(focusNodeId), 0);
   };
 
+  const requestRecipePathGrant = async () => {
+    if (document === null) return null;
+    return window.ether.permissions.grantFolder(document.documentId, "export");
+  };
+
   if (document === null) {
     return (
       <StartScreen
@@ -483,6 +488,7 @@ export function App() {
                 onLoadSetup={loadRecipeSetup}
                 onPreviewRecipe={previewRecipe}
                 onInstantiateRecipe={instantiateRecipe}
+                onRequestPathGrant={requestRecipePathGrant}
                 onInserted={closeRecipes}
               /></Suspense>
             ) : <p className="recipe-gallery-error" role="alert">Blocked: {recipeCatalogError}</p> : <p className="recipe-gallery-error" role="alert">Recipe Gallery needs the application service.</p>}

@@ -50,7 +50,7 @@ export type RecipeProviderSetup = {
 };
 
 export type RecipeBlocker = {
-  code: "RECIPE_MANIFEST_INVALID" | "TARGET_GRAPH_MISSING" | "PARAMETER_INVALID" | "PARAMETER_REQUIRED" | "CAPABILITY_MISSING" | "TRANSACTION_INVALID";
+  code: "RECIPE_MANIFEST_INVALID" | "TARGET_GRAPH_MISSING" | "PARAMETER_INVALID" | "PARAMETER_REQUIRED" | "CAPABILITY_MISSING" | "PATH_GRANT_REQUIRED" | "TRANSACTION_INVALID";
   message: string;
   parameterId?: string;
   requirement?: CapabilityRequirement;

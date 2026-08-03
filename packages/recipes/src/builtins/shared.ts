@@ -14,6 +14,12 @@ import type {
   ReviewCheckpoint
 } from "@ether/schema";
 
+/** Opaque path-grant value used only until the setup sheet receives a real grant. */
+export const EXPORT_GRANT_SETUP_SENTINEL = "__ether_export_grant_required__";
+
+/** The persisted route identity selected by the canonical Codex image alias. */
+const CODEX_IMAGE_PROVIDER_ID = "codex-chatgpt-image-2";
+
 const ACCENTS: Record<string, string> = {
   "prompt.text": "#37e6ea",
   "prompt.worker": "#a78bfa",
@@ -132,6 +138,19 @@ export function referenceParameter(title = "Reference images", maximumItems = 32
   };
 }
 
+export function exportPathGrantParameter(): RecipeStringParameter {
+  return {
+    id: "exportPathGrantId",
+    title: "Export folder",
+    description: "Choose a destination folder in setup. Ether stores only its opaque document-scoped path grant.",
+    type: "string",
+    required: true,
+    defaultValue: EXPORT_GRANT_SETUP_SENTINEL,
+    minLength: 1,
+    maxLength: 256
+  };
+}
+
 export function requirement(
   id: string,
   operation: ProviderOperation,
@@ -174,12 +193,26 @@ function capabilityFor(requirement: CapabilityRequirement, providerId: string, p
 
 export function substitutionsFor(requirements: readonly CapabilityRequirement[]): ProviderSubstitution[] {
   return requirements.flatMap((item) => {
+    const providerId = item.operation === "generate-image" || item.operation === "edit-image"
+      ? CODEX_IMAGE_PROVIDER_ID
+      : item.operation === "llm"
+        ? "codex-vision-assistant"
+        : item.operation === "evaluate"
+          ? "codex-vision-evaluation"
+          : "codex";
+    const profileId = item.operation === "edit-image"
+      ? "image-edit"
+      : item.operation === "llm"
+        ? "balanced"
+        : item.operation === "evaluate"
+          ? "evaluation"
+          : "image-default";
     const substitutions: ProviderSubstitution[] = [{
       requirementId: item.id,
-      providerId: "codex",
-      profileId: item.operation === "edit-image" ? "image-edit" : item.operation === "llm" ? "balanced" : "image-default",
+      providerId,
+      profileId,
       priority: 0,
-      capability: capabilityFor(item, "codex", item.operation === "edit-image" ? "image-edit" : item.operation === "llm" ? "balanced" : "image-default"),
+      capability: capabilityFor(item, providerId, profileId),
       parameterBindings: []
     }];
     if (

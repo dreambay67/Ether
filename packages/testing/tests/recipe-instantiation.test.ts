@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { previewGraphTransaction } from "@ether/graph-kernel";
-import type { EtherGraph, ProviderCapability, RecipeManifest } from "@ether/schema";
-import { BUILTIN_RECIPES, inspectRecipeProviderSetup, instantiateRecipe } from "../../recipes/src/index.js";
+import type { EtherGraph, ProviderCapability, RecipeManifest, RecipeParameterValue } from "@ether/schema";
+import { BUILTIN_RECIPES, EXPORT_GRANT_SETUP_SENTINEL, inspectRecipeProviderSetup, instantiateRecipe } from "../../recipes/src/index.js";
 
 function targetGraph(): EtherGraph {
   return {
@@ -18,10 +18,13 @@ function capabilitiesFor(recipe: RecipeManifest, substitutionIndex = 0): Provide
     .sort((left, right) => left.priority - right.priority)[substitutionIndex]!.capability);
 }
 
-function valuesFor(recipe: RecipeManifest) {
-  return recipe.parameters
+function valuesFor(recipe: RecipeManifest): RecipeParameterValue[] {
+  const values: RecipeParameterValue[] = recipe.parameters
     .filter((parameter) => parameter.type === "artifact")
     .map((parameter) => ({ parameterId: parameter.id, value: ["artifact-source-1"] }));
+  const exportGrant = recipe.parameters.find((parameter) => parameter.id === "exportPathGrantId");
+  if (exportGrant !== undefined) values.push({ parameterId: exportGrant.id, value: "opaque-export-grant" });
+  return values;
 }
 
 function geminiCapability(operation: "generate-image" | "edit-image"): ProviderCapability {
@@ -100,9 +103,9 @@ describe("recipe instantiation", () => {
     const primary = inspectRecipeProviderSetup(recipe, capabilitiesFor(recipe));
     expect(primary).toMatchObject([{
       state: "primary",
-      selectedProviderId: "codex",
+      selectedProviderId: "codex-chatgpt-image-2",
       options: [
-        expect.objectContaining({ providerId: "codex", available: true }),
+        expect.objectContaining({ providerId: "codex-chatgpt-image-2", available: true }),
         expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2", available: false })
       ]
     }]);
@@ -119,7 +122,7 @@ describe("recipe instantiation", () => {
       state: "compatible",
       selectedProviderId: "ether-fake-local",
       options: [
-        expect.objectContaining({ providerId: "codex", available: false }),
+        expect.objectContaining({ providerId: "codex-chatgpt-image-2", available: false }),
         expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2", available: false })
       ]
     }]);
@@ -159,7 +162,7 @@ describe("recipe instantiation", () => {
       ...draftSubstitutions.map((item) => ({
         ...item,
         requirementId: "finish",
-        priority: item.providerId === "codex" ? 0 : 1,
+        priority: item.providerId === "codex-chatgpt-image-2" ? 0 : 1,
         capability: { ...item.capability, inputChannels: ["image" as const] }
       }))
     ];
@@ -178,7 +181,7 @@ describe("recipe instantiation", () => {
       operation.type === "addNode" && operation.node.definitionId === "generation.image" ? [operation.node.config] : []);
     expect(configured).toEqual(expect.arrayContaining([
       expect.objectContaining({ providerId: "google-gemini-api-nano-banana-2-lite", profileId: "nano-banana-2-lite" }),
-      expect.objectContaining({ providerId: "codex", profileId: "image-default" })
+      expect.objectContaining({ providerId: "codex-chatgpt-image-2", profileId: "image-default" })
     ]));
   });
 
@@ -211,5 +214,36 @@ describe("recipe instantiation", () => {
     expect(preview.graphs.find((graph) => graph.id === "prompt-to-image-recipe.prompt-to-image.module")?.kind).toBe("module");
     const insertedPrompt = preview.graphs.find((graph) => graph.id === "root")!.nodes.find((node) => node.id === "prompt-to-image-prompt")!;
     expect(insertedPrompt.position.x).toBe(378);
+  });
+
+  it("fails closed on an export recipe until setup supplies an opaque path grant", () => {
+    const recipe = BUILTIN_RECIPES.find((item) => item.id === "curate-collect-export")!;
+    const missing = instantiateRecipe({
+      manifest: recipe, graphs: [targetGraph()], targetGraphId: "root",
+      baseDocumentRevisionId: "document-revision", baseGraphRevisions: { root: "root-revision" },
+      parameters: [{ parameterId: "references", value: ["artifact-source-1"] }], providerCapabilities: capabilitiesFor(recipe)
+    });
+    expect(missing).toMatchObject({ kind: "blocked", blockers: [expect.objectContaining({ code: "PATH_GRANT_REQUIRED" })] });
+
+    const configured = instantiateRecipe({
+      manifest: recipe, graphs: [targetGraph()], targetGraphId: "root",
+      baseDocumentRevisionId: "document-revision", baseGraphRevisions: { root: "root-revision" },
+      parameters: [
+        { parameterId: "references", value: ["artifact-source-1"] },
+        { parameterId: "exportPathGrantId", value: "opaque-export-grant" }
+      ], providerCapabilities: capabilitiesFor(recipe)
+    });
+    expect(configured.kind).toBe("ready");
+    if (configured.kind !== "ready") return;
+    const exportOperation = configured.transaction.operations.find((operation) => operation.type === "addNode" && operation.node.definitionId === "output.export");
+    expect(exportOperation).toMatchObject({ node: { config: { pathGrantId: "opaque-export-grant" } } });
+    expect(EXPORT_GRANT_SETUP_SENTINEL).not.toBe("opaque-export-grant");
+  });
+
+  it("keeps the contact-sheet recipe on the real Join executor path", () => {
+    const recipe = BUILTIN_RECIPES.find((item) => item.id === "batch-variations-contact-sheet")!;
+    const join = recipe.graph.nodes.find((node) => node.definitionId === "flow.join");
+    expect(join).toMatchObject({ config: { kind: "flow.join", strategy: "ordered", requireComplete: true } });
+    expect(recipe.graph.edges.some((edge) => edge.to.kind === "node" && edge.to.nodeId === join?.id && edge.from.kind === "node" && edge.from.nodeId === "image")).toBe(true);
   });
 });
