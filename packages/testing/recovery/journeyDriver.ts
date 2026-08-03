@@ -35,6 +35,7 @@ export type JourneyInputKind =
   | "left-drag"
   | "left-marquee"
   | "shift-marquee"
+  | "right-click"
   | "right-drag-pan"
   | "keyboard-command"
   | "inline-text-edit"
@@ -459,6 +460,14 @@ export class RealPageInput {
       const point = await this.point(target);
       await this.page.mouse.click(point.x, point.y, { button: "left" });
       return `Left click at ${formatPoint(point)}.`;
+    });
+  }
+
+  async rightClick(target: Locator | JourneyPoint, label: string, expected: string): Promise<void> {
+    await this.recordMouse("right-click", label, expected, async () => {
+      const point = await this.point(target);
+      await this.page.mouse.click(point.x, point.y, { button: "right" });
+      return `Right click at ${formatPoint(point)}.`;
     });
   }
 

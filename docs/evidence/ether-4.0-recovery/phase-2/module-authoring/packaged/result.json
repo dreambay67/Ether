@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "module-authoring-recovery",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T16:53:29.615Z",
+  "finishedAt": "2026-08-03T16:53:42.671Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "065a5822e9cecfce00afc851b42b50f9aba22228",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "45ede4a6b1968728a5fd7e941e9ab9a85696f58130ca946f128f2f57cd94abab"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "cecb3704cdb51b2569ad20b8d91bc699d24e25a3ecf327e9bb03870dc22b49ae"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Add prompt.text from Node Library",
+      "expected": "The blank document creates prompt.text through the registry-backed factory.",
+      "actual": "Left click at (108, 498).",
+      "durationMs": 147
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Add prompt.worker from Node Library",
+      "expected": "The blank document creates prompt.worker through the registry-backed factory.",
+      "actual": "Left click at (108, 633).",
+      "durationMs": 134
+    },
+    {
+      "sequence": 3,
+      "kind": "keyboard-command",
+      "label": "Select the workflow for a Module",
+      "expected": "The canvas-owned select-all command selects both blank-authored nodes before organization.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 184
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Create Module from selection",
+      "expected": "The visible command moves the selection into one locked, durable Module through the shared graph command.",
+      "actual": "Left click at (578, 328).",
+      "durationMs": 166
+    }
+  ],
+  "errors": []
+}

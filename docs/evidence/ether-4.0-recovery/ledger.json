@@ -6891,11 +6891,23 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": ["A", "P", "V"],
+          "commit": "399dc03d5ddcb4a1ca16121f1a0872cd7c203c32",
+          "packageHash": "c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b",
+          "actionLog": "docs/evidence/ether-4.0-recovery/phase-2/connection-inspector-authoring/packaged/action-log.md",
+          "captureCommand": "pnpm.cmd exec playwright test tests/desktop/canvas.spec.ts --config playwright.config.ts --workers=1; pnpm.cmd run test:connection-inspector-recovery:packaged",
+          "notes": "The source journey passes click-to-connect intent and persistence. The exact packaged journey visibly captured compatible target emphasis from a blank document before its later edge-completion failure; this record is limited to handle visibility/intent and does not claim J04 completion.",
+          "screenshots": [
+            "docs/evidence/ether-4.0-recovery/phase-2/connection-inspector-authoring/packaged/screenshots/01-compatible-six-channel-intent.png"
+          ]
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Channel-dot visibility behavior is specified in the renderer model, but qualifying packaged and visual proof is absent at baseline.",
-      "notes": "Channel-dot visibility behavior is specified in the renderer model, but qualifying packaged and visual proof is absent at baseline."
+      "notes": "Candidate A+P+V evidence at 399dc03 covers compatible handle visibility/intent. Baseline status remains nonterminal and the later packaged edge-completion route failed, so no J04 or gate claim is made."
     },
     {
       "id": "RX-022",
@@ -6920,11 +6932,19 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": ["A"],
+          "commit": "399dc03d5ddcb4a1ca16121f1a0872cd7c203c32",
+          "packageHash": "c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b",
+          "captureCommand": "pnpm.cmd exec vitest run tests/renderer-channel-registry.test.ts --config vitest.config.ts; pnpm.cmd exec playwright test tests/desktop/canvas.spec.ts --config playwright.config.ts --workers=1",
+          "notes": "Automated renderer/kernel coverage proves stable exact-duplicate rejection and permits role/selector variants; packaged multi-lane persistence remains unproven after the deferred J04 completion failure."
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Multi-lane channel/role/selector semantics are present in the recovery contract, but no packaged proof covers them at baseline.",
-      "notes": "Multi-lane channel/role/selector semantics are present in the recovery contract, but no packaged proof covers them at baseline."
+      "notes": "Candidate A evidence at 399dc03 covers exact-duplicate and role/selector variant semantics. Packaged J04 remains PRESENT-UNPROVEN."
     },
     {
       "id": "RX-023",
@@ -6950,11 +6970,19 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": ["A"],
+          "commit": "399dc03d5ddcb4a1ca16121f1a0872cd7c203c32",
+          "packageHash": "c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b",
+          "captureCommand": "pnpm.cmd exec playwright test tests/desktop/canvas.spec.ts --config playwright.config.ts --workers=1",
+          "notes": "The source interaction journey proves quiet General presentation, all 15 in-place roles, a visible non-General badge, and matching endpoint Inspector edits. Packaged/visual role proof remains open with J04."
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Role badges and endpoint Inspector agreement are specified interaction behavior, but no qualifying packaged/visual evidence exists at baseline.",
-      "notes": "Role badges and endpoint Inspector agreement are specified interaction behavior, but no qualifying packaged/visual evidence exists at baseline."
+      "notes": "Candidate A evidence at 399dc03 covers role presentation/editing and endpoint Inspector agreement. Packaged/visual J04 evidence remains open."
     },
     {
       "id": "RX-024",
@@ -6979,11 +7007,19 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": ["A"],
+          "commit": "399dc03d5ddcb4a1ca16121f1a0872cd7c203c32",
+          "packageHash": "c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b",
+          "captureCommand": "pnpm.cmd exec playwright test tests/desktop/canvas.spec.ts --config playwright.config.ts --workers=1",
+          "notes": "The source interaction journey right-clicks a connected channel dot, removes only that edge, and proves the selected node remains selected. Packaged J04 deletion proof remains open."
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Edge-only lane deletion is specified in the interaction contract, but no packaged proof demonstrates it at baseline.",
-      "notes": "Edge-only lane deletion is specified in the interaction contract, but no packaged proof demonstrates it at baseline."
+      "notes": "Candidate A evidence at 399dc03 covers edge-only deletion and node-selection preservation. Packaged J04 evidence remains open."
     },
     {
       "id": "RX-025",

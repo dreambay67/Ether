@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "connection-inspector-recovery",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T18:00:41.681Z",
+  "finishedAt": "2026-08-03T18:00:54.802Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "399dc03d5ddcb4a1ca16121f1a0872cd7c203c32",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "06ee589f20adef6c16c704d3e3b4ad92d9ecf2bc7a73d3019b0c5590d80d69b3"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Add review.evaluate from Node Library",
+      "expected": "The blank document creates review.evaluate through the canonical registry.",
+      "actual": "Left click at (108, 639).",
+      "durationMs": 80
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Add flow.batch from Node Library",
+      "expected": "The blank document creates flow.batch through the canonical registry.",
+      "actual": "Left click at (108, 669).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 3,
+      "kind": "left-click",
+      "label": "Add prompt.text from Node Library",
+      "expected": "The blank document creates prompt.text through the canonical registry.",
+      "actual": "Left click at (108, 557).",
+      "durationMs": 45
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Add prompt.worker from Node Library",
+      "expected": "The blank document creates prompt.worker through the canonical registry.",
+      "actual": "Left click at (108, 633).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 5,
+      "kind": "left-click",
+      "label": "Hide Reference Desk",
+      "expected": "The graph gets a clear practical authoring viewport.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 6,
+      "kind": "left-click",
+      "label": "Hide Build tools",
+      "expected": "The graph gets a clear practical authoring viewport.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 32
+    },
+    {
+      "sequence": 7,
+      "kind": "left-click",
+      "label": "Hide Project lens",
+      "expected": "The graph gets a clear practical authoring viewport.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 28
+    },
+    {
+      "sequence": 8,
+      "kind": "keyboard-command",
+      "label": "Fit the blank-authored connection graph",
+      "expected": "All four authored cards and their channel rails fit in the visible canvas.",
+      "actual": "Pressed Home.",
+      "durationMs": 8
+    },
+    {
+      "sequence": 9,
+      "kind": "left-click",
+      "label": "Begin Text lane",
+      "expected": "Only compatible receiver handles are emphasized for the Text channel.",
+      "actual": "Left click at (939, 633).",
+      "durationMs": 95
+    },
+    {
+      "sequence": 10,
+      "kind": "screenshot",
+      "label": "Capture compatible channel intent",
+      "expected": "A deliberate source click reveals the compatible receiver rail before persistence.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 977,
+      "screenshotPath": "screenshots/01-compatible-six-channel-intent.png"
+    },
+    {
+      "sequence": 11,
+      "kind": "left-click",
+      "label": "Complete Text lane",
+      "expected": "The Text lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (336, 408).",
+      "durationMs": 220
+    }
+  ],
+  "errors": []
+}
