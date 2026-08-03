@@ -39,6 +39,7 @@ import {
 } from "@ether/document";
 import {
   compilePlan,
+  createSharpLocalMediaFacet,
   DurableScheduler,
   ExecutionConcurrencyDomains,
   resolveScope,
@@ -1615,7 +1616,10 @@ export class EtherApplication implements EtherApplicationService {
     this.scheduler = new DurableScheduler({
       appDataRoot: this.options.appDataRoot,
       provider: this.options.provider,
-      providers: this.options.executionProviders,
+      providers: {
+        ...this.options.executionProviders,
+        localMedia: this.options.executionProviders?.localMedia ?? createSharpLocalMediaFacet()
+      },
       providerResolver: this.options.providerResolver,
       concurrencyDomains: this.options.concurrencyDomains,
       // The scheduler's durable-store protocol is intentionally narrower than

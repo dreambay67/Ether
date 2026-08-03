@@ -300,6 +300,7 @@ export const EditTransformConfigSchema = z
   .object({
     kind: z.literal("edit.transform"),
     operation: z.enum(["resize", "crop", "rotate", "upscale"]),
+    angle: z.number().finite().gt(-360).lt(360).optional(),
     width: z.number().int().positive().optional(),
     height: z.number().int().positive().optional(),
     preserveAspectRatio: z.boolean()

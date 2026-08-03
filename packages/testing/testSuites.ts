@@ -54,6 +54,7 @@ export const testSuites = {
     "tests/export-codec.test.ts",
     "tests/batch-scheduler.test.ts",
     "tests/application-contract-4.0.test.ts",
+    "tests/local-media-runtime.test.ts",
     "tests/local-output-publication.test.ts",
     "tests/live-output.test.ts",
     "tests/mcp-4.0.test.ts",

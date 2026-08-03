@@ -1,4 +1,11 @@
-import type { ExecutorContext, ExecutorResult, StepExecutor } from "./types.js";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import sharp from "sharp";
+
+import { EditMaskGeometrySchema, type EditMaskGeometry, type PayloadEnvelope } from "@ether/schema";
+
+import { ExecutorFailure, requireFacet, type ExecutorContext, type ExecutorResult, type LocalMediaFacet, type LocalMediaOutput, type StepExecutor } from "./types.js";
 import { jsonValue } from "./input.js";
 
 export class LocalMediaExecutor implements StepExecutor {
@@ -17,16 +24,273 @@ export class LocalMediaExecutor implements StepExecutor {
         }))
       };
     }
-    const localMedia = context.providers.localMedia;
-    if (localMedia === undefined) {
-      throw new Error(`The ${context.step.executor} step requires the local media executor facet.`);
-    }
+    const localMedia = requireFacet(context.providers.localMedia, "deterministic local media");
     const operation = context.step.executor === "mask"
       ? "mask"
       : stringOperation(context.step.parameters.operation);
-    const outputs = await localMedia.transform({ operation, inputs: context.inputs, parameters: context.step.parameters, signal: context.signal });
-    return { kind: "complete", outputs };
+    const outputs = await localMedia.transform({
+      operation,
+      inputs: context.inputs,
+      parameters: context.step.parameters,
+      signal: context.signal,
+      stagingDirectory: context.stagingDirectory
+    });
+    return { kind: "local-media", outputs };
   }
+}
+
+/**
+ * The canonical edit.mask and edit.transform routes are intentionally local:
+ * their results are derived only from scheduler-staged inputs, never a remote
+ * provider.  The scheduler later imports the output file atomically as a local
+ * artifact with ordinary output lineage.
+ */
+export function createSharpLocalMediaFacet(): LocalMediaFacet {
+  return { transform: transformWithSharp };
+}
+
+async function transformWithSharp(input: Parameters<LocalMediaFacet["transform"]>[0]): Promise<LocalMediaOutput[]> {
+  ensureNotAborted(input.signal);
+  const source = requiredStagedInput(input.inputs, "image", "source image");
+  const output = input.operation === "mask"
+    ? await makeMask(input, source)
+    : await transformImage(input, source);
+  ensureNotAborted(input.signal);
+  await mkdir(input.stagingDirectory, { recursive: true });
+  const fileName = `local-${input.operation}-${randomUUID()}.png`;
+  const stagedPath = path.join(input.stagingDirectory, fileName);
+  await writeFile(stagedPath, output.bytes, { flag: "wx", mode: 0o600 });
+  return [{
+    channel: output.channel,
+    role: output.role,
+    fileName,
+    mediaType: "image/png",
+    stagedPath,
+    metadata: {
+      localMediaOperation: input.operation,
+      sourcePayloadId: source.id,
+      width: output.width,
+      height: output.height,
+      ...(source.content.kind === "artifact" ? { sourceArtifactId: source.content.artifactId } : {}),
+      ...(output.channel === "mask" && output.maskPayloadId !== undefined ? { maskPayloadId: output.maskPayloadId } : {}),
+      ...(output.channel === "mask" && output.workspaceMaskStrokeCount !== undefined
+        ? { workspaceMaskStrokeCount: output.workspaceMaskStrokeCount }
+        : {})
+    }
+  }];
+}
+
+async function transformImage(
+  input: Parameters<LocalMediaFacet["transform"]>[0],
+  source: PayloadEnvelope
+): Promise<{ bytes: Buffer; channel: "image"; height: number; role: PayloadEnvelope["role"]; width: number }> {
+  const sourceBytes = await stagedAssetBytes(source, input.stagingDirectory, "source image");
+  const pipeline = sharp(sourceBytes, { failOn: "error" }).rotate();
+  const metadata = await sharp(sourceBytes, { failOn: "error" }).metadata().catch((error: unknown) => decodeFailure("source image", error));
+  const sourceWidth = metadata.width;
+  const sourceHeight = metadata.height;
+  if (sourceWidth === undefined || sourceHeight === undefined) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", "The source image has no readable dimensions.");
+  }
+  const operation = input.operation;
+  if (operation === "resize") {
+    const width = optionalPositiveInteger(input.parameters.width);
+    const height = optionalPositiveInteger(input.parameters.height);
+    if (width === undefined && height === undefined) {
+      throw new ExecutorFailure("LOCAL_MEDIA_PARAMETERS_INVALID", "Resize requires a positive width or height.");
+    }
+    pipeline.resize({
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
+      fit: input.parameters.preserveAspectRatio === false ? "fill" : "inside"
+    });
+  } else if (operation === "crop") {
+    const width = requiredPositiveInteger(input.parameters.width, "Crop width");
+    const height = requiredPositiveInteger(input.parameters.height, "Crop height");
+    pipeline.resize({ width, height, fit: "cover", position: "centre" });
+  } else if (operation === "rotate") {
+    const angle = finiteAngle(input.parameters.angle);
+    pipeline.rotate(angle);
+  } else if (operation === "upscale") {
+    const width = requiredPositiveInteger(input.parameters.width, "Upscale width");
+    const height = requiredPositiveInteger(input.parameters.height, "Upscale height");
+    if (width < sourceWidth || height < sourceHeight) {
+      throw new ExecutorFailure("LOCAL_MEDIA_PARAMETERS_INVALID", "Upscale dimensions must not shrink the source image.");
+    }
+    pipeline.resize({ width, height, fit: input.parameters.preserveAspectRatio === false ? "fill" : "inside", withoutEnlargement: false });
+  } else {
+    throw new ExecutorFailure("LOCAL_MEDIA_OPERATION_UNSUPPORTED", `Unsupported deterministic transform operation ${String(operation)}.`);
+  }
+  const bytes = await pipeline.png({ compressionLevel: 9 }).toBuffer().catch((error: unknown) => decodeFailure("source image", error));
+  const result = await sharp(bytes, { failOn: "error" }).metadata().catch((error: unknown) => decodeFailure("transformed image", error));
+  if (result.width === undefined || result.height === undefined) {
+    throw new ExecutorFailure("LOCAL_MEDIA_OUTPUT_INVALID", "The transformed image has no readable dimensions.");
+  }
+  return { bytes, channel: "image", role: source.role, width: result.width, height: result.height };
+}
+
+async function makeMask(
+  input: Parameters<LocalMediaFacet["transform"]>[0],
+  source: PayloadEnvelope
+): Promise<{
+  bytes: Buffer;
+  channel: "mask";
+  height: number;
+  maskPayloadId?: string;
+  role: "general";
+  width: number;
+  workspaceMaskStrokeCount?: number;
+}> {
+  if (input.parameters.mode === "provider") {
+    throw new ExecutorFailure("LOCAL_MEDIA_OPERATION_UNSUPPORTED", "Provider mask mode is not a deterministic local operation.");
+  }
+  const sourceBytes = await stagedAssetBytes(source, input.stagingDirectory, "source image");
+  const sourceMetadata = await sharp(sourceBytes, { failOn: "error" }).metadata().catch((error: unknown) => decodeFailure("source image", error));
+  if (sourceMetadata.width === undefined || sourceMetadata.height === undefined) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", "The source image has no readable dimensions.");
+  }
+  const mask = input.inputs.find((candidate) => candidate.channel === "mask");
+  const maskBytes = mask === undefined ? undefined : await stagedAssetBytes(mask, input.stagingDirectory, "mask");
+  const geometry = workspaceMaskGeometry(input.parameters);
+  const feather = optionalNonnegativeNumber(input.parameters.feather) ?? 0;
+  if (feather > 100) {
+    throw new ExecutorFailure("LOCAL_MEDIA_PARAMETERS_INVALID", "Mask feather must be between 0 and 100 pixels.");
+  }
+  let pipeline = geometry !== undefined
+    ? sharp(rasterMaskSvg(geometry, sourceMetadata.width, sourceMetadata.height))
+    : maskBytes === undefined
+    ? sharp({ create: { width: sourceMetadata.width, height: sourceMetadata.height, channels: 3, background: 0 } })
+    : sharp(maskBytes, { failOn: "error" })
+      .resize({ width: sourceMetadata.width, height: sourceMetadata.height, fit: "fill" })
+      .grayscale();
+  pipeline = pipeline.grayscale();
+  if (feather > 0) pipeline = pipeline.blur(Math.max(0.3, feather));
+  const bytes = await pipeline.png({ compressionLevel: 9 }).toBuffer().catch((error: unknown) => decodeFailure("mask", error));
+  return {
+    bytes,
+    channel: "mask",
+    role: "general",
+    width: sourceMetadata.width,
+    height: sourceMetadata.height,
+    ...(mask === undefined ? {} : { maskPayloadId: mask.id }),
+    ...(geometry === undefined ? {} : { workspaceMaskStrokeCount: geometry.strokes.length })
+  };
+}
+
+function requiredStagedInput(
+  inputs: readonly PayloadEnvelope[],
+  channel: "image" | "mask",
+  label: string
+): PayloadEnvelope {
+  const input = inputs.find((candidate) => candidate.channel === channel);
+  if (input === undefined) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_REQUIRED", `The deterministic local operation requires an authorized ${label} input.`);
+  }
+  return input;
+}
+
+function workspaceMaskGeometry(parameters: Record<string, unknown>): EditMaskGeometry | undefined {
+  const workspace = parameters.workspace;
+  if (workspace === null || typeof workspace !== "object" || Array.isArray(workspace)) return undefined;
+  const geometry = (workspace as Record<string, unknown>).geometry;
+  if (geometry === undefined) return undefined;
+  const parsed = EditMaskGeometrySchema.safeParse(geometry);
+  if (!parsed.success) {
+    throw new ExecutorFailure("LOCAL_MEDIA_PARAMETERS_INVALID", "The persisted mask workspace geometry is invalid.");
+  }
+  return parsed.data;
+}
+
+function rasterMaskSvg(geometry: EditMaskGeometry, width: number, height: number): Buffer {
+  const scaleX = width / geometry.width;
+  const scaleY = height / geometry.height;
+  const scale = (scaleX + scaleY) / 2;
+  const strokes = geometry.strokes.flatMap((stroke) => {
+    if (stroke.points.length === 0) return [];
+    const color = stroke.tool === "brush" ? "white" : "black";
+    const opacity = Math.max(0, Math.min(1, stroke.opacity));
+    const strokeWidth = stroke.size * scale;
+    const points = stroke.points.map((point) => ({
+      x: point.x * scaleX,
+      y: point.y * scaleY,
+      pressure: point.pressure
+    }));
+    if (points.length === 1) {
+      const point = points[0]!;
+      return [`<circle cx="${point.x}" cy="${point.y}" r="${Math.max(.5, strokeWidth * point.pressure / 2)}" fill="${color}" fill-opacity="${opacity}"/>`];
+    }
+    const pathData = points.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
+    return [`<path d="${pathData}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round"/>`];
+  }).join("");
+  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="black"/>${strokes}</svg>`);
+}
+
+async function stagedAssetBytes(input: PayloadEnvelope, stagingDirectory: string, label: string): Promise<Buffer> {
+  const assetPath = typeof input.metadata.assetPath === "string" ? input.metadata.assetPath : "";
+  let root: string;
+  try {
+    root = await realpath(stagingDirectory);
+  } catch (error) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", "The scheduler-owned media staging directory is unavailable.", false, { cause: error });
+  }
+  const candidate = path.resolve(assetPath);
+  const relative = path.relative(root, candidate);
+  if (assetPath.length === 0 || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} is not an authorized staged asset.`);
+  }
+  let canonical: string;
+  try {
+    canonical = await realpath(candidate);
+  } catch (error) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} staged asset is unavailable.`, false, { cause: error });
+  }
+  const canonicalRelative = path.relative(root, canonical);
+  if (canonicalRelative === ".." || canonicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(canonicalRelative)) {
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} staged asset escapes its authorized directory.`);
+  }
+  try {
+    if (!(await stat(canonical)).isFile()) {
+      throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} staged asset is not a regular file.`);
+    }
+    return await readFile(canonical);
+  } catch (error) {
+    if (error instanceof ExecutorFailure) throw error;
+    throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} staged asset could not be read.`, false, { cause: error });
+  }
+}
+
+function requiredPositiveInteger(value: unknown, label: string): number {
+  const parsed = optionalPositiveInteger(value);
+  if (parsed === undefined) throw new ExecutorFailure("LOCAL_MEDIA_PARAMETERS_INVALID", `${label} must be a positive integer.`);
+  return parsed;
+}
+
+function optionalPositiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 32_768 ? value : undefined;
+}
+
+function optionalNonnegativeNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function finiteAngle(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= -360 || value >= 360 || value === 0) {
+    throw new ExecutorFailure("LOCAL_MEDIA_PARAMETERS_INVALID", "Rotate angle must be a finite non-zero number between -360 and 360 degrees.");
+  }
+  return value;
+}
+
+function ensureNotAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new ExecutorFailure("CANCELLED", "Deterministic local media execution was cancelled.");
+}
+
+function decodeFailure(label: string, error: unknown): never {
+  throw new ExecutorFailure(
+    "LOCAL_MEDIA_DECODE_FAILED",
+    `The ${label} could not be decoded as a supported image.`,
+    false,
+    { cause: error instanceof Error ? error : undefined }
+  );
 }
 
 function filter(context: ExecutorContext): ExecutorResult {

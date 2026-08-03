@@ -22,7 +22,7 @@ import {
 import sharp from "sharp";
 
 import { ExecutorRegistry } from "../executors/registry.js";
-import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets, ExecutionProviderResolver } from "../executors/types.js";
+import type { ExecutorClaim, ExecutorPayloadDraft, ExecutionProviderFacets, ExecutionProviderResolver, LocalMediaOutput } from "../executors/types.js";
 import { ExecutorFailure } from "../executors/types.js";
 import { toProviderPayloads } from "../executors/input.js";
 import { verifyPlanHash } from "../plan/hashPlan.js";
@@ -56,7 +56,9 @@ export class DurableScheduler {
     if (options.persistence !== undefined) {
       this.persistence = options.persistence;
     } else if (options.store !== undefined) {
-      this.persistence = isSchedulerPersistence(options.store) ? options.store : documentStorePersistence(options.store);
+      this.persistence = isSchedulerPersistence(options.store)
+        ? options.store
+        : documentStorePersistence(options.store, options.appDataRoot);
     } else {
       throw new Error("DurableScheduler requires a persistence adapter or an open Ether document store.");
     }
@@ -184,9 +186,15 @@ export class DurableScheduler {
       : await this.persistence.resolvePlanInputs({ claim, step, plannedWorkItem, stagingDirectory });
     const providerInputs = toProviderPayloads(inputs);
     await this.withConcurrency(binding, signal, async () => {
-      const providers = this.options.providerResolver === undefined
+      const resolvedProviders = this.options.providerResolver === undefined
         ? this.providers
         : await this.options.providerResolver({ binding, step });
+      // Remote-provider resolution intentionally remains authoritative for every
+      // remote facet.  The deterministic local-media capability is application
+      // owned, however, and must stay available for Mask/Transform executions.
+      const providers = this.options.providerResolver === undefined
+        ? resolvedProviders
+        : { ...resolvedProviders, localMedia: resolvedProviders.localMedia ?? this.providers.localMedia };
       const result = await this.executors.execute({
         claim,
         step,
@@ -199,6 +207,8 @@ export class DurableScheduler {
       });
       if (result.kind === "provider-generation") {
         await this.executeProviderCompletion(claim, step, binding, result, inputs, stagingDirectory, signal);
+      } else if (result.kind === "local-media") {
+        await this.acceptLocalMediaCompletion(claim, step, inputs, result.outputs, stagingDirectory);
       } else if (result.kind === "waiting-review") {
         await this.persistence.waitForReview({ claim, ...result.checkpoint });
       } else {
@@ -284,6 +294,41 @@ export class DurableScheduler {
           : outputs.flatMap((output) => output.payloads.map((payload) => payload.id))
       }))
     });
+  }
+
+  private async acceptLocalMediaCompletion(
+    claim: ExecutorClaim,
+    step: ExecutorClaim["plan"]["steps"][number],
+    inputs: PayloadEnvelope[],
+    outputs: LocalMediaOutput[],
+    stagingDirectory: string
+  ): Promise<void> {
+    if (outputs.length === 0) {
+      throw new ExecutorFailure("EMPTY_EXECUTOR_OUTPUT", `${step.executor} completed without a staged local media output.`);
+    }
+    const accept = this.persistence.acceptLocalMediaOutput;
+    if (accept === undefined) {
+      throw new ExecutorFailure(
+        "LOCAL_MEDIA_PERSISTENCE_UNAVAILABLE",
+        "The active execution store cannot durably accept deterministic local media output."
+      );
+    }
+    const durableOutputs = await Promise.all(outputs.map(async (output, ordinal) => {
+      assertSafeArtifactFileName(output.fileName);
+      const stagedPath = await authorizeLocalMediaSource(output.stagedPath, stagingDirectory);
+      return {
+        ...output,
+        stagedPath,
+        artifactId: stableId("artifact", claim.attempt.id, ordinal),
+        outputVersionId: stableId("output", claim.attempt.id, ordinal),
+        payloadId: stableId("payload", claim.attempt.id, ordinal)
+      };
+    }));
+    try {
+      await accept({ claim, step, inputs, outputs: durableOutputs });
+    } finally {
+      try { removeOwnedStagingPath(stagingDirectory, this.options.appDataRoot); } catch { /* terminal local attempt owns cleanup */ }
+    }
   }
 
   private async executeProviderCompletion(
@@ -642,6 +687,27 @@ async function authorizeProviderSource(sourcePath: string, stagingDirectory: str
   assertContainedPath(stagingDirectory, canonical);
   if (!(await stat(canonical)).isFile()) {
     throw new ExecutorFailure("PROVIDER_OUTPUT_PATH_INVALID", "Provider artifact source is not a regular file.");
+  }
+  return canonical;
+}
+
+async function authorizeLocalMediaSource(sourcePath: string, stagingDirectory: string): Promise<string> {
+  const candidate = path.resolve(stagingDirectory, sourcePath);
+  assertContainedPath(stagingDirectory, candidate);
+  let canonical: string;
+  try {
+    canonical = await realpath(candidate);
+  } catch (error) {
+    throw new ExecutorFailure(
+      "LOCAL_MEDIA_OUTPUT_PATH_INVALID",
+      "The deterministic local media output is unavailable or cannot be resolved safely.",
+      false,
+      { cause: error }
+    );
+  }
+  assertContainedPath(stagingDirectory, canonical);
+  if (!(await stat(canonical)).isFile()) {
+    throw new ExecutorFailure("LOCAL_MEDIA_OUTPUT_PATH_INVALID", "The deterministic local media output is not a regular file.");
   }
   return canonical;
 }

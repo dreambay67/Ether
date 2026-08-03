@@ -107,6 +107,7 @@ export type PlanCompilationErrorCode =
   | "PROVIDER_CAPABILITY_UNAVAILABLE"
   | "EDIT_CAPABILITY_UNSUPPORTED"
   | "EDIT_MASK_UNSUPPORTED"
+  | "LOCAL_MEDIA_PROVIDER_MODE_UNSUPPORTED"
   | "EDIT_WORKSPACE_ARTIFACT_NOT_FOUND"
   | "EDIT_SOURCE_NOT_ON_IMAGE_LANE"
   | "WORKER_CONTEXT_INVALID"
@@ -1189,9 +1190,16 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
     case "review.evaluate":
       return makeProviderBinding(input, input.capability.providerId, config.model, config);
     case "edit.mask":
-      return config.mode === "provider"
-        ? makeProviderBinding(input, input.capability.providerId, "mask-provider-v1", config)
-        : null;
+      if (config.mode === "provider") {
+        throw new PlanCompilationError(
+          "LOCAL_MEDIA_PROVIDER_MODE_UNSUPPORTED",
+          "Provider mask mode is not available for the canonical deterministic Mask executor. Choose local or manual mode.",
+          { nodeId: node.id }
+        );
+      }
+      // Canonical local/manual masks are rendered from staged image/mask inputs
+      // and persisted workspace geometry; no remote provider route is selected.
+      return null;
     default:
       return null;
   }

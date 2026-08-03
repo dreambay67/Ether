@@ -187,7 +187,7 @@ const inspectorFields: Record<NodeDefinitionId, string[]> = {
   "prompt.text": ["body", "assembly"], "prompt.worker": ["instruction", "behavior", "profile", "model"],
   "reference.set": ["artifactIds", "enabledChannels", "ordering"], "generation.image": ["providerId", "profileId", "aspectRatio", "resolution", "outputFormat", "outputCount"],
   "edit.image": ["providerId", "profileId", "strength", "outputCount"], "edit.mask": ["mode", "feather"],
-  "edit.transform": ["operation", "width", "height", "preserveAspectRatio"], "review.compare": ["selectionMode", "minimumSelections"],
+  "edit.transform": ["operation", "angle", "width", "height", "preserveAspectRatio"], "review.compare": ["selectionMode", "minimumSelections"],
   "review.evaluate": ["instruction", "rubric", "profile", "model", "reasoningEffort"], "review.filter": ["match", "rules", "routes"],
   "flow.variables": ["variables"], "flow.batch": ["dimensions", "exclusions", "parallelism"], "flow.join": ["strategy", "requireComplete"],
   "output.collection": ["collectionId", "membershipMode", "makePrimary"], "output.export": ["pathGrantId", "namingTemplate", "format", "collisionPolicy", "includeMetadata"],

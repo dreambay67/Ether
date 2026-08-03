@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import {
+  importBlob,
   streamBlobRange,
   verifyExecutionEmbeddedReference,
   verifyExecutionReference,
@@ -23,7 +24,7 @@ import {
   type PayloadEnvelope
 } from "@ether/schema";
 
-import { ExecutorFailure, type ExecutorClaim } from "../executors/types.js";
+import { ExecutorFailure, type ExecutorClaim, type LocalMediaOutput } from "../executors/types.js";
 
 type ReferenceInputBindingBase = {
   id: string;
@@ -68,6 +69,7 @@ export type SchedulerPersistence = {
   failAttempt(attemptId: string, code: string, message: string, retryable: boolean): Promise<boolean>;
   acceptProviderOutput(input: Record<string, unknown>): Promise<unknown>;
   acceptCompletion(input: Record<string, unknown>): Promise<unknown>;
+  acceptLocalMediaOutput?(input: LocalMediaPersistenceInput): Promise<unknown>;
   prepareProviderCompletion(completion: unknown, stagingPath: string): Promise<unknown>;
   stageProviderCompletion(completion: unknown): Promise<unknown>;
   discardProviderCompletion(attemptId: string): Promise<boolean>;
@@ -88,7 +90,14 @@ export type DocumentStoreLike = {
   transaction<T>(operation: (repositories: { execution: unknown; outputs: unknown }) => T): Promise<T>;
 };
 
-export function documentStorePersistence(store: DocumentStoreLike): SchedulerPersistence {
+export type LocalMediaPersistenceInput = {
+  claim: ExecutorClaim;
+  outputs: Array<LocalMediaOutput & { artifactId: string; outputVersionId: string; payloadId: string }>;
+  step: ExecutorClaim["plan"]["steps"][number];
+  inputs: PayloadEnvelope[];
+};
+
+export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?: string): SchedulerPersistence {
   const persistence: SchedulerPersistence = {
     // A Save As publishes the same open store under a new document identity. Keep
     // scheduler persistence bound to that live identity rather than the identity
@@ -110,6 +119,7 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
       store.transaction(({ execution }) => callMethod<boolean>(execution, "failAttempt", [attemptId, code, message, retryable])),
     acceptProviderOutput: (input) => store.transaction(({ execution }) => callMethod(execution, "acceptProviderOutput", [input])),
     acceptCompletion: (input) => store.transaction(({ execution }) => requireExecutionMethod(execution, "acceptCompletion")(input)),
+    acceptLocalMediaOutput: async (input) => acceptLocalMediaOutput(store as DocumentStore, input, appDataRoot),
     prepareProviderCompletion: (completion, stagingPath) =>
       store.transaction(({ execution }) => callMethod(execution, "prepareProviderCompletion", [completion, stagingPath])),
     stageProviderCompletion: (completion) => store.transaction(({ execution }) => callMethod(execution, "stageProviderCompletion", [completion])),
@@ -228,6 +238,96 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
     }
   };
   return persistence;
+}
+
+async function acceptLocalMediaOutput(
+  store: DocumentStore,
+  input: LocalMediaPersistenceInput,
+  appDataRoot: string | undefined
+): Promise<unknown> {
+  const importedContentKeys: string[] = [];
+  try {
+    const imported: Array<{
+      output: LocalMediaPersistenceInput["outputs"][number];
+      blob: Awaited<ReturnType<typeof importBlob>>;
+    }> = [];
+    for (const output of input.outputs) {
+      const source = { sourcePath: output.stagedPath, mediaType: output.mediaType };
+      const blob = appDataRoot === undefined
+        ? await importBlob(store, source)
+        : await importBlob(store, source, { appDataRoot });
+      importedContentKeys.push(blob.contentKey);
+      imported.push({ output, blob });
+    }
+    const completedAt = new Date().toISOString();
+    return store.transaction(({ execution }) => execution.acceptCompletion({
+      claim: input.claim as ClaimedExecution,
+      outputs: imported.map(({ output, blob }, ordinal) => {
+        const version: NodeOutputVersion = {
+          id: output.outputVersionId,
+          nodeId: input.step.nodeId,
+          graphId: input.claim.plan.graphId,
+          graphRevisionId: input.claim.plan.graphRevisionId,
+          inputPayloadIds: input.inputs.map((payload) => payload.id),
+          selectedOutputVersionIds: unique(input.inputs.map((payload) => payload.source.outputVersionId)),
+          compiledContextHash: input.claim.plan.contentHash,
+          producer: { kind: "local", executor: input.step.executor },
+          outputPayloadIds: [output.payloadId],
+          parentOutputVersionId: null,
+          approval: input.step.parameters.reviewPolicy === "auto-apply"
+            ? { state: "approved", actor: "system", at: completedAt }
+            : { state: "unreviewed" },
+          runId: input.claim.job.id,
+          stepId: input.step.id,
+          workItemId: input.claim.workItem.id,
+          attemptId: input.claim.attempt.id,
+          timing: { startedAt: input.claim.attempt.startedAt ?? input.claim.attempt.createdAt, completedAt },
+          failure: null,
+          createdAt: completedAt
+        };
+        const payload: PayloadEnvelope = {
+          id: output.payloadId,
+          channel: output.channel,
+          role: output.role,
+          content: { kind: "artifact", artifactId: output.artifactId },
+          source: {
+            nodeId: input.step.nodeId,
+            outputVersionId: output.outputVersionId,
+            lineageKey: `${input.claim.plan.graphId}:${input.step.nodeId}:${input.claim.workItem.id}:${ordinal}`
+          },
+          metadata: { mediaType: output.mediaType, ...(output.metadata ?? {}) }
+        };
+        const artifact: Artifact = {
+          id: output.artifactId,
+          contentKey: blob.contentKey,
+          channel: output.channel,
+          mediaType: output.mediaType,
+          byteLength: blob.byteLength,
+          source: { outputVersionId: output.outputVersionId, payloadId: output.payloadId },
+          createdAt: completedAt,
+          metadata: {
+            title: output.fileName,
+            localMediaOperation: input.step.executor === "mask" ? "mask" : input.step.parameters.operation,
+            ...(output.metadata ?? {})
+          }
+        };
+        return { version, payloads: [payload], artifacts: [artifact] };
+      })
+    }));
+  } catch (error) {
+    if (importedContentKeys.length > 0) {
+      try {
+        await store.reclaimUnreferencedReadyBlobs(importedContentKeys);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "Local media output acceptance failed and its unreferenced blobs could not be reclaimed.",
+          { cause: cleanupError }
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 async function materializePlanReferences(
@@ -538,6 +638,10 @@ function extensionForMediaType(mediaType: string): string {
   if (mediaType === "video/mp4") return ".mp4";
   if (mediaType === "audio/wav") return ".wav";
   return ".bin";
+}
+
+function unique<T>(values: readonly T[]): T[] {
+  return [...new Set(values)];
 }
 
 export function isSchedulerPersistence(value: unknown): value is SchedulerPersistence {

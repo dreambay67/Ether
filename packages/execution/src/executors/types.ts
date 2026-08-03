@@ -46,6 +46,15 @@ export type ExecutorPayloadDraft = {
   metadata?: JsonObject;
 };
 
+export type LocalMediaOutput = {
+  channel: "image" | "mask";
+  role: ConnectionRole;
+  fileName: string;
+  mediaType: string;
+  metadata?: JsonObject;
+  stagedPath: string;
+};
+
 export type ExecutorResult =
   | {
       kind: "complete";
@@ -65,6 +74,7 @@ export type ExecutorResult =
       input: import("@ether/providers").GenerationProviderInput | import("@ether/providers").ImageEditProviderInput;
       expectedOutputCount: number;
     }
+  | { kind: "local-media"; outputs: LocalMediaOutput[] }
   | { kind: "waiting-review"; checkpoint: { selectionMode: "one" | "many"; minimumSelections: number } };
 
 export type WorkerFacet = Pick<AssistantProvider, "run">;
@@ -87,7 +97,8 @@ export type LocalMediaFacet = {
     inputs: PayloadEnvelope[];
     parameters: JsonObject;
     signal: AbortSignal;
-  }): Promise<ExecutorPayloadDraft[]>;
+    stagingDirectory: string;
+  }): Promise<LocalMediaOutput[]>;
 };
 
 export type CollectionFacet = {

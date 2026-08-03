@@ -27,7 +27,7 @@ export function registryFieldControl(kind: NodeConfig["kind"], field: string, va
   if (typeof value === "number") return "number";
   if (typeof value === "string") return "text";
   if (Array.isArray(value)) return "list";
-  if (value === undefined && ["width", "height"].includes(field)) return "optional-number";
+  if (value === undefined && ["angle", "width", "height"].includes(field)) return "optional-number";
   if (value === undefined && field === "exclusions") return "optional-list";
   return "unhandled";
 }
