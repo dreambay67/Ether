@@ -60,8 +60,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
       }
       await targetHandle.hover();
       await input.leftClick(targetHandle, `Complete ${label} lane`, `The ${label} lane persists through the ordinary connection interaction.`);
+      await expect(canvas).toHaveAttribute("data-projected-edge-count", String(index + 1));
       if (index === 0) {
-        await page.waitForTimeout(250);
         input.observe(
           "First lane completion state",
           "The saved graph and rendered path both report the completed Text lane.",
