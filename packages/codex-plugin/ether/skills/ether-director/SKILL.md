@@ -13,8 +13,21 @@ Roles: general, negative, subject, product, face, clothing, pose, setting, compo
 
 Translate the brief into Prompt, model-aware LLM Worker, Reference Set, generation/edit, review, collection, and export-preparation stages only when each serves the deliverable. Preserve immutable output selectors and keep node instructions separate from incoming content.
 
+The Node Library is the registry-backed source of truth: inspect `ether.node.catalog`
+and create only registered definitions through a graph transaction. Direct canvas
+editing is host-owned; do not emulate it with hidden field writes. Modules are
+locked by default. Create membership from an explicit selection, then use the
+host's module controls for rename, accent, description, collapse, enter/exit,
+unlock/relock, and dissolve; never move or dissolve a locked module.
+
 Preview one atomic change with `ether.graph.transaction.preview`; apply with `ether.graph.transaction.apply` or instantiate an approved recipe with `ether.recipe.preview` and `ether.recipe.instantiate`. Use `$temp:node:<name>`, `$temp:edge:<name>`, `$temp:group:<name>`, `$temp:module:<name>`, or `$temp:graph:<name>` only where that identity kind is declared. Reinspect and validate after apply; reject an unwanted proposal with `ether.graph.transaction.reject`.
 
 Permits are issued by the Ether host and are only observable through `ether.permission.inspect`; MCP cannot create or elevate them. Transaction apply and recipe instantiate require an `editPermitId`. Leave execution untouched under Edit Permit. For an explicit later run, use `ether.run.plan.preview`, then `ether.run.start` with a host-issued `runPermitId` bound to the exact `planId` and `contentHash`. Inspect durable work through `ether.run.list`, `ether.run.inspect`, and `ether.run.plan.inspect`.
 
 The tested natural-language construction template is `../../examples/editorial-campaign.transaction.json`. Hydrate every `{{...}}` value from the active document, graph, and selected references returned by MCP; `pathGrantId` must come from a real host-issued export grant. If no export grant is available, omit the export node and its incoming edge before preview. The hydrated transaction builds the campaign graph as one revision and starts no provider.
+
+For a genuinely blank document, use `../../examples/blank-document.transaction.json`
+under an Edit Permit. It needs only current document/graph revisions and creates a
+Prompt plus LLM Worker; inspect the catalog first, preview/apply once, and validate.
+With no reference or export grant, omit reference membership and export nodes. An
+Edit Permit never starts a provider.

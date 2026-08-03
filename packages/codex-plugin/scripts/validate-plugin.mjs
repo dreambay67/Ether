@@ -175,13 +175,15 @@ for (const skillName of compatibilitySkills) {
   if (!/Compatibility alias/i.test(skill) || !/\$ether-/.test(skill) || skill.split(/\r?\n/).length > 12) fail(`${skillName} must be a concise compatibility alias`);
 }
 
-for (const fileName of ["editorial-campaign.transaction.json", "review-repair.transaction.json"]) {
+for (const fileName of ["blank-document.transaction.json", "editorial-campaign.transaction.json", "review-repair.transaction.json"]) {
   const transaction = JSON.parse(await text(path.join(pluginRoot, "examples", fileName)));
   const placeholders = [...new Set(validateTransactionReferences(transaction, fileName))].sort();
   if (!Array.isArray(transaction.operations) || transaction.operations.length === 0 || transaction.actor !== "codex") fail(`${fileName} is not an operational transaction`);
   const expectedPlaceholders = fileName === "review-repair.transaction.json"
     ? ["{{baseDocumentRevisionId}}", "{{baseGraphRevisionId}}", "{{collectionNodeId}}", "{{reviewCollectionEdgeId}}", "{{reviewNodeId}}", "{{targetGraphId}}"].sort()
-    : ["{{baseDocumentRevisionId}}", "{{baseGraphRevisionId}}", "{{compositionReferenceId}}", "{{pathGrantId}}", "{{productReferenceId}}", "{{styleReferenceId}}", "{{targetGraphId}}"].sort();
+    : fileName === "blank-document.transaction.json"
+      ? ["{{baseDocumentRevisionId}}", "{{baseGraphRevisionId}}", "{{targetGraphId}}"].sort()
+      : ["{{baseDocumentRevisionId}}", "{{baseGraphRevisionId}}", "{{compositionReferenceId}}", "{{pathGrantId}}", "{{productReferenceId}}", "{{styleReferenceId}}", "{{targetGraphId}}"].sort();
   if (JSON.stringify(placeholders) !== JSON.stringify(expectedPlaceholders)) fail(`${fileName} has an unexpected placeholder contract`);
 }
 

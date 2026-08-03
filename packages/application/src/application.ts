@@ -43,7 +43,9 @@ import {
   DurableScheduler,
   ExecutionConcurrencyDomains,
   resolveScope,
+  type CollectionFacet,
   type ExecutionProviderFacets,
+  type ExportFacet,
   type ExecutionProviderResolver
 } from "@ether/execution";
 import type { StructuredOutputSchema } from "@ether/intelligence";
@@ -1621,14 +1623,21 @@ export class EtherApplication implements EtherApplicationService {
   }
 
   private attachScheduler(): void {
+    const applicationFacets = this.applicationOwnedExecutionFacets();
     this.scheduler = new DurableScheduler({
       appDataRoot: this.options.appDataRoot,
       provider: this.options.provider,
       providers: {
         ...this.options.executionProviders,
+        ...applicationFacets,
         localMedia: this.options.executionProviders?.localMedia ?? createSharpLocalMediaFacet()
       },
-      providerResolver: this.options.providerResolver,
+      providerResolver: this.options.providerResolver === undefined
+        ? undefined
+        : async (input) => ({
+          ...(await this.options.providerResolver!(input)),
+          ...applicationFacets
+        }),
       concurrencyDomains: this.options.concurrencyDomains,
       // The scheduler's durable-store protocol is intentionally narrower than
       // DocumentStore and is being evolved independently in Task 14.
@@ -1636,6 +1645,87 @@ export class EtherApplication implements EtherApplicationService {
       checkpoint: this.options.executionCheckpoint,
       onEventsAvailable: () => this.drainEvents()
     });
+  }
+
+  /**
+   * Collection and export execution are durable application capabilities. Keep
+   * them available even when the desktop resolver supplies only remote facets.
+   */
+  private applicationOwnedExecutionFacets(): Pick<ExecutionProviderFacets, "collection" | "export"> {
+    const collection: CollectionFacet = {
+      apply: async ({ collectionId, mode, makePrimary, payloads }) => {
+        const artifactIds = payloadArtifactIds(payloads);
+        if (artifactIds.length === 0) {
+          throw new ApplicationServiceError(
+            "EXECUTION_ARTIFACT_INPUT_REQUIRED",
+            "Collection execution requires artifact payloads."
+          );
+        }
+        const commandId = stableApplicationId(
+          "execution-collection",
+          collectionId,
+          mode,
+          String(makePrimary),
+          ...artifactIds
+        );
+        const store = this.requireWritableStore();
+        return store.transaction(({ collections, execution }) => {
+          const duplicate = execution.getCommandResult(commandId, "execution.collection");
+          if (duplicate !== undefined) return duplicate as { collectionId: string; memberCount: number };
+          if (mode === "replace") {
+            collections.removeMembers(collectionId, collections.memberships(collectionId).map((member) => member.artifactId));
+          }
+          collections.addMembers(collectionId, artifactIds.map((artifactId, position) => ({
+            artifactId,
+            position,
+            role: "general" as const,
+            source: { commandId }
+          })));
+          if (makePrimary) collections.setPrimary(collectionId);
+          const result = { collectionId, memberCount: collections.memberships(collectionId).length };
+          return execution.completeCommand(commandId, "execution.collection", result, [{
+            name: "collection.changed",
+            payload: { collectionId, change: "membership" }
+          }]) as { collectionId: string; memberCount: number };
+        });
+      }
+    };
+    const exporter: ExportFacet = {
+      export: async ({ pathGrantId, namingTemplate, format, collisionPolicy, includeMetadata, payloads }) => {
+        const artifactIds = payloadArtifactIds(payloads);
+        if (artifactIds.length === 0) {
+          throw new ApplicationServiceError(
+            "EXECUTION_ARTIFACT_INPUT_REQUIRED",
+            "Export execution requires artifact payloads."
+          );
+        }
+        const commandId = stableApplicationId(
+          "execution-export",
+          pathGrantId,
+          namingTemplate,
+          format,
+          collisionPolicy,
+          String(includeMetadata),
+          ...artifactIds
+        );
+        const records = await this.exportArtifacts({
+          artifactIds,
+          collisionPolicy,
+          commandId,
+          namingTemplate,
+          pathGrantId,
+          format,
+          includeMetadataSidecar: includeMetadata,
+          includeLineageReport: false
+        });
+        return {
+          exported: records.filter((record) => record.status === "committed").length,
+          skipped: records.filter((record) => record.status === "skipped").length,
+          paths: records.map((record) => record.relativePath)
+        };
+      }
+    };
+    return { collection, export: exporter };
   }
 
   private drainEvents(): Promise<void> {
@@ -2544,6 +2634,12 @@ function thumbnailDescriptor(
 
 function stableApplicationId(prefix: string, ...parts: string[]): string {
   return `${prefix}-${createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32)}`;
+}
+
+function payloadArtifactIds(payloads: readonly PayloadEnvelope[]): string[] {
+  return [...new Set(payloads
+    .filter((payload): payload is PayloadEnvelope & { content: { kind: "artifact"; artifactId: string } } => payload.content.kind === "artifact")
+    .map((payload) => payload.content.artifactId))];
 }
 
 function samePath(left: string, right: string): boolean {

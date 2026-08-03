@@ -39,8 +39,10 @@ const permitInspectionSchema = z.object({
   permission: z.enum(["edit", "path", "run"]),
   expiresAt: z.string().datetime({ offset: true }).nullable(),
   state: z.enum(["active", "start-consumed", "expired", "revoked"]),
+  pathGrantId: NonEmptyIdSchema.optional(),
   planId: NonEmptyIdSchema.optional(),
-  contentHash: NonEmptyIdSchema.optional()
+  contentHash: NonEmptyIdSchema.optional(),
+  purpose: z.enum(["live-output", "export", "reference"]).optional()
 }).strict();
 
 const documentHealthSchema = z.object({

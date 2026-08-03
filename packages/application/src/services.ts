@@ -26,7 +26,9 @@ export interface ApplicationPermit {
 
 export interface ApplicationPermitInspection extends ApplicationPermit {
   contentHash?: string;
+  pathGrantId?: string;
   planId?: string;
+  purpose?: PathGrantPurpose;
   state: "active" | "start-consumed" | "expired" | "revoked";
 }
 
@@ -185,7 +187,9 @@ export class ApplicationPermitStore {
           ? "expired"
           : permit.consumedByCommandId === undefined ? "active" : "start-consumed",
       ...(permit.planId === undefined ? {} : { planId: permit.planId }),
-      ...(permit.contentHash === undefined ? {} : { contentHash: permit.contentHash })
+      ...(permit.contentHash === undefined ? {} : { contentHash: permit.contentHash }),
+      ...(permit.pathGrantId === undefined ? {} : { pathGrantId: permit.pathGrantId }),
+      ...(permit.purpose === undefined ? {} : { purpose: permit.purpose })
     }));
   }
 

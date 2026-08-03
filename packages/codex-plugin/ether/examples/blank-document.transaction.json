@@ -1,0 +1,61 @@
+{
+  "id": "plugin-blank-document",
+  "baseDocumentRevisionId": "{{baseDocumentRevisionId}}",
+  "baseGraphRevisions": { "{{targetGraphId}}": "{{baseGraphRevisionId}}" },
+  "title": "Start a blank document workflow",
+  "actor": "codex",
+  "layoutPolicy": "preserve",
+  "operations": [
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:blank-prompt",
+        "definitionId": "prompt.text",
+        "title": "Blank document brief",
+        "position": { "x": 0, "y": 120 },
+        "size": { "width": 240, "height": 160 },
+        "config": { "kind": "prompt.text", "body": "Describe the intended creative direction.", "assembly": "append" },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "content" }
+      }
+    },
+    {
+      "type": "addNode",
+      "graphId": "{{targetGraphId}}",
+      "node": {
+        "id": "$temp:node:blank-worker",
+        "definitionId": "prompt.worker",
+        "title": "Blank document worker",
+        "position": { "x": 300, "y": 120 },
+        "size": { "width": 260, "height": 180 },
+        "config": {
+          "kind": "prompt.worker",
+          "behavior": "rewrite",
+          "instruction": "Return a concise production prompt from the brief.",
+          "profile": "balanced",
+          "model": "gpt-5",
+          "reasoningEffort": "medium",
+          "variation": 0.2,
+          "contextPolicy": { "includeUpstream": true, "includeDownstreamCapabilities": true, "maxTokens": 2000 },
+          "memoryPolicy": { "mode": "per-branch" },
+          "outputContract": { "channel": "text", "count": 1, "selectionPolicy": "latest" }
+        },
+        "presentation": { "collapsed": false, "accent": "default", "previewMode": "summary" }
+      }
+    },
+    {
+      "type": "addEdge",
+      "graphId": "{{targetGraphId}}",
+      "edge": {
+        "id": "$temp:edge:blank-prompt-worker",
+        "from": { "kind": "node", "nodeId": "$temp:node:blank-prompt", "channel": "text" },
+        "to": { "kind": "node", "nodeId": "$temp:node:blank-worker", "channel": "text" },
+        "role": "general",
+        "order": 0,
+        "selector": { "kind": "latest-approved" },
+        "adapter": { "kind": "auto" },
+        "enabled": true
+      }
+    }
+  ]
+}

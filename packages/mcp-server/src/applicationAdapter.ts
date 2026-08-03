@@ -26,8 +26,10 @@ export type PermitInspection = {
   permission: "edit" | "path" | "run";
   expiresAt: string | null;
   state: "active" | "start-consumed" | "expired" | "revoked";
+  pathGrantId?: string;
   planId?: string;
   contentHash?: string;
+  purpose?: "live-output" | "export" | "reference";
 };
 
 export type TransactionPreview = {

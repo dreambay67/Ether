@@ -112,8 +112,10 @@ export const PermitInspectionSchema: z.ZodType<PermitInspection[]> = z.array(z.o
   permission: z.enum(["edit", "path", "run"]),
   expiresAt: z.string().datetime({ offset: true }).nullable(),
   state: z.enum(["active", "start-consumed", "expired", "revoked"]),
+  pathGrantId: id.optional(),
   planId: id.optional(),
-  contentHash: id.optional()
+  contentHash: id.optional(),
+  purpose: z.enum(["live-output", "export", "reference"]).optional()
 }).strict());
 export const ApplicationBridgeResponseSchema: z.ZodType<
   ApplicationCommandResponse | ApplicationQueryResponse | ApplicationErrorMessage
