@@ -67,13 +67,14 @@ describe("A02 Windows integration harness contracts", () => {
       independentRelease: rejected("independent-release"),
       latchTerminal: () => { attempts.push("terminal-latch"); throw new Error("terminal-latch"); },
       persistAbortRequested: rejected("abort-requested"),
+      reportRecordedProcessError: rejected("recorded-process-error"),
       releaseWatchdog: rejected("watchdog-release-result"),
       terminateRetainedChild: rejected("child-termination")
     });
     expect(attempts).toEqual([
-      "terminal-latch", "stage-drain", "abort-requested", "child-termination", "independent-release", "child-exit", "watchdog-release-result"
+      "terminal-latch", "stage-drain", "abort-requested", "child-termination", "independent-release", "child-exit", "watchdog-release-result", "recorded-process-error"
     ]);
-    expect(failures).toHaveLength(7);
+    expect(failures).toHaveLength(8);
   });
 
   it("uses pre-GO watchdog cancellation but never invokes independent SendInput recovery", async () => {
@@ -329,6 +330,9 @@ describe("A02 Windows integration harness contracts", () => {
     const streamTracking = dragRunner.indexOf('child.stdout?.on("data"');
     const stderrTracking = dragRunner.indexOf('child.stderr?.on("data"');
     const exitTracking = dragRunner.indexOf("const exited = onceChildExit(child)");
+    const dragSpawn = dragRunner.indexOf('const child = spawn("powershell.exe"');
+    const dragErrorCollector = dragRunner.indexOf('const childProcessError = collectChildProcessError(child, "Explorer drag child")');
+    const dragPid = dragRunner.indexOf("const childPid = child.pid");
     const prepared = dragRunner.indexOf('writeDragDiagnosticStage(input.diagnostic, "prepared"');
     const watchdogReady = windowsIntegration.indexOf("await assertWatchdogReady(watchdog)");
     const releaseArmed = windowsIntegration.indexOf('writeDragDiagnosticStage(input.diagnostic, "release-armed"', watchdogReady);
@@ -341,6 +345,20 @@ describe("A02 Windows integration harness contracts", () => {
     const childExit = recoverySeam.indexOf('await attempt("retained child exit"', independentRelease);
     const watchdogProof = recoverySeam.indexOf('await attempt("watchdog release/result proof"', childExit);
     const preGoWatchdogProof = recoverySeam.indexOf('await attempt("pre-GO watchdog cancel/exit/result proof"', childExit);
+    const recordedProcessError = recoverySeam.indexOf('await attempt("recorded process error"', watchdogProof);
+    const watchdogStart = windowsIntegration.slice(
+      windowsIntegration.indexOf("async function startDragReleaseWatchdog"),
+      windowsIntegration.indexOf("async function disarmDragReleaseWatchdog")
+    );
+    const watchdogSpawn = watchdogStart.indexOf('const child = spawn("powershell.exe"');
+    const watchdogErrorCollector = watchdogStart.indexOf('const processError = collectChildProcessError(child, "Explorer drag watchdog")');
+    const watchdogPid = watchdogStart.indexOf("if (child.pid === undefined || child.pid <= 0)");
+    expect(dragSpawn).toBeGreaterThanOrEqual(0);
+    expect(dragErrorCollector).toBeGreaterThan(dragSpawn);
+    expect(dragPid).toBeGreaterThan(dragErrorCollector);
+    expect(watchdogSpawn).toBeGreaterThanOrEqual(0);
+    expect(watchdogErrorCollector).toBeGreaterThan(watchdogSpawn);
+    expect(watchdogPid).toBeGreaterThan(watchdogErrorCollector);
     expect(streamTracking).toBeGreaterThanOrEqual(0);
     expect(stderrTracking).toBeGreaterThanOrEqual(0);
     expect(exitTracking).toBeGreaterThanOrEqual(0);
@@ -358,7 +376,11 @@ describe("A02 Windows integration harness contracts", () => {
     expect(childExit).toBeGreaterThan(independentRelease);
     expect(watchdogProof).toBeGreaterThan(childExit);
     expect(preGoWatchdogProof).toBeGreaterThan(childExit);
+    expect(recordedProcessError).toBeGreaterThan(watchdogProof);
     expect(recoverySeam).toContain("if (operations.goPublished) await attempt(\"independent release\"");
+    expect(windowsIntegration).toContain("processError: ChildProcessErrorCollector");
+    expect(windowsIntegration).toContain("reportRecordedChildProcessError(watchdog.processError, false)");
+    expect(windowsIntegration).toContain("return child.exitCode !== null || child.signalCode !== null");
     expect(windowsIntegration).toContain("cancelled-pre-go");
     expect(windowsIntegration).toContain("child-dead-pre-go");
     expect(windowsIntegration).toContain("deadline-pre-go");
