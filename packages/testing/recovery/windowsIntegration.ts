@@ -228,14 +228,15 @@ export function requireNoTestOwnedRecentShortcuts(paths: readonly string[], labe
   }
 }
 
-/** Process-exit proof is always mandatory; a post-S1 journey failure always preserves evidence. */
+/** Exact process absence and failure-free finalization are both mandatory before deleting diagnostic artifacts. */
 export function recoveryArtifactsMayBeCleanedAfterShellCheckpoint(input: {
   checkpointCaptured: boolean;
+  exactProcessAbsenceProven: boolean;
+  finalizationFailuresAbsent: boolean;
   journeyFailedAfterCheckpoint: boolean;
-  processFinalizationProven: boolean;
   shellCheckpointRestored: boolean;
 }): boolean {
-  return input.processFinalizationProven && !input.journeyFailedAfterCheckpoint && (!input.checkpointCaptured || input.shellCheckpointRestored);
+  return input.exactProcessAbsenceProven && input.finalizationFailuresAbsent && !input.journeyFailedAfterCheckpoint && (!input.checkpointCaptured || input.shellCheckpointRestored);
 }
 
 export type AssociationRestorationWatchdog = {

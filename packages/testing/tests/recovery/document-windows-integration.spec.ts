@@ -11,10 +11,13 @@ import {
   assertAuthoringJourneySourceSafety,
   blankAuthoringJourney,
   cleanupIsolatedJourneyProfile,
+  collectJourneyBuildIdentity,
   createIsolatedJourneyProfile,
+  journeyEvidencePaths,
   launchRecoveryJourney,
   packagedJourneyConfig,
   recoveryShellTokenForProfile,
+  type JourneyBuildIdentity,
   type RecoveryJourneySession
 } from "../../recovery/journeyDriver.js";
 import {
@@ -86,17 +89,25 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   let primary: RecoveryJourneySession | null = null;
   let reopened: RecoveryJourneySession | null = null;
   const primaryProfile = await createIsolatedJourneyProfile();
+  let shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-primary", "primary");
   const shellS0 = await snapshotWindowsShellState(primaryProfile.appData);
   let shellS1: WindowsShellStateSnapshot | null = null;
   let shellS1TargetShortcuts: string[] | null = null;
   let postS1ShellClassified = false;
   let postS1ExactProcessAbsenceProven = false;
+  let exactProcessAbsenceProven = false;
   let primaryJourneyFailure: unknown = null;
   let journeyFailedAfterCheckpoint = false;
   const finalizationFailures: unknown[] = [];
 
   try {
-    primary = await launch(executable, "a02-windows-primary", primaryProfile);
+    exactProcessAbsenceProven = false;
+    primary = await launch(executable, "a02-windows-primary", primaryProfile, undefined, false, {
+      afterLaunchFailureApplicationExit: async () => {
+        exactProcessAbsenceProven = true;
+        await recordShellFinalizationBlocked({ action: "primary launch failure without S1", exactProcessAbsenceProven, reason: "S1 prerequisites were unavailable; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      }
+    });
     const recentBefore = await snapshotTestOwnedRecentShortcuts({ appData: primary.profile.appData, root, documentPaths: [documentPath, renamedPath, copyPath] });
     const primaryPid = await findExactPackagedProcessId(executable, primary.profile.userData);
     await expect(primary.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
@@ -146,7 +157,9 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     const primaryClose = await closeExactWindowWithNativeKeyboard(primaryPid);
     primary.input.observe("Clean close after disposable-root cleanup", "A native Alt+F4 sent to the exact packaged Ether window closes the Saved document without an unsaved-changes prompt before reopen validation.", primaryClose);
     await expect.poll(() => primary?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
-    await primary.close("passed");
+    await primary.close("passed", {
+      afterApplicationExit: () => { exactProcessAbsenceProven = true; }
+    });
     primary = null;
     postS1ExactProcessAbsenceProven = true;
 
@@ -154,18 +167,19 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     for (const disposableRoot of disposableRoots) await expect.poll(() => exists(disposableRoot)).toBe(false);
 
     postS1ExactProcessAbsenceProven = false;
+    exactProcessAbsenceProven = false;
+    shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-reopen-after-cleanup", "primary-reopen");
     reopened = await launch(executable, "a02-windows-reopen-after-cleanup", primaryProfile, documentPath, false, {
       afterLaunchFailureApplicationExit: async () => {
         postS1ExactProcessAbsenceProven = true;
-        if (shellS1 === null || shellS1TargetShortcuts === null) return;
-        await classifyShellAfterExactExit({
-          documentPaths: [documentPath, renamedPath, copyPath],
-          profile: primaryProfile,
-          root,
-          s0: shellS0,
-          s1: shellS1,
-          s1TargetShortcuts: shellS1TargetShortcuts
-        });
+        exactProcessAbsenceProven = true;
+        if (shellS1 === null || shellS1TargetShortcuts === null) {
+          await recordShellFinalizationBlocked({ action: "reopen launch failure without S1", exactProcessAbsenceProven, reason: "S1 prerequisites were unavailable; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+          return;
+        }
+        await recordShellFinalizationAttempt({ action: "reopen launch failure sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({
+          documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts!
+        }) });
         postS1ShellClassified = true;
       }
     });
@@ -186,14 +200,10 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
     await reopened.close("passed", {
       afterApplicationExit: async () => {
         postS1ExactProcessAbsenceProven = true;
-        const disposition = await classifyShellAfterExactExit({
-          documentPaths: [documentPath, renamedPath, copyPath],
-          profile: primaryProfile,
-          root,
-          s0: shellS0,
-          s1: primaryShellS1,
-          s1TargetShortcuts: primaryS1TargetShortcuts
-        });
+        exactProcessAbsenceProven = true;
+        const disposition = await recordShellFinalizationAttempt({ action: "reopen close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({
+          documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: primaryShellS1, s1TargetShortcuts: primaryS1TargetShortcuts
+        }) });
         reopened?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
         postS1ShellClassified = true;
       }
@@ -205,46 +215,66 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
   } finally {
     if (reopened !== null) {
       try {
-        await reopened.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
+        await reopened.close("failed", {
           afterApplicationExit: async () => {
             postS1ExactProcessAbsenceProven = true;
-            const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
-            reopened?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
-            postS1ShellClassified = true;
+            exactProcessAbsenceProven = true;
+            if (shellS1 !== null && shellS1TargetShortcuts !== null) {
+              const disposition = await recordShellFinalizationAttempt({ action: "failed reopen close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! }) });
+              reopened?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
+              postS1ShellClassified = true;
+            }
           }
-        } : {});
+        });
       } catch (error) {
         finalizationFailures.push(error);
       }
     }
     if (primary !== null) {
       try {
-        await primary.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
+        await primary.close("failed", {
           afterApplicationExit: async () => {
             postS1ExactProcessAbsenceProven = true;
-            const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
-            primary?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
-            postS1ShellClassified = true;
+            exactProcessAbsenceProven = true;
+            if (shellS1 !== null && shellS1TargetShortcuts !== null) {
+              const disposition = await recordShellFinalizationAttempt({ action: "failed primary close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! }) });
+              primary?.input.observe("Post-S1 primary shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
+              postS1ShellClassified = true;
+            }
           }
-        } : {});
+        });
       } catch (error) {
         finalizationFailures.push(error);
       }
     }
     if (reopened === null && primary === null && !postS1ShellClassified && shellS1 !== null && shellS1TargetShortcuts !== null && postS1ExactProcessAbsenceProven) {
       try {
-        await classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1, s1TargetShortcuts: shellS1TargetShortcuts });
+        await recordShellFinalizationAttempt({ action: "no-session primary sanitation retry", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [documentPath, renamedPath, copyPath], profile: primaryProfile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! }) });
         postS1ShellClassified = true;
       } catch (error) {
         finalizationFailures.push(error);
       }
     }
-    const processFinalizationProven = finalizationFailures.length === 0;
+    if (reopened === null && primary === null && !postS1ShellClassified && shellS1 !== null && shellS1TargetShortcuts !== null && !postS1ExactProcessAbsenceProven) {
+      try {
+        await recordShellFinalizationBlocked({ action: "no-session primary sanitation blocked", exactProcessAbsenceProven, reason: "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    if (primaryJourneyFailure !== null && shellFinalizationSidecar.attempts.length === 0) {
+      try {
+        await recordShellFinalizationBlockedOnce({ action: "primary no-session finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     const shellS1Restored = shellS1 === null || postS1ShellClassified;
     if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
+      exactProcessAbsenceProven,
+      finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
-      processFinalizationProven,
       shellCheckpointRestored: shellS1Restored
     })) {
       try {
@@ -254,8 +284,10 @@ test("records the scoped A02 packaged native-picker, identity, lease, and associ
         finalizationFailures.push(error);
       }
     } else {
-      const reason = !processFinalizationProven
-        ? "unproven process/session cleanup"
+      const reason = !exactProcessAbsenceProven
+        ? "unproven exact process absence"
+        : finalizationFailures.length > 0
+          ? "failed finalization"
         : journeyFailedAfterCheckpoint
           ? "post-S1 journey assertion/action failure"
           : "unproven post-S1 shell cleanup";
@@ -296,9 +328,17 @@ test("runs the separately approved reversible Explorer association route", async
   let postS1ShellClassified = false;
   let associationJourneyFailure: unknown = null;
   let journeyFailedAfterCheckpoint = false;
+  let exactProcessAbsenceProven = false;
+  const shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-association", "association");
   const finalizationFailures: unknown[] = [];
   try {
-    session = await launch(executable, "a02-windows-association", profile);
+    exactProcessAbsenceProven = false;
+    session = await launch(executable, "a02-windows-association", profile, undefined, false, {
+      afterLaunchFailureApplicationExit: async () => {
+        exactProcessAbsenceProven = true;
+        await recordShellFinalizationBlocked({ action: "association launch failure without S1", exactProcessAbsenceProven, reason: "S1 prerequisites were unavailable; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      }
+    });
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
@@ -340,7 +380,8 @@ test("runs the separately approved reversible Explorer association route", async
     const associationS1TargetShortcuts = shellS1TargetShortcuts;
     await session.close("passed", {
       afterApplicationExit: async () => {
-        const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath], profile, root, s0: shellS0, s1: associationShellS1, s1TargetShortcuts: associationS1TargetShortcuts });
+        exactProcessAbsenceProven = true;
+        const disposition = await recordShellFinalizationAttempt({ action: "association close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [documentPath], profile, root, s0: shellS0, s1: associationShellS1, s1TargetShortcuts: associationS1TargetShortcuts }) });
         session?.input.observe("Post-S1 association shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
         postS1ShellClassified = true;
       }
@@ -370,21 +411,31 @@ test("runs the separately approved reversible Explorer association route", async
         finalizationFailures.push(error);
       }
     }
-    if (session !== null) await session.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
+    if (session !== null) await session.close("failed", {
       afterApplicationExit: async () => {
-        const disposition = await classifyShellAfterExactExit({ documentPaths: [documentPath], profile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
-        session?.input.observe("Post-S1 association shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
-        postS1ShellClassified = true;
+        exactProcessAbsenceProven = true;
+        if (shellS1 !== null && shellS1TargetShortcuts !== null) {
+          const disposition = await recordShellFinalizationAttempt({ action: "failed association close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [documentPath], profile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! }) });
+          session?.input.observe("Post-S1 association shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
+          postS1ShellClassified = true;
+        }
       }
-    } : {}).catch((error) => finalizationFailures.push(error));
-    const processFinalizationProven = finalizationFailures.length === 0;
+    }).catch((error) => finalizationFailures.push(error));
+    if (associationJourneyFailure !== null && session === null && shellFinalizationSidecar.attempts.length === 0) {
+      try {
+        await recordShellFinalizationBlockedOnce({ action: "association no-session finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     if (shellS1 === null) {
       finalizationFailures.push(new Error("S1 shell checkpoint was not captured before association mutation."));
     } else shellStateRestored = postS1ShellClassified;
     if (associationRestorationProven && recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
+      exactProcessAbsenceProven,
+      finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
-      processFinalizationProven,
       shellCheckpointRestored: shellStateRestored
     })) {
       try {
@@ -428,9 +479,17 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
   let shellS1TargetShortcuts: string[] | null = null;
   let postS1ShellClassified = false;
   let journeyFailedAfterCheckpoint = false;
+  let exactProcessAbsenceProven = false;
+  const shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-explorer-drag", "explorer-drag");
   const finalizationFailures: unknown[] = [];
   try {
-    session = await launch(executable, "a02-windows-explorer-drag", profile);
+    exactProcessAbsenceProven = false;
+    session = await launch(executable, "a02-windows-explorer-drag", profile, undefined, false, {
+      afterLaunchFailureApplicationExit: async () => {
+        exactProcessAbsenceProven = true;
+        await recordShellFinalizationBlocked({ action: "Explorer drag launch failure without S1", exactProcessAbsenceProven, reason: "S1 prerequisites were unavailable; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      }
+    });
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [sourcePath, targetPath] });
     primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
@@ -466,7 +525,8 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     const dragS1TargetShortcuts = shellS1TargetShortcuts;
     await session.close("passed", {
       afterApplicationExit: async () => {
-        const disposition = await classifyShellAfterExactExit({ documentPaths: [sourcePath, targetPath], profile, root, s0: shellS0, s1: dragShellS1, s1TargetShortcuts: dragS1TargetShortcuts });
+        exactProcessAbsenceProven = true;
+        const disposition = await recordShellFinalizationAttempt({ action: "Explorer drag close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [sourcePath, targetPath], profile, root, s0: shellS0, s1: dragShellS1, s1TargetShortcuts: dragS1TargetShortcuts }) });
         session?.input.observe("Post-S1 Explorer shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
         postS1ShellClassified = true;
       }
@@ -485,25 +545,35 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     }
     if (session !== null) {
       try {
-        await session.close("failed", shellS1 !== null && shellS1TargetShortcuts !== null ? {
+        await session.close("failed", {
           afterApplicationExit: async () => {
-            const disposition = await classifyShellAfterExactExit({ documentPaths: [sourcePath, targetPath], profile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! });
-            session?.input.observe("Post-S1 Explorer shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
-            postS1ShellClassified = true;
+            exactProcessAbsenceProven = true;
+            if (shellS1 !== null && shellS1TargetShortcuts !== null) {
+              const disposition = await recordShellFinalizationAttempt({ action: "failed Explorer drag close sanitation", exactProcessAbsenceProven, sidecar: shellFinalizationSidecar, sanitize: () => classifyShellAfterExactExit({ documentPaths: [sourcePath, targetPath], profile, root, s0: shellS0, s1: shellS1!, s1TargetShortcuts: shellS1TargetShortcuts! }) });
+              session?.input.observe("Post-S1 Explorer shell classification", "After exact process absence, only exact post-S1 target links are removed; no new files or non-opaque changes are allowed.", disposition);
+              postS1ShellClassified = true;
+            }
           }
-        } : {});
+        });
       } catch (error) {
         finalizationFailures.push(error);
       }
     }
-    const processFinalizationProven = finalizationFailures.length === 0;
+    if (dragJourneyFailure !== null && session === null && shellFinalizationSidecar.attempts.length === 0) {
+      try {
+        await recordShellFinalizationBlockedOnce({ action: "Explorer drag no-session finalization blocked", exactProcessAbsenceProven, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     if (shellS1 === null) {
       finalizationFailures.push(new Error("S1 shell checkpoint was not captured before Explorer drag."));
     } else shellStateRestored = postS1ShellClassified;
     if (recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
+      exactProcessAbsenceProven,
+      finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
-      processFinalizationProven,
       shellCheckpointRestored: shellStateRestored
     })) {
       try {
@@ -552,11 +622,18 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   let s1RecentShortcutPaths: string[] | null = null;
   let jumpListFailure: unknown = null;
   let journeyFailedAfterCheckpoint = false;
-  let recentLaunchProcessExitProven = false;
+  let exactProcessAbsenceProven = false;
+  let shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-jump-list-setup", "jump-list-setup");
   const jumpListCleanupState = createJumpListShellCleanupState();
   const finalizationFailures: unknown[] = [];
   try {
-    setupSession = await launch(executable, "a02-windows-jump-list-setup", profile);
+    exactProcessAbsenceProven = false;
+    setupSession = await launch(executable, "a02-windows-jump-list-setup", profile, undefined, false, {
+      afterLaunchFailureApplicationExit: async () => {
+        exactProcessAbsenceProven = true;
+        await recordShellFinalizationBlocked({ action: "Jump List setup launch failure without S1", exactProcessAbsenceProven, reason: "S1 prerequisites were unavailable; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      }
+    });
     const setupPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(setupSession.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
     await setupSession.input.leftClick(setupSession.page.getByRole("button", { name: "Prompt", exact: true }), "Create the ordinary-recovery Jump List document", "The document is authored through the ordinary recovery UI with Recent disabled.");
@@ -568,6 +645,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     await expect.poll(() => setupSession?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await setupSession.close("passed", {
       afterApplicationExit: async () => {
+        exactProcessAbsenceProven = true;
         shellS1 = await resnapshotWindowsShellState(shellS0);
         setupSession?.input.observe("Capture S1 after ordinary native-save setup", "S0 is diagnostic; every S0→S1 shell delta is recorded as OS-native setup and is not restored.", describeWindowsShellSetupDelta(shellS0, shellS1));
         await assertShellCheckpointRestored(shellS1);
@@ -579,20 +657,18 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     s1RecentShortcutPaths = await snapshotS1TargetShortcuts({ documentPaths: [documentPath], profile, root });
 
     recentModeLaunched = true;
+    exactProcessAbsenceProven = false;
+    shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-jump-list", "jump-list");
     session = await launch(executable, "a02-windows-jump-list", profile, documentPath, true, {
       afterLaunchFailureApplicationExit: async () => {
-        recentLaunchProcessExitProven = true;
-        if (shellS1 === null || s1RecentShortcutPaths === null) return;
-        await restoreApprovedJumpListShellState({
-          allowNoCandidate: true,
-          before: shellS1,
-          documentPaths: [documentPath],
-          profile,
-          root,
-          s1RecentShortcutPaths,
-          state: jumpListCleanupState,
-          token: shellToken
-        });
+        exactProcessAbsenceProven = true;
+        if (shellS1 === null || s1RecentShortcutPaths === null) {
+          await recordShellFinalizationBlocked({ action: "Jump List launch failure without S1", exactProcessAbsenceProven, jumpState: jumpListCleanupState, reason: "S1 prerequisites were unavailable; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+          return;
+        }
+        await recordShellFinalizationAttempt({ action: "Jump List launch failure sanitation", exactProcessAbsenceProven, jumpState: jumpListCleanupState, sidecar: shellFinalizationSidecar, sanitize: () => restoreApprovedJumpListShellState({
+          allowNoCandidate: true, before: shellS1!, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths: s1RecentShortcutPaths!, state: jumpListCleanupState, token: shellToken
+        }) });
         jumpListShellStateRestored = true;
       }
     });
@@ -640,15 +716,10 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     const approvedRecentShortcutPaths = s1RecentShortcutPaths;
     await session.close("passed", {
       afterApplicationExit: async () => {
-        const shellDisposition = await restoreApprovedJumpListShellState({
-          before: approvedShellS1,
-          documentPaths: [documentPath],
-          profile,
-          root,
-          s1RecentShortcutPaths: approvedRecentShortcutPaths,
-          state: jumpListCleanupState,
-          token: shellToken
-        });
+        exactProcessAbsenceProven = true;
+        const shellDisposition = await recordShellFinalizationAttempt({ action: "Jump List close sanitation", exactProcessAbsenceProven, jumpState: jumpListCleanupState, sidecar: shellFinalizationSidecar, sanitize: () => restoreApprovedJumpListShellState({
+          before: approvedShellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths: approvedRecentShortcutPaths, state: jumpListCleanupState, token: shellToken
+        }) });
         session?.input.observe("Jump List app-scoped cleanup", "After exact process absence, only the exact new recovery candidate is recycled; J2 equals the J0 micro-baseline without that candidate while opaque in-place OS changes are recorded.", shellDisposition);
         jumpListShellStateRestored = true;
       }
@@ -677,6 +748,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
       try {
         await setupSession.close("failed", {
           afterApplicationExit: async () => {
+            exactProcessAbsenceProven = true;
             shellS1 ??= await resnapshotWindowsShellState(shellS0);
             setupSession?.input.observe("Capture S1 after failed ordinary setup", "S0 is diagnostic; this retained S1 is the only later restoration checkpoint.", describeWindowsShellSetupDelta(shellS0, shellS1));
           }
@@ -695,32 +767,49 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     }
     if (session !== null) {
       try {
-        await session.close("failed", recentModeLaunched && !jumpListShellStateRestored ? {
+        await session.close("failed", {
           afterApplicationExit: async () => {
-            if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
-            if (s1RecentShortcutPaths === null) throw new Error("S1 Recent shortcut baseline was not captured before approved Jump List cleanup.");
-            await restoreApprovedJumpListShellState({ before: shellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths, state: jumpListCleanupState, token: shellToken });
-            jumpListShellStateRestored = true;
+            exactProcessAbsenceProven = true;
+            if (recentModeLaunched && !jumpListShellStateRestored) {
+              if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
+              if (s1RecentShortcutPaths === null) throw new Error("S1 Recent shortcut baseline was not captured before approved Jump List cleanup.");
+              await recordShellFinalizationAttempt({ action: "failed Jump List close sanitation", exactProcessAbsenceProven, jumpState: jumpListCleanupState, sidecar: shellFinalizationSidecar, sanitize: () => restoreApprovedJumpListShellState({ before: shellS1!, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths: s1RecentShortcutPaths!, state: jumpListCleanupState, token: shellToken }) });
+              jumpListShellStateRestored = true;
+            }
           }
-        } : {});
+        });
         session = null;
       } catch (error) {
         finalizationFailures.push(error);
       }
     }
-    if (session === null && recentModeLaunched && !jumpListShellStateRestored && shellS1 !== null && s1RecentShortcutPaths !== null && recentLaunchProcessExitProven) {
+    if (session === null && recentModeLaunched && !jumpListShellStateRestored && shellS1 !== null && s1RecentShortcutPaths !== null && exactProcessAbsenceProven) {
       try {
-        await restoreApprovedJumpListShellState({ allowNoCandidate: true, before: shellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths, state: jumpListCleanupState, token: shellToken });
+        await recordShellFinalizationAttempt({ action: "no-session Jump List sanitation retry", exactProcessAbsenceProven, jumpState: jumpListCleanupState, sidecar: shellFinalizationSidecar, sanitize: () => restoreApprovedJumpListShellState({ allowNoCandidate: true, before: shellS1!, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths: s1RecentShortcutPaths!, state: jumpListCleanupState, token: shellToken }) });
         jumpListShellStateRestored = true;
       } catch (error) {
         finalizationFailures.push(error);
       }
     }
-    const processFinalizationProven = finalizationFailures.length === 0;
+    if (session === null && recentModeLaunched && !jumpListShellStateRestored && shellS1 !== null && s1RecentShortcutPaths !== null && !exactProcessAbsenceProven) {
+      try {
+        await recordShellFinalizationBlocked({ action: "no-session Jump List sanitation blocked", exactProcessAbsenceProven, jumpState: jumpListCleanupState, reason: "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    if (jumpListFailure !== null && shellFinalizationSidecar.attempts.length === 0) {
+      try {
+        await recordShellFinalizationBlockedOnce({ action: "Jump List no-session finalization blocked", exactProcessAbsenceProven, jumpState: jumpListCleanupState, reason: exactProcessAbsenceProven ? "S1 prerequisites were unavailable; sanitation was not attempted." : "Exact process absence was not proven; sanitation was not attempted.", sidecar: shellFinalizationSidecar });
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     if (associationRestorationProven && recoveryArtifactsMayBeCleanedAfterShellCheckpoint({
       checkpointCaptured: shellS1 !== null,
+      exactProcessAbsenceProven,
+      finalizationFailuresAbsent: finalizationFailures.length === 0,
       journeyFailedAfterCheckpoint,
-      processFinalizationProven,
       shellCheckpointRestored: jumpListShellStateRestored
     })) {
       try {
@@ -960,6 +1049,129 @@ function requireExactRecoveryCandidateMutation(
     throw new Error(`${stage} changed anything other than the exact J0 recovery candidate: ${formatWindowsShellStateChanges(changes) || "(none)"}.`);
   }
   return changes[0].after;
+}
+
+type ShellFinalizationAttempt = {
+  action: string;
+  candidatePath: string | null;
+  disposition: string | null;
+  exactProcessAbsenceProven: boolean;
+  failure: string | null;
+  finishedAt: string;
+  jumpStageAfter: string | null;
+  jumpStageBefore: string | null;
+  outcome: "passed" | "failed" | "blocked";
+};
+
+type ShellFinalizationSidecar = {
+  attempts: ShellFinalizationAttempt[];
+  identity: JourneyBuildIdentity;
+  journeyId: string;
+  path: string;
+  route: string;
+};
+
+async function createShellFinalizationSidecar(journeyId: string, route: string): Promise<ShellFinalizationSidecar> {
+  const evidence = journeyEvidencePaths(workspaceRoot, journeyId, "packaged", "committed", ["phase-0", "document-windows-integration", journeyId]);
+  const sidecar: ShellFinalizationSidecar = {
+    attempts: [],
+    identity: await collectJourneyBuildIdentity(workspaceRoot, "packaged"),
+    journeyId,
+    path: path.join(evidence.root, "shell-finalization.json"),
+    route
+  };
+  await writeShellFinalizationSidecar(sidecar);
+  return sidecar;
+}
+
+async function recordShellFinalizationAttempt(input: {
+  action: string;
+  exactProcessAbsenceProven: boolean;
+  jumpState?: JumpListShellCleanupState;
+  sidecar: ShellFinalizationSidecar;
+  sanitize: () => Promise<string>;
+}): Promise<string> {
+  if (!input.exactProcessAbsenceProven) {
+    await recordShellFinalizationBlocked({
+      action: input.action,
+      jumpState: input.jumpState,
+      reason: "Exact process absence was not proven; sanitation was not attempted.",
+      sidecar: input.sidecar
+    });
+    throw new Error("Refusing shell sanitation without exact process-absence proof.");
+  }
+  const jumpStageBefore = input.jumpState?.stage ?? null;
+  try {
+    const disposition = await input.sanitize();
+    input.sidecar.attempts.push({
+      action: input.action,
+      candidatePath: input.jumpState?.candidate?.relativePath ?? null,
+      disposition,
+      exactProcessAbsenceProven: input.exactProcessAbsenceProven,
+      failure: null,
+      finishedAt: new Date().toISOString(),
+      jumpStageAfter: input.jumpState?.stage ?? null,
+      jumpStageBefore,
+      outcome: "passed"
+    });
+    await writeShellFinalizationSidecar(input.sidecar);
+    return disposition;
+  } catch (error) {
+    input.sidecar.attempts.push({
+      action: input.action,
+      candidatePath: input.jumpState?.candidate?.relativePath ?? null,
+      disposition: null,
+      exactProcessAbsenceProven: input.exactProcessAbsenceProven,
+      failure: error instanceof Error ? error.message : String(error),
+      finishedAt: new Date().toISOString(),
+      jumpStageAfter: input.jumpState?.stage ?? null,
+      jumpStageBefore,
+      outcome: "failed"
+    });
+    try {
+      await writeShellFinalizationSidecar(input.sidecar);
+    } catch (sidecarError) {
+      throw new AggregateError([error, sidecarError], "Shell sanitation and durable finalization evidence both failed.", { cause: sidecarError });
+    }
+    throw error;
+  }
+}
+
+async function recordShellFinalizationBlocked(input: {
+  action: string;
+  exactProcessAbsenceProven?: boolean;
+  jumpState?: JumpListShellCleanupState;
+  reason: string;
+  sidecar: ShellFinalizationSidecar;
+}): Promise<void> {
+  input.sidecar.attempts.push({
+    action: input.action,
+    candidatePath: input.jumpState?.candidate?.relativePath ?? null,
+    disposition: `blocked: ${input.reason}`,
+    exactProcessAbsenceProven: input.exactProcessAbsenceProven ?? false,
+    failure: input.reason,
+    finishedAt: new Date().toISOString(),
+    jumpStageAfter: input.jumpState?.stage ?? null,
+    jumpStageBefore: input.jumpState?.stage ?? null,
+    outcome: "blocked"
+  });
+  await writeShellFinalizationSidecar(input.sidecar);
+}
+
+async function recordShellFinalizationBlockedOnce(input: Parameters<typeof recordShellFinalizationBlocked>[0]): Promise<void> {
+  if (input.sidecar.attempts.some((attempt) => attempt.action === input.action)) return;
+  await recordShellFinalizationBlocked(input);
+}
+
+async function writeShellFinalizationSidecar(sidecar: ShellFinalizationSidecar): Promise<void> {
+  await mkdir(path.dirname(sidecar.path), { recursive: true });
+  await writeFile(sidecar.path, `${JSON.stringify({
+    attempts: sidecar.attempts,
+    identity: sidecar.identity,
+    journeyId: sidecar.journeyId,
+    route: sidecar.route,
+    schemaVersion: 1
+  }, null, 2)}\n`, "utf8");
 }
 
 async function nativeScreenPointForCanvas(session: RecoveryJourneySession): Promise<{ x: number; y: number }> {

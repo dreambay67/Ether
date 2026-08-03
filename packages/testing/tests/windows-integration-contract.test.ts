@@ -44,10 +44,12 @@ import {
 describe("A02 Windows integration harness contracts", () => {
   it("keeps normal recovery journeys out of Recent and custom Jump List APIs", async () => {
     const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-    const [bootstrap, main, cleanup] = await Promise.all([
+    const [bootstrap, main, cleanup, driver, integrationSpec] = await Promise.all([
       readFile(path.join(repositoryRoot, "apps/desktop/src/main/bootstrap.ts"), "utf8"),
       readFile(path.join(repositoryRoot, "apps/desktop/src/main/main.ts"), "utf8"),
-      readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsShellDestinations.ts"), "utf8")
+      readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsShellDestinations.ts"), "utf8"),
+      readFile(path.join(repositoryRoot, "packages/testing/recovery/journeyDriver.ts"), "utf8"),
+      readFile(path.join(repositoryRoot, "packages/testing/tests/recovery/document-windows-integration.spec.ts"), "utf8")
     ]);
     expect(bootstrap).not.toMatch(/setJumpList|clearRecentDocuments/u);
     expect(main).toContain('if (recoveryShell === null || recoveryShell.recentEnabled) app.addRecentDocument(documentPath);');
@@ -61,6 +63,14 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("Refusing to delete S1-pre-existing shortcut pathname");
     expect(windowsIntegration).toContain("Shortcut bytes changed before deletion");
     expect(windowsIntegration).toContain("Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256");
+    expect(driver).toContain("afterLaunchFailureApplicationExit");
+    expect(integrationSpec).toContain("let exactProcessAbsenceProven = false");
+    expect(integrationSpec.match(/afterLaunchFailureApplicationExit/g)?.length).toBeGreaterThanOrEqual(5);
+    expect(integrationSpec).toContain("shell-finalization.json");
+    expect(integrationSpec).toContain("recordShellFinalizationAttempt");
+    expect(integrationSpec).toContain("recordShellFinalizationBlocked");
+    expect(integrationSpec).toContain("Refusing shell sanitation without exact process-absence proof");
+    expect(integrationSpec).toContain("Shell sanitation and durable finalization evidence both failed");
   });
 
   it("declares only representative packaged coverage and names the remaining Windows gaps", () => {
@@ -167,13 +177,14 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => requireNoTestOwnedRecentShortcuts(["C:\\real\\Recent\\Jump List.lnk"])).toThrow(/S1 contains matching test-owned Recent shortcuts/u);
   });
 
-  it("requires process proof before cleanup and S1 equality after the checkpoint", () => {
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, journeyFailedAfterCheckpoint: false, processFinalizationProven: false, shellCheckpointRestored: false })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: false, journeyFailedAfterCheckpoint: false, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(true);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: false, processFinalizationProven: false, shellCheckpointRestored: true })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: false, processFinalizationProven: true, shellCheckpointRestored: false })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: true, processFinalizationProven: true, shellCheckpointRestored: true })).toBe(false);
-    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ checkpointCaptured: true, journeyFailedAfterCheckpoint: false, processFinalizationProven: true, shellCheckpointRestored: true })).toBe(true);
+  it("requires explicit exact-process proof, failure-free finalization, and S1 cleanup before deletion", () => {
+    const base = { checkpointCaptured: true, exactProcessAbsenceProven: true, finalizationFailuresAbsent: true, journeyFailedAfterCheckpoint: false, shellCheckpointRestored: true };
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, exactProcessAbsenceProven: false })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, finalizationFailuresAbsent: false })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, shellCheckpointRestored: false })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, journeyFailedAfterCheckpoint: true })).toBe(false);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint(base)).toBe(true);
+    expect(recoveryArtifactsMayBeCleanedAfterShellCheckpoint({ ...base, checkpointCaptured: false, shellCheckpointRestored: false })).toBe(true);
   });
 
   it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {
