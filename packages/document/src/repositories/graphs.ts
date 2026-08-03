@@ -117,6 +117,7 @@ interface ModuleRow {
   height: number;
   interface_json: string;
   internal_graph_id: string;
+  metadata_json: string;
   module_id: string;
   position_x: number;
   position_y: number;
@@ -152,6 +153,37 @@ export class GraphRepositoryError extends Error {
 
 function parseJson(serialized: string): unknown {
   return JSON.parse(serialized) as unknown;
+}
+
+type ModuleMetadata = Pick<
+  EtherGraph["modules"][number],
+  "description" | "accent" | "locked"
+>;
+
+function parseModuleMetadata(serialized: string): ModuleMetadata {
+  let value: unknown;
+  try {
+    value = parseJson(serialized);
+  } catch {
+    return {};
+  }
+  if (typeof value !== "object" || value === null) return {};
+  const metadata: ModuleMetadata = {};
+  const description = Reflect.get(value, "description");
+  const accent = Reflect.get(value, "accent");
+  const locked = Reflect.get(value, "locked");
+  if (typeof description === "string") metadata.description = description;
+  if (typeof accent === "string" && accent.length > 0) metadata.accent = accent;
+  if (typeof locked === "boolean") metadata.locked = locked;
+  return metadata;
+}
+
+function serializeModuleMetadata(module: EtherGraph["modules"][number]): string {
+  const metadata: ModuleMetadata = {};
+  if (module.description !== undefined) metadata.description = module.description;
+  if (module.accent !== undefined) metadata.accent = module.accent;
+  if (module.locked !== undefined) metadata.locked = module.locked;
+  return JSON.stringify(metadata);
 }
 
 export class GraphRepository {
@@ -194,7 +226,7 @@ export class GraphRepository {
     const modules = this.context.database
       .prepare(
         `SELECT module_id, internal_graph_id, title, position_x, position_y, width, height,
-                interface_json, collapsed
+                interface_json, collapsed, metadata_json
          FROM modules WHERE parent_graph_id = ? AND deleted_at IS NULL
          ORDER BY module_order, module_id`
       )
@@ -249,6 +281,7 @@ export class GraphRepository {
       modules: modules.map((module) => ({
         id: module.module_id,
         title: module.title,
+        ...parseModuleMetadata(module.metadata_json),
         graphId: module.internal_graph_id,
         position: { x: module.position_x, y: module.position_y },
         size: { width: module.width, height: module.height },
@@ -270,15 +303,15 @@ export class GraphRepository {
     return rows.map(({ graph_id }) => this.get(graph_id)).filter((value): value is EtherGraph => value !== undefined);
   }
 
-  validateMany(input: EtherGraph[]): EtherGraph[] {
+  validateMany(input: EtherGraph[], replacingGraphIds: readonly string[] = []): EtherGraph[] {
     const graphs = input.map((value) => EtherGraphSchema.parse(value));
-    this.validateEntityOwnership(graphs);
+    this.validateEntityOwnership(graphs, replacingGraphIds);
     return graphs;
   }
 
   persistMany(input: EtherGraph[], deletedGraphIds: readonly string[] = []): EtherGraph[] {
-    const graphs = this.validateMany(input);
-    const replacing = new Set([...graphs.map((graph) => graph.id), ...deletedGraphIds]);
+    const replacing = new Set([...input.map((graph) => graph.id), ...deletedGraphIds]);
+    const graphs = this.validateMany(input, [...replacing]);
     const proposed = [...this.list().filter((graph) => !replacing.has(graph.id)), ...graphs];
     const diagnostics = validateFullGraphState(proposed);
     if (diagnostics.length > 0) {
@@ -310,7 +343,11 @@ export class GraphRepository {
     return graphs;
   }
 
-  private validateEntityOwnership(graphs: EtherGraph[]): void {
+  private validateEntityOwnership(
+    graphs: EtherGraph[],
+    replacingGraphIds: readonly string[] = []
+  ): void {
+    const replacing = new Set(replacingGraphIds);
     const proposed = new Map<string, { graphId: string; kind: EntityKind }>();
     const add = (entityId: string, graphId: string, kind: EntityKind): void => {
       const prior = proposed.get(entityId);
@@ -344,13 +381,15 @@ export class GraphRepository {
       .all() as unknown as EntityOwnerRow[];
     for (const owner of existing) {
       const candidate = proposed.get(owner.entity_id);
-      if (
-        candidate !== undefined &&
-        (candidate.graphId !== owner.graph_id || candidate.kind !== owner.entity_kind)
-      ) {
+      if (candidate === undefined) continue;
+      const movesBetweenGraphs = candidate.graphId !== owner.graph_id;
+      const changesEntityKind = candidate.kind !== owner.entity_kind;
+      if (changesEntityKind || (movesBetweenGraphs && !replacing.has(owner.graph_id))) {
         throw new GraphRepositoryError(
           "ENTITY_ID_CONFLICT",
-          `Entity ID ${owner.entity_id} cannot move between graphs or entity kinds.`,
+          changesEntityKind
+            ? `Entity ID ${owner.entity_id} cannot change entity kind.`
+            : `Entity ID ${owner.entity_id} cannot move from graph ${owner.graph_id} without replacing that graph.`,
           {
             entityId: owner.entity_id,
             existing: { graphId: owner.graph_id, kind: owner.entity_kind },
@@ -474,13 +513,14 @@ export class GraphRepository {
       this.context.database
         .prepare(
           `INSERT INTO modules (
-             module_id, parent_graph_id, internal_graph_id, node_id, title, metadata_json,
+           module_id, parent_graph_id, internal_graph_id, node_id, title, metadata_json,
              position_x, position_y, width, height, interface_json, collapsed, module_order,
              created_at, updated_at, deleted_at
-           ) VALUES (?, ?, ?, NULL, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+           ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
            ON CONFLICT(module_id) DO UPDATE SET
              parent_graph_id = excluded.parent_graph_id, internal_graph_id = excluded.internal_graph_id,
-             node_id = NULL, title = excluded.title, position_x = excluded.position_x,
+             node_id = NULL, title = excluded.title, metadata_json = excluded.metadata_json,
+             position_x = excluded.position_x,
              position_y = excluded.position_y, width = excluded.width, height = excluded.height,
              interface_json = excluded.interface_json, collapsed = excluded.collapsed,
              module_order = excluded.module_order, updated_at = excluded.updated_at, deleted_at = NULL`
@@ -490,6 +530,7 @@ export class GraphRepository {
           graph.id,
           module.graphId,
           module.title,
+          serializeModuleMetadata(module),
           module.position.x,
           module.position.y,
           module.size.width,

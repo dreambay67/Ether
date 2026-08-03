@@ -12,14 +12,14 @@ import { notifyRendererInteractive } from "../runtime/interactive";
 import { NODE_LIBRARY_DRAG_TYPE, QuickAddPalette } from "./library/NodeLibrary";
 import { commandIdForKeyboard, commandPreservesCanvasFocus, type GraphCommand } from "./commands/useGraphCommands";
 import type { CanvasEditorField } from "./commands/directEditing";
+import { moduleAccent, moduleIsLocked } from "./modules/moduleModel";
 
-function GroupNode({ data }: { data: { title: string; color: string } }) { return <div className="ether-group-frame" style={{ "--group-color": data.color } as React.CSSProperties}><span>{data.title}</span></div>; }
 function OverviewCluster({ data }: NodeProps & { data: { count: number; title: string } }) {
   return <article className="ether-node ether-node-overview ether-node-family-canvas" data-testid="ether-node" data-cluster-node-count={data.count} aria-label={`${data.count} nodes in this canvas region`}><header className="ether-node-header"><span className="ether-node-family">Overview</span></header><strong>{data.title}</strong><span>{data.count} nodes</span></article>;
 }
-const nodeTypes = { etherNode: EtherNode, overviewCluster: OverviewCluster, module: ModuleNode, group: GroupNode }; const edgeTypes = { etherEdge: EtherEdge };
-export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selectedIds, selectedEdgeId, selectedModuleId, activeEditor, commands, viewport, onAddNode, onMove, onMoveGroup, onMoveModule, onResize, onDelete, onEditRequest, onEditCommit, onEditCancel, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onEdgeSelected, onModuleSelected, onViewport, onCommandUnavailable }: {
-  graph: EtherGraph; catalog: readonly NodeLibraryItem[]; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; selectedIds: readonly string[]; selectedEdgeId: string | null; selectedModuleId: string | null; activeEditor: { nodeId: string; field: CanvasEditorField } | null; commands: readonly GraphCommand[]; viewport?: Viewport; onAddNode(definitionId: NodeDefinitionId, position: NodePosition): void; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveGroup(id: string, position: XYPosition): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onEditRequest(id: string, field: CanvasEditorField): void; onEditCommit(id: string, field: CanvasEditorField, value: string): Promise<boolean>; onEditCancel(): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onModuleSelected(id: string | null): void; onViewport(viewport: Viewport): void; onCommandUnavailable(message: string): void;
+const nodeTypes = { etherNode: EtherNode, overviewCluster: OverviewCluster, module: ModuleNode }; const edgeTypes = { etherEdge: EtherEdge };
+export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selectedIds, selectedEdgeId, selectedModuleId, activeEditor, commands, viewport, onAddNode, onMove, onMoveModule, onResize, onDelete, onEditRequest, onEditCommit, onEditCancel, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onEdgeSelected, onModuleSelected, onViewport, onCommandUnavailable }: {
+  graph: EtherGraph; catalog: readonly NodeLibraryItem[]; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; selectedIds: readonly string[]; selectedEdgeId: string | null; selectedModuleId: string | null; activeEditor: { nodeId: string; field: CanvasEditorField } | null; commands: readonly GraphCommand[]; viewport?: Viewport; onAddNode(definitionId: NodeDefinitionId, position: NodePosition): void; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onEditRequest(id: string, field: CanvasEditorField): void; onEditCommit(id: string, field: CanvasEditorField, value: string): Promise<boolean>; onEditCancel(): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onModuleSelected(id: string | null, additive?: boolean): void; onViewport(viewport: Viewport): void; onCommandUnavailable(message: string): void;
 }) {
   markPerformance("canvas:projection:start");
   const flow = useReactFlow();
@@ -104,10 +104,12 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     } satisfies Node));
   }, [graph.nodes, showSemanticOverview]);
   const nodes = useMemo<Node[]>(() => [
-    ...graph.groups.map((group) => ({ id: `group:${group.id}`, type: "group", position: group.position, width: group.size.width, height: group.size.height, draggable: !readOnly, selectable: false, data: { title: group.title, color: group.color }, style: { width: group.size.width, height: group.size.height, zIndex: 0 } })),
-    ...graph.modules.map((module) => ({ id: `module:${module.id}`, type: "module", position: module.position, width: module.size.width, height: module.size.height, draggable: !readOnly, selected: selectedModuleId === module.id, data: { title: module.title, collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id) }, style: { width: module.size.width, height: module.size.height, zIndex: 1 } })),
+    ...graph.modules.map((module) => {
+      const height = module.collapsed ? 112 : module.size.height;
+      return { id: `module:${module.id}`, type: "module", position: module.position, width: module.size.width, height, draggable: !readOnly && !moduleIsLocked(module), selected: selectedModuleId === module.id, data: { title: module.title, description: module.description ?? "", accent: moduleAccent(module), locked: moduleIsLocked(module), collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id) }, style: { width: module.size.width, height, zIndex: 1 } };
+    }),
     ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => { const editing = activeEditor?.nodeId === node.id; const height = editing ? Math.max(220, node.size.height) : node.size.height; return { id: node.id, type: "etherNode", position: node.position, width: node.size.width, height, selected: selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], status: nodeStatuses[node.id] ?? null, readOnly, activeEditor: editing ? activeEditor.field : null, onDelete, onResizeStart: interaction.beginResize, onResize, onResizeEnd: interaction.settle, onSelect: interaction.selectNode, onEditRequest, onEditCommit, onEditCancel } satisfies EtherCanvasNodeData, style: { width: node.size.width, height, zIndex: 1 } }; }))
-  ], [activeEditor, activity, graph.groups, graph.modules, graph.nodes, interaction.beginResize, interaction.selectNode, interaction.settle, nodeStatuses, onDelete, onEditCancel, onEditCommit, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectedIds, selectedModuleId, showSemanticOverview]);
+  ], [activeEditor, activity, graph.modules, graph.nodes, interaction.beginResize, interaction.selectNode, interaction.settle, nodeStatuses, onDelete, onEditCancel, onEditCommit, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectedIds, selectedModuleId, showSemanticOverview]);
   const edges = useMemo(() => showSemanticOverview ? [] : graph.edges.map((edge) => ({ id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, selected: selectedEdgeId === edge.id, data: { edge, readOnly, compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel } satisfies EtherFlowEdgeData })), [compatibleChannels, graph.edges, onChannel, onDeleteEdge, onRole, readOnly, selectedEdgeId, showSemanticOverview]);
   markPerformance("canvas:projection:end");
   measurePerformance("canvas:projection", "canvas:projection:start", "canvas:projection:end");
@@ -149,13 +151,12 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   }, [draggedDefinition, insertionAt, onAddNode, readOnly]);
   const onNodeDragStop: OnNodeDrag = useCallback((_event, node) => {
     if (readOnly) return;
-    if (node.id.startsWith("group:")) { onMoveGroup(node.id.slice("group:".length), node.position); interaction.settle(); return; }
     if (node.id.startsWith("module:")) { onMoveModule(node.id.slice("module:".length), node.position); interaction.settle(); return; }
     const original = graph.nodes.find((item) => item.id === node.id); if (!original) return;
     const selected = selectedIds.includes(node.id) ? selectedIds : [node.id]; const delta = { x: node.position.x - original.position.x, y: node.position.y - original.position.y };
     onMove(graph.nodes.filter((item) => selected.includes(item.id)).map((item) => ({ nodeId: item.id, position: { x: item.position.x + delta.x, y: item.position.y + delta.y } })));
     interaction.settle();
-  }, [graph.nodes, interaction, onMove, onMoveGroup, onMoveModule, readOnly, selectedIds]);
+  }, [graph.nodes, interaction, onMove, onMoveModule, readOnly, selectedIds]);
   const fitSmallGraph = graph.nodes.length > 0 && graph.nodes.length < 250;
   const fitViewOnMount = useRef({ graphId: graph.id, enabled: fitSmallGraph });
   if (fitViewOnMount.current.graphId !== graph.id) {
@@ -278,9 +279,9 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           if (graph.nodes.some((item) => item.id === node.id)) {
             interaction.selectNode(node.id, event.ctrlKey || event.metaKey || event.shiftKey);
           } else if (node.id.startsWith("module:")) {
-            interaction.clearSelection();
+            if (!(event.ctrlKey || event.metaKey || event.shiftKey)) interaction.clearSelection();
             onEdgeSelected(null);
-            onModuleSelected(node.id.slice("module:".length));
+            onModuleSelected(node.id.slice("module:".length), event.ctrlKey || event.metaKey || event.shiftKey);
           }
         }}
         onEdgeClick={(_event, edge) => { interaction.clearSelection(); onModuleSelected(null); onEdgeSelected(edge.id); }}

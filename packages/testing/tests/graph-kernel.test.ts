@@ -876,6 +876,22 @@ describe("atomic graph transactions", () => {
     expect(interfaceUpdate.inverseReplay).toEqual(created.graphs);
   });
 
+  it("requires an explicit unlock transaction before moving, changing membership, or removing a locked module", () => {
+    const root = graph("root", "root", []);
+    const inner = graph("inner", "module", [promptNode("inside")]);
+    const module = { id: "locked-module", title: "Locked", description: "Protected", accent: "#37e6ea", locked: true, graphId: "inner", position: { x: 0, y: 0 }, size: { width: 240, height: 140 }, interface: { inputs: [], outputs: [], parameters: [] }, collapsed: false };
+    root.modules = [module];
+    const base = { id: "locked", baseDocumentRevisionId: "doc", baseGraphRevisions: { root: "r", inner: "i" }, title: "Locked module", actor: "user" as const, layoutPolicy: "preserve" as const };
+    expect(() => previewGraphTransaction({ graphs: [root, inner], transaction: { ...base, operations: [{ type: "updateModule", graphId: root.id, moduleId: module.id, module: { ...module, position: { x: 20, y: 20 } } }] } })).toThrow(/unlock.*separate transaction/i);
+    expect(() => previewGraphTransaction({ graphs: [root, inner], transaction: { ...base, operations: [{ type: "updateModule", graphId: root.id, moduleId: module.id, module, subtree: { rootGraphId: inner.id, graphs: [{ ...inner, title: "Changed" }] } }] } })).toThrow(/unlock.*separate transaction/i);
+    expect(() => previewGraphTransaction({ graphs: [root, inner], transaction: { ...base, operations: [{ type: "removeModule", graphId: root.id, moduleId: module.id }] } })).toThrow(/unlock module/i);
+
+    const unlocked = previewGraphTransaction({ graphs: [root, inner], transaction: { ...base, operations: [{ type: "updateModule", graphId: root.id, moduleId: module.id, module: { ...module, locked: false } }] } });
+    const removed = previewGraphTransaction({ graphs: unlocked.graphs, transaction: { ...base, id: "remove-unlocked", operations: [{ type: "removeModule", graphId: root.id, moduleId: module.id }] } });
+    expect(removed.graphs).toEqual([expect.objectContaining({ id: "root", modules: [] })]);
+    expect(removed.inverseReplay).toEqual(unlocked.graphs);
+  });
+
   it("rejects module subtree updates that collide with graphs outside the owned subtree", () => {
     const root = graph("root", "root", []);
     const inner = graph("inner", "module", []);

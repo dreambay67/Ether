@@ -161,6 +161,9 @@ export const EtherModuleSchema = z
   .object({
     id: z.string().min(1),
     title: z.string(),
+    description: z.string().optional(),
+    accent: z.string().min(1).optional(),
+    locked: z.boolean().optional(),
     graphId: z.string().min(1),
     position: NodePositionSchema,
     size: NodeSizeSchema,

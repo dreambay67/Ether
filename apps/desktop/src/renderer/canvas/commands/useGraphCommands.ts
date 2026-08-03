@@ -1,13 +1,14 @@
 import { useCallback, useMemo } from "react";
 import type { EtherEdge, EtherGraph, EtherNode, GraphOperation } from "@ether/schema";
 import type { CanvasEditorField } from "./directEditing";
+import { moduleIsLocked } from "../modules/moduleModel";
 
 export type GraphCommandId = "delete" | "duplicate" | "copy" | "cut" | "paste" | "selectAll" | "undo" | "redo" | "createModule" | "dissolveModule" | "rename" | "edit" | "runSelected" | "fit" | "palette";
 export type GraphCommand = { id: GraphCommandId; label: string; shortcut: string; enabled: boolean; disabledReason?: string; execute(): void | Promise<unknown> };
 type ClipboardSnapshot = { kind: "ether.graph-selection.v1"; nodes: EtherNode[]; edges: EtherEdge[]; pasteCount: number };
 let graphClipboard: ClipboardSnapshot | null = null;
 
-export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdgeId, selectedModuleId, apply, createModule, dissolveModule, undo, redo, onSelectNodes, onSelectEdge, onSelectModule, onEdit, onRunSelected, onFit, onPalette, onStatus }: {
+export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdgeId, selectedModuleId, apply, createModule, dissolveModule, undo, redo, onSelectNodes, onSelectEdge, onSelectModule, onEdit, onRenameModule, onEnterModule, onRunSelected, onFit, onPalette, onStatus }: {
   graph: EtherGraph;
   readOnly: boolean;
   selectedNodeIds: readonly string[];
@@ -22,6 +23,8 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
   onSelectEdge(id: string | null): void;
   onSelectModule(id: string | null): void;
   onEdit(nodeId: string, field: CanvasEditorField): void;
+  onRenameModule(moduleId: string): void;
+  onEnterModule(moduleId: string): void;
   onRunSelected(): void;
   onFit(): void;
   onPalette(): void;
@@ -98,6 +101,7 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
   }, [apply, graph.edges, graph.id, onSelectEdge, onSelectModule, onSelectNodes, onStatus, selectedNodeIds, selection]);
   const cut = useCallback(async () => { if (await copySelection()) await deleteSelection(); }, [copySelection, deleteSelection]);
   const primary = selectedNodeIds[0] ?? null;
+  const selectedModule = selectedModuleId === null ? undefined : graph.modules.find((module) => module.id === selectedModuleId);
   const noSelection = "Select a node first.";
   const locked = readOnly ? "This document is read-only." : undefined;
   return useMemo<GraphCommand[]>(() => [
@@ -110,13 +114,13 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
     command("undo", "Undo graph transaction", "Ctrl+Z", !readOnly, locked, undo),
     command("redo", "Redo graph transaction", "Ctrl+Y", !readOnly, locked, redo),
     command("createModule", "Create module", "Ctrl+G", !readOnly && selection.length > 0, locked ?? noSelection, async () => { if (await createModule([...selectedNodeIds])) onSelectNodes([]); }),
-    command("dissolveModule", "Dissolve module", "Ctrl+Shift+G", !readOnly && selectedModuleId !== null, locked ?? "Select a module first.", async () => { if (selectedModuleId) await dissolveModule(selectedModuleId); }),
-    command("rename", "Rename", "F2", !readOnly && primary !== null, locked ?? noSelection, () => { if (primary) onEdit(primary, "title"); }),
-    command("edit", "Edit primary content", "Enter", !readOnly && primary !== null, locked ?? noSelection, () => { if (primary) onEdit(primary, "primary"); }),
+    command("dissolveModule", "Dissolve module", "Ctrl+Shift+G", !readOnly && selectedModule !== undefined && !moduleIsLocked(selectedModule), locked ?? (selectedModule === undefined ? "Select a module first." : "Unlock this module before dissolving it."), async () => { if (selectedModuleId) await dissolveModule(selectedModuleId); }),
+    command("rename", "Rename", "F2", !readOnly && (primary !== null || selectedModuleId !== null), locked ?? noSelection, () => { if (primary) onEdit(primary, "title"); else if (selectedModuleId) onRenameModule(selectedModuleId); }),
+    command("edit", selectedModuleId ? "Enter module" : "Edit primary content", "Enter", !readOnly && (primary !== null || selectedModuleId !== null), locked ?? noSelection, () => { if (primary) onEdit(primary, "primary"); else if (selectedModuleId) onEnterModule(selectedModuleId); }),
     command("runSelected", "Preview selected run", "Ctrl+Enter", selectedNodeIds.length > 0, noSelection, onRunSelected),
     command("fit", "Fit current graph", "Home", graph.nodes.length + graph.modules.length > 0, "This canvas is blank.", onFit),
     command("palette", "Command palette", "Ctrl+K", true, undefined, onPalette)
-  ], [copySelection, createModule, cut, deleteSelection, dissolveModule, graph.modules.length, graph.nodes, locked, onEdit, onFit, onPalette, onRunSelected, onSelectEdge, onSelectModule, onSelectNodes, paste, primary, readOnly, redo, selectedEdgeId, selectedModuleId, selectedNodeIds, selection.length, undo]);
+  ], [copySelection, createModule, cut, deleteSelection, dissolveModule, graph.modules.length, graph.nodes, locked, onEdit, onEnterModule, onFit, onPalette, onRenameModule, onRunSelected, onSelectEdge, onSelectModule, onSelectNodes, paste, primary, readOnly, redo, selectedEdgeId, selectedModule, selectedModuleId, selectedNodeIds, selection.length, undo]);
 }
 
 function command(id: GraphCommandId, label: string, shortcut: string, enabled: boolean, disabledReason: string | undefined, execute: GraphCommand["execute"]): GraphCommand {

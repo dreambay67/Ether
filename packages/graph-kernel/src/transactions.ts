@@ -212,6 +212,29 @@ function requireAffectedBaseRevisions(graphs: readonly EtherGraph[], operations:
   for (const graphId of affected) if (!Object.hasOwn(baseGraphRevisions, graphId)) throw new GraphKernelError("MISSING_BASE_GRAPH_REVISION", `A base graph revision is required for affected graph ${graphId}.`);
 }
 
+function enforceLockedModuleBoundaries(graphs: readonly EtherGraph[], operations: readonly GraphOperation[]): void {
+  const byId = new Map(graphs.map((graph) => [graph.id, graph]));
+  for (const operation of operations) {
+    if (operation.type === "createModule" && operation.module.locked === false) {
+      throw new GraphKernelError("MODULE_MUST_START_LOCKED", `Module ${operation.module.id} must be locked when it is created.`);
+    }
+    if (operation.type !== "updateModule" && operation.type !== "removeModule") continue;
+    const module = byId.get(operation.graphId)?.modules.find((candidate) => candidate.id === operation.moduleId);
+    // Pre-recovery 4.0 records did not persist this field. Their compatibility
+    // behavior stays unchanged until an explicit conversion/relock writes it.
+    if (module === undefined || module.locked !== true) continue;
+    if (operation.type === "removeModule") {
+      throw new GraphKernelError("MODULE_LOCKED", `Unlock module ${module.id} before dissolving or removing it.`);
+    }
+    const moved = module.position.x !== operation.module.position.x || module.position.y !== operation.module.position.y;
+    const resized = module.size.width !== operation.module.size.width || module.size.height !== operation.module.size.height;
+    const changedMembership = operation.subtree !== undefined || module.graphId !== operation.module.graphId;
+    if (moved || resized || changedMembership) {
+      throw new GraphKernelError("MODULE_LOCKED", `Unlock module ${module.id} in a separate transaction before moving, resizing, or changing membership.`);
+    }
+  }
+}
+
 export function previewGraphTransaction(input: { graphs: readonly EtherGraph[]; transaction: GraphTransaction; capabilities?: readonly string[]; idFactory?: TempFactory }): {
   graphs: EtherGraph[]; forwardOperations: GraphOperation[]; inverseOperations: GraphOperation[]; tempIds: Record<string, string>; forwardReplay: EtherGraph[]; inverseReplay: EtherGraph[];
 } {
@@ -228,6 +251,7 @@ export function previewGraphTransaction(input: { graphs: readonly EtherGraph[]; 
   }
   const forwardOperations = parsed.operations.map((operation) => GraphOperationSchema.parse(replaceTemporaryIds(operation, resolved)));
   requireAffectedBaseRevisions(input.graphs, forwardOperations, parsed.baseGraphRevisions);
+  enforceLockedModuleBoundaries(input.graphs, forwardOperations);
   const forward = replay(input.graphs, forwardOperations, true);
   validateResult(forward.graphs, input.capabilities ?? []);
   const replayedForward = replay(input.graphs, forwardOperations, false).graphs;

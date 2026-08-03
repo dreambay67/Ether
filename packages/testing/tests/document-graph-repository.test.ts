@@ -914,6 +914,91 @@ describe("transactional Ether document repositories", () => {
     await reopened.close();
   });
 
+  it("moves existing node and edge IDs into a module graph atomically", async () => {
+    const source = promptNode("move-source", "Source");
+    const target = promptNode("move-target", "Target");
+    const lane: EtherGraph["edges"][number] = {
+      id: "move-lane",
+      from: { kind: "node", nodeId: source.id, channel: "text" },
+      to: { kind: "node", nodeId: target.id, channel: "text" },
+      role: "general",
+      order: 0,
+      selector: { kind: "latest" },
+      adapter: { kind: "auto" },
+      enabled: true
+    };
+    const initial = {
+      ...graph("graph-move", "root", [source, target]),
+      edges: [lane]
+    };
+    const store = await storeClass().create(filePath, {
+      appVersion: "4.0.0",
+      documentId: "document-entity-move",
+      initialGraph: initial,
+      title: "Entity move"
+    });
+    const internal = graph("graph-move-module", "module", [source, target]);
+    internal.edges = [lane];
+    const module = {
+      id: "module-move",
+      title: "Moved selection",
+      description: "Selection contents",
+      accent: "electric-blue",
+      locked: true,
+      graphId: internal.id,
+      position: { x: 320, y: 80 },
+      size: { width: 240, height: 160 },
+      interface: { inputs: [], outputs: [], parameters: [] },
+      collapsed: false
+    };
+    const parent = { ...initial, nodes: [], edges: [], modules: [module] };
+    const genesis = await store.read(({ revisions }) => revisions.head());
+    const created = await store.transaction(({ revisions }) => revisions.commit({
+      id: "move-selection-into-module",
+      baseDocumentRevisionId: genesis.documentRevisionId,
+      baseGraphRevisions: { [initial.id]: genesis.graphRevisions[initial.id]! },
+      title: "Move selection into module",
+      actor: "user",
+      graphSnapshots: [parent, internal],
+      forwardOperations: [
+        {
+          type: "createModule",
+          graphId: initial.id,
+          module,
+          subtree: { rootGraphId: internal.id, graphs: [internal] }
+        },
+        { type: "removeEdge", graphId: initial.id, edgeId: lane.id },
+        { type: "removeNode", graphId: initial.id, nodeId: source.id },
+        { type: "removeNode", graphId: initial.id, nodeId: target.id }
+      ],
+      inverseOperations: [
+        { type: "removeModule", graphId: initial.id, moduleId: module.id },
+        { type: "addEdge", graphId: initial.id, edge: lane, index: 0 },
+        { type: "addNode", graphId: initial.id, node: source, index: 0 },
+        { type: "addNode", graphId: initial.id, node: target, index: 1 }
+      ]
+    }));
+    expect(created.graphRevisionsCreated.map(({ graphId }) => graphId).sort()).toEqual([
+      initial.id,
+      internal.id
+    ].sort());
+    await expect(store.read(({ graphs }) => graphs.get(initial.id))).resolves.toEqual(parent);
+    await expect(store.read(({ graphs }) => graphs.get(internal.id))).resolves.toEqual(internal);
+
+    await store.transaction(({ revisions }) => revisions.undo());
+    await expect(store.read(({ graphs }) => graphs.get(initial.id))).resolves.toEqual(initial);
+    await expect(store.read(({ graphs }) => graphs.get(internal.id))).resolves.toBeUndefined();
+
+    await store.transaction(({ revisions }) => revisions.redo());
+    await expect(store.read(({ graphs }) => graphs.get(internal.id))).resolves.toEqual(internal);
+    await store.close();
+
+    const reopened = await storeClass().open(filePath, { access: "read-only" });
+    await expect(reopened.read(({ graphs }) => graphs.get(initial.id))).resolves.toEqual(parent);
+    await expect(reopened.read(({ graphs }) => graphs.get(internal.id))).resolves.toEqual(internal);
+    await reopened.close();
+  });
+
   it("keeps runtime read facades pure and prevents sync or async mutation exploits", async () => {
     const initial = graph();
     const store = await storeClass().create(filePath, {

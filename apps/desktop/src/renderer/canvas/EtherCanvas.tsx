@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { getViewportForBounds, ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
 import type { EtherGraph, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition } from "@ether/schema";
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
@@ -13,6 +13,7 @@ import { useGraphCommands } from "./commands/useGraphCommands";
 import type { InspectorContext } from "./inspector/types";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { centeredCanvasPosition, openCanvasPosition } from "./placement";
+import { addNodesToModuleOperations, createModuleOperations, moduleIsLocked, removeNodesFromModuleOperations } from "./modules/moduleModel";
 
 export type EtherCanvasHandle = { addNode(definitionId: NodeDefinitionId): void; addPrompt(): void; addImage(): void; focusNode(nodeId: string): void; };
 export type EtherCanvasProps = { graph: EtherGraph; revisionSeed: GraphRevisionSeed; catalog: readonly NodeLibraryItem[]; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onStatus(message: string): void; onInspectorChange?(context: InspectorContext | null): void; };
@@ -24,7 +25,7 @@ type ApplicationQueryBridge = {
 };
 type PreparedSelectionPlan = { id: string; contentHash: string; estimatedCalls: number };
 function graphContentBounds(graph: EtherGraph) {
-  const items = [...graph.nodes, ...graph.groups, ...graph.modules];
+  const items = [...graph.nodes, ...graph.modules];
   if (items.length === 0) return null;
   const left = Math.min(...items.map((item) => item.position.x));
   const top = Math.min(...items.map((item) => item.position.y));
@@ -40,6 +41,27 @@ function queryRequest(name: string, documentId: string, payload: unknown) {
 
 function commandRequest(name: string, documentId: string, payload: unknown) {
   return { kind: "command", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name, documentId, payload };
+}
+
+async function loadModuleSubtree(documentId: string, rootGraphId: string): Promise<{ graphs: EtherGraph[]; revisions: GraphRevisionSeed[] }> {
+  const bridge = typedQueryBridge();
+  if (!bridge) throw new Error("Module membership requires the typed application bridge.");
+  const pending = [rootGraphId];
+  const graphs: EtherGraph[] = [];
+  const revisions: GraphRevisionSeed[] = [];
+  while (pending.length > 0) {
+    const graphId = pending.shift()!;
+    if (graphs.some((graph) => graph.id === graphId)) continue;
+    const response = await bridge.query(queryRequest("graph.snapshot", documentId, { graphId }));
+    const graph = response.payload?.graph as EtherGraph | undefined;
+    const documentRevisionId = response.payload?.documentRevisionId;
+    const graphRevisionId = response.payload?.graphRevisionId;
+    if (!graph || typeof documentRevisionId !== "string" || typeof graphRevisionId !== "string") throw new Error(`Module graph ${graphId} is unavailable.`);
+    graphs.push(graph);
+    revisions.push({ graphId, documentRevisionId, graphRevisionId });
+    pending.push(...graph.modules.map((module) => module.graphId));
+  }
+  return { graphs, revisions };
 }
 
 function useNodeRuntimeStatuses(documentId: string, graphId: string) {
@@ -111,30 +133,53 @@ export const EtherCanvas = forwardRef<EtherCanvasHandle, EtherCanvasProps>(funct
   const rootGraphId = rootRevisionSeed.graphId;
   const rootDocumentRevisionId = rootRevisionSeed.documentRevisionId;
   const rootGraphRevisionId = rootRevisionSeed.graphRevisionId;
-  const [selectedIds, setSelectedIds] = useState<string[]>([]); const [status, setStatus] = useState("Canvas ready"); const [activeGraph, setActiveGraph] = useState<EtherGraph>(graph); const [parents, setParents] = useState<ParentFrame[]>([]); const [viewports, setViewports] = useState<Record<string, Viewport>>({}); const [revisionSeed, setRevisionSeed] = useState<GraphRevisionSeed>(rootRevisionSeed);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]); const [status, setStatus] = useState("Canvas ready"); const [activeGraph, setActiveGraph] = useState<EtherGraph>(graph); const [parents, setParents] = useState<ParentFrame[]>([]); const [restoredModuleId, setRestoredModuleId] = useState<string | null>(null); const [viewports, setViewports] = useState<Record<string, Viewport>>({}); const [revisionSeed, setRevisionSeed] = useState<GraphRevisionSeed>(rootRevisionSeed);
+  const activeGraphId = useRef(activeGraph.id);
+  activeGraphId.current = activeGraph.id;
   const report = useCallback((message: string) => { setStatus(message); onStatus(message); }, [onStatus]);
   useEffect(() => { if (activeGraph.id === graph.id) setActiveGraph(graph); }, [activeGraph.id, graph]);
   useEffect(() => {
-    if (activeGraph.id === rootGraphId) setRevisionSeed({ graphId: rootGraphId, documentRevisionId: rootDocumentRevisionId, graphRevisionId: rootGraphRevisionId });
-  }, [activeGraph.id, rootDocumentRevisionId, rootGraphId, rootGraphRevisionId]);
+    if (activeGraphId.current === rootGraphId) setRevisionSeed({ graphId: rootGraphId, documentRevisionId: rootDocumentRevisionId, graphRevisionId: rootGraphRevisionId });
+  }, [rootDocumentRevisionId, rootGraphId, rootGraphRevisionId]);
   useEffect(() => { setSelectedIds((ids) => ids.filter((id) => activeGraph?.nodes.some((node) => node.id === id))); }, [activeGraph]);
   const displayedGraph = activeGraph;
   const rememberViewport = useCallback((graphId: string, viewport: Viewport) => setViewports((current) => ({ ...current, [graphId]: viewport })), []);
-  const enterModule = async (moduleId: string, parentGraph: EtherGraph) => {
+  const enterModule = useCallback(async (moduleId: string, parentGraph: EtherGraph) => {
     const module = parentGraph.modules.find((item) => item.id === moduleId); const bridge = typedQueryBridge();
     if (!module || !bridge) { report("Module navigation requires the typed application bridge."); return; }
-    try { const response = await bridge.query(queryRequest("graph.snapshot", document.documentId, { graphId: module.graphId })); const child = response.payload?.graph as EtherGraph | undefined; const documentRevisionId = response.payload?.documentRevisionId as string | undefined; const graphRevisionId = response.payload?.graphRevisionId as string | undefined; if (!child || !documentRevisionId || !graphRevisionId) throw new Error("The module graph revision was unavailable."); setParents((stack) => [...stack, { graph: parentGraph, moduleId, selectedIds }]); setRevisionSeed({ graphId: child.id, documentRevisionId, graphRevisionId }); setActiveGraph(child); setSelectedIds([]); report(`Entered ${module.title}`); } catch (error) { report(error instanceof Error ? error.message : "The module could not be opened."); }
-  };
-  const leaveModule = () => { const parent = parents.at(-1); if (!parent) return; setParents((stack) => stack.slice(0, -1)); setActiveGraph(parent.graph); setSelectedIds(parent.selectedIds); report("Returned to parent canvas"); };
+    try { const response = await bridge.query(queryRequest("graph.snapshot", document.documentId, { graphId: module.graphId })); const child = response.payload?.graph as EtherGraph | undefined; const documentRevisionId = response.payload?.documentRevisionId as string | undefined; const graphRevisionId = response.payload?.graphRevisionId as string | undefined; if (!child || !documentRevisionId || !graphRevisionId) throw new Error("The module graph revision was unavailable."); setParents((stack) => [...stack, { graph: parentGraph, moduleId, selectedIds }]); setRevisionSeed({ graphId: child.id, documentRevisionId, graphRevisionId }); setRestoredModuleId(null); setActiveGraph(child); setSelectedIds([]); report(`Entered ${module.title}`); } catch (error) { report(error instanceof Error ? error.message : "The module could not be opened."); }
+  }, [document.documentId, report, selectedIds]);
+  const leaveModule = useCallback(async () => {
+    const parent = parents.at(-1);
+    const bridge = typedQueryBridge();
+    if (!parent || !bridge) return;
+    try {
+      const response = await bridge.query(queryRequest("graph.snapshot", document.documentId, { graphId: parent.graph.id }));
+      const nextParent = response.payload?.graph as EtherGraph | undefined;
+      const documentRevisionId = response.payload?.documentRevisionId;
+      const graphRevisionId = response.payload?.graphRevisionId;
+      if (!nextParent || typeof documentRevisionId !== "string" || typeof graphRevisionId !== "string") throw new Error("The parent graph revision was unavailable.");
+      setParents((stack) => stack.slice(0, -1));
+      setRevisionSeed({ graphId: nextParent.id, documentRevisionId, graphRevisionId });
+      setRestoredModuleId(parent.moduleId);
+      setActiveGraph(nextParent);
+      setSelectedIds(parent.selectedIds);
+      report("Returned to parent canvas");
+    } catch (error) {
+      report(error instanceof Error ? error.message : "The parent canvas could not be restored.");
+    }
+  }, [document.documentId, parents, report]);
   const updateParentGraph = useCallback((nextGraph: EtherGraph) => setParents((stack) => stack.map((frame, index) => index === stack.length - 1 ? { ...frame, graph: nextGraph } : frame)), []);
   const acceptGraph = useCallback((next: EtherGraph) => { if (next.id === graph.id) onGraph(next); setActiveGraph(next); }, [graph.id, onGraph]);
   const parent = parents.at(-1);
   const acceptViewport = useCallback((viewport: Viewport) => rememberViewport(displayedGraph.id, viewport), [displayedGraph.id, rememberViewport]);
-  return <ReactFlowProvider><CanvasInner graph={displayedGraph} catalog={catalog} viewport={viewports[displayedGraph.id]} revisionSeed={revisionSeed} parentFrame={parent} document={document} onGraph={acceptGraph} onParentGraph={updateParentGraph} status={status} report={report} selectedIds={selectedIds} setSelectedIds={setSelectedIds} onInspectorChange={onInspectorChange} onViewport={acceptViewport} onEnterModule={enterModule} onLeaveModule={parents.length > 0 ? leaveModule : undefined} ref={ref} /></ReactFlowProvider>;
+  return <ReactFlowProvider><CanvasInner graph={displayedGraph} catalog={catalog} viewport={viewports[displayedGraph.id]} revisionSeed={revisionSeed} parentFrame={parent} restoredModuleId={restoredModuleId} document={document} onGraph={acceptGraph} onParentGraph={updateParentGraph} status={status} report={report} selectedIds={selectedIds} setSelectedIds={setSelectedIds} onInspectorChange={onInspectorChange} onViewport={acceptViewport} onEnterModule={enterModule} onLeaveModule={parents.length > 0 ? leaveModule : undefined} ref={ref} /></ReactFlowProvider>;
 });
 
-const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: readonly NodeLibraryItem[]; viewport?: Viewport; revisionSeed?: GraphRevisionSeed; parentFrame?: ParentFrame; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onParentGraph(graph: EtherGraph): void; status: string; report(message: string): void; selectedIds: string[]; setSelectedIds(ids: string[]): void; onInspectorChange?(context: InspectorContext | null): void; onViewport(viewport: Viewport): void; onEnterModule(id: string, graph: EtherGraph): void; onLeaveModule?(): void; }>(function CanvasInner({ graph, catalog, viewport, revisionSeed, parentFrame, document, onGraph, onParentGraph, status, report, selectedIds, setSelectedIds, onInspectorChange, onViewport, onEnterModule, onLeaveModule }, ref) {
-  const transactions = useTransactionCommands({ document, graph, revisionSeed, onGraph, onStatus: report }); const nodes = useNodeCommands(graph, catalog, transactions.apply, report); const edges = useEdgeCommands(graph, transactions.apply, report); const readOnly = document.mode !== "writable";
+const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: readonly NodeLibraryItem[]; viewport?: Viewport; revisionSeed?: GraphRevisionSeed; parentFrame?: ParentFrame; restoredModuleId?: string | null; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onParentGraph(graph: EtherGraph): void; status: string; report(message: string): void; selectedIds: string[]; setSelectedIds(ids: string[]): void; onInspectorChange?(context: InspectorContext | null): void; onViewport(viewport: Viewport): void; onEnterModule(id: string, graph: EtherGraph): void; onLeaveModule?(): void | Promise<void>; }>(function CanvasInner({ graph, catalog, viewport, revisionSeed, parentFrame, restoredModuleId, document, onGraph, onParentGraph, status, report, selectedIds, setSelectedIds, onInspectorChange, onViewport, onEnterModule, onLeaveModule }, ref) {
+  const transactions = useTransactionCommands({ document, graph, revisionSeed, onGraph, onStatus: report });
+  const { apply: applyTransaction, seedRevision, undo, redo } = transactions;
+  const nodes = useNodeCommands(graph, catalog, applyTransaction, report); const edges = useEdgeCommands(graph, applyTransaction, report); const readOnly = document.mode !== "writable";
   const flow = useReactFlow();
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
@@ -147,8 +192,12 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   useEffect(() => { setPreparedSelection(null); }, [document.documentId, graph.id, graph.updatedAt, selectionFingerprint]);
   useEffect(() => {
     if (activeEditor !== null && !graph.nodes.some((node) => node.id === activeEditor.nodeId)) setActiveEditor(null);
+    if (selectedEdgeId !== null && !graph.edges.some((edge) => edge.id === selectedEdgeId)) setSelectedEdgeId(null);
     if (selectedModuleId !== null && !graph.modules.some((module) => module.id === selectedModuleId)) setSelectedModuleId(null);
-  }, [activeEditor, graph.modules, graph.nodes, selectedModuleId]);
+  }, [activeEditor, graph.edges, graph.modules, graph.nodes, selectedEdgeId, selectedModuleId]);
+  useEffect(() => {
+    if (restoredModuleId && graph.modules.some((module) => module.id === restoredModuleId)) setSelectedModuleId(restoredModuleId);
+  }, [graph.id, graph.modules, restoredModuleId]);
   const refreshGraph = useCallback(async () => {
     const bridge = typedQueryBridge();
     if (!bridge) return null;
@@ -163,7 +212,6 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
       return null;
     }
   }, [document.documentId, graph.id, onGraph, report]);
-  useEffect(() => { onInspectorChange?.(selectedEdgeId ? { graph, document, nodeId: null, edgeId: selectedEdgeId, apply: transactions.apply, refreshGraph, report } : selectedIds.length === 1 ? { graph, document, nodeId: selectedIds[0]!, edgeId: null, apply: transactions.apply, refreshGraph, report } : null); }, [document, graph, onInspectorChange, refreshGraph, report, selectedEdgeId, selectedIds, transactions.apply]);
   const insertionCenter = useCallback((definitionId: NodeDefinitionId): NodePosition => {
     const surface = globalThis.document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
     if (surface === null) return { x: 120 + graph.nodes.length * 28, y: 120 + graph.nodes.length * 20 };
@@ -196,10 +244,10 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
       }
     }
   }), [addAtCenter, flow, graph.nodes, report, setSelectedIds]);
-  const persistViewport = async () => { const next = viewport ?? graph.viewState.viewport; return transactions.apply([{ type: "updateGraphProperties", graphId: graph.id, viewState: { ...graph.viewState, viewport: next } }], "Save canvas viewport"); };
-  const toggleModule = (id: string) => { if (readOnly) return; const module = graph.modules.find((item) => item.id === id); if (module) void transactions.apply([{ type: "updateModule", graphId: graph.id, moduleId: id, module: { ...module, collapsed: !module.collapsed } }], module.collapsed ? "Expand module" : "Collapse module"); };
-  const enter = async (id: string) => { if (readOnly || await persistViewport()) onEnterModule(id, graph); };
-  const leave = async () => { if (readOnly || await persistViewport()) onLeaveModule?.(); };
+  const persistViewport = useCallback(async () => { const next = viewport ?? graph.viewState.viewport; return applyTransaction([{ type: "updateGraphProperties", graphId: graph.id, viewState: { ...graph.viewState, viewport: next } }], "Save canvas viewport"); }, [applyTransaction, graph.id, graph.viewState, viewport]);
+  const toggleModule = (id: string) => { if (readOnly) return; const module = graph.modules.find((item) => item.id === id); if (module) void applyTransaction([{ type: "updateModule", graphId: graph.id, moduleId: id, module: { ...module, collapsed: !module.collapsed } }], module.collapsed ? "Expand module" : "Collapse module"); };
+  const enter = useCallback(async (id: string) => { if (readOnly || await persistViewport()) onEnterModule(id, graph); }, [graph, onEnterModule, persistViewport, readOnly]);
+  const leave = useCallback(async () => { if (readOnly || await persistViewport()) await onLeaveModule?.(); }, [onLeaveModule, persistViewport, readOnly]);
   const exposeParameter = (nodeId: string) => {
     if (readOnly || parentFrame === undefined) return;
     const module = parentFrame.graph.modules.find((item) => item.id === parentFrame.moduleId); const node = graph.nodes.find((item) => item.id === nodeId); if (!module || !node) return;
@@ -208,7 +256,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     if (module.interface.parameters.some((item) => item.id === parameter.id)) { report("That parameter is already exposed."); return; }
     const nextInterface = { ...module.interface, parameters: [...module.interface.parameters, parameter] };
     const operations: GraphOperation[] = [{ type: "updateModuleInterface", graphId: parentFrame.graph.id, moduleId: module.id, interface: nextInterface }];
-    void transactions.apply(operations, "Expose module parameter").then((saved) => { if (saved) onParentGraph({ ...parentFrame.graph, modules: parentFrame.graph.modules.map((item) => item.id === module.id ? { ...item, interface: nextInterface } : item) }); });
+    void applyTransaction(operations, "Expose module parameter").then((saved) => { if (saved) onParentGraph({ ...parentFrame.graph, modules: parentFrame.graph.modules.map((item) => item.id === module.id ? { ...item, interface: nextInterface } : item) }); });
   };
   const runSelected = async () => {
     const bridge = typedQueryBridge();
@@ -264,6 +312,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     const module = graph.modules.find((item) => item.id === moduleId);
     const bridge = typedQueryBridge();
     if (!module || !bridge || readOnly) return false;
+    if (moduleIsLocked(module)) { report("Unlock this module before dissolving it."); return false; }
     try {
       const response = await bridge.query(queryRequest("graph.snapshot", document.documentId, { graphId: module.graphId }));
       const child = response.payload?.graph as EtherGraph | undefined;
@@ -291,7 +340,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
       });
       const accepted = window.confirm(`Dissolve ${module.title}?\n\nRestore ${child.nodes.length} node${child.nodes.length === 1 ? "" : "s"} and ${child.edges.length + affectedEdges.length} connection${child.edges.length + affectedEdges.length === 1 ? "" : "s"} to this canvas. This is undoable.`);
       if (!accepted) { report("Module dissolution cancelled."); return false; }
-      transactions.seedRevision({ graphId: child.id, documentRevisionId, graphRevisionId });
+      seedRevision({ graphId: child.id, documentRevisionId, graphRevisionId });
       const restoredNodes = child.nodes.map((node) => ({ ...node, position: { x: module.position.x + node.position.x, y: module.position.y + node.position.y } }));
       const operations: GraphOperation[] = [
         ...restoredNodes.map((node) => ({ type: "addNode", graphId: graph.id, node } as GraphOperation)),
@@ -299,14 +348,84 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
         ...rewrittenEdges.map((edge) => ({ type: "updateEdge", graphId: graph.id, edgeId: edge.id, edge } as GraphOperation)),
         { type: "removeModule", graphId: graph.id, moduleId: module.id }
       ];
-      const saved = await transactions.apply(operations, "Dissolve module", { requiredGraphIds: [child.id] });
+      const saved = await applyTransaction(operations, "Dissolve module", { requiredGraphIds: [child.id] });
       if (saved) { setSelectedModuleId(null); setSelectedIds(restoredNodes.map((node) => node.id)); }
       return saved;
     } catch (error) {
       report(error instanceof Error ? error.message : "The module could not be dissolved.");
       return false;
     }
-  }, [document.documentId, graph.edges, graph.id, graph.modules, readOnly, report, setSelectedIds, transactions]);
+  }, [applyTransaction, document.documentId, graph.edges, graph.id, graph.modules, readOnly, report, seedRevision, setSelectedIds]);
+  const addSelectedToModule = useCallback(async (moduleId: string, nodeIds: readonly string[]) => {
+    const module = graph.modules.find((candidate) => candidate.id === moduleId);
+    if (!module || readOnly) return false;
+    try {
+      const loaded = await loadModuleSubtree(document.documentId, module.graphId);
+      loaded.revisions.forEach(seedRevision);
+      const result = addNodesToModuleOperations(graph, module, loaded.graphs, nodeIds);
+      if (!result.ok) { report(result.message); return false; }
+      const saved = await applyTransaction(result.operations, "Add module members", { requiredGraphIds: loaded.graphs.map((item) => item.id) });
+      if (saved) setSelectedIds([]);
+      return saved;
+    } catch (error) {
+      report(error instanceof Error ? error.message : "Module membership could not be changed.");
+      return false;
+    }
+  }, [applyTransaction, document.documentId, graph, readOnly, report, seedRevision, setSelectedIds]);
+  const removeSelectedFromModule = useCallback(async (nodeIds: readonly string[]) => {
+    if (!parentFrame || readOnly) return false;
+    const module = parentFrame.graph.modules.find((candidate) => candidate.id === parentFrame.moduleId);
+    if (!module) return false;
+    if (moduleIsLocked(module)) { report("Leave this module, unlock it, then re-enter before removing members."); return false; }
+    try {
+      const loaded = await loadModuleSubtree(document.documentId, module.graphId);
+      loaded.revisions.forEach(seedRevision);
+      const result = removeNodesFromModuleOperations(parentFrame.graph, module, loaded.graphs, nodeIds);
+      if (!result.ok) { report(result.message); return false; }
+      const saved = await applyTransaction(result.operations, "Move module members to parent", { requiredGraphIds: loaded.graphs.map((item) => item.id) });
+      if (!saved) return false;
+      setSelectedIds([]);
+      const response = await typedQueryBridge()?.query(queryRequest("graph.snapshot", document.documentId, { graphId: parentFrame.graph.id }));
+      const nextParent = response?.payload?.graph as EtherGraph | undefined;
+      if (nextParent) onParentGraph(nextParent);
+      return true;
+    } catch (error) {
+      report(error instanceof Error ? error.message : "Module members could not be moved to the parent canvas.");
+      return false;
+    }
+  }, [applyTransaction, document.documentId, onParentGraph, parentFrame, readOnly, report, seedRevision, setSelectedIds]);
+  const convertLegacyGroup = useCallback(async (groupId: string) => {
+    const group = graph.groups.find((candidate) => candidate.id === groupId);
+    if (!group || readOnly) return false;
+    const uniqueNodeIds = [...new Set(group.nodeIds)];
+    const missing = uniqueNodeIds.filter((nodeId) => !graph.nodes.some((node) => node.id === nodeId));
+    const overlap = graph.groups.find((candidate) => candidate.id !== group.id && candidate.nodeIds.some((nodeId) => uniqueNodeIds.includes(nodeId)));
+    if (uniqueNodeIds.length === 0 || missing.length > 0 || overlap !== undefined) {
+      report(missing.length > 0
+        ? `Repair preview: ${group.title} references ${missing.length} missing node${missing.length === 1 ? "" : "s"}. No change was made.`
+        : overlap !== undefined
+          ? `Repair preview: ${group.title} overlaps ${overlap.title}. Separate their membership before conversion; no change was made.`
+          : `Repair preview: ${group.title} has no members. No change was made.`);
+      return false;
+    }
+    const preview = createModuleOperations(graph, uniqueNodeIds, { title: group.title, accent: group.color, removeGroupId: group.id });
+    if (preview === null) { report(`Repair preview: ${group.title} cannot be converted without losing content. No change was made.`); return false; }
+    const accepted = window.confirm(`Convert ${group.title} to a locked Module?\n\n${uniqueNodeIds.length} member${uniqueNodeIds.length === 1 ? "" : "s"}, connections, and positions will be preserved in one undoable transaction.`);
+    if (!accepted) { report("Group conversion cancelled; no change was made."); return false; }
+    const saved = await applyTransaction(preview.operations, "Convert group to locked module");
+    if (saved) { setSelectedIds([]); setSelectedModuleId(preview.module.id); }
+    return saved;
+  }, [applyTransaction, graph, readOnly, report, setSelectedIds]);
+  useEffect(() => {
+    const base = { graph, document, selectedNodeIds: selectedIds, apply: applyTransaction, refreshGraph, report, enterModule: (moduleId: string) => void enter(moduleId), dissolveModule, addSelectedToModule };
+    onInspectorChange?.(selectedModuleId
+      ? { ...base, nodeId: null, edgeId: null, moduleId: selectedModuleId }
+      : selectedEdgeId
+        ? { ...base, nodeId: null, edgeId: selectedEdgeId, moduleId: null }
+        : selectedIds.length === 1
+          ? { ...base, nodeId: selectedIds[0]!, edgeId: null, moduleId: null }
+          : null);
+  }, [addSelectedToModule, applyTransaction, dissolveModule, document, enter, graph, onInspectorChange, refreshGraph, report, selectedEdgeId, selectedIds, selectedModuleId]);
   const fitGraph = useCallback(() => {
     const content = graphContentBounds(graph);
     if (content === null) return;
@@ -327,17 +446,19 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   }, [flow, graph]);
   const commands = useGraphCommands({
     graph, readOnly, selectedNodeIds: selectedIds, selectedEdgeId, selectedModuleId,
-    apply: transactions.apply, createModule: nodes.createModule, dissolveModule,
-    undo: transactions.undo, redo: transactions.redo,
+    apply: applyTransaction, createModule: nodes.createModule, dissolveModule,
+    undo, redo,
     onSelectNodes: (ids) => { setActiveEditor(null); setSelectedIds(ids); },
     onSelectEdge: setSelectedEdgeId,
     onSelectModule: setSelectedModuleId,
     onEdit: beginEdit,
+    onRenameModule: () => globalThis.requestAnimationFrame(() => globalThis.document.querySelector<HTMLInputElement>('input[aria-label="Module title"]')?.focus()),
+    onEnterModule: (moduleId) => void enter(moduleId),
     onRunSelected: () => void runSelected(),
     onFit: fitGraph,
     onPalette: () => setPaletteOpen(true),
     onStatus: report
   });
   const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
-  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onMove={nodes.moveNodes} onMoveGroup={nodes.moveGroup} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id) => { setActiveEditor(null); setSelectedEdgeId(null); setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runDetail={preparedSelection ? "The exact selected-node plan is ready." : "Prepare an exact plan before any provider work starts."} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} /></div>;
+  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); if (!additive) setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runDetail={preparedSelection ? "The exact selected-node plan is ready." : "Prepare an exact plan before any provider work starts."} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} /></div>;
 });

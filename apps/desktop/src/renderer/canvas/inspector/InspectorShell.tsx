@@ -1,5 +1,6 @@
 import { PanelRight } from "lucide-react";
 import { EdgeInspector } from "./EdgeInspector";
+import { ModuleInspector } from "./ModuleInspector";
 import { NodeInspector } from "./NodeInspector";
 import type { InspectorContext } from "./types";
 
@@ -9,5 +10,7 @@ export function InspectorShell({ context }: { context: InspectorContext | null }
   if (node) return <NodeInspector context={{ ...context, node }} />;
   const edge = context.edgeId === null ? undefined : context.graph.edges.find((candidate) => candidate.id === context.edgeId);
   if (edge) return <EdgeInspector context={{ ...context, edge }} />;
+  const module = context.moduleId === null ? undefined : context.graph.modules.find((candidate) => candidate.id === context.moduleId);
+  if (module) return <ModuleInspector context={{ ...context, module }} />;
   return <div className="ether-inspector-empty"><strong>Selection changed</strong><p>The selected item is no longer available in this graph revision.</p></div>;
 }

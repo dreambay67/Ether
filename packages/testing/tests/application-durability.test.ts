@@ -214,6 +214,125 @@ afterEach(async () => {
 });
 
 describe("durable application execution", () => {
+  it("dissolves a module across graph ownership, history, and reopen", async () => {
+    const documentsRoot = await temp("ether-module-removal-doc-");
+    const appDataRoot = await temp("ether-module-removal-appdata-");
+    const documentPath = path.join(documentsRoot, "Module-removal.ether");
+    const application = new EtherApplication({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      dispatchMode: "manual"
+    });
+    let documentOpen = false;
+    try {
+      const created = await application.createDocument({
+        path: documentPath,
+        title: "Module removal",
+        initialGraph: blankGraph()
+      });
+      documentOpen = true;
+      const internalNode = {
+        id: "module-node",
+        definitionId: "prompt.text" as const,
+        title: "Inside",
+        position: { x: 40, y: 60 },
+        size: { width: 220, height: 140 },
+        config: { kind: "prompt.text" as const, body: "Inside module", assembly: "append" as const },
+        presentation: { collapsed: false, accent: "default", previewMode: "summary" as const }
+      };
+      const internal: EtherGraph = {
+        ...blankGraph(),
+        id: "graph-module-removal",
+        title: "Module contents",
+        kind: "module",
+        nodes: [internalNode]
+      };
+      const module = {
+        id: "module-removal",
+        title: "Removable module",
+        graphId: internal.id,
+        position: { x: 320, y: 80 },
+        size: { width: 240, height: 160 },
+        interface: { inputs: [], outputs: [], parameters: [] },
+        collapsed: false,
+        locked: true
+      };
+      const createTransaction: GraphTransaction = {
+        id: "application-create-module-removal",
+        baseDocumentRevisionId: created.documentRevisionId,
+        baseGraphRevisions: created.graphRevisions,
+        title: "Create module",
+        actor: "user",
+        layoutPolicy: "preserve",
+        operations: [{
+          type: "createModule",
+          graphId: "graph-root",
+          module,
+          subtree: { rootGraphId: internal.id, graphs: [internal] }
+        }]
+      };
+      await application.applyGraphTransaction({
+        commandId: "application-create-module-removal",
+        transaction: createTransaction
+      });
+      await expect(application.queryGraph(internal.id)).resolves.toEqual(internal);
+
+      const afterCreate = await application.queryDocument();
+      const unlockedModule = { ...module, locked: false };
+      await application.applyGraphTransaction({
+        commandId: "application-unlock-module-removal",
+        transaction: {
+          id: "application-unlock-module-removal",
+          baseDocumentRevisionId: afterCreate.documentRevisionId,
+          baseGraphRevisions: afterCreate.graphRevisions,
+          title: "Unlock module",
+          actor: "user",
+          layoutPolicy: "preserve",
+          operations: [{
+            type: "updateModule",
+            graphId: "graph-root",
+            moduleId: module.id,
+            module: unlockedModule
+          }]
+        }
+      });
+      const afterUnlock = await application.queryDocument();
+      await application.applyGraphTransaction({
+        commandId: "application-remove-module-removal",
+        transaction: {
+          id: "application-remove-module-removal",
+          baseDocumentRevisionId: afterUnlock.documentRevisionId,
+          baseGraphRevisions: afterUnlock.graphRevisions,
+          title: "Remove module",
+          actor: "user",
+          layoutPolicy: "preserve",
+          operations: [
+            { type: "addNode", graphId: "graph-root", node: { ...internalNode, position: { x: 360, y: 140 } } },
+            { type: "removeModule", graphId: "graph-root", moduleId: module.id }
+          ]
+        }
+      });
+      await expect(application.queryGraph(internal.id)).rejects.toMatchObject({ code: "GRAPH_NOT_FOUND" });
+      await expect(application.queryGraph("graph-root")).resolves.toMatchObject({ nodes: [expect.objectContaining({ id: internalNode.id })], modules: [] });
+      await application.applyHistory("application-undo-module-removal", "graph.undo");
+      await expect(application.queryGraph(internal.id)).resolves.toEqual(internal);
+      await expect(application.queryGraph("graph-root")).resolves.toMatchObject({ nodes: [], modules: [expect.objectContaining({ id: module.id, locked: false })] });
+      await application.applyHistory("application-redo-module-removal", "graph.redo");
+      await expect(application.queryGraph(internal.id)).rejects.toMatchObject({ code: "GRAPH_NOT_FOUND" });
+      await expect(application.queryGraph("graph-root")).resolves.toMatchObject({ nodes: [expect.objectContaining({ id: internalNode.id })], modules: [] });
+      await application.closeDocument();
+      documentOpen = false;
+
+      await application.openDocument({ path: documentPath, access: "read-only" });
+      documentOpen = true;
+      await expect(application.queryGraph(internal.id)).rejects.toMatchObject({ code: "GRAPH_NOT_FOUND" });
+      await expect(application.queryGraph("graph-root")).resolves.toMatchObject({ nodes: [expect.objectContaining({ id: internalNode.id })], modules: [] });
+    } finally {
+      if (documentOpen) await application.closeDocument();
+    }
+  });
+
   it("returns typed STALE_PLAN after the graph revision changes", async () => {
     const { application, plan, permit } = await createReadyApplication({ dispatchMode: "manual" });
     const head = await application.queryDocument();

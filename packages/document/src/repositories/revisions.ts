@@ -230,7 +230,7 @@ export class RevisionRepository {
       );
     }
 
-    this.graphs.validateMany(commit.graphSnapshots);
+    this.graphs.validateMany(commit.graphSnapshots, affectedGraphIds);
     const currentGraphs = this.graphs.list();
     const currentById = new Map(currentGraphs.map((graph) => [graph.id, graph]));
     const declaredById = new Map(commit.graphSnapshots.map((graph) => [graph.id, graph]));

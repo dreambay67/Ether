@@ -146,6 +146,9 @@ export function App() {
       ? current
       : { ...current, graph: nextGraph });
   }, []);
+  const acceptCanvasGraph = useCallback((nextGraph: EtherGraph) => {
+    if (document !== null) updateHydratedGraph(document.documentId, nextGraph);
+  }, [document, updateHydratedGraph]);
 
   useEffect(() => {
     if (graph === null) return;
@@ -426,7 +429,7 @@ export function App() {
             }}
             catalog={nodeCatalog}
             document={document}
-            onGraph={(nextGraph) => updateHydratedGraph(document.documentId, nextGraph)}
+            onGraph={acceptCanvasGraph}
             onStatus={setMessage}
             onInspectorChange={setInspectorContext}
           />}

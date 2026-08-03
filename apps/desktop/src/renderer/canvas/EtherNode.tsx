@@ -1,6 +1,6 @@
 import { memo, useState, type FocusEvent } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Check, LockKeyhole, Pencil, Trash2, Unlock, X } from "lucide-react";
 import type { EtherNode as SchemaNode, PayloadChannel } from "@ether/schema";
 import { ChannelRail } from "./ports/ChannelRail";
 import { NodePreview } from "./nodes/NodePreview";
@@ -78,10 +78,12 @@ function InlineNodeEditor({ label, value, placeholder, singleLine = false, onCom
   </div>;
 }
 
-export function ModuleNode({ id, data, selected }: NodeProps & { data: { title: string; collapsed: boolean; inputs: Array<{ id: string; channel: PayloadChannel }>; outputs: Array<{ id: string; channel: PayloadChannel }>; readOnly: boolean; onEnter(id: string): void; onToggle(id: string): void } }) {
-  return <article className={`ether-module-node${selected ? " is-selected" : ""}`} data-testid="ether-module-node" data-module-id={id}>
+export function ModuleNode({ id, data, selected }: NodeProps & { data: { title: string; description: string; accent: string; locked: boolean; collapsed: boolean; inputs: Array<{ id: string; channel: PayloadChannel }>; outputs: Array<{ id: string; channel: PayloadChannel }>; readOnly: boolean; onEnter(id: string): void; onToggle(id: string): void } }) {
+  return <article className={`ether-module-node${selected ? " is-selected" : ""}${data.locked ? " is-locked" : " is-unlocked"}`} style={{ "--module-accent": data.accent } as React.CSSProperties} data-testid="ether-module-node" data-module-id={id} data-module-locked={data.locked ? "true" : "false"}>
     {data.inputs.map((port, index) => <Handle key={`in-${port.id}`} id={`in:${port.id}`} type="target" position={Position.Left} style={{ top: `${18 + index * 18}px` }} aria-label={`Input ${port.id} ${port.channel}`} />)}
-    <button type="button" className="ether-module-title nodrag" onDoubleClick={() => data.onEnter(id)}>{data.title}</button><p>{data.collapsed ? "Collapsed module" : "Double click to enter"}</p><button type="button" className="ether-module-collapse nodrag" disabled={data.readOnly} onClick={() => { if (!data.readOnly) data.onToggle(id); }}>{data.collapsed ? "Expand" : "Collapse"}</button>
+    <header><span>{data.locked ? <LockKeyhole size={13} aria-label="Locked module" /> : <Unlock size={13} aria-label="Unlocked module" />}</span><button type="button" className="ether-module-title nodrag" onDoubleClick={() => data.onEnter(id)} title="Double-click to enter module">{data.title}</button></header>
+    <p>{data.collapsed ? `Collapsed${data.description ? ` · ${data.description}` : ""}` : data.description || (data.locked ? "Members protected from the parent canvas" : "Unlocked for parent-canvas movement")}</p>
+    <footer><button type="button" className="ether-module-enter nodrag" onClick={() => data.onEnter(id)}>Enter</button><button type="button" className="ether-module-collapse nodrag" disabled={data.readOnly} onClick={() => { if (!data.readOnly) data.onToggle(id); }}>{data.collapsed ? "Expand" : "Collapse"}</button></footer>
     {data.outputs.map((port, index) => <Handle key={`out-${port.id}`} id={`out:${port.id}`} type="source" position={Position.Right} style={{ top: `${18 + index * 18}px` }} aria-label={`Output ${port.id} ${port.channel}`} />)}
   </article>;
 }

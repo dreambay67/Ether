@@ -4,6 +4,7 @@ export const testSuites = {
     "tests/asset-drop.test.ts",
     "tests/brand-tokens.test.ts",
     "tests/canvas-authoring-commands.test.ts",
+    "tests/module-authoring.test.ts",
     "tests/canvas-history.test.ts",
     "tests/desktop-vite-config.test.ts",
     "tests/desktop-ipc-contract.test.ts",
