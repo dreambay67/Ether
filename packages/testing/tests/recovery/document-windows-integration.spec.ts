@@ -27,6 +27,7 @@ import {
   assertExactPackagedProcess,
   assertExactWindowForegroundWithUia,
   applyReversibleAssociation,
+  associationArtifactsMayBeCleaned,
   assertWindowsShellStateRestored,
   cleanupWindowsIntegrationRoot,
   closeExactWindowWithNativeKeyboard,
@@ -173,6 +174,10 @@ test("runs the separately approved reversible Explorer association route", async
   let plan: ReversibleAssociationPlan | null = null;
   let watchdog: AssociationRestorationWatchdog | null = null;
   let associationMayBeMutated = false;
+  let associationRestorationProven = false;
+  let shellStateRestored = false;
+  let associationJourneyFailure: unknown = null;
+  const finalizationFailures: unknown[] = [];
   try {
     session = await launch(executable, "a02-windows-association", profile);
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
@@ -198,6 +203,7 @@ test("runs the separately approved reversible Explorer association route", async
       const restorePlan = plan;
       const restoreWatchdog = watchdog;
       await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
+      associationRestorationProven = true;
       plan = null;
       watchdog = null;
       associationMayBeMutated = false;
@@ -207,22 +213,53 @@ test("runs the separately approved reversible Explorer association route", async
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     await session.close("passed");
     session = null;
+  } catch (error) {
+    associationJourneyFailure = error;
   } finally {
-    if (associationMayBeMutated && plan !== null && watchdog !== null) {
-      const restorePlan = plan;
-      const restoreWatchdog = watchdog;
-      await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
-    } else if (watchdog !== null) {
-      await disarmAssociationRestorationWatchdog(watchdog);
+    try {
+      if (associationMayBeMutated && plan !== null && watchdog !== null) {
+        const restorePlan = plan;
+        const restoreWatchdog = watchdog;
+        await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
+        associationRestorationProven = true;
+      } else if (watchdog !== null) {
+        await disarmAssociationRestorationWatchdog(watchdog);
+        associationRestorationProven = true;
+      } else if (associationArtifactsMayBeCleaned({ mutationAttempted: associationMayBeMutated, restorationProven: false, watchdogActive: false })) {
+        associationRestorationProven = true;
+      }
+    } catch (error) { finalizationFailures.push(error); }
+    if (session !== null && primaryPid !== null) {
+      try {
+        await closeExactWindowWithNativeKeyboard(primaryPid);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
     }
-    if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
-    if (session !== null) await session.close("failed");
+    if (session !== null) await session.close("failed").catch((error) => finalizationFailures.push(error));
     try {
       await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
-    } finally {
-      await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
-      await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
+      shellStateRestored = true;
+    } catch (error) { finalizationFailures.push(error); }
+    if (associationRestorationProven && shellStateRestored) {
+      try {
+        await cleanupIsolatedJourneyProfile(profile);
+        await cleanupWindowsIntegrationRoot(root);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    } else {
+      finalizationFailures.push(new Error(`Preserved recovery artifacts after unproven restoration: root=${root}; profile=${profile.root}.`));
     }
+  }
+  if (associationJourneyFailure !== null) {
+    if (finalizationFailures.length > 0) {
+      throw new AggregateError([associationJourneyFailure, ...finalizationFailures], "Association journey and safe finalization failed.", { cause: finalizationFailures.at(-1) });
+    }
+    throw associationJourneyFailure;
+  }
+  if (finalizationFailures.length > 0) {
+    throw new AggregateError(finalizationFailures, "Association journey finalization did not prove safe cleanup.", { cause: finalizationFailures.at(-1) });
   }
 });
 
@@ -270,7 +307,13 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     await session.close("passed");
     session = null;
   } finally {
-    if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
+    if (session !== null && primaryPid !== null) {
+      try {
+        await closeExactWindowWithNativeKeyboard(primaryPid);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     if (session !== null) await session.close("failed");
     try {
       await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [sourcePath, targetPath] });
@@ -298,6 +341,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   let plan: ReversibleAssociationPlan | null = null;
   let watchdog: AssociationRestorationWatchdog | null = null;
   let associationMayBeMutated = false;
+  let associationRestorationProven = false;
   let jumpListShellStateRestored = false;
   let recentModeLaunched = false;
   let jumpListFailure: unknown = null;
@@ -337,6 +381,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
       const restorePlan = plan;
       const restoreWatchdog = watchdog;
       await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
+      associationRestorationProven = true;
       plan = null;
       watchdog = null;
       associationMayBeMutated = false;
@@ -366,8 +411,12 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
         const restorePlan = plan;
         const restoreWatchdog = watchdog;
         await restoreAssociationWithWatchdog(restorePlan, restoreWatchdog);
+        associationRestorationProven = true;
       } else if (watchdog !== null) {
         await disarmAssociationRestorationWatchdog(watchdog);
+        associationRestorationProven = true;
+      } else if (associationArtifactsMayBeCleaned({ mutationAttempted: associationMayBeMutated, restorationProven: false, watchdogActive: false })) {
+        associationRestorationProven = true;
       }
     } catch (error) {
       finalizationFailures.push(error);
@@ -389,12 +438,20 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     try {
       if (!jumpListShellStateRestored && !recentModeLaunched) {
         await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
+        jumpListShellStateRestored = true;
       }
     } catch (error) {
       finalizationFailures.push(error);
-    } finally {
-      await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
-      await cleanupWindowsIntegrationRoot(root).catch(() => undefined);
+    }
+    if (associationRestorationProven && jumpListShellStateRestored) {
+      try {
+        await cleanupIsolatedJourneyProfile(profile);
+        await cleanupWindowsIntegrationRoot(root);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    } else {
+      finalizationFailures.push(new Error(`Preserved recovery artifacts after unproven restoration: root=${root}; profile=${profile.root}.`));
     }
   }
   if (jumpListFailure !== null) {

@@ -17,6 +17,7 @@ import {
   blankAuthoringJourney,
   collectJourneyBuildIdentity,
   journeyEvidencePaths,
+  retainOwnedPackagedProcessIds,
   sha256File
 } from "../recovery/journeyDriver.js";
 
@@ -136,6 +137,16 @@ describe("Ether recovery journey driver", () => {
     ]) {
       expect(() => assertPackagedJourneyArgs([argument])).toThrow(/driver-owned isolation/u);
     }
+  });
+
+  it("retains the complete observed packaged process set after a browser root exits", () => {
+    const retained = retainOwnedPackagedProcessIds(new Set([101]), [102, 103, 0, -1, Number.NaN]);
+    expect([...retained].sort((left, right) => left - right)).toEqual([101, 102, 103]);
+
+    // The first root PID remains part of the proof set even when a later scan
+    // sees only its renderer/GPU descendants.
+    const afterRootExit = retainOwnedPackagedProcessIds(retained, [102, 103]);
+    expect([...afterRootExit].sort((left, right) => left - right)).toEqual([101, 102, 103]);
   });
 
   it("preserves a supplied recovery profile by default, cleans it only when requested, and rejects outside roots", async () => {

@@ -96,6 +96,15 @@ export type AssociationRestorationWatchdog = {
   triggerPath: string;
 };
 
+/** A test root can be removed only after an association was never armed or restoration/disarm was proven. */
+export function associationArtifactsMayBeCleaned(input: {
+  mutationAttempted: boolean;
+  restorationProven: boolean;
+  watchdogActive: boolean;
+}): boolean {
+  return input.restorationProven || (!input.mutationAttempted && !input.watchdogActive);
+}
+
 export function isAssociationMutationApproved(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment[ASSOCIATION_APPROVAL] === ASSOCIATION_APPROVAL_VALUE;
 }

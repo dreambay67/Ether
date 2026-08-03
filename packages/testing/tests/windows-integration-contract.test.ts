@@ -13,11 +13,13 @@ import {
   resolveRecoveryShellIdentity
 } from "../../../apps/desktop/src/main/recoveryShellIdentity.js";
 import { assertPackagedJourneyArgs, assertRecoveryShellRecentAdmission, packagedJourneyConfig } from "../recovery/journeyDriver.js";
+import { removeRecoveryShellAutomaticDestinations } from "../recovery/windowsShellDestinations.js";
 
 import {
   A02_WINDOWS_INTEGRATION_COVERAGE,
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
+  associationArtifactsMayBeCleaned,
   ETHER_EXTENSION_KEY,
   SHELL_UI_APPROVAL,
   SHELL_UI_APPROVAL_VALUE,
@@ -62,9 +64,20 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => requireAssociationMutationApproval({ [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE })).not.toThrow();
   });
 
+  it("preserves association recovery artifacts unless no mutation was armed or restoration is proven", () => {
+    expect(associationArtifactsMayBeCleaned({ mutationAttempted: false, watchdogActive: false, restorationProven: false })).toBe(true);
+    expect(associationArtifactsMayBeCleaned({ mutationAttempted: false, watchdogActive: true, restorationProven: false })).toBe(false);
+    expect(associationArtifactsMayBeCleaned({ mutationAttempted: true, watchdogActive: false, restorationProven: false })).toBe(false);
+    expect(associationArtifactsMayBeCleaned({ mutationAttempted: true, watchdogActive: true, restorationProven: true })).toBe(true);
+  });
+
   it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {
     expect(() => requireShellUiApproval({})).toThrow(/shell interaction is disabled/u);
     expect(() => requireShellUiApproval({ [SHELL_UI_APPROVAL]: SHELL_UI_APPROVAL_VALUE })).not.toThrow();
+  });
+
+  it("refuses app-scoped COM destination cleanup before any COM work without both approvals", async () => {
+    await expect(removeRecoveryShellAutomaticDestinations("0123456789abcdef0123456789abcdef", {})).rejects.toThrow(/requires both explicit/u);
   });
 
   it("accepts recovery shell identity only for the disposable journey profile shape", () => {

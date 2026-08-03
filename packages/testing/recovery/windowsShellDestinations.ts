@@ -3,6 +3,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const RECOVERY_SHELL_TOKEN = /^[a-f0-9]{32}$/u;
+const SHELL_UI_APPROVAL = "ETHER_A02_SHELL_UI_APPROVAL";
+const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
+const APPROVAL_VALUE = "approved-by-main";
 
 /**
  * Clears only the automatic destinations owned by one disposable recovery
@@ -15,6 +18,9 @@ export async function removeRecoveryShellAutomaticDestinations(
 ): Promise<void> {
   if (!RECOVERY_SHELL_TOKEN.test(token)) {
     throw new Error("Recovery shell identity token must be 32 lowercase hexadecimal characters.");
+  }
+  if (environment[SHELL_UI_APPROVAL] !== APPROVAL_VALUE || environment[ASSOCIATION_APPROVAL] !== APPROVAL_VALUE) {
+    throw new Error("Recovery shell destination cleanup requires both explicit shell and association approvals.");
   }
   if (process.platform !== "win32") return;
 

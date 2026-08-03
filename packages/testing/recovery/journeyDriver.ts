@@ -597,7 +597,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   let packagedBrowser: Browser | null = null;
   let packagedProcess: ChildProcess | null = null;
   let packagedExecutablePath = "";
-  let existingPackagedProcesses = new Set<number>();
+  const ownedPackagedProcessIds = new Set<number>();
   let processOutput: () => string = () => "";
 
   try {
@@ -631,7 +631,6 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     } else {
       packagedExecutablePath = config.executablePath ?? path.join(workspaceRoot, "release", "windows", "win-unpacked", "Ether.exe");
       await requireFile(packagedExecutablePath, "Packaged Ether.exe");
-      existingPackagedProcesses = await packagedProcessIds(packagedExecutablePath);
       const packagedArgs = config.packagedArgs?.(profile) ?? [];
       assertPackagedJourneyArgs(packagedArgs);
       packagedProcess = spawn(packagedExecutablePath, [
@@ -641,8 +640,17 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         ...recoveryShellArgumentsFor(config, profile),
         ...packagedArgs
       ], { env: environment, stdio: "pipe", windowsHide: true });
+      if (packagedProcess.pid !== undefined && packagedProcess.pid > 0) {
+        ownedPackagedProcessIds.add(packagedProcess.pid);
+      }
       processOutput = captureProcessOutput(packagedProcess);
       packagedBrowser = await connectToPackagedApp(profile.userData, packagedProcess, processOutput);
+      await retainLivePackagedJourneyProcessIds({
+        executablePath: packagedExecutablePath,
+        profileMarker: profile.userData,
+        seedProcessId: packagedProcess.pid,
+        retainedProcessIds: ownedPackagedProcessIds
+      });
       const context = packagedBrowser.contexts()[0];
       if (context === undefined) throw new Error("Ether.exe did not expose a browser context.");
       page = context.pages()[0] ?? await context.waitForEvent("page", { timeout: 30_000 });
@@ -670,7 +678,14 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         const failures: unknown[] = [];
         try {
           if (!applicationExited) {
-            await shutdownLaunchedJourney({ sourceApp, packagedBrowser, packagedProcess, packagedExecutablePath, existingPackagedProcesses });
+            await shutdownLaunchedJourney({
+              sourceApp,
+              packagedBrowser,
+              packagedProcess,
+              packagedExecutablePath,
+              profileMarker: profile.userData,
+              ownedPackagedProcessIds
+            });
             applicationExited = true;
           }
           if (!afterExitCompleted) {
@@ -696,7 +711,14 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     const failures: unknown[] = [error];
     let applicationExited = false;
     try {
-      await shutdownLaunchedJourney({ sourceApp, packagedBrowser, packagedProcess, packagedExecutablePath, existingPackagedProcesses });
+      await shutdownLaunchedJourney({
+        sourceApp,
+        packagedBrowser,
+        packagedProcess,
+        packagedExecutablePath,
+        profileMarker: profile.userData,
+        ownedPackagedProcessIds
+      });
       applicationExited = true;
     } catch (shutdownError) {
       failures.push(shutdownError);
@@ -783,10 +805,11 @@ async function closeSourceElectron(sourceApp: ElectronApplication): Promise<void
 }
 
 async function shutdownLaunchedJourney(input: {
-  existingPackagedProcesses: ReadonlySet<number>;
   packagedBrowser: Browser | null;
   packagedExecutablePath: string;
+  ownedPackagedProcessIds: Set<number>;
   packagedProcess: ChildProcess | null;
+  profileMarker: string;
   sourceApp: ElectronApplication | null;
 }): Promise<void> {
   const failures: unknown[] = [];
@@ -797,7 +820,14 @@ async function shutdownLaunchedJourney(input: {
     try { await input.packagedBrowser.close(); } catch (error) { failures.push(error); }
   }
   if (input.packagedProcess !== null) {
-    try { await stopNewPackagedProcesses(input.packagedExecutablePath, input.existingPackagedProcesses); } catch (error) { failures.push(error); }
+    try {
+      await stopNewPackagedProcesses({
+        executablePath: input.packagedExecutablePath,
+        profileMarker: input.profileMarker,
+        seedProcessId: input.packagedProcess.pid,
+        retainedProcessIds: input.ownedPackagedProcessIds
+      });
+    } catch (error) { failures.push(error); }
   }
   if (failures.length > 0) throw new AggregateError(failures, "Launched journey process shutdown did not prove absence.", { cause: failures.at(-1) });
 }
@@ -834,23 +864,57 @@ async function connectToPackagedApp(userDataDirectory: string, process: ChildPro
   throw new Error(`Timed out connecting to Ether.exe: ${messageFor(lastError)}\n${output()}`);
 }
 
-async function packagedProcessIds(executablePath: string): Promise<Set<number>> {
+/** Retain every observed member so an exited browser root cannot hide surviving children. */
+export function retainOwnedPackagedProcessIds(retained: ReadonlySet<number>, observed: Iterable<number>): Set<number> {
+  const next = new Set(retained);
+  for (const processId of observed) {
+    if (Number.isSafeInteger(processId) && processId > 0) next.add(processId);
+  }
+  return next;
+}
+
+async function retainLivePackagedJourneyProcessIds(input: {
+  executablePath: string;
+  profileMarker: string;
+  seedProcessId: number | undefined;
+  retainedProcessIds: Set<number>;
+}): Promise<Set<number>> {
+  const observed = await journeyPackagedProcessIds(input.executablePath, input.profileMarker, input.seedProcessId, input.retainedProcessIds);
+  const retained = retainOwnedPackagedProcessIds(input.retainedProcessIds, observed);
+  input.retainedProcessIds.clear();
+  for (const processId of retained) input.retainedProcessIds.add(processId);
+  return observed;
+}
+
+async function journeyPackagedProcessIds(
+  executablePath: string,
+  profileMarker: string,
+  seedProcessId: number | undefined,
+  retainedProcessIds: ReadonlySet<number>
+): Promise<Set<number>> {
   const escapedPath = executablePath.replaceAll("'", "''");
+  const escapedMarker = profileMarker.replaceAll("'", "''");
+  const anchors = [...retainOwnedPackagedProcessIds(retainedProcessIds, seedProcessId === undefined ? [] : [seedProcessId])].join(",");
   const { stdout } = await execFileAsync("powershell.exe", [
     "-NoProfile",
     "-NonInteractive",
     "-Command",
-    `Get-CimInstance Win32_Process | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedPath}', [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { $_.ProcessId }`
+    `$all = @(Get-CimInstance Win32_Process); $roots = @($all | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedPath}', [System.StringComparison]::OrdinalIgnoreCase) -and ([string]$_.CommandLine).IndexOf('${escapedMarker}', [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -notmatch '(?:^|\\s)--type(?:=|\\s)' }); if ($roots.Count -gt 1) { throw ('Ambiguous packaged journey roots for isolated profile: ' + ($roots.ProcessId -join ',')) }; $ids = New-Object System.Collections.Generic.HashSet[int]; $queue = New-Object System.Collections.Generic.Queue[int]; foreach ($anchor in @(${anchors || ""})) { if ([int]$anchor -gt 0 -and $ids.Add([int]$anchor)) { $queue.Enqueue([int]$anchor) } }; foreach ($root in $roots) { if ($ids.Add([int]$root.ProcessId)) { $queue.Enqueue([int]$root.ProcessId) } }; while ($queue.Count -gt 0) { $parent = $queue.Dequeue(); foreach ($child in @($all | Where-Object { $_.ParentProcessId -eq $parent })) { if ($ids.Add([int]$child.ProcessId)) { $queue.Enqueue([int]$child.ProcessId) } } }; $all | Where-Object { $ids.Contains([int]$_.ProcessId) } | ForEach-Object { $_.ProcessId }`
   ]);
   return new Set(stdout.split(/\r?\n/u).map((value) => Number(value.trim())).filter(Number.isInteger));
 }
 
-async function stopNewPackagedProcesses(executablePath: string, existing: ReadonlySet<number>): Promise<void> {
-  if (!executablePath) return;
+async function stopNewPackagedProcesses(input: {
+  executablePath: string;
+  profileMarker: string;
+  seedProcessId: number | undefined;
+  retainedProcessIds: Set<number>;
+}): Promise<void> {
+  if (!input.executablePath) return;
   const deadline = Date.now() + 15_000;
   let last = "";
   while (Date.now() < deadline) {
-    const processIds = [...await packagedProcessIds(executablePath)].filter((processId) => !existing.has(processId));
+    const processIds = [...await retainLivePackagedJourneyProcessIds(input)];
     if (processIds.length === 0) return;
     last = processIds.join(",");
     await execFileAsync("powershell.exe", [
