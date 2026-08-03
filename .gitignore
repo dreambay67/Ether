@@ -3,8 +3,8 @@ dist/
 build/
 out/
 release/
-apps/desktop/.release-runtime/
-apps/desktop/.release-project/
+apps/desktop/.release-runtime*/
+apps/desktop/.release-project*/
 coverage/
 .turbo/
 .vite/
