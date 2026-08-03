@@ -3,7 +3,7 @@ import type { EtherNode } from "@ether/schema";
 
 import { commandIdForKeyboard } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
-import { marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
+import { marqueeHitIds, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
 
 const presentation = { collapsed: false, accent: "default", previewMode: "content" as const };
@@ -39,6 +39,16 @@ describe("canvas authoring command map", () => {
     expect(marqueeSelectionStart(["worker"], true)).toEqual({ base: ["worker"], selection: ["worker"] });
     expect(marqueeSelectionUpdate(["prompt"], ["worker"], false)).toEqual(["worker"]);
     expect(marqueeSelectionUpdate(["prompt"], ["worker"], true)).toEqual(["prompt", "worker"]);
+  });
+
+  it("derives partial marquee hits from rendered node rectangles", () => {
+    const nodes = [
+      { id: "prompt", rect: { x: 100, y: 100, width: 200, height: 120 } },
+      { id: "worker", rect: { x: 400, y: 100, width: 200, height: 120 } }
+    ];
+    expect(marqueeHitIds(nodes, { x: 80, y: 80 }, { x: 160, y: 160 })).toEqual(["prompt"]);
+    expect(marqueeHitIds(nodes, { x: 380, y: 80 }, { x: 620, y: 240 })).toEqual(["worker"]);
+    expect(marqueeHitIds(nodes, { x: 80, y: 80 }, { x: 80.5, y: 80.5 })).toEqual([]);
   });
 
   it("centers blank insertions and finds the first non-overlapping registry slot", () => {

@@ -4,7 +4,7 @@ import { NodeDefinitionIdSchema, type EtherGraph, type NodeDefinitionId, type No
 import { EtherEdge, type EtherFlowEdgeData } from "./edges/EtherEdge";
 import { EtherNode, type EtherCanvasNodeData, ModuleNode } from "./EtherNode";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
-import { useCanvasInteraction } from "./hooks/useCanvasInteraction";
+import { marqueeHitIds, useCanvasInteraction } from "./hooks/useCanvasInteraction";
 import { channelsFor } from "./ports/ChannelRail";
 import { projectCanvasChannelActivity } from "./projection";
 import { markPerformance, measurePerformance } from "../performance/marks";
@@ -24,6 +24,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   markPerformance("canvas:projection:start");
   const flow = useReactFlow();
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const marqueeGesture = useRef<{ start: { x: number; y: number } } | null>(null);
   const previousSurfaceSize = useRef<{ width: number; height: number } | null>(null);
   const interaction = useCanvasInteraction(selectedIds, onSelected);
   const { beginEdit: beginInteractionEdit, mode: interactionMode, settle: settleInteraction } = interaction;
@@ -176,7 +177,31 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       aria-label="Authoring canvas"
       tabIndex={0}
       onPointerDownCapture={(event) => {
-        if ((event.target as HTMLElement).closest(".react-flow__pane")) event.currentTarget.focus({ preventScroll: true });
+        if (!(event.target as HTMLElement).closest(".react-flow__pane")) return;
+        event.currentTarget.focus({ preventScroll: true });
+        if (event.button === 0) {
+          marqueeGesture.current = { start: { x: event.clientX, y: event.clientY } };
+          interaction.beginMarquee(event.shiftKey);
+        }
+      }}
+      onPointerUpCapture={(event) => {
+        const gesture = marqueeGesture.current;
+        if (event.button !== 0 || gesture === null) return;
+        marqueeGesture.current = null;
+        const nodeRects = [...event.currentTarget.querySelectorAll<HTMLElement>(".react-flow__node[data-id]")]
+          .flatMap((element) => {
+            const id = element.dataset.id;
+            return id !== undefined && graph.nodes.some((node) => node.id === id)
+              ? [{ id, rect: element.getBoundingClientRect() }]
+              : [];
+          });
+        interaction.updateMarquee(marqueeHitIds(nodeRects, gesture.start, { x: event.clientX, y: event.clientY }));
+        interaction.endMarquee();
+      }}
+      onPointerCancelCapture={() => {
+        if (marqueeGesture.current === null) return;
+        marqueeGesture.current = null;
+        interaction.cancel();
       }}
       onDoubleClick={(event) => {
         if ((event.target as HTMLElement).closest(".react-flow__pane")) openQuickAdd(event.clientX, event.clientY);
@@ -191,6 +216,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           else if (command.disabledReason) onCommandUnavailable(command.disabledReason);
         } else if (event.key === "Escape") {
           event.preventDefault();
+          marqueeGesture.current = null;
           if (quickAdd !== null) setQuickAdd(null);
           else interaction.cancel();
         } else if (
@@ -240,17 +266,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           notifyRendererInteractive();
         }}
         onMove={updateSemanticZoom}
-        onSelectionStart={(event) => interaction.beginMarquee(event.shiftKey)}
         onSelectionChange={({ nodes: selected }) => {
           interaction.updateMarquee(
             selected.filter((node) => graph.nodes.some((item) => item.id === node.id)).map((node) => node.id)
           );
-        }}
-        onSelectionEnd={() => {
-          interaction.updateMarquee(
-            flow.getNodes().filter((node) => node.selected && graph.nodes.some((item) => item.id === node.id)).map((node) => node.id)
-          );
-          interaction.endMarquee();
         }}
         onNodeClick={(event, node) => {
           if (graph.nodes.some((item) => item.id === node.id)) {

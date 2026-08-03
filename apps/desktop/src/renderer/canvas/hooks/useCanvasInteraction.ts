@@ -99,6 +99,21 @@ export function marqueeSelectionUpdate(base: readonly string[], hits: readonly s
   return unique(additive ? [...base, ...hits] : hits);
 }
 
+export function marqueeHitIds(
+  nodes: readonly { id: string; rect: { x: number; y: number; width: number; height: number } }[],
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+) {
+  if (Math.hypot(end.x - start.x, end.y - start.y) <= 1) return [];
+  const left = Math.min(start.x, end.x);
+  const right = Math.max(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+  return nodes.filter(({ rect }) => (
+    rect.x < right && rect.x + rect.width > left && rect.y < bottom && rect.y + rect.height > top
+  )).map(({ id }) => id);
+}
+
 function unique(ids: readonly string[]) {
   return [...new Set(ids)];
 }
