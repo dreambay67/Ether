@@ -98,8 +98,9 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await input.pressKey("Control+Enter", "Commit primary content edit", "Ctrl+Enter commits text while the editor owns focus.");
     await expect(primaryEditor).toBeHidden();
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
-    await input.leftClick(renamedTitle, "Restore Prompt command focus", "The directly edited Prompt remains the primary graph selection.");
-    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
+    const workerTitle = worker.getByRole("button", { name: "Worker", exact: true });
+    await input.leftClick(workerTitle, "Select a runnable Worker", "The existing Worker becomes the primary graph selection for preview.");
+    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.worker"]);
     await input.pressKey("Control+Enter", "Preview the selected run", "Ctrl+Enter prepares the selected-node plan without starting provider work.");
     await expect(page.getByTestId("canvas-status")).toContainText("Selected plan ready");
 
