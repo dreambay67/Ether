@@ -80,6 +80,63 @@ The normal A02 primary journey and the approved association, Explorer drag, and 
 
 For future controlled Windows evidence, a fresh Windows VM snapshot or Windows Sandbox with a disposable user profile is the preferred isolation boundary. It avoids relying on a developer's established MRU state, but does not weaken this classifier or the exact process/link proof requirements.
 
+## 2026-08-03 single association `9532736` Marshal.SizeOf failure
+
+Status: **failed safely and excluded from packaged evidence**. The exact
+approval-gated association selector ran one test in one file at HEAD
+`95327367b94357c9888aa350c717ae959245ebaa`, with one worker, `retries=0`, the
+association route, and both required approvals. The Sol PASS-to-package/list/run
+gate passed. The runtime test took 22.1 s and the complete command took 24.5 s.
+
+The attempt failed before the first native `SendInput`: Windows PowerShell 5.1
+treated `[Runtime.InteropServices.Marshal]::SizeOf([EtherA02Native+INPUT])` as a
+`RuntimeType` object and reported that the type could not be marshaled. No retry,
+fallback, or second route was run. This records the exact `SizeOf` exception only;
+it does not claim a product or foreground-transition root cause. The isolated
+diagnostics contain ready, graph, command, and document records only, with no
+association record, consistent with failure before Enter submission.
+
+Package-audit inventory for the run:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `release/windows/win-unpacked/Ether.exe` | `329340612560c625450600616c8b5c8643b7b77063b411984d3d359f93c57cef` |
+| `release/windows/win-unpacked/resources/app.asar` | `ecff49c42130b4f3f11be2c42d8665ef472fcdba0524843daecfcdb9cb7f5b97` |
+| `release/windows/Ether-4.0.0-Setup.exe` | `60ba0f...0ac56` |
+
+The installer value is retained in the supplied abbreviated package-audit form;
+the route's committed result and shell sidecar identify the executable and asar
+hashes consumed by the test. A prior orchestrator timeout/staging `ENOENT` is
+retained only as an excluded packaging incident; it is not a product failure and
+does not explain this route's exact `SizeOf` exception.
+
+Read-only shell/process facts were:
+
+| Check | Preflight | Postflight |
+| --- | --- | --- |
+| Exact packaged process count | `0` | `0` |
+| Retained route PowerShell count | `0` | `0` |
+| Registry UTF-8 query digest | `e28e10c3557e46a3cf3e8a0637b06dc3f758ee98a54edcfa604ce77e88aa01c4` | unchanged |
+| Left/Return high-bit state | up | up |
+| Exact Explorer route window | no route window | no Explorer window |
+| Recent files / readable files | `209 / 209` | `209 / 209` |
+| Recent aggregate SHA-256 | `32702af01e09cc1c0fcff920725510c98dbf8bab4de3136f74215438aa77d3` | `4b1086...c4e7` |
+
+The only observed shell delta was the allowed in-place mutation of the pre-existing
+opaque file
+`CustomDestinations\\590aee7bdd69b59b.customDestinations-ms`:
+
+| Field | Preflight | Postflight |
+| --- | --- | --- |
+| Last written UTC | `2026-08-03T05:46:13.833Z` | `2026-08-03T06:45:02.615Z` |
+| SHA-256 | `af3dc1...1f0` | `4c5ff7...a1f0` |
+
+Finalization passed exact process absence and shell classification, removed zero
+target links, and recorded only the permitted opaque in-place delta. The opaque
+file was never restored, deleted, overwritten, or timestamp-repaired. Disposable
+diagnostic roots identified by tokens `QIlA0P` and `JAmTNP` remain preserved and
+must not be cleaned or treated as accepted evidence.
+
 ## 2026-08-03 second controlled packaged lifecycle failure
 
 Status: failed safely at the writer-lock contender launch; excluded from packaged evidence. The primary packaged UI/native lifecycle completed its setup actions before the contender route reached the tightened recovery-shell resolver. No approval-gated association, Explorer, Jump List, COM, or destination-cleanup route was enabled.
