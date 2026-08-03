@@ -344,16 +344,19 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     const closeAction = await closeExactWindowWithNativeKeyboard(primaryPid);
     session.input.observe("Close isolated Jump List journey", "A native Alt+F4 closes only the exact recovery-AUMID Ether window before shell-state verification.", closeAction);
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
-    const shellDisposition = await restoreApprovedJumpListShellState({
-      before: shellBefore,
-      documentPaths: [documentPath],
-      profile,
-      root,
-      token: shellToken
+    await session.close("passed", {
+      afterApplicationExit: async () => {
+        const shellDisposition = await restoreApprovedJumpListShellState({
+          before: shellBefore,
+          documentPaths: [documentPath],
+          profile,
+          root,
+          token: shellToken
+        });
+        session?.input.observe("Jump List app-scoped cleanup", "Only the exact 2560-byte recovery-AUMID AutomaticDestinations artifact is recycled after COM cleanup, then the complete real and isolated shell state matches baseline.", shellDisposition);
+        jumpListShellStateRestored = true;
+      }
     });
-    session.input.observe("Jump List app-scoped cleanup", "Only the exact 2560-byte recovery-AUMID AutomaticDestinations artifact is recycled after COM cleanup, then the complete real and isolated shell state matches baseline.", shellDisposition);
-    jumpListShellStateRestored = true;
-    await session.close("passed");
     session = null;
   } catch (error) {
     jumpListFailure = error;
@@ -370,14 +373,22 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
       finalizationFailures.push(error);
     }
     if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
-    if (session !== null) await session.close("failed");
+    if (session !== null) {
+      try {
+        await session.close("failed", recentModeLaunched && !jumpListShellStateRestored ? {
+          afterApplicationExit: async () => {
+            await restoreApprovedJumpListShellState({ before: shellBefore, documentPaths: [documentPath], profile, root, token: shellToken });
+            jumpListShellStateRestored = true;
+          }
+        } : {});
+        session = null;
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     try {
-      if (!jumpListShellStateRestored) {
-        if (recentModeLaunched) {
-          await restoreApprovedJumpListShellState({ before: shellBefore, documentPaths: [documentPath], profile, root, token: shellToken });
-        } else {
-          await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
-        }
+      if (!jumpListShellStateRestored && !recentModeLaunched) {
+        await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
       }
     } catch (error) {
       finalizationFailures.push(error);

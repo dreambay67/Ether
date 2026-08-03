@@ -19,6 +19,12 @@ const PROFILE_PREFIX = "ether-recovery-journey-";
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 const RECOVERY_SHELL_IDENTITY_ARGUMENT = "--ether-recovery-shell-identity=";
 const RECOVERY_SHELL_RECENT_ARGUMENT = "--ether-recovery-shell-recent=";
+const RECOVERY_SHELL_JOURNEY_ARGUMENT = "--ether-recovery-shell-journey=";
+const SHELL_UI_APPROVAL = "ETHER_A02_SHELL_UI_APPROVAL";
+const SHELL_UI_APPROVAL_VALUE = "approved-by-main";
+const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
+const ASSOCIATION_APPROVAL_VALUE = "approved-by-main";
+const RECOVERY_JUMP_LIST_JOURNEY_ID = "a02-windows-jump-list";
 
 export type JourneyMode = "source-electron" | "packaged";
 export type EvidenceMode = "ephemeral" | "committed";
@@ -563,7 +569,7 @@ export type RecoveryJourneySession = {
   evidence: JourneyEvidencePaths;
   recorder: JourneyActionRecorder;
   input: RealPageInput;
-  close(outcome: JourneyOutcome): Promise<JourneyEvidencePaths>;
+  close(outcome: JourneyOutcome, options?: { afterApplicationExit?: () => Promise<void> | void }): Promise<JourneyEvidencePaths>;
 };
 
 /**
@@ -573,6 +579,7 @@ export type RecoveryJourneySession = {
  */
 export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Promise<RecoveryJourneySession> {
   assertAuthoringJourneyDeclaration(config.declaration);
+  assertRecoveryShellRecentAdmission(config);
   const workspaceRoot = path.resolve(config.workspaceRoot);
   const ownsProfile = config.profile === undefined;
   const profile = config.profile ?? await createIsolatedJourneyProfile();
@@ -614,7 +621,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         args: [
           sourceEntrypoint,
           `--user-data-dir=${profile.userData}`,
-          recoveryShellIdentityArgumentFor(config, profile),
+          ...recoveryShellArgumentsFor(config, profile),
           ...(config.sourceArgs?.(profile) ?? [])
         ],
         env: environment
@@ -631,7 +638,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
         "--remote-debugging-port=0",
         `--user-data-dir=${profile.userData}`,
         "--disable-gpu",
-        recoveryShellIdentityArgumentFor(config, profile),
+        ...recoveryShellArgumentsFor(config, profile),
         ...packagedArgs
       ], { env: environment, stdio: "pipe", windowsHide: true });
       processOutput = captureProcessOutput(packagedProcess);
@@ -648,7 +655,9 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     });
     page.on("pageerror", (error) => recorder.capturePageError(error));
     const input = new RealPageInput(page, recorder);
-    let closed = false;
+    let finalized = false;
+    let applicationExited = false;
+    let afterExitCompleted = false;
     return {
       page,
       profile,
@@ -656,34 +665,46 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
       evidence,
       recorder,
       input,
-      close: async (outcome) => {
-        if (closed) return evidence;
-        closed = true;
+      close: async (outcome, closeOptions = {}) => {
+        if (finalized) return evidence;
+        const failures: unknown[] = [];
         try {
-          if (sourceApp !== null) {
-            await closeSourceElectron(sourceApp);
+          if (!applicationExited) {
+            await shutdownLaunchedJourney({ sourceApp, packagedBrowser, packagedProcess, packagedExecutablePath, existingPackagedProcesses });
+            applicationExited = true;
           }
-          if (packagedBrowser !== null) await packagedBrowser.close();
-          if (packagedProcess !== null && packagedProcess.exitCode === null) {
-            await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses);
+          if (!afterExitCompleted) {
+            await closeOptions.afterApplicationExit?.();
+            afterExitCompleted = true;
           }
+        } catch (error) {
+          failures.push(error);
         } finally {
           recorder.captureMainProcessOutput(processOutput());
-          recorder.finish(outcome);
-          await recorder.write(evidence);
-          if (cleanupProfile) await cleanupIsolatedJourneyProfile(profile);
+          recorder.finish(failures.length === 0 ? outcome : "failed");
+          try { await recorder.write(evidence); } catch (error) { failures.push(error); }
+          if (applicationExited && cleanupProfile) {
+            try { await cleanupIsolatedJourneyProfile(profile); } catch (error) { failures.push(error); }
+          }
         }
+        if (failures.length > 0) throw new AggregateError(failures, "Journey shutdown or after-exit cleanup failed.", { cause: failures.at(-1) });
+        finalized = true;
         return evidence;
       }
     };
   } catch (error) {
-    if (sourceApp !== null) await closeSourceElectron(sourceApp).catch(() => undefined);
-    await packagedBrowser?.close().catch(() => undefined);
-    if (packagedProcess !== null && packagedProcess.exitCode === null) {
-      await stopNewPackagedProcesses(packagedExecutablePath, existingPackagedProcesses).catch(() => undefined);
-      if (packagedProcess.exitCode === null) packagedProcess.kill();
+    const failures: unknown[] = [error];
+    let applicationExited = false;
+    try {
+      await shutdownLaunchedJourney({ sourceApp, packagedBrowser, packagedProcess, packagedExecutablePath, existingPackagedProcesses });
+      applicationExited = true;
+    } catch (shutdownError) {
+      failures.push(shutdownError);
     }
-    if (cleanupProfile) await cleanupIsolatedJourneyProfile(profile).catch(() => undefined);
+    if (applicationExited && cleanupProfile) {
+      try { await cleanupIsolatedJourneyProfile(profile); } catch (cleanupError) { failures.push(cleanupError); }
+    }
+    if (failures.length > 1) throw new AggregateError(failures, "Journey launch failed and exact process shutdown was not clean.", { cause: error });
     throw error;
   }
 }
@@ -700,18 +721,37 @@ export function assertPackagedJourneyArgs(argumentsToValidate: readonly string[]
       normalized === "--user-data-dir" ||
       normalized.startsWith("--user-data-dir=") ||
       normalized.startsWith(RECOVERY_SHELL_IDENTITY_ARGUMENT) ||
-      normalized.startsWith(RECOVERY_SHELL_RECENT_ARGUMENT)
+      normalized.startsWith(RECOVERY_SHELL_RECENT_ARGUMENT) ||
+      normalized.startsWith(RECOVERY_SHELL_JOURNEY_ARGUMENT)
     ) {
       throw new Error(`Packaged journey argument ${argument} would override driver-owned isolation.`);
     }
   }
 }
 
-function recoveryShellIdentityArgumentFor(config: RecoveryJourneyConfig, profile: JourneyProfile): string {
+/** Recent-mode shell state is allowed only for the one explicitly approved packaged Jump List journey. */
+export function assertRecoveryShellRecentAdmission(config: RecoveryJourneyConfig, environment: NodeJS.ProcessEnv = process.env): void {
+  if (config.recoveryShellRecent !== true) return;
+  if (
+    config.mode !== "packaged" ||
+    config.journeyId !== RECOVERY_JUMP_LIST_JOURNEY_ID ||
+    config.profile === undefined ||
+    config.cleanupProfile !== false ||
+    environment[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE ||
+    environment[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE
+  ) {
+    throw new Error("Recovery shell Recent mode is restricted to the approved reusable-profile packaged Jump List journey.");
+  }
+}
+
+function recoveryShellArgumentsFor(config: RecoveryJourneyConfig, profile: JourneyProfile): string[] {
   const prefix = config.recoveryShellRecent === true
     ? RECOVERY_SHELL_RECENT_ARGUMENT
     : RECOVERY_SHELL_IDENTITY_ARGUMENT;
-  return `${prefix}${recoveryShellTokenForProfile(profile)}`;
+  return [
+    `${prefix}${recoveryShellTokenForProfile(profile)}`,
+    ...(config.recoveryShellRecent === true ? [`${RECOVERY_SHELL_JOURNEY_ARGUMENT}${RECOVERY_JUMP_LIST_JOURNEY_ID}`] : [])
+  ];
 }
 
 async function requireFile(filePath: string, label: string): Promise<void> {
@@ -739,6 +779,27 @@ async function closeSourceElectron(sourceApp: ElectronApplication): Promise<void
     process.kill();
     await Promise.race([exited, delay(5_000)]);
   }
+  if (process.exitCode === null) throw new Error("Source Electron process remained after requested shutdown.");
+}
+
+async function shutdownLaunchedJourney(input: {
+  existingPackagedProcesses: ReadonlySet<number>;
+  packagedBrowser: Browser | null;
+  packagedExecutablePath: string;
+  packagedProcess: ChildProcess | null;
+  sourceApp: ElectronApplication | null;
+}): Promise<void> {
+  const failures: unknown[] = [];
+  if (input.sourceApp !== null) {
+    try { await closeSourceElectron(input.sourceApp); } catch (error) { failures.push(error); }
+  }
+  if (input.packagedBrowser !== null) {
+    try { await input.packagedBrowser.close(); } catch (error) { failures.push(error); }
+  }
+  if (input.packagedProcess !== null) {
+    try { await stopNewPackagedProcesses(input.packagedExecutablePath, input.existingPackagedProcesses); } catch (error) { failures.push(error); }
+  }
+  if (failures.length > 0) throw new AggregateError(failures, "Launched journey process shutdown did not prove absence.", { cause: failures.at(-1) });
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -786,12 +847,19 @@ async function packagedProcessIds(executablePath: string): Promise<Set<number>> 
 
 async function stopNewPackagedProcesses(executablePath: string, existing: ReadonlySet<number>): Promise<void> {
   if (!executablePath) return;
-  const processIds = [...await packagedProcessIds(executablePath)].filter((processId) => !existing.has(processId));
-  if (processIds.length === 0) return;
-  await execFileAsync("powershell.exe", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-Command",
-    `Stop-Process -Id ${processIds.join(",")} -Force -ErrorAction SilentlyContinue`
-  ]);
+  const deadline = Date.now() + 15_000;
+  let last = "";
+  while (Date.now() < deadline) {
+    const processIds = [...await packagedProcessIds(executablePath)].filter((processId) => !existing.has(processId));
+    if (processIds.length === 0) return;
+    last = processIds.join(",");
+    await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `Stop-Process -Id ${processIds.join(",")} -Force -ErrorAction SilentlyContinue`
+    ]);
+    await delay(200);
+  }
+  throw new Error(`Exact packaged journey processes remained after shutdown: ${last || "unknown"}.`);
 }

@@ -7,10 +7,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   RECOVERY_SHELL_IDENTITY_ARGUMENT,
+  RECOVERY_SHELL_JOURNEY_ARGUMENT,
+  RECOVERY_SHELL_JUMP_LIST_JOURNEY,
   RECOVERY_SHELL_RECENT_ARGUMENT,
   resolveRecoveryShellIdentity
 } from "../../../apps/desktop/src/main/recoveryShellIdentity.js";
-import { assertPackagedJourneyArgs } from "../recovery/journeyDriver.js";
+import { assertPackagedJourneyArgs, assertRecoveryShellRecentAdmission, packagedJourneyConfig } from "../recovery/journeyDriver.js";
 
 import {
   A02_WINDOWS_INTEGRATION_COVERAGE,
@@ -76,10 +78,28 @@ describe("A02 Windows integration harness contracts", () => {
       taskbarName: "Ether Recovery 01234567",
       token
     });
-    expect(resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData })?.recentEnabled).toBe(true);
+    const approvals = {
+      [SHELL_UI_APPROVAL]: SHELL_UI_APPROVAL_VALUE,
+      [ASSOCIATION_APPROVAL]: ASSOCIATION_APPROVAL_VALUE
+    };
+    const recentArgv = [`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`, `${RECOVERY_SHELL_JOURNEY_ARGUMENT}${RECOVERY_SHELL_JUMP_LIST_JOURNEY}`];
+    expect(resolveRecoveryShellIdentity({ appData, argv: recentArgv, environment: approvals, isPackaged: true, platform: "win32", tempRoot: os.tmpdir(), userData })?.recentEnabled).toBe(true);
+    expect(() => resolveRecoveryShellIdentity({ appData, argv: recentArgv, environment: {}, isPackaged: true, platform: "win32", tempRoot: os.tmpdir(), userData })).toThrow(/requires the packaged approved/u);
+    expect(() => resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`], environment: approvals, isPackaged: true, platform: "win32", tempRoot: os.tmpdir(), userData })).toThrow(/requires the packaged approved/u);
+    expect(() => resolveRecoveryShellIdentity({ appData, argv: [`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`, `${RECOVERY_SHELL_JOURNEY_ARGUMENT}wrong`], environment: approvals, isPackaged: true, platform: "win32", tempRoot: os.tmpdir(), userData })).toThrow(/requires the packaged approved/u);
+    expect(() => resolveRecoveryShellIdentity({ appData, argv: recentArgv, environment: approvals, isPackaged: false, platform: "win32", tempRoot: os.tmpdir(), userData })).toThrow(/requires the packaged approved/u);
     expect(() => resolveRecoveryShellIdentity({ appData: process.env.APPDATA, argv: [`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`], platform: "win32", tempRoot: os.tmpdir(), userData: path.join(os.tmpdir(), "Ether") })).toThrow(/non-disposable profile/u);
     expect(() => assertPackagedJourneyArgs([`${RECOVERY_SHELL_IDENTITY_ARGUMENT}${token}`])).toThrow(/driver-owned isolation/u);
     expect(() => assertPackagedJourneyArgs([`${RECOVERY_SHELL_RECENT_ARGUMENT}${token}`])).toThrow(/driver-owned isolation/u);
+    expect(() => assertPackagedJourneyArgs([`${RECOVERY_SHELL_JOURNEY_ARGUMENT}${RECOVERY_SHELL_JUMP_LIST_JOURNEY}`])).toThrow(/driver-owned isolation/u);
+
+    const profile = { root, appData, localAppData: path.join(root, "AppData", "Local"), userData, kind: "fresh-isolated" as const };
+    const permitted = { ...packagedJourneyConfig("C:\\repo", "a02-windows-jump-list"), profile, cleanupProfile: false, recoveryShellRecent: true };
+    expect(() => assertRecoveryShellRecentAdmission(permitted, approvals)).not.toThrow();
+    expect(() => assertRecoveryShellRecentAdmission({ ...permitted, journeyId: "other" }, approvals)).toThrow(/restricted/u);
+    expect(() => assertRecoveryShellRecentAdmission({ ...permitted, mode: "source-electron" }, approvals)).toThrow(/restricted/u);
+    expect(() => assertRecoveryShellRecentAdmission({ ...permitted, cleanupProfile: true }, approvals)).toThrow(/restricted/u);
+    expect(() => assertRecoveryShellRecentAdmission(permitted, {})).toThrow(/restricted/u);
   });
 
   it("deletes only named disposable roots below a driver-created test root", async () => {

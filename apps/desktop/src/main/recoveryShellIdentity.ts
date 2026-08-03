@@ -3,6 +3,12 @@ import path from "node:path";
 
 export const RECOVERY_SHELL_IDENTITY_ARGUMENT = "--ether-recovery-shell-identity=";
 export const RECOVERY_SHELL_RECENT_ARGUMENT = "--ether-recovery-shell-recent=";
+export const RECOVERY_SHELL_JOURNEY_ARGUMENT = "--ether-recovery-shell-journey=";
+export const RECOVERY_SHELL_JUMP_LIST_JOURNEY = "a02-windows-jump-list";
+const SHELL_UI_APPROVAL = "ETHER_A02_SHELL_UI_APPROVAL";
+const SHELL_UI_APPROVAL_VALUE = "approved-by-main";
+const ASSOCIATION_APPROVAL = "ETHER_A02_ASSOCIATION_MUTATION";
+const ASSOCIATION_APPROVAL_VALUE = "approved-by-main";
 
 export type RecoveryShellIdentity = {
   appUserModelId: string;
@@ -21,6 +27,8 @@ export type RecoveryShellIdentity = {
 export function resolveRecoveryShellIdentity(input: {
   appData: string | undefined;
   argv: readonly string[];
+  environment?: NodeJS.ProcessEnv;
+  isPackaged?: boolean;
   platform?: NodeJS.Platform;
   tempRoot?: string;
   userData: string;
@@ -36,6 +44,19 @@ export function resolveRecoveryShellIdentity(input: {
   const recentEnabled = argument.startsWith(RECOVERY_SHELL_RECENT_ARGUMENT);
   const token = argument.slice((recentEnabled ? RECOVERY_SHELL_RECENT_ARGUMENT : RECOVERY_SHELL_IDENTITY_ARGUMENT).length);
   if (!/^[a-f0-9]{32}$/u.test(token)) throw new Error("Ether recovery shell identity token must be 32 lowercase hexadecimal characters.");
+  if (recentEnabled) {
+    const environment = input.environment ?? process.env;
+    const journeyMarkers = input.argv.filter((value) => value.startsWith(RECOVERY_SHELL_JOURNEY_ARGUMENT));
+    if (
+      input.isPackaged !== true ||
+      journeyMarkers.length !== 1 ||
+      journeyMarkers[0] !== `${RECOVERY_SHELL_JOURNEY_ARGUMENT}${RECOVERY_SHELL_JUMP_LIST_JOURNEY}` ||
+      environment[SHELL_UI_APPROVAL] !== SHELL_UI_APPROVAL_VALUE ||
+      environment[ASSOCIATION_APPROVAL] !== ASSOCIATION_APPROVAL_VALUE
+    ) {
+      throw new Error("Ether recovery shell Recent mode requires the packaged approved Jump List journey and both explicit Windows shell approvals.");
+    }
+  }
   if (input.appData === undefined) throw new Error("Ether recovery shell identity requires an isolated APPDATA path.");
 
   const userData = path.resolve(input.userData);

@@ -91,6 +91,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   const recoveryShell = resolveRecoveryShellIdentity({
     appData: process.env.APPDATA,
     argv: launchArgv,
+    isPackaged: app.isPackaged,
     userData: app.getPath("userData")
   });
   if (!app.requestSingleInstanceLock()) {
