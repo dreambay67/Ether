@@ -72,6 +72,8 @@ test("captures the manual from visible blank-document actions without provider w
     await contentEditor.fill("Design a quiet coastal campaign in crisp morning light.");
     await input.screenshot("03-direct-editing.png", evidence, "Capture direct editing", "The packaged canvas shows one controlled in-place content editor.");
     await input.pressKey("Control+Enter", "Commit Prompt content", "Ctrl+Enter saves the edit without starting a run.");
+    await expect(contentEditor).toBeHidden();
+    await expect(page.getByTestId("canvas-status")).toContainText("Edit node content saved");
 
     const evaluate = page.locator(".ether-node[data-node-definition='review.evaluate']");
     const batch = page.locator(".ether-node[data-node-definition='flow.batch']");
@@ -82,6 +84,7 @@ test("captures the manual from visible blank-document actions without provider w
       await expect(batch.getByTestId(`channel-zone-input-${channel}`)).toHaveAttribute("data-compatible", "true");
       await batch.getByLabel(`${label} input`).hover();
       await input.leftClick(batch.getByLabel(`${label} input`), `Complete ${label} lane`, `The ${label} lane persists through the visible canvas interaction.`);
+      await expect(page.getByTestId("canvas-status")).toContainText("Connect nodes saved");
       await expect(page.locator(".ether-edge-hit-target")).toHaveCount(index + 1);
     }
     const firstRole = page.getByTestId("edge-role-chip").first();
