@@ -20,6 +20,9 @@ import {
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
   associationArtifactsMayBeCleaned,
+  assertWindowsShellCheckpointStable,
+  compareWindowsShellState,
+  describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
   SHELL_UI_APPROVAL,
   SHELL_UI_APPROVAL_VALUE,
@@ -69,6 +72,16 @@ describe("A02 Windows integration harness contracts", () => {
     expect(associationArtifactsMayBeCleaned({ mutationAttempted: false, watchdogActive: true, restorationProven: false })).toBe(false);
     expect(associationArtifactsMayBeCleaned({ mutationAttempted: true, watchdogActive: false, restorationProven: false })).toBe(false);
     expect(associationArtifactsMayBeCleaned({ mutationAttempted: true, watchdogActive: true, restorationProven: true })).toBe(true);
+  });
+
+  it("records S0 setup deltas but rejects every post-S1 shell change", () => {
+    const s0 = { roots: [{ appData: "C:\\real", files: [] }] };
+    const s1 = { roots: [{ appData: "C:\\real", files: [{ path: "CustomDestinations/setup.customDestinations-ms", sha256: "a".repeat(64), size: 12 }] }] };
+    const postS1 = { roots: [{ appData: "C:\\real", files: [{ path: "CustomDestinations/setup.customDestinations-ms", sha256: "b".repeat(64), size: 12 }] }] };
+    expect(compareWindowsShellState(s0, s1)).toHaveLength(1);
+    expect(describeWindowsShellSetupDelta(s0, s1)).toMatch(/S0→S1 OS-native setup delta.*without restoration claim/u);
+    expect(() => assertWindowsShellCheckpointStable(s1, s1)).not.toThrow();
+    expect(() => assertWindowsShellCheckpointStable(s1, postS1)).toThrow(/S1 checkpoint changed after setup/u);
   });
 
   it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {

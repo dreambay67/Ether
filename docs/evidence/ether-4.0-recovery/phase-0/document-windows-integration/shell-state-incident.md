@@ -48,7 +48,7 @@ The normal packaged `document-lifecycle` journey started at `2026-08-03T00:44:06
 | `release/windows/win-unpacked/Ether.exe` | `03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f` |
 | `release/windows/win-unpacked/resources/app.asar` | `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e` |
 
-The owned-process query emitted `0`, because its parser accepted every integer rather than only positive safe process IDs. The wrapper attempted this exact shutdown command, which rejected the zero PID:
+The query did not emit PID `0`. Its normal newline-terminated stdout ended with a blank line; the former parser converted that blank through `Number("")` into `0`. The driver repeatedly composed the following exact shutdown command and failed the shutdown proof closed; this record does not claim that Windows rejected PID `0`:
 
 ```text
 Stop-Process -Id 41408,36540,40364,38536,0 -Force -ErrorAction SilentlyContinue
@@ -63,3 +63,12 @@ The package's native Save also changed a pre-existing real shell file. Its prior
 | `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `57b6423bd9319721ff005aeefa7d8e8432bace2f371197daafaf24b46af6a756` | `341f541efc7457b9f89e1deeb054883442238d1449183bba5d25f24c0e9a744a` | `2026-08-03T00:44:22.9170685Z` |
 
 Corrective action: the recovery driver now rejects `0`, negative, non-numeric, mixed, and non-safe process-ID query output before it can compose a shutdown command. A fresh controlled packaged run requires separate authorization; none was performed for this correction.
+
+## S0/S1 shell-baseline change control
+
+Approved association, Explorer drag, and Jump List journeys now distinguish an initial diagnostic `S0` from the first restorable checkpoint `S1`:
+
+- `S0` is a byte-level real-and-isolated shell snapshot before the journey. Any `S0→S1` change caused by ordinary native UI or Save setup is recorded as an opaque OS-native setup delta; it is not deleted, overwritten, or claimed restored.
+- `S1` is captured only after the ordinary UI/native-save setup is complete, then immediately rechecked before association mutation, Explorer gesture, or approved Recent mode.
+- The final invariant is exact byte-level equality to `S1`. Any post-`S1` unrelated delta fails closed and preserves the disposable profile and test root for diagnosis.
+- The Jump List route creates and saves its document in an ordinary-recovery session with Recent disabled, exits that session, records `S0→S1`, and only then starts the exact approved Recent-mode session against the existing document. Its COM/recycle proof therefore permits only one post-`S1` recovery AutomaticDestinations delta and returns to `S1` exactly.

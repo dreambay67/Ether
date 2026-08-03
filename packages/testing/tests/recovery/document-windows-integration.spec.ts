@@ -28,6 +28,7 @@ import {
   assertExactWindowForegroundWithUia,
   applyReversibleAssociation,
   associationArtifactsMayBeCleaned,
+  assertWindowsShellCheckpointStable,
   assertWindowsShellStateRestored,
   cleanupWindowsIntegrationRoot,
   closeExactWindowWithNativeKeyboard,
@@ -45,6 +46,7 @@ import {
   removeTestOwnedDisposableRoots,
   cleanupTestOwnedRecentShortcuts,
   compareWindowsShellState,
+  describeWindowsShellSetupDelta,
   recycleProvenRecoveryAutomaticDestination,
   formatWindowsShellStateChanges,
   recoveryShellIdentityArgument,
@@ -167,7 +169,7 @@ test("runs the separately approved reversible Explorer association route", async
   const root = await createWindowsIntegrationRoot();
   const profile = await createIsolatedJourneyProfile();
   const shellToken = recoveryShellTokenForProfile(profile);
-  const shellBefore = await snapshotWindowsShellState(profile.appData);
+  const shellS0 = await snapshotWindowsShellState(profile.appData);
   const documentPath = path.join(root, `Association ${shellToken.slice(0, 8)} \u017dlt\u00fd.ether`);
   let session: RecoveryJourneySession | null = null;
   let primaryPid: number | null = null;
@@ -176,6 +178,7 @@ test("runs the separately approved reversible Explorer association route", async
   let associationMayBeMutated = false;
   let associationRestorationProven = false;
   let shellStateRestored = false;
+  let shellS1: WindowsShellStateSnapshot | null = null;
   let associationJourneyFailure: unknown = null;
   const finalizationFailures: unknown[] = [];
   try {
@@ -187,6 +190,9 @@ test("runs the separately approved reversible Explorer association route", async
     await session.input.pressKey("Control+s", "Save association document through native picker", "The association target is a unique test-owned .ether document.");
     await completeNativeFileDialogWithUia(primaryPid, documentPath);
     await expect.poll(() => isFile(documentPath)).toBe(true);
+    shellS1 = await resnapshotWindowsShellState(shellS0);
+    session.input.observe("Capture S1 after native association setup", "S0 is diagnostic; every S0→S1 shell delta is recorded as OS-native setup and is not restored.", describeWindowsShellSetupDelta(shellS0, shellS1));
+    await assertShellCheckpointRestored(shellS1);
     plan = await createAssociationDryRunPlan({ executablePath: executable, documentPath, root, recoveryShellToken: shellToken, userData: profile.userData });
     watchdog = await startAssociationRestorationWatchdog(plan);
     try {
@@ -238,8 +244,12 @@ test("runs the separately approved reversible Explorer association route", async
     }
     if (session !== null) await session.close("failed").catch((error) => finalizationFailures.push(error));
     try {
-      await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
-      shellStateRestored = true;
+      if (shellS1 === null) {
+        finalizationFailures.push(new Error("S1 shell checkpoint was not captured before association mutation."));
+      } else {
+        await assertShellCheckpointRestored(shellS1);
+        shellStateRestored = true;
+      }
     } catch (error) { finalizationFailures.push(error); }
     if (associationRestorationProven && shellStateRestored) {
       try {
@@ -272,13 +282,14 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
   const root = await createWindowsIntegrationRoot();
   const profile = await createIsolatedJourneyProfile();
   const shellToken = recoveryShellTokenForProfile(profile);
-  const shellBefore = await snapshotWindowsShellState(profile.appData);
+  const shellS0 = await snapshotWindowsShellState(profile.appData);
   const sourcePath = path.join(root, `Explorer drag source ${shellToken.slice(0, 8)} \u017dlt\u00fd.ether`);
   const targetPath = path.join(root, `Explorer drag target ${shellToken.slice(0, 8)} \u017dlt\u00fd.ether`);
   let session: RecoveryJourneySession | null = null;
   let primaryPid: number | null = null;
   let dragJourneyFailure: unknown = null;
   let shellStateRestored = false;
+  let shellS1: WindowsShellStateSnapshot | null = null;
   const finalizationFailures: unknown[] = [];
   try {
     session = await launch(executable, "a02-windows-explorer-drag", profile);
@@ -296,6 +307,9 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     await session.input.pressKey("Control+s", "Save distinct active drag target", "The native picker saves the two-node target separately from the source.");
     await completeNativeFileDialogWithUia(primaryPid, targetPath);
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(targetPath));
+    shellS1 = await resnapshotWindowsShellState(shellS0);
+    session.input.observe("Capture S1 after native Explorer setup", "S0 is diagnostic; every S0→S1 shell delta is recorded as OS-native setup and is not restored.", describeWindowsShellSetupDelta(shellS0, shellS1));
+    await assertShellCheckpointRestored(shellS1);
     const target = await nativeScreenPointForCanvas(session);
     const drag = await dragDocumentFromExplorerWithNativePointer({ documentPath: sourcePath, etherPid: primaryPid, target });
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(sourcePath), { timeout: 30_000 });
@@ -327,8 +341,12 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
       }
     }
     try {
-      await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [sourcePath, targetPath] });
-      shellStateRestored = true;
+      if (shellS1 === null) {
+        finalizationFailures.push(new Error("S1 shell checkpoint was not captured before Explorer drag."));
+      } else {
+        await assertShellCheckpointRestored(shellS1);
+        shellStateRestored = true;
+      }
     } catch (error) {
       finalizationFailures.push(error);
     }
@@ -364,8 +382,9 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   const profile = await createIsolatedJourneyProfile();
   const shellToken = recoveryShellTokenForProfile(profile);
   const taskbarName = recoveryShellTaskbarName(shellToken);
-  const shellBefore = await snapshotWindowsShellState(profile.appData);
+  const shellS0 = await snapshotWindowsShellState(profile.appData);
   const documentPath = path.join(root, `Jump List ${shellToken.slice(0, 8)} \u017dlt\u00fd.ether`);
+  let setupSession: RecoveryJourneySession | null = null;
   let session: RecoveryJourneySession | null = null;
   let primaryPid: number | null = null;
   let plan: ReversibleAssociationPlan | null = null;
@@ -374,17 +393,37 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   let associationRestorationProven = false;
   let jumpListShellStateRestored = false;
   let recentModeLaunched = false;
+  let shellS1: WindowsShellStateSnapshot | null = null;
   let jumpListFailure: unknown = null;
   const finalizationFailures: unknown[] = [];
   try {
+    setupSession = await launch(executable, "a02-windows-jump-list-setup", profile);
+    const setupPid = await findExactPackagedProcessId(executable, profile.userData);
+    await expect(setupSession.page.getByTestId("document-canvas")).toBeVisible({ timeout: 30_000 });
+    await setupSession.input.leftClick(setupSession.page.getByRole("button", { name: "Prompt", exact: true }), "Create the ordinary-recovery Jump List document", "The document is authored through the ordinary recovery UI with Recent disabled.");
+    await setupSession.input.pressKey("Control+s", "Save ordinary-recovery Jump List setup document", "The native picker creates the exact test-owned document before the approved Recent-mode session starts.");
+    await completeNativeFileDialogWithUia(setupPid, documentPath);
+    await expect.poll(() => isFile(documentPath)).toBe(true);
+    const setupClose = await closeExactWindowWithNativeKeyboard(setupPid);
+    setupSession.input.observe("Close ordinary-recovery Jump List setup", "The ordinary recovery process exits before S1 is captured and before Recent mode is admitted.", setupClose);
+    await expect.poll(() => setupSession?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
+    await setupSession.close("passed", {
+      afterApplicationExit: async () => {
+        shellS1 = await resnapshotWindowsShellState(shellS0);
+        setupSession?.input.observe("Capture S1 after ordinary native-save setup", "S0 is diagnostic; every S0→S1 shell delta is recorded as OS-native setup and is not restored.", describeWindowsShellSetupDelta(shellS0, shellS1));
+        await assertShellCheckpointRestored(shellS1);
+      }
+    });
+    setupSession = null;
+    if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured after ordinary-recovery setup.");
+    await assertShellCheckpointRestored(shellS1);
+
     recentModeLaunched = true;
-    session = await launch(executable, "a02-windows-jump-list", profile, undefined, true);
+    session = await launch(executable, "a02-windows-jump-list", profile, documentPath, true);
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     primaryPid = await findExactPackagedProcessId(executable, profile.userData);
-    await session.input.leftClick(session.page.getByRole("button", { name: "Prompt", exact: true }), "Create unique Jump List document", "Saving it lets Ether register the unique target with app.addRecentDocument and its recent Jump List category.");
-    await session.input.pressKey("Control+s", "Save unique Jump List target", "The native picker saves the exact test-owned recent document.");
-    await completeNativeFileDialogWithUia(primaryPid, documentPath);
-    await expect.poll(() => isFile(documentPath)).toBe(true);
+    await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
+    session.input.observe("Open existing S1 document in approved Recent mode", "The approved Jump List session opens the ordinary-recovery document and does not invoke a native Save dialog.", `Opened ${path.basename(documentPath)} from the same disposable profile/token.`);
     await session.page.waitForTimeout(1_000);
     plan = await createAssociationDryRunPlan({ executablePath: executable, documentPath, root, recoveryShellToken: shellToken, userData: profile.userData });
     watchdog = await startAssociationRestorationWatchdog(plan);
@@ -419,16 +458,18 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     const closeAction = await closeExactWindowWithNativeKeyboard(primaryPid);
     session.input.observe("Close isolated Jump List journey", "A native Alt+F4 closes only the exact recovery-AUMID Ether window before shell-state verification.", closeAction);
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
+    if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
+    const approvedShellS1 = shellS1;
     await session.close("passed", {
       afterApplicationExit: async () => {
         const shellDisposition = await restoreApprovedJumpListShellState({
-          before: shellBefore,
+          before: approvedShellS1,
           documentPaths: [documentPath],
           profile,
           root,
           token: shellToken
         });
-        session?.input.observe("Jump List app-scoped cleanup", "Only the exact 2560-byte recovery-AUMID AutomaticDestinations artifact is recycled after COM cleanup, then the complete real and isolated shell state matches baseline.", shellDisposition);
+        session?.input.observe("Jump List app-scoped cleanup", "Only the exact post-S1 2560-byte recovery-AUMID AutomaticDestinations artifact is recycled after COM cleanup, then the complete real and isolated shell state matches S1.", shellDisposition);
         jumpListShellStateRestored = true;
       }
     });
@@ -451,12 +492,32 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     } catch (error) {
       finalizationFailures.push(error);
     }
-    if (session !== null && primaryPid !== null) await closeExactWindowWithNativeKeyboard(primaryPid).catch(() => undefined);
+    if (setupSession !== null) {
+      try {
+        await setupSession.close("failed", {
+          afterApplicationExit: async () => {
+            shellS1 ??= await resnapshotWindowsShellState(shellS0);
+            setupSession?.input.observe("Capture S1 after failed ordinary setup", "S0 is diagnostic; this retained S1 is the only later restoration checkpoint.", describeWindowsShellSetupDelta(shellS0, shellS1));
+          }
+        });
+        setupSession = null;
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
+    if (session !== null && primaryPid !== null) {
+      try {
+        await closeExactWindowWithNativeKeyboard(primaryPid);
+      } catch (error) {
+        finalizationFailures.push(error);
+      }
+    }
     if (session !== null) {
       try {
         await session.close("failed", recentModeLaunched && !jumpListShellStateRestored ? {
           afterApplicationExit: async () => {
-            await restoreApprovedJumpListShellState({ before: shellBefore, documentPaths: [documentPath], profile, root, token: shellToken });
+            if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
+            await restoreApprovedJumpListShellState({ before: shellS1, documentPaths: [documentPath], profile, root, token: shellToken });
             jumpListShellStateRestored = true;
           }
         } : {});
@@ -466,14 +527,14 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
       }
     }
     try {
-      if (!jumpListShellStateRestored && !recentModeLaunched) {
-        await restoreShellJourneyState({ profile, root, shellBefore, documentPaths: [documentPath] });
+      if (!jumpListShellStateRestored && shellS1 !== null) {
+        await assertShellCheckpointRestored(shellS1);
         jumpListShellStateRestored = true;
       }
     } catch (error) {
       finalizationFailures.push(error);
     }
-    if (associationRestorationProven && jumpListShellStateRestored) {
+    if (associationRestorationProven && shellS1 !== null && jumpListShellStateRestored) {
       try {
         await cleanupIsolatedJourneyProfile(profile);
         await cleanupWindowsIntegrationRoot(root);
@@ -539,6 +600,11 @@ async function restoreShellJourneyState(input: {
   if (failures.length > 0) throw new AggregateError(failures, "The isolated Windows shell state did not restore completely.");
 }
 
+/** S1 is the first restore obligation; S0 only documents unavoidable native setup deltas. */
+async function assertShellCheckpointRestored(s1: WindowsShellStateSnapshot): Promise<void> {
+  assertWindowsShellCheckpointStable(s1, await resnapshotWindowsShellState(s1));
+}
+
 /**
  * The sole COM cleanup route is deliberately local to the separately approved
  * Jump List journey. It proves that every affected real/isolated Recent file
@@ -553,12 +619,6 @@ async function restoreApprovedJumpListShellState(input: {
 }): Promise<string> {
   const realAppData = process.env.APPDATA;
   if (realAppData === undefined) throw new Error("Jump List cleanup requires the real APPDATA snapshot root.");
-  await cleanupTestOwnedRecentShortcuts({
-    appData: input.profile.appData,
-    additionalAppData: [realAppData],
-    root: input.root,
-    documentPaths: input.documentPaths
-  });
   const preCleanup = await resnapshotWindowsShellState(input.before);
   const createdByJourney = compareWindowsShellState(input.before, preCleanup);
   const candidate = requireSingleRecoveryAutomaticDestination(createdByJourney, path.resolve(realAppData), "practical Jump List route");

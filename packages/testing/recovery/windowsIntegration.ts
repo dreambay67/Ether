@@ -88,6 +88,26 @@ export type WindowsShellStateChange = {
   before: { path: string; sha256: string; size: number } | null;
 };
 
+/** The S0 diagnostic delta is recorded, never treated as a restoration obligation. */
+export function describeWindowsShellSetupDelta(s0: WindowsShellStateSnapshot, s1: WindowsShellStateSnapshot): string {
+  const changes = compareWindowsShellState(s0, s1);
+  return changes.length === 0
+    ? "S0→S1 had no shell-file delta."
+    : `S0→S1 OS-native setup delta (recorded without restoration claim): ${formatWindowsShellStateChanges(changes)}`;
+}
+
+/** Any delta from the S1 checkpoint is an unproven post-setup shell mutation and fails closed. */
+export function assertWindowsShellCheckpointStable(
+  s1: WindowsShellStateSnapshot,
+  current: WindowsShellStateSnapshot,
+  label = "S1"
+): void {
+  const changes = compareWindowsShellState(s1, current);
+  if (changes.length > 0) {
+    throw new Error(`Windows shell ${label} checkpoint changed after setup: ${formatWindowsShellStateChanges(changes)}`);
+  }
+}
+
 export type AssociationRestorationWatchdog = {
   child: ChildProcess;
   completePath: string;
@@ -153,9 +173,7 @@ export async function snapshotWindowsShellState(isolatedAppData: string): Promis
 
 export async function assertWindowsShellStateRestored(before: WindowsShellStateSnapshot): Promise<void> {
   const after = await resnapshotWindowsShellState(before);
-  if (JSON.stringify(after) !== JSON.stringify(before)) {
-    throw new Error(`Windows Recent/Jump List state was not restored exactly: ${formatWindowsShellStateChanges(compareWindowsShellState(before, after))}`);
-  }
+  assertWindowsShellCheckpointStable(before, after, "restoration");
 }
 
 export async function resnapshotWindowsShellState(before: WindowsShellStateSnapshot): Promise<WindowsShellStateSnapshot> {
