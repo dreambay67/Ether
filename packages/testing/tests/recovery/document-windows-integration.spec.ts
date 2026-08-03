@@ -364,12 +364,10 @@ test("runs the separately approved reversible Explorer association route", async
       associationMayBeMutated = true;
       await applyReversibleAssociation(plan);
       await minimizeExactWindowWithUia(primaryPid);
-      const activation = await invokeDocumentFromExplorerWithUia(documentPath);
+      const activation = await invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid });
       await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
-      await expect.poll(() => session?.page.evaluate(() => document.hasFocus()) ?? false).toBe(true);
       await assertExactPackagedProcess(executable, primaryPid);
-      await assertExactWindowForegroundWithUia(primaryPid);
-      session.input.observe("Explorer UIA association", "Explorer resolves the uniquely named test folder/item, invokes it through UI Automation, and focuses the exact packaged primary document.", activation);
+      session.input.observe("Explorer UIA association", "The same native Explorer interaction proves a foreground transition from its exact source HWND/PID to the pre-resolved minimized Ether HWND/PID after invoking the unique selected test document.", activation);
     } finally {
       const restorePlan = plan;
       const restoreWatchdog = watchdog;
@@ -526,10 +524,8 @@ test("runs the separately approved Explorer pointer drag/drop route", async () =
     const drag = await dragDocumentFromExplorerWithNativePointer({ documentPath: sourcePath, etherPid: primaryPid, target });
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(sourcePath), { timeout: 30_000 });
     await expect(session.page.locator(".react-flow__node")).toHaveCount(1);
-    await expect.poll(() => session?.page.evaluate(() => document.hasFocus()) ?? false).toBe(true);
     await assertExactPackagedProcess(executable, primaryPid);
-    await assertExactWindowForegroundWithUia(primaryPid);
-    session.input.observe("Explorer pointer drag/drop", "A real OS pointer drag from the uniquely named Explorer item onto the exact Fixer Ether canvas opens the source document.", `${drag}; canvas target=(${target.x},${target.y}).`);
+    session.input.observe("Explorer pointer drag/drop", "The same native pointer interaction foregrounds the exact Explorer source HWND, performs the real drag, and proves transition to the pre-resolved Ether HWND/PID immediately after mouse-up.", `${drag}; canvas target=(${target.x},${target.y}).`);
     const closeAction = await closeExactWindowWithNativeKeyboard(primaryPid);
     session.input.observe("Close isolated drag journey", "A native Alt+F4 closes only the exact recovery-AUMID Ether window before shell-state verification.", closeAction);
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);

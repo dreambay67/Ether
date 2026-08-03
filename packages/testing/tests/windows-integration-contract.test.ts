@@ -28,12 +28,14 @@ import {
   classifyJumpListComProgress,
   classifyJumpListRecycleProgress,
   compareWindowsShellState,
+  buildNativeExplorerDragScript,
   deriveWindowsShellDeletionCandidate,
   describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
   SHELL_UI_APPROVAL,
   SHELL_UI_APPROVAL_VALUE,
   createWindowsIntegrationRoot,
+  encodedPowerShellCommandLength,
   isAssociationMutationApproved,
   removeTestOwnedDisposableRoots,
   recoveryArtifactsMayBeCleanedAfterShellCheckpoint,
@@ -106,7 +108,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(explorerHelpers.split(shellParsedPath)).toHaveLength(3);
     expect(explorerHelpers.split(shellDisplayName)).toHaveLength(3);
     expect(explorerHelpers.split("NameProperty, $displayName")).toHaveLength(4);
-    expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Before Invoke\")");
+    expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Immediately before association Invoke\")");
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"Before arranging drag window\")");
     expect(explorerHelpers).toContain("exactExplorerSelectedDocumentScript(\"After arranging drag window\")");
     expect(explorerHelpers).not.toContain("@($matchedWindow.Document.SelectedItems())");
@@ -118,6 +120,47 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("const MAX_ENCODED_POWERSHELL_COMMAND_LENGTH = 30_000");
     expect(windowsIntegration).toContain("Buffer.byteLength(script, \"utf16le\")");
     expect(windowsIntegration).toContain("assertPowerShellEncodedCommandLength(script)");
+  });
+
+  it("keeps the generated native Explorer drag command inside the encoded-command ceiling", () => {
+    const dragScript = buildNativeExplorerDragScript({
+      documentPath: "C:\\Ether Recovery\\Explorer drag Žltý.ether",
+      etherPid: 1234,
+      target: { x: 960, y: 540 }
+    });
+    expect(encodedPowerShellCommandLength(dragScript)).toBeLessThanOrEqual(30_000);
+  });
+
+  it("proves association and drag focus transitions inside their exact Explorer interactions", async () => {
+    const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+    const [windowsIntegration, integrationSpec] = await Promise.all([
+      readFile(path.join(repositoryRoot, "packages/testing/recovery/windowsIntegration.ts"), "utf8"),
+      readFile(path.join(repositoryRoot, "packages/testing/tests/recovery/document-windows-integration.spec.ts"), "utf8")
+    ]);
+    const associationRoute = integrationSpec.slice(
+      integrationSpec.indexOf('test("runs the separately approved reversible Explorer association route"'),
+      integrationSpec.indexOf('test("runs the separately approved Explorer pointer drag/drop route"')
+    );
+    const dragRoute = integrationSpec.slice(
+      integrationSpec.indexOf('test("runs the separately approved Explorer pointer drag/drop route"'),
+      integrationSpec.indexOf('test("runs the separately approved Windows Jump List known-and-missing target route"')
+    );
+    expect(windowsIntegration).toContain("exactEtherTopLevelWindowScript");
+    expect(windowsIntegration).toContain("Exact Ether target did not remain minimized before association Invoke");
+    expect(windowsIntegration).toContain("SetForegroundWindow($explorerHwnd)");
+    expect(windowsIntegration).not.toContain("SetForegroundWindow($etherHwnd)");
+    expect(windowsIntegration).toContain("exactEtherForegroundTransitionScript");
+    expect(windowsIntegration).toContain("foreground did not transition from the exact Explorer HWND to the exact Ether HWND/PID");
+    expect(windowsIntegration).toContain("sourceHwnd=");
+    expect(windowsIntegration).toContain("targetHwnd=");
+    expect(windowsIntegration).toContain("latencyMs=");
+    expect(windowsIntegration).toContain("Exact Explorer HWND resolved to a non-positive PID");
+    expect(windowsIntegration.split("$explorerPid = [int64]$nativePid")).toHaveLength(3);
+    expect(associationRoute).toContain("invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid })");
+    expect(associationRoute).not.toContain("document.hasFocus()");
+    expect(associationRoute).not.toContain("assertExactWindowForegroundWithUia(primaryPid)");
+    expect(dragRoute).not.toContain("document.hasFocus()");
+    expect(dragRoute).not.toContain("assertExactWindowForegroundWithUia(primaryPid)");
   });
 
   it("declares only representative packaged coverage and names the remaining Windows gaps", () => {
