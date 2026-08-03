@@ -1,0 +1,417 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "blank-gui-checkpoint",
+  "mode": "packaged",
+  "startedAt": "2026-08-03T11:31:57.365Z",
+  "finishedAt": "2026-08-03T11:32:07.163Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "51ec96680e7453519fbb0643bfe5e6c2c2312375",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "94f64e57236b36013c1ba5abbcfa1c129941590a0ca98c169c6f565e36e6476a"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "a2d1ef9bdc9943e94fda49702a4c65bdfc7ca4cc3af2cfa737aafc1a7f05850e"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Registry-backed blank library",
+      "expected": "All 17 canonical node types are discoverable before graph mutation.",
+      "actual": "Found 17 registry rows in canonical order.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "screenshot",
+      "label": "Capture the blank registry-backed library",
+      "expected": "A fresh blank document visibly exposes the searchable Node Library.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 128,
+      "screenshotPath": "screenshots/01-blank-library.png"
+    },
+    {
+      "sequence": 3,
+      "kind": "left-click",
+      "label": "Add prompt.text from Node Library",
+      "expected": "The registry factory creates prompt.text with canonical defaults.",
+      "actual": "Left click at (108, 498).",
+      "durationMs": 37
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Add prompt.worker from Node Library",
+      "expected": "The registry factory creates prompt.worker with canonical defaults.",
+      "actual": "Left click at (108, 633).",
+      "durationMs": 34
+    },
+    {
+      "sequence": 5,
+      "kind": "left-drag",
+      "label": "Move Worker with ordinary left drag",
+      "expected": "The Worker moves once and preserves its graph identity.",
+      "actual": "Left drag (542, 434) to (542, 824).",
+      "durationMs": 273
+    },
+    {
+      "sequence": 6,
+      "kind": "left-marquee",
+      "label": "Marquee-select Prompt",
+      "expected": "A left-drag marquee selects the intersected Prompt.",
+      "actual": "Left drag (674, 526) to (930, 702).",
+      "durationMs": 154
+    },
+    {
+      "sequence": 7,
+      "kind": "shift-marquee",
+      "label": "Add Worker with Shift marquee",
+      "expected": "Shift marquee preserves Prompt and adds Worker.",
+      "actual": "Shift+left drag (414, 688) to (670, 864).",
+      "durationMs": 103
+    },
+    {
+      "sequence": 8,
+      "kind": "screenshot",
+      "label": "Capture movement and additive marquee",
+      "expected": "The separated nodes show one reliable movement and two-node additive selection state.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 175,
+      "screenshotPath": "screenshots/02-marquee-and-movement.png"
+    },
+    {
+      "sequence": 9,
+      "kind": "keyboard-command",
+      "label": "Duplicate selected nodes",
+      "expected": "Ctrl+D duplicates the two selected nodes with a visible offset.",
+      "actual": "Pressed Control+D.",
+      "durationMs": 38
+    },
+    {
+      "sequence": 10,
+      "kind": "keyboard-command",
+      "label": "Copy graph selection",
+      "expected": "Ctrl+C records the selected graph subgraph.",
+      "actual": "Pressed Control+C.",
+      "durationMs": 6
+    },
+    {
+      "sequence": 11,
+      "kind": "keyboard-command",
+      "label": "Paste graph selection",
+      "expected": "Ctrl+V pastes the selected subgraph with fresh graph identities.",
+      "actual": "Pressed Control+V.",
+      "durationMs": 36
+    },
+    {
+      "sequence": 12,
+      "kind": "keyboard-command",
+      "label": "Delete pasted graph selection",
+      "expected": "Delete removes the current graph selection.",
+      "actual": "Pressed Delete.",
+      "durationMs": 30
+    },
+    {
+      "sequence": 13,
+      "kind": "keyboard-command",
+      "label": "Undo graph delete",
+      "expected": "Ctrl+Z restores the deleted graph selection.",
+      "actual": "Pressed Control+Z.",
+      "durationMs": 26
+    },
+    {
+      "sequence": 14,
+      "kind": "keyboard-command",
+      "label": "Redo graph delete",
+      "expected": "Ctrl+Y reapplies the graph deletion.",
+      "actual": "Pressed Control+Y.",
+      "durationMs": 38
+    },
+    {
+      "sequence": 15,
+      "kind": "keyboard-command",
+      "label": "Select every current node",
+      "expected": "Ctrl+A selects every node when the canvas owns focus.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 12
+    },
+    {
+      "sequence": 16,
+      "kind": "observation",
+      "label": "Primary graph shortcuts",
+      "expected": "Duplicate, clipboard, delete, undo, redo, and select-all change the durable graph.",
+      "actual": "Node counts: 2 -> 4 -> 6 -> 4 -> 6 -> 4; four selected.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 17,
+      "kind": "keyboard-command",
+      "label": "Rename the primary selected node",
+      "expected": "F2 opens one controlled title editor.",
+      "actual": "Pressed F2.",
+      "durationMs": 16
+    },
+    {
+      "sequence": 18,
+      "kind": "keyboard-command",
+      "label": "Commit the direct title edit",
+      "expected": "Enter commits the renamed title as one graph transaction.",
+      "actual": "Pressed Enter.",
+      "durationMs": 27
+    },
+    {
+      "sequence": 19,
+      "kind": "left-click",
+      "label": "Restore canvas-owned node focus",
+      "expected": "The renamed Prompt is the primary selected graph object.",
+      "actual": "Left click at (802, 599).",
+      "durationMs": 130
+    },
+    {
+      "sequence": 20,
+      "kind": "keyboard-command",
+      "label": "Open primary content editing",
+      "expected": "Enter edits the selected Prompt primary content rather than moving the node.",
+      "actual": "Pressed Enter.",
+      "durationMs": 26
+    },
+    {
+      "sequence": 21,
+      "kind": "screenshot",
+      "label": "Capture controlled direct editing",
+      "expected": "The selected Prompt visibly owns the only bounded on-canvas editor.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 196,
+      "screenshotPath": "screenshots/03-direct-editing.png"
+    },
+    {
+      "sequence": 22,
+      "kind": "keyboard-command",
+      "label": "Commit primary content edit",
+      "expected": "Ctrl+Enter commits text while the editor owns focus.",
+      "actual": "Pressed Control+Enter.",
+      "durationMs": 29
+    },
+    {
+      "sequence": 23,
+      "kind": "left-click",
+      "label": "Restore Prompt command focus",
+      "expected": "The directly edited Prompt remains the primary graph selection.",
+      "actual": "Left click at (802, 599).",
+      "durationMs": 16
+    },
+    {
+      "sequence": 24,
+      "kind": "keyboard-command",
+      "label": "Select the preview graph scope",
+      "expected": "The preview scope includes the blank-authored Workers without starting provider work.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 10
+    },
+    {
+      "sequence": 25,
+      "kind": "keyboard-command",
+      "label": "Preview the selected run",
+      "expected": "Ctrl+Enter reaches provider capability validation without starting provider work.",
+      "actual": "Pressed Control+Enter.",
+      "durationMs": 10
+    },
+    {
+      "sequence": 26,
+      "kind": "observation",
+      "label": "Provider-free run preview",
+      "expected": "The shortcut is wired while an unconfigured blank profile remains provider-safe.",
+      "actual": "Preview stopped at the visible capability guard; no provider work started.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 27,
+      "kind": "left-click",
+      "label": "Add reference.set from Node Library",
+      "expected": "The registry factory creates reference.set with canonical defaults.",
+      "actual": "Left click at (108, 749).",
+      "durationMs": 37
+    },
+    {
+      "sequence": 28,
+      "kind": "left-click",
+      "label": "Add generation.image from Node Library",
+      "expected": "The registry factory creates generation.image with canonical defaults.",
+      "actual": "Left click at (108, 814).",
+      "durationMs": 38
+    },
+    {
+      "sequence": 29,
+      "kind": "left-click",
+      "label": "Add edit.image from Node Library",
+      "expected": "The registry factory creates edit.image with canonical defaults.",
+      "actual": "Left click at (108, 674).",
+      "durationMs": 52
+    },
+    {
+      "sequence": 30,
+      "kind": "left-click",
+      "label": "Add edit.mask from Node Library",
+      "expected": "The registry factory creates edit.mask with canonical defaults.",
+      "actual": "Left click at (108, 750).",
+      "durationMs": 37
+    },
+    {
+      "sequence": 31,
+      "kind": "left-click",
+      "label": "Add edit.transform from Node Library",
+      "expected": "The registry factory creates edit.transform with canonical defaults.",
+      "actual": "Left click at (108, 814).",
+      "durationMs": 39
+    },
+    {
+      "sequence": 32,
+      "kind": "left-click",
+      "label": "Add review.compare from Node Library",
+      "expected": "The registry factory creates review.compare with canonical defaults.",
+      "actual": "Left click at (108, 674).",
+      "durationMs": 38
+    },
+    {
+      "sequence": 33,
+      "kind": "left-click",
+      "label": "Add review.evaluate from Node Library",
+      "expected": "The registry factory creates review.evaluate with canonical defaults.",
+      "actual": "Left click at (108, 750).",
+      "durationMs": 40
+    },
+    {
+      "sequence": 34,
+      "kind": "left-click",
+      "label": "Add review.filter from Node Library",
+      "expected": "The registry factory creates review.filter with canonical defaults.",
+      "actual": "Left click at (108, 814).",
+      "durationMs": 44
+    },
+    {
+      "sequence": 35,
+      "kind": "left-click",
+      "label": "Add flow.variables from Node Library",
+      "expected": "The registry factory creates flow.variables with canonical defaults.",
+      "actual": "Left click at (108, 674).",
+      "durationMs": 56
+    },
+    {
+      "sequence": 36,
+      "kind": "left-click",
+      "label": "Add flow.batch from Node Library",
+      "expected": "The registry factory creates flow.batch with canonical defaults.",
+      "actual": "Left click at (108, 750).",
+      "durationMs": 40
+    },
+    {
+      "sequence": 37,
+      "kind": "left-click",
+      "label": "Add flow.join from Node Library",
+      "expected": "The registry factory creates flow.join with canonical defaults.",
+      "actual": "Left click at (108, 814).",
+      "durationMs": 124
+    },
+    {
+      "sequence": 38,
+      "kind": "left-click",
+      "label": "Add output.collection from Node Library",
+      "expected": "The registry factory creates output.collection with canonical defaults.",
+      "actual": "Left click at (108, 674).",
+      "durationMs": 45
+    },
+    {
+      "sequence": 39,
+      "kind": "left-click",
+      "label": "Add output.export from Node Library",
+      "expected": "The registry factory creates output.export with canonical defaults.",
+      "actual": "Left click at (108, 750).",
+      "durationMs": 44
+    },
+    {
+      "sequence": 40,
+      "kind": "left-click",
+      "label": "Add canvas.note from Node Library",
+      "expected": "The registry factory creates canvas.note with canonical defaults.",
+      "actual": "Left click at (108, 814).",
+      "durationMs": 38
+    },
+    {
+      "sequence": 41,
+      "kind": "left-click",
+      "label": "Add canvas.drawing from Node Library",
+      "expected": "The registry factory creates canvas.drawing with canonical defaults.",
+      "actual": "Left click at (108, 774).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 42,
+      "kind": "left-click",
+      "label": "Return focus to the canvas",
+      "expected": "Canvas focus owns the final fit command.",
+      "actual": "Left click at (802, 906).",
+      "durationMs": 29
+    },
+    {
+      "sequence": 43,
+      "kind": "keyboard-command",
+      "label": "Fit the authored graph",
+      "expected": "Home fits all authored node types into the viewport.",
+      "actual": "Pressed Home.",
+      "durationMs": 5
+    },
+    {
+      "sequence": 44,
+      "kind": "observation",
+      "label": "All canonical cards authored",
+      "expected": "Every canonical type can be created from the blank document without a graph fixture.",
+      "actual": "17 distinct node definitions are visible on the durable canvas.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 45,
+      "kind": "screenshot",
+      "label": "Capture all canonical node types",
+      "expected": "The fitted blank-authored graph visibly contains all 17 canonical node types.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 208,
+      "screenshotPath": "screenshots/04-all-17-node-types.png"
+    },
+    {
+      "sequence": 46,
+      "kind": "keyboard-command",
+      "label": "Open the canvas command palette",
+      "expected": "Ctrl+K exposes the same graph command registry used by shortcuts and toolbar.",
+      "actual": "Pressed Control+K.",
+      "durationMs": 37
+    },
+    {
+      "sequence": 47,
+      "kind": "screenshot",
+      "label": "Capture the unified command surface",
+      "expected": "The palette visibly lists graph commands, shortcuts, availability, and disabled reasons.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 284,
+      "screenshotPath": "screenshots/05-command-palette.png"
+    }
+  ],
+  "errors": []
+}
