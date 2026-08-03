@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
-import { ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
+import { getViewportForBounds, ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
 import type { EtherGraph, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition } from "@ether/schema";
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import { CanvasSidePanels } from "./CanvasSidePanels";
@@ -24,6 +24,15 @@ type ApplicationQueryBridge = {
 };
 type PreparedSelectionPlan = { id: string; contentHash: string; estimatedCalls: number };
 function emptyCanvasGraph(documentId: string): EtherGraph { return { id: `loading-${documentId}`, title: "Canvas", kind: "root", createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z", nodes: [], edges: [], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null } }; }
+function graphContentBounds(graph: EtherGraph) {
+  const items = [...graph.nodes, ...graph.groups, ...graph.modules];
+  if (items.length === 0) return null;
+  const left = Math.min(...items.map((item) => item.position.x));
+  const top = Math.min(...items.map((item) => item.position.y));
+  const right = Math.max(...items.map((item) => item.position.x + item.size.width));
+  const bottom = Math.max(...items.map((item) => item.position.y + item.size.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 function typedQueryBridge() { return (window.ether as unknown as { application?: ApplicationQueryBridge }).application; }
 
 function queryRequest(name: string, documentId: string, payload: unknown) {
@@ -294,14 +303,23 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     }
   }, [document.documentId, graph.edges, graph.id, graph.modules, readOnly, report, setSelectedIds, transactions]);
   const fitGraph = useCallback(() => {
-    // Pane resizes re-center the viewport on their next animation frame. Fit after those
-    // adjustments settle so an immediate Home command remains authoritative.
+    const content = graphContentBounds(graph);
+    if (content === null) return;
+    // Pane resizes re-center the viewport on their next animation frame. Apply Ether's
+    // model-backed fit after those adjustments settle instead of relying on React Flow's
+    // queued controlled-node fit path.
     globalThis.requestAnimationFrame(() => {
       globalThis.requestAnimationFrame(() => {
-        void flow.fitView({ padding: 0.2, minZoom: 0.1, maxZoom: 1.25, duration: 240 });
+        const surface = globalThis.document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
+        const frame = surface?.getBoundingClientRect();
+        if (frame === undefined || frame.width <= 0 || frame.height <= 0) return;
+        const next = getViewportForBounds(content, frame.width, frame.height, 0.1, 1.25, {
+          top: "86px", right: "42px", bottom: "42px", left: "42px"
+        });
+        void flow.setViewport(next, { duration: 240 });
       });
     });
-  }, [flow]);
+  }, [flow, graph]);
   const commands = useGraphCommands({
     graph, readOnly, selectedNodeIds: selectedIds, selectedEdgeId, selectedModuleId,
     apply: transactions.apply, createModule: nodes.createModule, dissolveModule,
