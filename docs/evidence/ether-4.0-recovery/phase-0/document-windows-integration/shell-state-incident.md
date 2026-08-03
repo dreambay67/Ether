@@ -36,3 +36,30 @@ Corrective controls now in source:
 - association mutation has independent approval, pre-apply concurrency checks, default-value-only restoration, and a detached watchdog.
 
 No deletion, overwrite, timestamp repair, or speculative restoration of either affected file was attempted after this finding. The original final-review task must treat exact pre-fixer Windows shell-state restoration as an unresolved historical evidence limitation, even if all future scoped journeys restore to their recorded before snapshots.
+
+## 2026-08-03 controlled packaged lifecycle failure
+
+Status: failed safely; not accepted as packaged evidence. The controlling lifecycle wrapper detected the shutdown failure and stopped the journey. No approval-gated association, Explorer, Jump List, COM, or destination-cleanup route was enabled.
+
+The normal packaged `document-lifecycle` journey started at `2026-08-03T00:44:06.905Z` from source commit `6545bd9edc9ed2f271137dac1612c6177a6ffa10`, with these installed package artifacts:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `release/windows/win-unpacked/Ether.exe` | `03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f` |
+| `release/windows/win-unpacked/resources/app.asar` | `8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e` |
+
+The owned-process query emitted `0`, because its parser accepted every integer rather than only positive safe process IDs. The wrapper attempted this exact shutdown command, which rejected the zero PID:
+
+```text
+Stop-Process -Id 41408,36540,40364,38536,0 -Force -ErrorAction SilentlyContinue
+```
+
+Read-only post-failure inspection found no exact packaged `Fixer` `Ether.exe` process remaining. The disposable journey profile is deliberately preserved for diagnosis at `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-4QHhOI` (created `2026-08-03T00:44:06Z`); it was not deleted or altered after the failure.
+
+The package's native Save also changed a pre-existing real shell file. Its prior bytes are not recoverable from the harness, so it is preserved in place with no restore, deletion, or overwrite attempt:
+
+| Relative path under `%APPDATA%\Microsoft\Windows\Recent` | Size | Before SHA-256 | After SHA-256 | Last written UTC |
+| --- | ---: | --- | --- | --- |
+| `CustomDestinations\590aee7bdd69b59b.customDestinations-ms` | 6233 | `57b6423bd9319721ff005aeefa7d8e8432bace2f371197daafaf24b46af6a756` | `341f541efc7457b9f89e1deeb054883442238d1449183bba5d25f24c0e9a744a` | `2026-08-03T00:44:22.9170685Z` |
+
+Corrective action: the recovery driver now rejects `0`, negative, non-numeric, mixed, and non-safe process-ID query output before it can compose a shutdown command. A fresh controlled packaged run requires separate authorization; none was performed for this correction.

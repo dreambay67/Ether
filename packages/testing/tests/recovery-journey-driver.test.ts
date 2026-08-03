@@ -17,6 +17,7 @@ import {
   blankAuthoringJourney,
   collectJourneyBuildIdentity,
   journeyEvidencePaths,
+  parsePositiveSafeProcessIds,
   retainOwnedPackagedProcessIds,
   sha256File
 } from "../recovery/journeyDriver.js";
@@ -147,6 +148,13 @@ describe("Ether recovery journey driver", () => {
     // sees only its renderer/GPU descendants.
     const afterRootExit = retainOwnedPackagedProcessIds(retained, [102, 103]);
     expect([...afterRootExit].sort((left, right) => left - right)).toEqual([101, 102, 103]);
+  });
+
+  it("rejects non-positive, non-safe, and mixed packaged process query output", () => {
+    expect([...parsePositiveSafeProcessIds("41408\n36540\n40364\n38536\n")]).toEqual([41408, 36540, 40364, 38536]);
+    for (const output of ["0\n", "-1\n", "NaN\n", "41408\n0\n40364\n", "9007199254740992\n"]) {
+      expect(() => parsePositiveSafeProcessIds(output)).toThrow(/Invalid packaged journey process ID/u);
+    }
   });
 
   it("preserves a supplied recovery profile by default, cleans it only when requested, and rejects outside roots", async () => {

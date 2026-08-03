@@ -873,6 +873,22 @@ export function retainOwnedPackagedProcessIds(retained: ReadonlySet<number>, obs
   return next;
 }
 
+/** Parse only unambiguous Windows process IDs; malformed output must fail shutdown proof closed. */
+export function parsePositiveSafeProcessIds(output: string): Set<number> {
+  const processIds = new Set<number>();
+  for (const token of output.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean)) {
+    if (!/^[1-9][0-9]*$/u.test(token)) {
+      throw new Error(`Invalid packaged journey process ID from Windows query: ${token}.`);
+    }
+    const processId = Number(token);
+    if (!Number.isSafeInteger(processId) || processId <= 0) {
+      throw new Error(`Invalid packaged journey process ID from Windows query: ${token}.`);
+    }
+    processIds.add(processId);
+  }
+  return processIds;
+}
+
 async function retainLivePackagedJourneyProcessIds(input: {
   executablePath: string;
   profileMarker: string;
@@ -901,7 +917,7 @@ async function journeyPackagedProcessIds(
     "-Command",
     `$all = @(Get-CimInstance Win32_Process); $roots = @($all | Where-Object { [string]::Equals($_.ExecutablePath, '${escapedPath}', [System.StringComparison]::OrdinalIgnoreCase) -and ([string]$_.CommandLine).IndexOf('${escapedMarker}', [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.CommandLine -notmatch '(?:^|\\s)--type(?:=|\\s)' }); if ($roots.Count -gt 1) { throw ('Ambiguous packaged journey roots for isolated profile: ' + ($roots.ProcessId -join ',')) }; $ids = New-Object System.Collections.Generic.HashSet[int]; $queue = New-Object System.Collections.Generic.Queue[int]; foreach ($anchor in @(${anchors || ""})) { if ([int]$anchor -gt 0 -and $ids.Add([int]$anchor)) { $queue.Enqueue([int]$anchor) } }; foreach ($root in $roots) { if ($ids.Add([int]$root.ProcessId)) { $queue.Enqueue([int]$root.ProcessId) } }; while ($queue.Count -gt 0) { $parent = $queue.Dequeue(); foreach ($child in @($all | Where-Object { $_.ParentProcessId -eq $parent })) { if ($ids.Add([int]$child.ProcessId)) { $queue.Enqueue([int]$child.ProcessId) } } }; $all | Where-Object { $ids.Contains([int]$_.ProcessId) } | ForEach-Object { $_.ProcessId }`
   ]);
-  return new Set(stdout.split(/\r?\n/u).map((value) => Number(value.trim())).filter(Number.isInteger));
+  return parsePositiveSafeProcessIds(stdout);
 }
 
 async function stopNewPackagedProcesses(input: {
