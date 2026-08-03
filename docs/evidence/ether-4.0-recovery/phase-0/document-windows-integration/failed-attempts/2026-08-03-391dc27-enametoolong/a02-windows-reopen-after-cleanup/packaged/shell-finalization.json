@@ -1,0 +1,46 @@
+{
+  "attempts": [
+    {
+      "action": "reopen close sanitation",
+      "candidatePath": null,
+      "disposition": "failed: spawn ENAMETOOLONG",
+      "exactProcessAbsenceProven": true,
+      "failure": "spawn ENAMETOOLONG",
+      "finishedAt": "2026-08-03T02:29:37.556Z",
+      "jumpStageAfter": null,
+      "jumpStageBefore": null,
+      "jumpTransitions": null,
+      "outcome": "failed"
+    },
+    {
+      "action": "failed reopen close sanitation",
+      "candidatePath": null,
+      "disposition": "failed: spawn ENAMETOOLONG",
+      "exactProcessAbsenceProven": true,
+      "failure": "spawn ENAMETOOLONG",
+      "finishedAt": "2026-08-03T02:29:37.725Z",
+      "jumpStageAfter": null,
+      "jumpStageBefore": null,
+      "jumpTransitions": null,
+      "outcome": "failed"
+    }
+  ],
+  "durabilityFailureObserved": false,
+  "identity": {
+    "gitCommit": "391dc2739886b0df941573511fff408f94ddd5f6",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+      }
+    ]
+  },
+  "journeyId": "a02-windows-reopen-after-cleanup",
+  "route": "primary-reopen",
+  "schemaVersion": 1
+}
