@@ -631,7 +631,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
-    "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02Native { [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; } [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd,out uint p); [DllImport(\"user32.dll\")] public static extern bool IsIconic(IntPtr h); [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int hgt,uint f); [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x,int y); [DllImport(\"user32.dll\")] public static extern bool GetCursorPos(out POINT p); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e); [DllImport(\"user32.dll\")] public static extern void keybd_event(byte v,byte s,uint f,UIntPtr e); [DllImport(\"user32.dll\")] public static extern IntPtr WindowFromPoint(POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr GetAncestor(IntPtr h,uint f); [DllImport(\"user32.dll\")] public static extern bool ClientToScreen(IntPtr h,ref POINT p); [DllImport(\"user32.dll\")] public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l); }' -ErrorAction SilentlyContinue",
+    "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class EtherA02Native{[StructLayout(LayoutKind.Sequential)]public struct POINT{public int X,Y;}[StructLayout(LayoutKind.Sequential)]public struct KEYBDINPUT{public ushort a,b;public uint c,d;public UIntPtr e;}[StructLayout(LayoutKind.Sequential)]public struct MOUSEINPUT{public int a,b;public uint c,d,e;public UIntPtr f;}[StructLayout(LayoutKind.Explicit)]public struct INPUTUNION{[FieldOffset(0)]public KEYBDINPUT k;[FieldOffset(0)]public MOUSEINPUT m;}[StructLayout(LayoutKind.Sequential)]public struct INPUT{public uint type;public INPUTUNION U;}[DllImport(\"user32.dll\")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);[DllImport(\"user32.dll\")]public static extern bool IsIconic(IntPtr h);[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int z,uint f);[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int x,int y);[DllImport(\"user32.dll\")]public static extern bool GetCursorPos(out POINT p);[DllImport(\"user32.dll\")]public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);[DllImport(\"user32.dll\",SetLastError=true)]public static extern uint SendInput(uint n,INPUT[] p,int cb);[DllImport(\"user32.dll\")]public static extern short GetAsyncKeyState(int v);[DllImport(\"user32.dll\")]public static extern IntPtr WindowFromPoint(POINT p);[DllImport(\"user32.dll\")]public static extern IntPtr GetAncestor(IntPtr h,uint f);[DllImport(\"user32.dll\")]public static extern bool ClientToScreen(IntPtr h,ref POINT p);[DllImport(\"user32.dll\")]public static extern IntPtr SendMessage(IntPtr h,uint m,IntPtr w,IntPtr l);static INPUT I(uint f){return new INPUT{type=1,U=new INPUTUNION{k=new KEYBDINPUT{a=0x0D,c=f}}};}public static INPUT[] EnterPair(){return new[]{I(0),I(2)};}public static INPUT[] EnterRelease(){return new[]{I(2)};}public static bool ReturnReleased(){var e=DateTime.UtcNow.AddSeconds(2);while(DateTime.UtcNow<e){if((GetAsyncKeyState(0x0D)&0x8000)==0)return true;System.Threading.Thread.Sleep(25);}return false;}}' -ErrorAction SilentlyContinue",
     `$document = '${ps(input.documentPath)}'`,
     `$etherPid = ${input.etherPid}`,
     "$documentFullPath = [System.IO.Path]::GetFullPath($document)",
@@ -663,7 +663,7 @@ export function buildExplorerAssociationInvokeScript(input: { documentPath: stri
     "}",
     "if ($null -eq $item) { if ($null -ne $matchedWindow) { $matchedWindow.Quit() }; throw ('A newly created Explorer HWND did not expose exact test-owned display item ' + $displayName) }",
     "$buttonDown = $false",
-    `try { $explorerHwnd = [intptr]$matchedWindow.HWND; if ($explorerHwnd -eq [intptr]::Zero) { throw 'Association chrome: exact Explorer HWND is zero' }; if (-not [EtherA02Native]::SetWindowPos($explorerHwnd, [intptr]::Zero, 40, 40, 0, 0, 0x0015)) { throw 'Association chrome: could not arrange exact Explorer HWND without activation' }; Start-Sleep -Milliseconds 150; $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle($explorerHwnd); $explorerBounds = $windowRoot.Current.BoundingRectangle; if ($explorerBounds.Left -lt 0 -or $explorerBounds.Top -lt 0 -or $explorerBounds.Width -le 4 -or $explorerBounds.Height -le 4) { throw 'Association chrome: exact Explorer frame has no positive safe bounds' }; $clickX = [int]($explorerBounds.Left + 2); $clickY = [int]($explorerBounds.Top + 2); $clientOrigin = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::ClientToScreen($explorerHwnd,[ref]$clientOrigin) -or $clickY -ge $clientOrigin.Y) { throw 'Association chrome: click is not non-client frame' }; ${exactWindowRootAtPointScript("EtherA02Native", "$clickX", "$clickY", "$explorerHwnd", "Association chrome")}; [EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null; [EtherA02Native]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); $buttonDown = $true; [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $buttonDown = $false; ${exactExplorerForegroundIdentityScript("EtherA02Native", "After association chrome click")}; $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -ne 1) { throw 'Association Invoke: exact Explorer HWND no longer exposes one display item' }; $item = $candidates[0]; ${exactExplorerSelectedDocumentScript("Immediately before association Invoke")}; $pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern after chrome click' }; if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Exact Ether target did not remain minimized before association Invoke' }; ${exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Invoke")}; $activationStartedAt = [DateTime]::UtcNow; ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); ${exactEtherForegroundTransitionScript("EtherA02Native", "association Invoke")}; Write-Output ('uia-invoked click=(' + $clickX + ',' + $clickY + ') sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' folder=' + $folder + ' displayName=' + $displayName) } finally { if ($buttonDown) { [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
+    `try { $explorerHwnd = [intptr]$matchedWindow.HWND; if ($explorerHwnd -eq [intptr]::Zero) { throw 'Association chrome: exact Explorer HWND is zero' }; if (-not [EtherA02Native]::SetWindowPos($explorerHwnd, [intptr]::Zero, 40, 40, 0, 0, 0x0015)) { throw 'Association chrome: could not arrange exact Explorer HWND without activation' }; Start-Sleep -Milliseconds 150; $windowRoot = [System.Windows.Automation.AutomationElement]::FromHandle($explorerHwnd); $explorerBounds = $windowRoot.Current.BoundingRectangle; if ($explorerBounds.Left -lt 0 -or $explorerBounds.Top -lt 0 -or $explorerBounds.Width -le 4 -or $explorerBounds.Height -le 4) { throw 'Association chrome: exact Explorer frame has no positive safe bounds' }; $clickX = [int]($explorerBounds.Left + 2); $clickY = [int]($explorerBounds.Top + 2); $clientOrigin = New-Object EtherA02Native+POINT; if (-not [EtherA02Native]::ClientToScreen($explorerHwnd,[ref]$clientOrigin) -or $clickY -ge $clientOrigin.Y) { throw 'Association chrome: click is not non-client frame' }; ${exactWindowRootAtPointScript("EtherA02Native", "$clickX", "$clickY", "$explorerHwnd", "Association chrome")}; [EtherA02Native]::SetCursorPos($clickX, $clickY) | Out-Null; [EtherA02Native]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); $buttonDown = $true; [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); $buttonDown = $false; ${exactExplorerForegroundIdentityScript("EtherA02Native", "After association chrome click")}; $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $displayName); $candidates = $windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition); if ($candidates.Count -ne 1) { throw 'Association Invoke: exact Explorer HWND no longer exposes one display item' }; $item = $candidates[0]; ${exactExplorerSelectedDocumentScript("Immediately before association Invoke")}; $pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern); if ($null -eq $pattern) { throw 'Explorer item has no UI Automation InvokePattern after chrome click' }; if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Exact Ether target did not remain minimized before association Invoke' }; ${exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Invoke")}; $activationStartedAt = [DateTime]::UtcNow; ([System.Windows.Automation.InvokePattern]$pattern).Invoke(); ${exactEtherForegroundTransitionScript("EtherA02Native", "association Invoke")}; Write-Output ('uia-invoked click=(' + $clickX + ',' + $clickY + ') sourceHwnd=' + $explorerHwnd + ' sourcePid=' + $explorerPid + ' targetHwnd=' + $etherHwnd + ' targetPid=' + $etherPid + ' latencyMs=' + $transitionLatencyMs + ' inserted=' + $inserted + ' returnReleased=' + $returnReleased + ' samples=' + $stabilitySample + ' folder=' + $folder + ' displayName=' + $displayName) } finally { if ($buttonDown) { [EtherA02Native]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero) }; if ($null -ne $matchedWindow) { $matchedWindow.Quit() } }`
   ].join("; ");
   return compactAssociationScript(hardenAssociationPointerScript(script));
 }
@@ -683,22 +683,29 @@ function hardenAssociationPointerScript(script: string): string {
   ].join("; ");
   const nativeEnterActivation = [
     "$item = $candidates[0]",
-    "A 'Immediately before association Enter'",
-    "if (-not $item.Current.IsEnabled -or $item.Current.IsOffscreen -or -not $item.Current.IsKeyboardFocusable) { throw 'Enter:state' }",
-    "$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
-    "if ($null -eq $pattern) { throw 'Enter:actionable' }",
+    "A 'Enter'",
     "$itemRuntimeId = [string]::Join(',', @($item.GetRuntimeId()))",
     "try { $item.SetFocus() } catch { throw 'Enter:focus' }",
-    "A 'Immediately before association Enter'",
-    "if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Enter:minimized' }",
-    exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Enter"),
-    "if (-not $item.Current.HasKeyboardFocus) { throw 'Enter:focus' }",
-    "$focused = [System.Windows.Automation.AutomationElement]::FocusedElement",
-    "if ($null -eq $focused -or [string]::Join(',', @($focused.GetRuntimeId())) -ne $itemRuntimeId) { throw 'Enter:identity' }",
+    "$stabilitySample = 0",
+    "for($stabilitySample=0;$stabilitySample -lt 2;$stabilitySample++){",
+    "$stableCandidates=$windowRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)",
+    "if($stableCandidates.Count -ne 1){throw 'Enter:stability'}",
+    "$stableItem=$stableCandidates[0]",
+    "A 'E'",
+    "if([string]::Join(',',@($stableItem.GetRuntimeId())) -ne $itemRuntimeId){throw 'Enter:stability'}",
+    "if(-not $stableItem.Current.IsEnabled -or $stableItem.Current.IsOffscreen -or -not $stableItem.Current.IsKeyboardFocusable -or -not $stableItem.Current.HasKeyboardFocus){throw 'Enter:state'}",
+    "$focused=[System.Windows.Automation.AutomationElement]::FocusedElement",
+    "if($null -eq $focused -or [string]::Join(',',@($focused.GetRuntimeId())) -ne $itemRuntimeId){throw 'Enter:stability'}",
+    compactExplorerForegroundIdentityScript("EtherA02Native"),
+    "if(-not [EtherA02Native]::IsIconic($etherHwnd)){throw 'Enter:minimized'}",
+    "[uint32]$stableEtherPid=0;[EtherA02Native]::GetWindowThreadProcessId($etherHwnd,[ref]$stableEtherPid)|Out-Null;if($stableEtherPid -eq 0 -or [int64]$stableEtherPid -ne $etherPid){throw 'Enter:stability'}",
+    "if($stabilitySample -eq 0){Start-Sleep -Milliseconds 50}",
+    "}",
+    "$inputSize = [Runtime.InteropServices.Marshal]::SizeOf([EtherA02Native+INPUT]); if (([IntPtr]::Size -eq 8 -and $inputSize -ne 40) -or ([IntPtr]::Size -eq 4 -and $inputSize -ne 28)) { throw ('Enter:INPUT ABI size ' + $inputSize) }",
     "$returnDown = $false",
-    "try { $activationStartedAt = [DateTime]::UtcNow; [EtherA02Native]::keybd_event(0x0D,0,0,[UIntPtr]::Zero); $returnDown = $true; [EtherA02Native]::keybd_event(0x0D,0,2,[UIntPtr]::Zero); $returnDown = $false",
-    exactEtherForegroundTransitionScript("EtherA02Native", "association Enter"),
-    "} finally { if ($returnDown) { [EtherA02Native]::keybd_event(0x0D,0,2,[UIntPtr]::Zero) } }"
+    "try { $activationStartedAt = [DateTime]::UtcNow; $returnDown = $true; $enterInputs = [EtherA02Native]::EnterPair(); $inserted = [EtherA02Native]::SendInput(2,$enterInputs,$inputSize); if ($inserted -lt 1) { $returnDown = $false }; if ($inserted -ne 2) { $insertError = [Runtime.InteropServices.Marshal]::GetLastWin32Error(); throw ('Enter:SendInput inserted ' + $inserted + '/2; lastError=' + $insertError) }; $returnDown = $false; $returnReleased = [EtherA02Native]::ReturnReleased(); if (-not $returnReleased) { throw 'Enter:key-state VK_RETURN high bit did not clear' }",
+    compactEtherForegroundTransitionScript("EtherA02Native"),
+    "} finally { if ($returnDown) { $releaseInputs = [EtherA02Native]::EnterRelease(); $releaseInserted = [EtherA02Native]::SendInput(1,$releaseInputs,$inputSize); if ($releaseInserted -ne 1) { $releaseError = [Runtime.InteropServices.Marshal]::GetLastWin32Error(); throw ('Enter:cleanup SendInput inserted ' + $releaseInserted + '/1; lastError=' + $releaseError) } } }"
   ].join("; ");
   return script
     .replace("$clickX = [int]($explorerBounds.Left + 2); $clickY = [int]($explorerBounds.Top + 2)", "$clickX = [int]($explorerBounds.Left + 2); $clickY = [int][Math]::Round($explorerBounds.Top + ($explorerBounds.Height / 2))")
@@ -716,15 +723,23 @@ function compactAssociationScript(script: string): string {
     .replaceAll("$documentFullPath", "$d")
     .replaceAll("$documentLeaf", "$l")
     .replaceAll("$folderNamespace", "$ns")
+    .replaceAll("$document", "$doc")
+    .replaceAll("$folder", "$f")
     .replaceAll("$parsedDocument", "$pd")
     .replaceAll("$parsedPath", "$pp")
     .replaceAll("$displayName", "$n")
+    .replaceAll("$shell", "$sh")
     .replaceAll("$existingHwnd", "$eh")
     .replaceAll("$matchedWindow", "$mw")
     .replaceAll("$windowRoot", "$wr")
     .replaceAll("$explorerBounds", "$eb")
     .replaceAll("$explorerPid", "$ep")
     .replaceAll("$condition", "$c")
+    .replaceAll("$root", "$rt")
+    .replaceAll("$deadline", "$dl")
+    .replaceAll("$nativePid", "$np")
+    .replaceAll("$selectionMatches", "$sm")
+    .replaceAll("$buttonDown", "$bd")
     .replaceAll("$candidates", "$cs")
     .replaceAll("$clientOrigin", "$co")
     .replaceAll("$clickX", "$cx")
@@ -740,12 +755,56 @@ function compactAssociationScript(script: string): string {
     .replaceAll("$foregroundPid", "$fpid")
     .replaceAll("$itemRuntimeId", "$ir")
     .replaceAll("$focused", "$fo")
+    .replaceAll("$stabilitySample", "$ss")
+    .replaceAll("$stableCandidates", "$sc")
+    .replaceAll("$stableItem", "$si")
+    .replaceAll("$stableRuntimeId", "$sr")
+    .replaceAll("$stableEtherPid", "$sp")
     .replaceAll("$returnDown", "$rd")
     .replaceAll("$activationStartedAt", "$as")
+    .replaceAll("$enterInputs", "$ei")
+    .replaceAll("$inserted", "$in")
+    .replaceAll("$insertError", "$ie")
+    .replaceAll("$vkReturn", "$vk")
+    .replaceAll("$returnReleased", "$rr")
+    .replaceAll("$returnDeadline", "$rl")
+    .replaceAll("$releaseInputs", "$ri")
+    .replaceAll("$releaseInserted", "$rn")
+    .replaceAll("$releaseError", "$re")
+    .replaceAll("$inputSize", "$iz")
     .replaceAll("$explorerHwnd", "$xh")
     .replaceAll("$etherHwnd", "$th")
     .replaceAll("$etherPid", "$tp")
-    .replaceAll("$transitionLatencyMs", "$lm");
+    .replaceAll("$transitionLatencyMs", "$lm")
+    .replaceAll("Exact Explorer selected-item path mismatch", "A02E:selection-path")
+    .replaceAll("Shell ParseName returned an empty Explorer display name", "A02E:display-name")
+    .replaceAll("Exact Explorer HWND PID was zero", "A02E:explorer-pid-zero")
+    .replaceAll("Association chrome: exact Explorer HWND is zero", "A02E:chrome-hwnd-zero")
+    .replaceAll("Association chrome: could not arrange exact Explorer HWND without activation", "A02E:chrome-arrange")
+    .replaceAll("Association chrome: exact Explorer frame has no positive safe bounds", "A02E:chrome-bounds")
+    .replaceAll("Association chrome: click is not non-client frame", "A02E:chrome-frame")
+    .replaceAll("Association chrome: no hit", "A02E:chrome-no-hit")
+    .replaceAll("Association chrome: WindowFromPoint root was not the exact expected HWND", "A02E:chrome-hit-root")
+    .replaceAll("Association chrome: cursor placement failed", "A02E:cursor-place")
+    .replaceAll("Association chrome: cursor read failed", "A02E:cursor-read")
+    .replaceAll("Association chrome: cursor readback mismatch", "A02E:cursor-mismatch")
+    .replaceAll("Association chrome actual cursor: no hit", "A02E:cursor-no-hit")
+    .replaceAll("Association chrome actual cursor: WindowFromPoint root was not the exact expected HWND", "A02E:cursor-hit-root")
+    .replaceAll("Association chrome: interactive hit test rejected", "A02E:chrome-interactive")
+    .replaceAll("Association chrome: non-inert hit test rejected", "A02E:chrome-non-inert")
+    .replaceAll("After association chrome click: exact Explorer HWND is zero", "A02E:after-hwnd-zero")
+    .replaceAll("After association chrome click: exact Explorer HWND was not foreground", "A02E:after-foreground")
+    .replaceAll("After association chrome click: Explorer HWND PID mismatch immediately before action", "A02E:after-pid")
+    .replaceAll("Association Invoke: exact Explorer HWND no longer exposes one display item", "A02E:item-missing")
+    .replaceAll("Expected one exact nonzero top-level Ether HWND for PID ", "A02E:ether-hwnd ")
+    .replaceAll("Exact Ether HWND PID mismatch. Expected ", "A02E:ether-pid ")
+    .replaceAll("A newly created Explorer HWND did not expose exact test-owned display item ", "A02E:explorer-item ")
+    .replaceAll("Shell namespace unavailable for exact document folder ", "A02E:shell-folder ")
+    .replaceAll("Shell namespace did not expose exact document leaf ", "A02E:shell-leaf ")
+    .replaceAll("Shell ParseName path mismatch. Expected ", "A02E:parse-path ")
+    .replaceAll("Exact new Explorer window exposed multiple items named ", "A02E:duplicate-item ")
+    .replaceAll("Enter:key-state VK_RETURN high bit did not clear", "A02E:return-state")
+    .replaceAll("; ", ";");
 }
 
 export type NativeScreenPoint = { x: number; y: number };
@@ -785,6 +844,15 @@ function exactExplorerForegroundIdentityScript(nativeType: string, stage: string
   ].join("; ");
 }
 
+function compactExplorerForegroundIdentityScript(nativeType: string): string {
+  return [
+    "$explorerHwnd=[intptr]$matchedWindow.HWND",
+    "if($explorerHwnd -eq [intptr]::Zero){throw 'Enter:explorer-hwnd'}",
+    `if([${nativeType}]::GetForegroundWindow() -ne $explorerHwnd){throw 'Enter:explorer-foreground'}`,
+    `[uint32]$foregroundExplorerPid=0;[${nativeType}]::GetWindowThreadProcessId($explorerHwnd,[ref]$foregroundExplorerPid)|Out-Null;if($foregroundExplorerPid -eq 0 -or [int64]$foregroundExplorerPid -ne $explorerPid){throw 'Enter:explorer-pid'}`
+  ].join(";");
+}
+
 function exactWindowRootAtPointScript(nativeType: string, x: string, y: string, expectedHwnd: string, stage: string): string {
   return [
     `$hitPoint = New-Object ${nativeType}+POINT; $hitPoint.X = [int]${x}; $hitPoint.Y = [int]${y}`,
@@ -803,6 +871,16 @@ function exactEtherForegroundTransitionScript(nativeType: string, stage: string)
     `if (-not $foregroundTransitioned) { throw '${stage}: foreground did not transition from the exact Explorer HWND to the exact Ether HWND/PID' }`,
     "$transitionLatencyMs = [int]([DateTime]::UtcNow - $activationStartedAt).TotalMilliseconds"
   ].join("; ");
+}
+
+function compactEtherForegroundTransitionScript(nativeType: string): string {
+  return [
+    "$activationDeadline=[DateTime]::UtcNow.AddSeconds(15)",
+    "$foregroundTransitioned=$false",
+    `while([DateTime]::UtcNow -lt $activationDeadline -and -not $foregroundTransitioned){$foregroundHwnd=[${nativeType}]::GetForegroundWindow();if($foregroundHwnd -eq $etherHwnd){[uint32]$foregroundPid=0;[${nativeType}]::GetWindowThreadProcessId($foregroundHwnd,[ref]$foregroundPid)|Out-Null;if([int]$foregroundPid -eq $etherPid){$foregroundTransitioned=$true;break}};Start-Sleep -Milliseconds 50}`,
+    "if(-not $foregroundTransitioned){throw 'Enter:transition'}",
+    "$transitionLatencyMs=[int]([DateTime]::UtcNow-$activationStartedAt).TotalMilliseconds"
+  ].join(";");
 }
 
 /**

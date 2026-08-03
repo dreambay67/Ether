@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -373,9 +374,15 @@ test(A02_ROUTE_TITLES.association, async () => {
       await applyReversibleAssociation(plan);
       await minimizeExactWindowWithUia(primaryPid);
       const activation = await invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid });
+      const associationDiagnostics = await waitForFocusedAssociationDiagnostics({
+        documentPath,
+        primaryPid,
+        recoveryToken: shellToken,
+        userData: profile.userData
+      });
       await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
       await assertExactPackagedProcess(executable, primaryPid);
-      session.input.observe("Explorer keyboard association", "UIA proves the exact focused selected item; native Enter then proves a foreground transition from its exact Explorer HWND/PID to the pre-resolved minimized Ether HWND/PID.", activation);
+      session.input.observe("Explorer keyboard association", "UIA proves the exact focused selected item; native Enter then proves a foreground transition from its exact Explorer HWND/PID to the pre-resolved minimized Ether HWND/PID.", `${activation.trim()} ${associationDiagnostics}`);
     } finally {
       const restorePlan = plan;
       const restoreWatchdog = watchdog;
@@ -1302,6 +1309,67 @@ async function launch(
     ...(recoveryShellRecent ? { recoveryShellRecent: true } : {}),
     packagedArgs: () => openPath === undefined ? [] : [openPath]
   });
+}
+
+type AssociationDiagnosticRecord = {
+  correlationId?: unknown;
+  details?: Record<string, unknown>;
+  event?: unknown;
+};
+
+async function waitForFocusedAssociationDiagnostics(input: {
+  documentPath: string;
+  primaryPid: number;
+  recoveryToken: string;
+  userData: string;
+}): Promise<string> {
+  const logPath = path.join(input.userData, "4.0", "diagnostics", "logs", "ether-current.jsonl");
+  const expectedPathHash = createHash("sha256").update(`${input.recoveryToken}\0${path.resolve(input.documentPath).toLocaleLowerCase("en-US")}`).digest("hex");
+  const expectedBasenameHash = createHash("sha256").update(`${input.recoveryToken}\0${path.basename(input.documentPath)}`).digest("hex");
+  const expectedTokenHash = createHash("sha256").update(input.recoveryToken).digest("hex");
+  const events = [
+    "desktop.recovery.association.second-instance.received",
+    "desktop.recovery.association.second-instance.focus-attempt",
+    "desktop.recovery.association.second-instance.handled",
+    "desktop.recovery.association.second-instance.focus-state"
+  ] as const;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const records = (await readFile(logPath, "utf8"))
+        .split(/\r?\n/u)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as AssociationDiagnosticRecord)
+        .filter((record) => typeof record.event === "string" && events.includes(record.event as (typeof events)[number]));
+      const correlationIds = [...new Set(records.map((record) => record.correlationId).filter((value): value is string => typeof value === "string"))];
+      for (const correlationId of correlationIds) {
+        const trace = records.filter((record) => record.correlationId === correlationId);
+        const indexes = events.map((event) => trace.findIndex((record) => record.event === event));
+        if (indexes.some((index) => index < 0) || indexes.some((index, position) => position > 0 && index <= indexes[position - 1]!)) continue;
+        const received = trace[indexes[0]!]!.details ?? {};
+        const handled = trace[indexes[2]!]!.details ?? {};
+        const focusState = trace[indexes[3]!]!.details ?? {};
+        if (
+          received.candidatePathHash !== expectedPathHash ||
+          received.candidateBasenameHash !== expectedBasenameHash ||
+          received.recoveryTokenHash !== expectedTokenHash ||
+          received.primaryProcessId !== input.primaryPid ||
+          handled.canonicalPathHash !== expectedPathHash ||
+          handled.canonicalBasenameHash !== expectedBasenameHash ||
+          handled.disposition !== "focused" ||
+          focusState.postSettleFocused !== true ||
+          focusState.postSettleMinimized !== false ||
+          focusState.postSettleVisible !== true
+        ) continue;
+        return `association-diagnostics correlation=${correlationId} events=received>focus-attempt>handled(focused)>focus-state postSettleFocused=true postSettleMinimized=false postSettleVisible=true`;
+      }
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      continue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Timed out waiting for the isolated recovery association diagnostics trace with exact hashes, PID, ordering, and settled focus state.");
 }
 
 async function requestSecondInstance(executablePath: string, profile: RecoveryJourneySession["profile"], documentPath: string): Promise<string> {
