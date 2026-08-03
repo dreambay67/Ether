@@ -20,7 +20,10 @@ import {
   ASSOCIATION_APPROVAL,
   ASSOCIATION_APPROVAL_VALUE,
   associationArtifactsMayBeCleaned,
+  assertWindowsShellClassificationClean,
   assertWindowsShellCheckpointStable,
+  assertWindowsShellMicroBaselineAfterRecycle,
+  classifyWindowsShellStateChanges,
   compareWindowsShellState,
   describeWindowsShellSetupDelta,
   ETHER_EXTENSION_KEY,
@@ -84,6 +87,51 @@ describe("A02 Windows integration harness contracts", () => {
     expect(describeWindowsShellSetupDelta(s0, s1)).toMatch(/S0→S1 OS-native setup delta.*without restoration claim/u);
     expect(() => assertWindowsShellCheckpointStable(s1, s1)).not.toThrow();
     expect(() => assertWindowsShellCheckpointStable(s1, postS1)).toThrow(/S1 checkpoint changed after setup/u);
+  });
+
+  it("allows only in-place opaque destination modifications and a declared new recovery automatic destination", () => {
+    const s1 = { roots: [{ appData: "C:\\real", files: [
+      { path: "CustomDestinations/existing.customDestinations-ms", sha256: "a".repeat(64), size: 12 },
+      { path: "Recent\\unsafe.lnk", sha256: "b".repeat(64), size: 4 }
+    ] }] };
+    const j0 = { roots: [{ appData: "C:\\real", files: [
+      { path: "CustomDestinations/existing.customDestinations-ms", sha256: "c".repeat(64), size: 12 },
+      { path: "Recent\\unsafe.lnk", sha256: "d".repeat(64), size: 4 },
+      { path: "AutomaticDestinations/recovery.automaticDestinations-ms", sha256: "e".repeat(64), size: 64 }
+    ] }] };
+    const classification = classifyWindowsShellStateChanges(s1, j0, { allowNewRecoveryAutomaticDestination: true });
+    expect(classification.allowedOpaqueModifications).toHaveLength(1);
+    expect(classification.newRecoveryAutomaticDestinations).toHaveLength(1);
+    expect(classification.violations).toHaveLength(1);
+    expect(() => assertWindowsShellClassificationClean(classification, "S1→J0")).toThrow(/unsafe Windows shell changes/u);
+  });
+
+  it("requires J2 to be exactly J0 without the recycled candidate", () => {
+    const j0 = { roots: [{ appData: "C:\\real", files: [
+      { path: "AutomaticDestinations/recovery.automaticDestinations-ms", sha256: "a".repeat(64), size: 2560 },
+      { path: "CustomDestinations/existing.customDestinations-ms", sha256: "b".repeat(64), size: 12 }
+    ] }] };
+    const j2 = { roots: [{ appData: "C:\\real", files: [{ path: "CustomDestinations/existing.customDestinations-ms", sha256: "b".repeat(64), size: 12 }] }] };
+    expect(() => assertWindowsShellMicroBaselineAfterRecycle(j0, j2, { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" })).not.toThrow();
+    const concurrentWrite = { roots: [{ appData: "C:\\real", files: [{ path: "CustomDestinations/existing.customDestinations-ms", sha256: "c".repeat(64), size: 12 }] }] };
+    expect(() => assertWindowsShellMicroBaselineAfterRecycle(j0, concurrentWrite, { appData: "C:\\real", relativePath: "AutomaticDestinations/recovery.automaticDestinations-ms" })).toThrow(/J2 did not equal J0/u);
+  });
+
+  it("fails every removal and new or changed non-opaque shell file", () => {
+    const before = { roots: [{ appData: "C:\\real", files: [
+      { path: "CustomDestinations/existing.customDestinations-ms", sha256: "a".repeat(64), size: 12 },
+      { path: "exact-target.lnk", sha256: "b".repeat(64), size: 4 }
+    ] }] };
+    const after = { roots: [{ appData: "C:\\real", files: [
+      { path: "exact-target.lnk", sha256: "c".repeat(64), size: 4 },
+      { path: "unexpected.txt", sha256: "d".repeat(64), size: 1 },
+      { path: "CustomDestinations/new.customDestinations-ms", sha256: "e".repeat(64), size: 12 }
+    ] }] };
+    const classification = classifyWindowsShellStateChanges(before, after, { allowNewRecoveryAutomaticDestination: true });
+    expect(classification.allowedOpaqueModifications).toHaveLength(0);
+    expect(classification.newRecoveryAutomaticDestinations).toHaveLength(0);
+    expect(classification.violations).toHaveLength(4);
+    expect(() => assertWindowsShellClassificationClean(classification, "removal/new/non-opaque")).toThrow(/unsafe Windows shell changes/u);
   });
 
   it("requires an empty exact-target Recent-link baseline before Recent mode", () => {

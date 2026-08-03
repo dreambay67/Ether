@@ -70,9 +70,11 @@ The normal A02 primary journey and the approved association, Explorer drag, and 
 
 - `S0` is a byte-level real-and-isolated shell snapshot before the journey. Any `S0→S1` change caused by ordinary native UI or Save setup is recorded as an opaque OS-native setup delta; it is not deleted, overwritten, or claimed restored.
 - `S1` is captured only after the ordinary UI/native-save setup is complete, then immediately rechecked before association mutation, Explorer gesture, or approved Recent mode.
-- The final invariant is exact byte-level equality to `S1`. Any post-`S1` unrelated delta fails closed and preserves the disposable profile and test root for diagnosis.
-- The normal A02 primary route captures `S1` after its final native File > Open title check. Its second-instance, disposable-root, clean-close/reopen, and association dry-run work is post-`S1`; a failed session/process proof or final equality preserves the exact primary profile and Windows root.
-- The Jump List route creates and saves its document in an ordinary-recovery session with Recent disabled, exits that session, records `S0→S1`, and only then starts the exact approved Recent-mode session against the existing document. Its COM/recycle proof therefore permits only one post-`S1` recovery AutomaticDestinations delta and returns to `S1` exactly.
+- The shared `S1` classifier permits reporting-only **in-place** changes to pre-existing `AutomaticDestinations/*.automaticDestinations-ms` and `CustomDestinations/*.customDestinations-ms` files. It never restores, deletes, overwrites, or timestamp-repairs those opaque Windows-managed files. Every removal, every changed `.lnk` or other non-opaque file, and every unexpected new file fails closed and preserves the disposable profile and test root for diagnosis.
+- The normal A02 primary route captures `S1` after its final native File > Open title check. Its second-instance, disposable-root, clean-close/reopen, and association dry-run work is post-`S1`; a failed session/process proof or final classifier check preserves the exact primary profile and Windows root.
+- The Jump List route creates and saves its document in an ordinary-recovery session with Recent disabled, exits that session, records `S0→S1`, and only then starts the exact approved Recent-mode session against the existing document. After exact process absence and exact-target-link cleanup, `S1→J0` must contain exactly one new recovery AutomaticDestinations candidate plus only reportable opaque modifications. `J0` is the micro-baseline: COM must change that exact candidate only, with a rechecked 2560-byte/hash state; after recycle, `J2` must equal `J0` minus that exact candidate. Concurrent or unrelated writes fail and preserve the artifacts.
+
+For future controlled Windows evidence, a fresh Windows VM snapshot or Windows Sandbox with a disposable user profile is the preferred isolation boundary. It avoids relying on a developer's established MRU state, but does not weaken this classifier or the exact process/link proof requirements.
 
 ## 2026-08-03 second controlled packaged lifecycle failure
 
@@ -150,3 +152,16 @@ attempted:
 These successful packaged runs do not close association, Explorer drag, Jump List,
 cross-machine portability, or owner-M requirements. The pre-existing shell file
 remains preserved in place under the historical restoration limitation above.
+
+## 2026-08-03 third controlled packaged lifecycle failure
+
+Status: both individual journey records passed, but the combined attempt is **excluded from packaged evidence** because its shared post-`S1` Windows shell state was not accepted under the then-current control. The attempted HEAD was `bdc3d76bf3953d3e27a59c0a49926d42acee5787`.
+
+| Journey | Started UTC | Finished UTC | Individual result |
+| --- | --- | --- | --- |
+| `a02-windows-primary` | `2026-08-03T01:27:52.140Z` | `2026-08-03T01:28:10.718Z` | passed; excluded with the combined attempt |
+| `a02-windows-reopen-after-cleanup` | `2026-08-03T01:28:10.994Z` | `2026-08-03T01:28:16.663Z` | passed; excluded with the combined attempt |
+
+The normal native UI changed the same pre-existing real shell MRU file. Its recorded digest changed from `73f204...d5ec7` to `333b840...e243`, with last-write time `2026-08-03T01:28:16.1461844Z`. This opaque pre-existing file remains in place: no restore, deletion, overwrite, or timestamp repair was attempted.
+
+Read-only post-failure inspection found no exact packaged Fixer `Ether.exe` process. The failed-attempt root `C:\Users\deny7\AppData\Local\Temp\ether-a02-windows-integration-8ILUcl` and profile `C:\Users\deny7\AppData\Local\Temp\ether-recovery-journey-FMILz4` are deliberately preserved and must not be treated as accepted evidence or cleanup targets.

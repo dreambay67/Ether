@@ -88,6 +88,67 @@ export type WindowsShellStateChange = {
   before: { path: string; sha256: string; size: number } | null;
 };
 
+export type WindowsShellStateClassification = {
+  allowedOpaqueModifications: WindowsShellStateChange[];
+  newRecoveryAutomaticDestinations: WindowsShellStateChange[];
+  violations: WindowsShellStateChange[];
+};
+
+const OPAQUE_SHELL_DESTINATION = /^(?:AutomaticDestinations\/[^/]+\.automaticDestinations-ms|CustomDestinations\/[^/]+\.customDestinations-ms)$/iu;
+const RECOVERY_AUTOMATIC_DESTINATION = /^AutomaticDestinations\/[^/]+\.automaticDestinations-ms$/iu;
+
+/** Classifies byte-level shell deltas without ever repairing opaque Windows-managed destination files. */
+export function classifyWindowsShellStateChanges(
+  before: WindowsShellStateSnapshot,
+  after: WindowsShellStateSnapshot,
+  options: { allowNewRecoveryAutomaticDestination?: boolean } = {}
+): WindowsShellStateClassification {
+  const classification: WindowsShellStateClassification = {
+    allowedOpaqueModifications: [],
+    newRecoveryAutomaticDestinations: [],
+    violations: []
+  };
+  for (const change of compareWindowsShellState(before, after)) {
+    const relativePath = change.after?.path ?? change.before?.path ?? "";
+    if (change.before !== null && change.after !== null && OPAQUE_SHELL_DESTINATION.test(relativePath)) {
+      classification.allowedOpaqueModifications.push(change);
+    } else if (
+      options.allowNewRecoveryAutomaticDestination === true &&
+      change.before === null &&
+      change.after !== null &&
+      RECOVERY_AUTOMATIC_DESTINATION.test(relativePath)
+    ) {
+      classification.newRecoveryAutomaticDestinations.push(change);
+    } else {
+      classification.violations.push(change);
+    }
+  }
+  return classification;
+}
+
+export function assertWindowsShellClassificationClean(classification: WindowsShellStateClassification, label: string): void {
+  if (classification.violations.length > 0) {
+    throw new Error(`${label} introduced unsafe Windows shell changes: ${formatWindowsShellStateChanges(classification.violations)}`);
+  }
+}
+
+/** After recycling the candidate, J2 must equal J0 except for that exact removed file. */
+export function assertWindowsShellMicroBaselineAfterRecycle(
+  j0: WindowsShellStateSnapshot,
+  j2: WindowsShellStateSnapshot,
+  candidate: { appData: string; relativePath: string }
+): void {
+  const changes = compareWindowsShellState(j0, j2);
+  if (
+    changes.length !== 1 ||
+    changes[0]?.appData !== candidate.appData ||
+    changes[0]?.before?.path !== candidate.relativePath ||
+    changes[0]?.after !== null
+  ) {
+    throw new Error(`J2 did not equal J0 minus the exact recycled recovery destination: ${formatWindowsShellStateChanges(changes)}`);
+  }
+}
+
 /** The S0 diagnostic delta is recorded, never treated as a restoration obligation. */
 export function describeWindowsShellSetupDelta(s0: WindowsShellStateSnapshot, s1: WindowsShellStateSnapshot): string {
   const changes = compareWindowsShellState(s0, s1);
@@ -115,7 +176,7 @@ export function requireNoTestOwnedRecentShortcuts(paths: readonly string[], labe
   }
 }
 
-/** Process-exit proof is always mandatory; post-S1 cleanup also requires shell equality. */
+/** Process-exit proof is always mandatory; a post-S1 journey failure always preserves evidence. */
 export function recoveryArtifactsMayBeCleanedAfterShellCheckpoint(input: {
   checkpointCaptured: boolean;
   journeyFailedAfterCheckpoint: boolean;
