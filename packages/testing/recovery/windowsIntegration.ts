@@ -685,14 +685,16 @@ function hardenAssociationPointerScript(script: string): string {
     "$item = $candidates[0]",
     "A 'Immediately before association Enter'",
     "if (-not $item.Current.IsEnabled -or $item.Current.IsOffscreen -or -not $item.Current.IsKeyboardFocusable) { throw 'Enter:state' }",
+    "$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)",
+    "if ($null -eq $pattern) { throw 'Enter:actionable' }",
     "$itemRuntimeId = [string]::Join(',', @($item.GetRuntimeId()))",
     "try { $item.SetFocus() } catch { throw 'Enter:focus' }",
-    "if (-not $item.Current.HasKeyboardFocus) { throw 'Enter:focus' }",
-    "$focused = [System.Windows.Automation.AutomationElement]::FocusedElement",
-    "if ($null -eq $focused -or [string]::Join(',', @($focused.GetRuntimeId())) -ne $itemRuntimeId) { throw 'Enter:identity' }",
     "A 'Immediately before association Enter'",
     "if (-not [EtherA02Native]::IsIconic($etherHwnd)) { throw 'Enter:minimized' }",
     exactExplorerForegroundIdentityScript("EtherA02Native", "Immediately before association Enter"),
+    "if (-not $item.Current.HasKeyboardFocus) { throw 'Enter:focus' }",
+    "$focused = [System.Windows.Automation.AutomationElement]::FocusedElement",
+    "if ($null -eq $focused -or [string]::Join(',', @($focused.GetRuntimeId())) -ne $itemRuntimeId) { throw 'Enter:identity' }",
     "$returnDown = $false",
     "try { $activationStartedAt = [DateTime]::UtcNow; [EtherA02Native]::keybd_event(0x0D,0,0,[UIntPtr]::Zero); $returnDown = $true; [EtherA02Native]::keybd_event(0x0D,0,2,[UIntPtr]::Zero); $returnDown = $false",
     exactEtherForegroundTransitionScript("EtherA02Native", "association Enter"),
@@ -739,6 +741,10 @@ function compactAssociationScript(script: string): string {
     .replaceAll("$itemRuntimeId", "$ir")
     .replaceAll("$focused", "$fo")
     .replaceAll("$returnDown", "$rd")
+    .replaceAll("$activationStartedAt", "$as")
+    .replaceAll("$explorerHwnd", "$xh")
+    .replaceAll("$etherHwnd", "$th")
+    .replaceAll("$etherPid", "$tp")
     .replaceAll("$transitionLatencyMs", "$lm");
 }
 
@@ -831,16 +837,20 @@ async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticS
   });
   if (child.pid === undefined || child.pid <= 0) throw new Error("Explorer drag did not create a retained PowerShell child PID.");
   await writeDragDiagnosticStage(input.diagnostic, "prepared", { childPid: child.pid, down: false, releaseAttempted: false });
-  const watchdog = startDragReleaseWatchdog({ ...input.diagnostic, childPid: child.pid });
-  await writeFile(input.diagnostic.armPath, `${input.diagnostic.token}\n`, "utf8");
+  const watchdog = await startDragReleaseWatchdog({ ...input.diagnostic, childPid: child.pid });
+  await assertWatchdogReady(watchdog);
+  await writeDragDiagnosticStage(input.diagnostic, "release-armed", { childPid: child.pid, down: false, releaseAttempted: false });
+  await writeTokenBoundDurableFile(input.diagnostic.armPath, dragControlToken(input.diagnostic, child.pid, "go"));
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
-  const stageNames: Record<string, DragDiagnosticStage> = { a: "release-armed", f: "source-foreground-proven", h: "threshold-crossed", m: "mouse-down-sent", p: "prepared", r: "released", t: "target-proven", u: "release-attempted", v: "transition-proven" };
+  const stageNames: Record<string, DragDiagnosticStage> = { f: "source-foreground-proven", h: "threshold-crossed", m: "mouse-down-sent", r: "released", t: "target-proven", u: "release-attempted", v: "transition-proven" };
   const observedStages = new Set<DragDiagnosticStage>();
   let partialLine = "";
   let stageWrites = Promise.resolve();
+  let terminal = false;
   child.stdout?.on("data", (chunk: Buffer) => {
     stdout.push(chunk);
+    if (terminal) return;
     const lines = `${partialLine}${chunk.toString("utf8")}`.split(/\r?\n/u);
     partialLine = lines.pop() ?? "";
     for (const line of lines) {
@@ -854,9 +864,12 @@ async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticS
   });
   child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
   const exited = onceChildExit(child);
-  const timeout = setTimeout(() => child.kill(), Math.max(1, input.diagnostic.deadlineEpochMs - Date.now()));
+  let timeoutHandle: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error("Explorer drag exceeded its internal deadline.")), Math.max(1, input.diagnostic.deadlineEpochMs - Date.now()));
+  });
   try {
-    const exit = await exited;
+    const exit = await Promise.race([exited, timeout]);
     if (exit.code !== 0 || exit.signal !== null) {
       throw new Error(`Explorer drag child failed code=${exit.code ?? "none"} signal=${exit.signal ?? "none"}: ${Buffer.concat(stderr).toString("utf8").trim()}`);
     }
@@ -867,51 +880,129 @@ async function runTrackedNativeExplorerDrag(input: { diagnostic: DragDiagnosticS
     await writeDragDiagnosticStage(input.diagnostic, "transition-proven", { childPid: child.pid, down: false, releaseAttempted: true });
     return Buffer.concat(stdout).toString("utf8").trim();
   } catch (error) {
+    terminal = true;
+    await stageWrites;
     await writeDragDiagnosticStage(input.diagnostic, "abort-requested", { childPid: child.pid, down: true, releaseAttempted: false });
     if (child.exitCode === null) child.kill();
-    await independentDragLeftUp(input.diagnostic, child.pid);
+    const independentRelease = await independentDragLeftUp(input.diagnostic, child.pid);
     await Promise.race([onceChildExit(child), delay(5_000)]);
     if (child.exitCode === null) throw new Error("Explorer drag retained child did not exit after the bounded abort request.", { cause: error });
+    await assertWatchdogReleased(watchdog);
+    if (!independentRelease) throw new Error("Explorer drag independent release proof was unavailable.", { cause: error });
     throw error;
   } finally {
-    clearTimeout(timeout);
-    await disarmDragReleaseWatchdog(watchdog);
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    if (!terminal) await disarmDragReleaseWatchdog(watchdog);
   }
 }
 
-type DragWatchdog = { child: ChildProcess; disarmPath: string; failurePath: string };
+type DragWatchdog = DragDiagnosticSidecar & { child: ChildProcess; childPid: number; disarmPath: string; failurePath: string; readyPath: string; resultPath: string };
 
-function startDragReleaseWatchdog(input: DragDiagnosticSidecar & { childPid: number }): DragWatchdog {
+async function startDragReleaseWatchdog(input: DragDiagnosticSidecar & { childPid: number }): Promise<DragWatchdog> {
   const disarmPath = `${input.sidecarPath}.watchdog-disarm`;
   const failurePath = `${input.sidecarPath}.watchdog-failure`;
+  const readyPath = `${input.sidecarPath}.watchdog-ready`;
+  const resultPath = `${input.sidecarPath}.watchdog-result`;
   const script = [
     "$ErrorActionPreference='Stop'",
-    `$token='${ps(input.token)}'; $sidecar='${ps(input.sidecarPath)}'; $disarm='${ps(disarmPath)}'; $failure='${ps(failurePath)}'; $childPid=${input.childPid}; $parentPid=${input.parentPid}; $deadline=[DateTimeOffset]::FromUnixTimeMilliseconds(${input.deadlineEpochMs}).UtcDateTime`,
+    `$token='${ps(input.token)}'; $arm='${ps(input.armPath)}'; $disarm='${ps(disarmPath)}'; $failure='${ps(failurePath)}'; $ready='${ps(readyPath)}'; $result='${ps(resultPath)}'; $childPid=${input.childPid}; $parentPid=${input.parentPid}; $deadlineMs=${input.deadlineEpochMs}`,
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02DragWatchdog { [DllImport(\"user32.dll\")] public static extern uint SendInput(uint n, INPUT[] i, int s); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int v); [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public MOUSEINPUT mi; } [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx,dy; public uint data,flags,time; public IntPtr extra; } public static uint Up() { var i=new INPUT[]{new INPUT{type=0,mi=new MOUSEINPUT{flags=0x0004}}}; return SendInput(1,i,Marshal.SizeOf(typeof(INPUT))); } }' -ErrorAction SilentlyContinue",
-    "while ([DateTime]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $disarm)) { if (-not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -or -not (Get-Process -Id $childPid -ErrorAction SilentlyContinue)) { break }; Start-Sleep -Milliseconds 100 }",
-    "if (-not (Test-Path -LiteralPath $disarm)) { try { $count=[EtherA02DragWatchdog]::Up(); $state=[EtherA02DragWatchdog]::GetAsyncKeyState(1); [IO.File]::WriteAllText($sidecar + '.watchdog-result', ('token=' + $token + ';childPid=' + $childPid + ';parentPid=' + $parentPid + ';eventCount=' + $count + ';asyncKeyState=' + $state)); } catch { [IO.File]::WriteAllText($failure, $_.Exception.Message) } }"
+    "function F($p,$v){$q=$p+'.tmp';$b=[Text.Encoding]::UTF8.GetBytes($v);$s=[IO.File]::Open($q,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::None);try{$s.Write($b,0,$b.Length);$s.Flush($true)}finally{$s.Dispose()};Move-Item -LiteralPath $q -Destination $p -Force}",
+    "function R($k,$c,$s){F $result (([pscustomobject]@{token=$token;childPid=$childPid;parentPid=$parentPid;deadlineEpochMs=$deadlineMs;kind=$k;eventCount=$c;asyncKeyState=$s}|ConvertTo-Json -Compress))}",
+    "function V($p,$kind){if(-not(Test-Path -LiteralPath $p)){return $false};return ((Get-Content -LiteralPath $p -Raw).Trim() -eq ($token+'|'+$childPid+'|'+$parentPid+'|'+$deadlineMs+'|'+$kind))}",
+    "try { F $ready ($token+'|'+$childPid+'|'+$parentPid+'|'+$deadlineMs+'|ready'); while([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadlineMs -and -not(V $arm 'go')){Start-Sleep -Milliseconds 25}; if(-not(V $arm 'go')){throw 'Watchdog did not receive an exact token-bound GO'}; while([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadlineMs){if(V $disarm 'disarm'){R 'disarmed' 0 0;exit 0};if(-not(Get-Process -Id $parentPid -ErrorAction SilentlyContinue) -or -not(Get-Process -Id $childPid -ErrorAction SilentlyContinue)){break};Start-Sleep -Milliseconds 50};$count=[EtherA02DragWatchdog]::Up();$state=[EtherA02DragWatchdog]::GetAsyncKeyState(1);R 'released' $count $state}catch{F $failure $_.Exception.Message;exit 2}"
   ].join("; ");
   assertPowerShellEncodedCommandLength(script);
   const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { detached: true, stdio: "ignore", windowsHide: true });
   if (child.pid === undefined || child.pid <= 0) throw new Error("Explorer drag watchdog did not create a retained PID.");
-  child.unref();
-  return { child, disarmPath, failurePath };
+  return { ...input, child, disarmPath, failurePath, readyPath, resultPath };
 }
 
 async function disarmDragReleaseWatchdog(watchdog: DragWatchdog): Promise<void> {
-  await writeFile(watchdog.disarmPath, "verified\n", "utf8");
+  await writeTokenBoundDurableFile(watchdog.disarmPath, dragControlToken(watchdog, watchdog.childPid, "disarm"));
   await Promise.race([onceChildExit(watchdog.child), delay(5_000)]);
   if (watchdog.child.exitCode === null) throw new Error("Explorer drag release watchdog did not exit after disarm.");
   if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag release watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
+  const result = await readWatchdogResult(watchdog);
+  if (result.kind === "released") {
+    assertExactDragReleaseProof(result.eventCount, result.asyncKeyState, "watchdog");
+    return;
+  }
+  if (result.kind !== "disarmed") throw new Error("Explorer drag watchdog returned an unexpected terminal result after disarm.");
 }
 
-async function independentDragLeftUp(diagnostic: DragDiagnosticSidecar, childPid: number): Promise<void> {
+async function assertWatchdogReady(watchdog: DragWatchdog): Promise<void> {
+  await waitForExactTokenFile(watchdog.readyPath, dragControlToken(watchdog, watchdog.childPid, "ready"), 5_000);
+  if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag watchdog failed before GO: ${await readFile(watchdog.failurePath, "utf8")}`);
+}
+
+async function assertWatchdogReleased(watchdog: DragWatchdog): Promise<void> {
+  await Promise.race([onceChildExit(watchdog.child), delay(5_000)]);
+  if (watchdog.child.exitCode === null) throw new Error("Explorer drag watchdog did not exit after the retained child ended.");
+  if (await isFile(watchdog.failurePath)) throw new Error(`Explorer drag watchdog failed: ${await readFile(watchdog.failurePath, "utf8")}`);
+  await assertWatchdogResult(watchdog, "released");
+}
+
+async function assertWatchdogResult(watchdog: DragWatchdog, expectedKind: "disarmed" | "released"): Promise<void> {
+  const result = await readWatchdogResult(watchdog);
+  if (result.kind !== expectedKind) throw new Error("Explorer drag watchdog result had an unexpected terminal state.");
+  if (expectedKind === "released") assertExactDragReleaseProof(result.eventCount, result.asyncKeyState, "watchdog");
+}
+
+async function readWatchdogResult(watchdog: DragWatchdog): Promise<{ asyncKeyState: string | undefined; eventCount: string | undefined; kind: string }> {
+  const result = JSON.parse(await readFile(watchdog.resultPath, "utf8").catch(() => "{}")) as Partial<{ asyncKeyState: number; childPid: number; deadlineEpochMs: number; eventCount: number; kind: string; parentPid: number; token: string }>;
+  if (result.token !== watchdog.token || result.childPid !== watchdog.childPid || result.parentPid !== watchdog.parentPid || result.deadlineEpochMs !== watchdog.deadlineEpochMs || typeof result.kind !== "string") throw new Error("Explorer drag watchdog result was ambiguous.");
+  return { asyncKeyState: result.asyncKeyState === undefined ? undefined : String(result.asyncKeyState), eventCount: result.eventCount === undefined ? undefined : String(result.eventCount), kind: result.kind };
+}
+
+async function independentDragLeftUp(diagnostic: DragDiagnosticSidecar, childPid: number): Promise<boolean> {
   const script = [
     "$ErrorActionPreference='Stop'",
     "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class EtherA02DragRelease { [DllImport(\"user32.dll\")] public static extern uint SendInput(uint n, INPUT[] i, int s); [DllImport(\"user32.dll\")] public static extern short GetAsyncKeyState(int v); [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public MOUSEINPUT mi; } [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx,dy; public uint data,flags,time; public IntPtr extra; } public static uint Up() { var i=new INPUT[]{new INPUT{type=0,mi=new MOUSEINPUT{flags=0x0004}}}; return SendInput(1,i,Marshal.SizeOf(typeof(INPUT))); } }' -ErrorAction SilentlyContinue",
-    `$count=[EtherA02DragRelease]::Up(); $state=[EtherA02DragRelease]::GetAsyncKeyState(1); [IO.File]::WriteAllText('${ps(diagnostic.sidecarPath)}.independent-release', 'token=${ps(diagnostic.token)};childPid=${childPid};parentPid=${diagnostic.parentPid};eventCount=' + $count + ';asyncKeyState=' + $state)`
+    `$count=[EtherA02DragRelease]::Up(); $state=[EtherA02DragRelease]::GetAsyncKeyState(1); Write-Output ('${ps(diagnostic.token)}|${childPid}|${diagnostic.parentPid}|${diagnostic.deadlineEpochMs}|released|' + $count + '|' + $state)`
   ].join("; ");
-  await runPowerShell(script, 5_000);
+  const proof = (await runPowerShell(script, 5_000)).trim().split("|");
+  if (proof.length !== 7 || proof[0] !== diagnostic.token || proof[1] !== String(childPid) || proof[2] !== String(diagnostic.parentPid) || proof[3] !== String(diagnostic.deadlineEpochMs) || proof[4] !== "released") throw new Error("Explorer drag independent release result was ambiguous.");
+  assertExactDragReleaseProof(proof[5], proof[6], "independent");
+  await writeDragDiagnosticResult(diagnostic, { asyncKeyState: Number(proof[6]), childPid, eventCount: Number(proof[5]), kind: "independent-release", parentPid: diagnostic.parentPid, token: diagnostic.token });
+  return true;
+}
+
+function dragControlToken(input: DragDiagnosticSidecar, childPid: number, kind: "ready" | "go" | "disarm"): string {
+  return `${input.token}|${childPid}|${input.parentPid}|${input.deadlineEpochMs}|${kind}`;
+}
+
+async function writeTokenBoundDurableFile(destination: string, contents: string): Promise<void> {
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "w");
+  try { await handle.writeFile(`${contents}\n`, "utf8"); await handle.sync(); } finally { await handle.close(); }
+  await rename(temporary, destination);
+}
+
+async function waitForExactTokenFile(destination: string, expected: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const actual = await readFile(destination, "utf8").catch(() => "");
+    if (actual.trim() === expected) return;
+    await delay(25);
+  }
+  throw new Error(`Timed out awaiting exact durable drag watchdog control proof: ${path.basename(destination)}.`);
+}
+
+function assertExactDragReleaseProof(eventCount: string | undefined, asyncKeyState: string | undefined, source: string): void {
+  const count = Number(eventCount);
+  const state = Number(asyncKeyState);
+  if (!Number.isSafeInteger(count) || count !== 1 || !Number.isSafeInteger(state) || (state & 0x8000) !== 0) {
+    throw new Error(`Explorer drag ${source} release proof was not exact: eventCount=${eventCount ?? "missing"}; asyncKeyState=${asyncKeyState ?? "missing"}.`);
+  }
+}
+
+async function writeDragDiagnosticResult(diagnostic: DragDiagnosticSidecar, result: { asyncKeyState: number; childPid: number; eventCount: number; kind: string; parentPid: number; token: string }): Promise<void> {
+  const destination = `${diagnostic.sidecarPath}.${result.kind}.json`;
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "w");
+  try { await handle.writeFile(JSON.stringify({ ...result, deadlineEpochMs: diagnostic.deadlineEpochMs, timestamp: new Date().toISOString() }), "utf8"); await handle.sync(); } finally { await handle.close(); }
+  await rename(temporary, destination);
 }
 
 function assertDragDiagnosticSidecar(sidecar: DragDiagnosticSidecar): void {
@@ -945,7 +1036,7 @@ export function buildNativeExplorerDragScript(input: {
   target: NativeScreenPoint;
 }): string {
   if (!Number.isSafeInteger(input.etherPid) || input.etherPid <= 0) throw new Error("Explorer drag requires an exact positive Ether PID.");
-  const diagnostic = input.diagnostic === undefined ? [] : ["function W{while(-not(Test-Path -LiteralPath $env:ETHER_A02_DRAG_ARM_PATH)){if([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [int64]$env:ETHER_A02_DRAG_DEADLINE){throw 'Drag watchdog was not armed before native mouse-down'};Start-Sleep -Milliseconds 25};if((Get-Content -LiteralPath $env:ETHER_A02_DRAG_ARM_PATH -Raw).Trim() -ne $env:ETHER_A02_DRAG_TOKEN){throw 'Drag watchdog arm token mismatch'}}"];
+  const diagnostic = input.diagnostic === undefined ? [] : ["function W{$e=$env:ETHER_A02_DRAG_TOKEN+'|'+$PID+'|'+$env:ETHER_A02_DRAG_PARENT_PID+'|'+$env:ETHER_A02_DRAG_DEADLINE+'|go';while(-not(Test-Path -LiteralPath $env:ETHER_A02_DRAG_ARM_PATH)){if([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [int64]$env:ETHER_A02_DRAG_DEADLINE){throw 'Drag watchdog was not armed before native mouse-down'};Start-Sleep -Milliseconds 25};if((Get-Content -LiteralPath $env:ETHER_A02_DRAG_ARM_PATH -Raw).Trim() -ne $e){throw 'Drag watchdog GO token mismatch'}}"];
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "Add-Type -AssemblyName UIAutomationClient",
@@ -994,9 +1085,10 @@ function compactNativeExplorerDragScript(script: string, diagnostic: boolean): s
   return script
     // SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW: preserve size/position and show it without activation.
     .replace("0x0040", "0x0054")
-    .replace("$down = $false", `${actualRoot}; ${diagnostic ? `${stage("p", 0, 0)}; W; ` : ""}$down = $false`)
+    .replace("$down = $false", `${actualRoot}; $down = $false`)
     .replace("[EtherA02Pointer]::SetCursorPos($sourceX, $sourceY) | Out-Null", "if (-not [EtherA02Pointer]::SetCursorPos($sourceX,$sourceY)) { throw 'Drag source: cursor placement failed' }")
-    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $sourceX $sourceY $explorerHwnd 'Drag source actual cursor'; ${diagnostic ? `${stage("a", 0, 0)}; ` : ""}$activationStartedAt =`)
+    .replace("; $activationStartedAt =", `; ${readCursor("Drag source")}; P $cursor.X $cursor.Y $sourceX $sourceY $explorerHwnd 'Drag source actual cursor'; $activationStartedAt =`)
+    .replace("; [EtherA02Pointer]::mouse_event(0x0002", `; ${diagnostic ? "W; " : ""}[EtherA02Pointer]::mouse_event(0x0002`)
     .replace("$down = $true; $dragFocusDeadline", `$down = $true; ${diagnostic ? `${stage("m", 1, 0)}; ` : ""}$dragFocusDeadline`)
     .replace("$dragFocused = $true; break", `$dragFocused = $true; ${diagnostic ? `${stage("f", 1, 0)}; ` : ""}break`)
     .replace("[EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY) | Out-Null", `if (-not [EtherA02Pointer]::SetCursorPos(($sourceX + $dragDistance),$sourceY)) { throw 'Drag threshold: cursor placement failed' }; ${readCursor("Drag threshold")}; P $cursor.X $cursor.Y ($sourceX+$dragDistance) $sourceY $explorerHwnd 'Drag threshold actual cursor'; ${diagnostic ? stage("h", 1, 0) : ""}`)

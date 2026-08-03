@@ -500,13 +500,6 @@ test(A02_ROUTE_TITLES["explorer-drag"], async () => {
   let journeyFailedAfterCheckpoint = false;
   let exactProcessAbsenceProven = false;
   let dragDiagnosticsProven = false;
-  const dragDiagnostic = {
-    armPath: path.join(root, "drag-release.arm"),
-    deadlineEpochMs: Date.now() + 50_000,
-    parentPid: process.pid,
-    sidecarPath: path.join(root, "drag-diagnostic.json"),
-    token: shellToken
-  };
   const shellFinalizationSidecar = await createShellFinalizationSidecar("a02-windows-explorer-drag", "explorer-drag");
   const finalizationFailures: unknown[] = [];
   try {
@@ -537,6 +530,13 @@ test(A02_ROUTE_TITLES["explorer-drag"], async () => {
     shellS1TargetShortcuts = await snapshotS1TargetShortcuts({ documentPaths: [sourcePath, targetPath], profile, root });
     session.input.observe("S1 exact target-link checkpoint", "Both real and isolated S1 Recent roots contain zero links resolving to the exact Explorer documents.", "S1 matching target links=0.");
     const target = await nativeScreenPointForCanvas(session);
+    const dragDiagnostic = {
+      armPath: path.join(root, "drag-release.arm"),
+      deadlineEpochMs: Date.now() + 50_000,
+      parentPid: process.pid,
+      sidecarPath: path.join(root, "drag-diagnostic.json"),
+      token: shellToken
+    };
     const drag = await dragDocumentFromExplorerWithNativePointer({ diagnostic: dragDiagnostic, documentPath: sourcePath, etherPid: primaryPid, target });
     const diagnostic = JSON.parse(await readFile(dragDiagnostic.sidecarPath, "utf8")) as { childPid?: number; down?: boolean; parentPid?: number; releaseAttempted?: boolean; stage?: string; token?: string };
     if (diagnostic.token !== shellToken || diagnostic.parentPid !== process.pid || !Number.isSafeInteger(diagnostic.childPid) || diagnostic.childPid! <= 0 || diagnostic.stage !== "transition-proven" || diagnostic.down !== false || diagnostic.releaseAttempted !== true) {

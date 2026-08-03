@@ -149,10 +149,10 @@ describe("A02 Windows integration harness contracts", () => {
       target: { x: 960, y: 540 }
     });
     expect(encodedPowerShellCommandLength(diagnosticDragScript)).toBeLessThanOrEqual(30_000);
-    for (const stage of ["p", "a", "m", "f", "h", "t", "u", "r", "v"]) {
+    for (const stage of ["m", "f", "h", "t", "u", "r", "v"]) {
       expect(diagnosticDragScript).toContain(`A02D|${stage}|`);
     }
-    expect(diagnosticDragScript.indexOf("A02D|a|0|0")).toBeLessThan(diagnosticDragScript.indexOf("mouse_event(0x0002"));
+    expect(diagnosticDragScript.indexOf("W; [EtherA02Pointer]::mouse_event(0x0002")).toBeGreaterThan(diagnosticDragScript.indexOf("Drag source actual cursor"));
     expect(diagnosticDragScript).toContain("Drag watchdog was not armed before native mouse-down");
   });
 
@@ -164,15 +164,23 @@ describe("A02 Windows integration harness contracts", () => {
     const chromeClick = associationScript.indexOf("[EtherA02Native]::mouse_event(0x0002");
     const associationForeground = associationScript.indexOf("After association chrome click: exact Explorer HWND was not foreground", chromeClick);
     const associationSelection = associationScript.indexOf("A 'Immediately before association Enter'", associationForeground);
-    const associationMinimized = associationScript.indexOf("if (-not [EtherA02Native]::IsIconic($etherHwnd))");
+    const associationActionable = associationScript.indexOf("$pattern = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)", associationSelection);
+    const associationSetFocus = associationScript.indexOf("$item.SetFocus()", associationActionable);
+    const associationMinimized = associationScript.indexOf("if (-not [EtherA02Native]::IsIconic($th))", associationSetFocus);
     const associationFinalForeground = associationScript.indexOf("Immediately before association Enter: exact Explorer HWND was not foreground", associationMinimized);
-    const associationStarted = associationScript.indexOf("$activationStartedAt = [DateTime]::UtcNow", associationFinalForeground);
+    const associationFinalKeyboardFocus = associationScript.indexOf("$item.Current.HasKeyboardFocus", associationFinalForeground);
+    const associationFinalFocusedElement = associationScript.indexOf("[System.Windows.Automation.AutomationElement]::FocusedElement", associationFinalKeyboardFocus);
+    const associationStarted = associationScript.indexOf("$as = [DateTime]::UtcNow", associationFinalFocusedElement);
     const associationEnter = associationScript.indexOf("[EtherA02Native]::keybd_event(0x0D,0,0", associationStarted);
     expect(chromeClick).toBeGreaterThanOrEqual(0);
     expect(associationForeground).toBeGreaterThan(chromeClick);
     expect(associationSelection).toBeGreaterThan(associationForeground);
+    expect(associationActionable).toBeGreaterThan(associationSelection);
+    expect(associationSetFocus).toBeGreaterThan(associationActionable);
     expect(associationMinimized).toBeGreaterThan(associationSelection);
     expect(associationFinalForeground).toBeGreaterThan(associationMinimized);
+    expect(associationFinalKeyboardFocus).toBeGreaterThan(associationFinalForeground);
+    expect(associationFinalFocusedElement).toBeGreaterThan(associationFinalKeyboardFocus);
     expect(associationStarted).toBeGreaterThan(associationFinalForeground);
     expect(associationEnter).toBeGreaterThan(associationStarted);
     expect(associationScript).toContain("$item.SetFocus()");
@@ -181,7 +189,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(associationScript).toContain("GetRuntimeId()");
     expect(associationScript).not.toContain("InvokePattern]$pattern).Invoke()");
     expect(associationScript).toContain("if ($rd) { [EtherA02Native]::keybd_event(0x0D,0,2");
-    expect(associationScript).toContain("ClientToScreen($explorerHwnd,[ref]$co)");
+    expect(associationScript).toContain("ClientToScreen($xh,[ref]$co)");
     expect(associationScript).toContain("$cx -ge $co.X");
     expect(associationScript).toContain("Association chrome: click is not non-client frame");
     expect(associationScript).toContain("$eb.Left + 2");
@@ -189,7 +197,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(associationScript).toContain("if (-not [EtherA02Native]::SetCursorPos($cx,$cy))");
     expect(associationScript).toContain("if($cu.X -ne $cx -or $cu.Y -ne $cy){throw 'Association chrome: cursor readback mismatch'}");
     expect(associationScript).toContain("Association chrome actual cursor: WindowFromPoint root was not the exact expected HWND");
-    expect(associationScript).toContain("SendMessage($explorerHwnd,0x84");
+    expect(associationScript).toContain("SendMessage($xh,0x84");
     expect(associationScript).toContain("$hit -in 1,3,8,9,20");
     expect(associationScript).toContain("$hit -notin 10,11,12,13,14,15,16,17");
 
@@ -269,11 +277,30 @@ describe("A02 Windows integration harness contracts", () => {
     expect(windowsIntegration).toContain("$foregroundExplorerPid = 0");
     expect(windowsIntegration).toContain("Explorer HWND PID mismatch immediately before action");
     expect(windowsIntegration).toContain("requireAssociationRouteApproval();");
+    const watchdogReady = windowsIntegration.indexOf("await assertWatchdogReady(watchdog)");
+    const releaseArmed = windowsIntegration.indexOf('writeDragDiagnosticStage(input.diagnostic, "release-armed"', watchdogReady);
+    const go = windowsIntegration.indexOf("writeTokenBoundDurableFile(input.diagnostic.armPath", releaseArmed);
+    const terminalLatch = windowsIntegration.indexOf("terminal = true", go);
+    const abortPersisted = windowsIntegration.indexOf('writeDragDiagnosticStage(input.diagnostic, "abort-requested"', terminalLatch);
+    const retainedChildTermination = windowsIntegration.indexOf("if (child.exitCode === null) child.kill()", abortPersisted);
+    const independentRelease = windowsIntegration.indexOf("await independentDragLeftUp", retainedChildTermination);
+    expect(watchdogReady).toBeGreaterThanOrEqual(0);
+    expect(releaseArmed).toBeGreaterThan(watchdogReady);
+    expect(go).toBeGreaterThan(releaseArmed);
+    expect(terminalLatch).toBeGreaterThan(go);
+    expect(abortPersisted).toBeGreaterThan(terminalLatch);
+    expect(retainedChildTermination).toBeGreaterThan(abortPersisted);
+    expect(independentRelease).toBeGreaterThan(retainedChildTermination);
+    expect(windowsIntegration).toContain("assertExactDragReleaseProof");
+    expect(windowsIntegration).toContain("count !== 1");
+    expect(windowsIntegration).toContain("(state & 0x8000) !== 0");
+    expect(windowsIntegration).toContain("Drag watchdog GO token mismatch");
+    expect(windowsIntegration).toContain("ConvertTo-Json -Compress");
     expect(associationRoute).toContain("invokeDocumentFromExplorerWithUia({ documentPath, etherPid: primaryPid })");
     expect(associationRoute).toContain('!routeIsExactly("association")');
     expect(dragRoute).toContain('!routeIsExactly("explorer-drag")');
     expect(dragRoute).toContain("dragDiagnosticsProven");
-    expect(dragRoute).toContain("deadlineEpochMs: Date.now() + 50_000");
+    expect(dragRoute.indexOf("const dragDiagnostic")).toBeGreaterThan(dragRoute.indexOf("const target = await nativeScreenPointForCanvas(session)"));
     expect(associationRoute).not.toContain("document.hasFocus()");
     expect(associationRoute).not.toContain("assertExactWindowForegroundWithUia(primaryPid)");
     expect(dragRoute).not.toContain("document.hasFocus()");
