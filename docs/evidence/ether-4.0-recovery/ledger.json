@@ -6289,11 +6289,27 @@
       "ownerRoutes": [
         "J02"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": [
+            "P",
+            "V"
+          ],
+          "commit": "38235da49e31afc5e04f1868fde4b2614d68fd40",
+          "packageHash": "bc79aa9e6826cee71d0e2aa3e4f330766bbaf0f9e5f3561700fcd45cc333a6c2",
+          "actionLog": "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md",
+          "captureCommand": "pnpm.cmd run test:gui-checkpoint:packaged",
+          "notes": "Accepted intermediate blank-GUI checkpoint: the fresh blank packaged document visibly exposed all 17 canonical registry rows and ended with all 17 definition IDs on the durable canvas. Final A/M and J02 save/reopen evidence remain open.",
+          "screenshots": [
+            "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/screenshots/01-blank-library.png",
+            "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/screenshots/04-all-17-node-types.png"
+          ]
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "The rejected-candidate audit states blank-canvas authoring exposes only Prompt and Image, so the all-17-node library journey is broken.",
-      "notes": "The rejected-candidate audit states blank-canvas authoring exposes only Prompt and Image, so the all-17-node library journey is broken."
+      "notes": "The accepted intermediate checkpoint supplies P+V candidate evidence at product commit 38235da. Baseline status remains nonterminal; A, explicit owner acceptance, and the complete J02 save/reopen route are not yet reconciled to a final candidate."
     },
     {
       "id": "RX-003",
@@ -6318,11 +6334,22 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": [
+            "P"
+          ],
+          "commit": "38235da49e31afc5e04f1868fde4b2614d68fd40",
+          "packageHash": "bc79aa9e6826cee71d0e2aa3e4f330766bbaf0f9e5f3561700fcd45cc333a6c2",
+          "actionLog": "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md",
+          "captureCommand": "pnpm.cmd run test:gui-checkpoint:packaged",
+          "notes": "The packaged action log clicks every canonical library row and records 17 distinct definition IDs on the resulting durable canvas. Automated placement/default assertions and final-candidate refresh remain open."
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "The rejected authoring surface does not expose a complete registry-driven library, so clicking every canonical item cannot currently be completed.",
-      "notes": "The rejected authoring surface does not expose a complete registry-driven library, so clicking every canonical item cannot currently be completed."
+      "notes": "The accepted intermediate checkpoint supplies P candidate evidence at product commit 38235da. Baseline status remains nonterminal until A is reconciled and the evidence is refreshed against the eventual candidate."
     },
     {
       "id": "RX-004",
@@ -6528,11 +6555,26 @@
       "ownerRoutes": [
         "J03"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "classes": [
+            "P",
+            "V"
+          ],
+          "commit": "38235da49e31afc5e04f1868fde4b2614d68fd40",
+          "packageHash": "bc79aa9e6826cee71d0e2aa3e4f330766bbaf0f9e5f3561700fcd45cc333a6c2",
+          "actionLog": "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md",
+          "captureCommand": "pnpm.cmd run test:gui-checkpoint:packaged",
+          "notes": "The packaged blank-authored route performs ordinary left marquee followed by Shift-additive marquee, records one then two selected nodes, and captures the stable nonblank result. Final A/M and scale-matrix evidence remain open.",
+          "screenshots": [
+            "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/screenshots/02-marquee-and-movement.png"
+          ]
+        }
+      ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "The recovery design records unreliable marquee/pointer behavior and the baseline renderer can fail during marquee interaction.",
-      "notes": "The recovery design records unreliable marquee/pointer behavior and the baseline renderer can fail during marquee interaction."
+      "notes": "The accepted intermediate checkpoint supplies P+V candidate evidence at product commit 38235da. Baseline status remains nonterminal until A, owner acceptance, scale coverage, and final-candidate refresh are complete."
     },
     {
       "id": "RX-011",
