@@ -15,7 +15,7 @@ import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { centeredCanvasPosition, openCanvasPosition } from "./placement";
 
 export type EtherCanvasHandle = { addNode(definitionId: NodeDefinitionId): void; addPrompt(): void; addImage(): void; focusNode(nodeId: string): void; };
-export type EtherCanvasProps = { graph: EtherGraph | null; catalog: readonly NodeLibraryItem[]; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onStatus(message: string): void; onInspectorChange?(context: InspectorContext | null): void; };
+export type EtherCanvasProps = { graph: EtherGraph; revisionSeed: GraphRevisionSeed; catalog: readonly NodeLibraryItem[]; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onStatus(message: string): void; onInspectorChange?(context: InspectorContext | null): void; };
 type ParentFrame = { graph: EtherGraph; moduleId: string; selectedIds: string[] };
 type ApplicationQueryBridge = {
   query(query: unknown): Promise<{ payload?: Record<string, unknown> }>;
@@ -23,7 +23,6 @@ type ApplicationQueryBridge = {
   onEvent?(listener: (event: { name?: string }) => void): () => void;
 };
 type PreparedSelectionPlan = { id: string; contentHash: string; estimatedCalls: number };
-function emptyCanvasGraph(documentId: string): EtherGraph { return { id: `loading-${documentId}`, title: "Canvas", kind: "root", createdAt: "2026-07-22T00:00:00.000Z", updatedAt: "2026-07-22T00:00:00.000Z", nodes: [], edges: [], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null } }; }
 function graphContentBounds(graph: EtherGraph) {
   const items = [...graph.nodes, ...graph.groups, ...graph.modules];
   if (items.length === 0) return null;
@@ -108,12 +107,18 @@ function useNodeRuntimeStatuses(documentId: string, graphId: string) {
   return statuses;
 }
 
-export const EtherCanvas = forwardRef<EtherCanvasHandle, EtherCanvasProps>(function EtherCanvas({ graph, catalog, document, onGraph, onStatus, onInspectorChange }, ref) {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]); const [status, setStatus] = useState("Canvas ready"); const [activeGraph, setActiveGraph] = useState<EtherGraph | null>(null); const [parents, setParents] = useState<ParentFrame[]>([]); const [viewports, setViewports] = useState<Record<string, Viewport>>({}); const [revisionSeed, setRevisionSeed] = useState<GraphRevisionSeed | undefined>();
+export const EtherCanvas = forwardRef<EtherCanvasHandle, EtherCanvasProps>(function EtherCanvas({ graph, revisionSeed: rootRevisionSeed, catalog, document, onGraph, onStatus, onInspectorChange }, ref) {
+  const rootGraphId = rootRevisionSeed.graphId;
+  const rootDocumentRevisionId = rootRevisionSeed.documentRevisionId;
+  const rootGraphRevisionId = rootRevisionSeed.graphRevisionId;
+  const [selectedIds, setSelectedIds] = useState<string[]>([]); const [status, setStatus] = useState("Canvas ready"); const [activeGraph, setActiveGraph] = useState<EtherGraph>(graph); const [parents, setParents] = useState<ParentFrame[]>([]); const [viewports, setViewports] = useState<Record<string, Viewport>>({}); const [revisionSeed, setRevisionSeed] = useState<GraphRevisionSeed>(rootRevisionSeed);
   const report = useCallback((message: string) => { setStatus(message); onStatus(message); }, [onStatus]);
-  useEffect(() => { if (graph !== null && (activeGraph === null || activeGraph.id === graph.id)) setActiveGraph(graph); }, [activeGraph, graph]);
+  useEffect(() => { if (activeGraph.id === graph.id) setActiveGraph(graph); }, [activeGraph.id, graph]);
+  useEffect(() => {
+    if (activeGraph.id === rootGraphId) setRevisionSeed({ graphId: rootGraphId, documentRevisionId: rootDocumentRevisionId, graphRevisionId: rootGraphRevisionId });
+  }, [activeGraph.id, rootDocumentRevisionId, rootGraphId, rootGraphRevisionId]);
   useEffect(() => { setSelectedIds((ids) => ids.filter((id) => activeGraph?.nodes.some((node) => node.id === id))); }, [activeGraph]);
-  const displayedGraph = activeGraph ?? graph ?? emptyCanvasGraph(document.documentId);
+  const displayedGraph = activeGraph;
   const rememberViewport = useCallback((graphId: string, viewport: Viewport) => setViewports((current) => ({ ...current, [graphId]: viewport })), []);
   const enterModule = async (moduleId: string, parentGraph: EtherGraph) => {
     const module = parentGraph.modules.find((item) => item.id === moduleId); const bridge = typedQueryBridge();
@@ -122,7 +127,7 @@ export const EtherCanvas = forwardRef<EtherCanvasHandle, EtherCanvasProps>(funct
   };
   const leaveModule = () => { const parent = parents.at(-1); if (!parent) return; setParents((stack) => stack.slice(0, -1)); setActiveGraph(parent.graph); setSelectedIds(parent.selectedIds); report("Returned to parent canvas"); };
   const updateParentGraph = useCallback((nextGraph: EtherGraph) => setParents((stack) => stack.map((frame, index) => index === stack.length - 1 ? { ...frame, graph: nextGraph } : frame)), []);
-  const acceptGraph = useCallback((next: EtherGraph) => { if (next.id === graph?.id) onGraph(next); setActiveGraph(next); }, [graph?.id, onGraph]);
+  const acceptGraph = useCallback((next: EtherGraph) => { if (next.id === graph.id) onGraph(next); setActiveGraph(next); }, [graph.id, onGraph]);
   const parent = parents.at(-1);
   const acceptViewport = useCallback((viewport: Viewport) => rememberViewport(displayedGraph.id, viewport), [displayedGraph.id, rememberViewport]);
   return <ReactFlowProvider><CanvasInner graph={displayedGraph} catalog={catalog} viewport={viewports[displayedGraph.id]} revisionSeed={revisionSeed} parentFrame={parent} document={document} onGraph={acceptGraph} onParentGraph={updateParentGraph} status={status} report={report} selectedIds={selectedIds} setSelectedIds={setSelectedIds} onInspectorChange={onInspectorChange} onViewport={acceptViewport} onEnterModule={enterModule} onLeaveModule={parents.length > 0 ? leaveModule : undefined} ref={ref} /></ReactFlowProvider>;

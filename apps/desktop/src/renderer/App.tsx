@@ -39,7 +39,12 @@ const TemplateGallery = lazy(async () => ({ default: (await import("./canvas/lib
 
 export function App() {
   const { state, document } = useProjectSession();
-  const [graph, setGraph] = useState<EtherGraph | null>(null);
+  const [graphHydration, setGraphHydration] = useState<{
+    documentId: string;
+    documentRevisionId: string;
+    graphRevisionId: string;
+    graph: EtherGraph;
+  } | null>(null);
   const [message, setMessage] = useState("Preparing an untitled document...");
   const [repair, setRepair] = useState<RepairResult | null>(null);
   const [references, setReferences] = useState<DesktopReference[]>([]);
@@ -59,13 +64,19 @@ export function App() {
     normalizeInterfacePreferences
   );
   const canvasRef = useRef<EtherCanvasHandle>(null);
+  const graphLoadGeneration = useRef(0);
   const recipesButtonRef = useRef<HTMLButtonElement>(null);
   const recipesDialogRef = useRef<HTMLElement>(null);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const health = useProjectHealth(references);
   const actionableMissing = health.missing.filter((reference) => reference.actions.length > 0);
   const applicationAvailable = typeof window.ether.application?.onEvent === "function";
-  const graphReady = document !== null && graph !== null && graph.id === document.graphId;
+  const activeGraphHydration = document !== null && graphHydration !== null &&
+    graphHydration.documentId === document.documentId && graphHydration.graph.id === document.graphId
+    ? graphHydration
+    : null;
+  const graph = activeGraphHydration?.graph ?? null;
+  const graphReady = activeGraphHydration !== null;
   const closeRecipes = useCallback(() => {
     setRecipesOpen(false);
     globalThis.requestAnimationFrame(() => recipesButtonRef.current?.focus());
@@ -95,12 +106,45 @@ export function App() {
   }, [interfacePreferences]);
 
   const loadGraph = useCallback(async (active: DocumentDescriptor) => {
+    const generation = ++graphLoadGeneration.current;
     markPerformance("document-open:start");
     markPerformance("graph-hydration:start");
-    const result = await window.ether.graph.snapshot(active.documentId);
-    setGraph(result.graph);
-    setReferences(await window.ether.references.list(active.documentId));
+    const [snapshot, nextReferences] = await Promise.all([
+      typeof window.ether.application?.query === "function"
+        ? window.ether.application.query({
+            kind: "query",
+            id: crypto.randomUUID(),
+            correlationId: crypto.randomUUID(),
+            documentId: active.documentId,
+            name: "graph.snapshot",
+            payload: { graphId: active.graphId }
+          } as ApplicationQuery).then((response) => {
+            if (response.name !== "graph.snapshot") throw new Error("The application returned the wrong graph snapshot response.");
+            return response.payload;
+          })
+        : window.ether.graph.snapshot(active.documentId).then((result) => ({
+            graph: result.graph,
+            documentRevisionId: active.documentRevisionId,
+            graphRevisionId: active.graphRevisionId
+          })),
+      window.ether.references.list(active.documentId)
+    ]);
+    if (generation !== graphLoadGeneration.current) return;
+    if (snapshot.graph.id !== active.graphId) throw new Error("The hydrated graph does not belong to the active document.");
+    setGraphHydration({
+      documentId: active.documentId,
+      documentRevisionId: snapshot.documentRevisionId,
+      graphRevisionId: snapshot.graphRevisionId,
+      graph: snapshot.graph
+    });
+    setReferences(nextReferences);
     setMessage((current) => current === "Preparing an untitled document..." ? "" : current);
+  }, []);
+
+  const updateHydratedGraph = useCallback((documentId: string, nextGraph: EtherGraph) => {
+    setGraphHydration((current) => current === null || current.documentId !== documentId || current.graph.id !== nextGraph.id
+      ? current
+      : { ...current, graph: nextGraph });
   }, []);
 
   useEffect(() => {
@@ -113,6 +157,8 @@ export function App() {
 
   useEffect(() => {
     if (document === null) {
+      graphLoadGeneration.current += 1;
+      setGraphHydration(null);
       notifyRendererInteractive();
       return;
     }
@@ -367,12 +413,26 @@ export function App() {
           </aside>
         </div>
       )}
-      canvas={!graphReady
+      canvas={activeGraphHydration === null
         ? <div className="canvas-loading" role="status">Loading document canvas...</div>
-        : <EtherCanvas ref={canvasRef} graph={graph} catalog={nodeCatalog} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
+        : <EtherCanvas
+            key={document.documentId}
+            ref={canvasRef}
+            graph={activeGraphHydration.graph}
+            revisionSeed={{
+              graphId: activeGraphHydration.graph.id,
+              documentRevisionId: activeGraphHydration.documentRevisionId,
+              graphRevisionId: activeGraphHydration.graphRevisionId
+            }}
+            catalog={nodeCatalog}
+            document={document}
+            onGraph={(nextGraph) => updateHydratedGraph(document.documentId, nextGraph)}
+            onStatus={setMessage}
+            onInspectorChange={setInspectorContext}
+          />}
       inspector={<InspectorPanel context={inspectorContext} />}
-      referenceDesk={applicationAvailable && graphReady ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graphReady ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
-      batchMatrix={applicationAvailable && graphReady ? <Suspense fallback={<p>Loading batch plan…</p>}><BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /></Suspense> : <p>{graphReady ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
+      referenceDesk={applicationAvailable && activeGraphHydration !== null ? <ReferenceDesk documentId={document.documentId} graph={activeGraphHydration.graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graphReady ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
+      batchMatrix={applicationAvailable && activeGraphHydration !== null ? <Suspense fallback={<p>Loading batch plan…</p>}><BatchMatrix documentId={document.documentId} graph={activeGraphHydration.graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /></Suspense> : <p>{graphReady ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}
       jobCenter={applicationAvailable ? <Suspense fallback={<p>Loading Job Center…</p>}><JobCenter documentId={document.documentId} onStatus={setMessage} /></Suspense> : <p>Job Center is unavailable in this compatibility session.</p>}
       status={(
         <footer className={`document-status state-${state.saveState}`} aria-live="polite">
