@@ -3,6 +3,7 @@ export const testSuites = {
     "tests/acceptance-docs.test.ts",
     "tests/asset-drop.test.ts",
     "tests/brand-tokens.test.ts",
+    "tests/canvas-authoring-commands.test.ts",
     "tests/canvas-history.test.ts",
     "tests/desktop-vite-config.test.ts",
     "tests/desktop-ipc-contract.test.ts",
@@ -98,6 +99,7 @@ export const testSuites = {
     "tests/desktop/drawing-edit.spec.ts"
   ],
   recoveryBaseline: ["tests/recovery/authoring-baseline.spec.ts"],
+  recoveryGuiCheckpoint: ["tests/recovery/gui-checkpoint.spec.ts"],
   recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
   recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],
   recoveryWindowsIntegration: ["tests/recovery/document-windows-integration.spec.ts"],

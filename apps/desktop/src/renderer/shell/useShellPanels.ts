@@ -9,7 +9,7 @@ type PanelState = { size: number; collapsed: boolean };
 type PanelLayout = Record<ShellPanelId, PanelState>;
 
 export const shellPanelLimits: Record<ShellPanelId, { min: number; max: number }> = {
-  tools: { min: 148, max: 320 },
+  tools: { min: 220, max: 360 },
   inspector: { min: 220, max: 400 },
   artifacts: { min: 120, max: 300 },
   runs: { min: 104, max: 260 }
@@ -25,7 +25,7 @@ export function shellPanelLimitsFor(workspace: WorkspaceId, panel: ShellPanelId)
 
 const initialWorkspacePanels: Record<WorkspaceId, PanelLayout> = {
   build: {
-    tools: { size: 184, collapsed: false },
+    tools: { size: 264, collapsed: false },
     inspector: { size: 260, collapsed: false },
     artifacts: { size: 180, collapsed: false },
     runs: { size: 148, collapsed: true }

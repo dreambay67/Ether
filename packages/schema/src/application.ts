@@ -39,6 +39,7 @@ import {
   EditMaskGeometrySchema,
   EditWorkspaceStateSchema,
   EtherNodeSchema,
+  NodeLibraryItemSchema,
   PayloadChannelSchema,
   ReferenceSetMemberSchema
 } from "./nodes.js";
@@ -132,6 +133,7 @@ export const applicationQueryNames = [
   "document.history",
   "graph.snapshot",
   "graph.catalog",
+  "node.catalog",
   "graph.selectionDetails",
   "graph.validation",
   "node.outputs",
@@ -204,6 +206,7 @@ export const globalApplicationCommandNames = [
   "provider.refresh"
 ] as const satisfies readonly ApplicationCommandName[];
 export const globalApplicationQueryNames = [
+  "node.catalog",
   "provider.capabilities",
   "provider.health",
   "recipe.catalog",
@@ -400,6 +403,7 @@ export const applicationQueryPayloadSchemas = {
   "document.history": StrictEmptyPayloadSchema,
   "graph.snapshot": graphIdPayloadSchema,
   "graph.catalog": StrictEmptyPayloadSchema,
+  "node.catalog": StrictEmptyPayloadSchema,
   "graph.selectionDetails": z
     .object({ graphId: idSchema, nodeIds: z.array(idSchema), edgeIds: z.array(idSchema) })
     .strict(),
@@ -750,6 +754,7 @@ export const ApplicationQuerySchema = z.discriminatedUnion("name", [
   queryMessage("document.history", applicationQueryPayloadSchemas["document.history"]),
   queryMessage("graph.snapshot", applicationQueryPayloadSchemas["graph.snapshot"]),
   queryMessage("graph.catalog", applicationQueryPayloadSchemas["graph.catalog"]),
+  globalQueryMessage("node.catalog", applicationQueryPayloadSchemas["node.catalog"]),
   queryMessage("graph.selectionDetails", applicationQueryPayloadSchemas["graph.selectionDetails"]),
   queryMessage("graph.validation", applicationQueryPayloadSchemas["graph.validation"]),
   queryMessage("node.outputs", applicationQueryPayloadSchemas["node.outputs"]),
@@ -1082,6 +1087,7 @@ const recoveryStatusResponseSchema = z
     message: z.string().nullable()
   })
   .strict();
+const nodeCatalogResponseSchema = z.object({ nodes: z.array(NodeLibraryItemSchema) }).strict();
 const documentHistoryMilestoneSchema = z
   .object({
     id: idSchema,
@@ -1190,6 +1196,7 @@ export const applicationResponsePayloadSchemas = {
   "document.history": documentHistoryResponseSchema,
   "graph.snapshot": graphSnapshotResponseSchema,
   "graph.catalog": graphCatalogResponseSchema,
+  "node.catalog": nodeCatalogResponseSchema,
   "graph.selectionDetails": graphSelectionResponseSchema,
   "graph.validation": GraphValidationResultSchema,
   "node.outputs": nodeOutputsResponseSchema,
@@ -1386,6 +1393,7 @@ export const ApplicationQueryResponseSchema = z.discriminatedUnion("name", [
   responseMessage("document.history", applicationResponsePayloadSchemas["document.history"]),
   responseMessage("graph.snapshot", applicationResponsePayloadSchemas["graph.snapshot"]),
   responseMessage("graph.catalog", applicationResponsePayloadSchemas["graph.catalog"]),
+  globalResponseMessage("node.catalog", applicationResponsePayloadSchemas["node.catalog"]),
   responseMessage(
     "graph.selectionDetails",
     applicationResponsePayloadSchemas["graph.selectionDetails"]

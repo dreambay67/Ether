@@ -575,6 +575,35 @@ export const NodePresentationDefaultsSchema = z
   .strict();
 export type NodePresentationDefaults = z.infer<typeof NodePresentationDefaultsSchema>;
 
+/** Serializable registry projection used by desktop, MCP, and other presentation clients. */
+export const NodeLibraryItemSchema = z
+  .object({
+    definitionId: NodeDefinitionIdSchema,
+    family: NodeFamilySchema,
+    title: z.string().min(1),
+    description: z.string().min(1),
+    example: z.string().min(1),
+    synonyms: z.array(z.string().min(1)),
+    inputChannels: z.array(PayloadChannelSchema),
+    outputChannels: z.array(PayloadChannelSchema),
+    defaultConfig: NodeConfigSchema,
+    inspector: InspectorDefinitionSchema,
+    executor: NodeExecutorKindSchema,
+    presentation: NodePresentationDefaultsSchema,
+    setupRequirement: z.enum(["none", "provider-capability", "path-grant"])
+  })
+  .strict()
+  .superRefine((item, context) => {
+    if (item.defaultConfig.kind !== item.definitionId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["defaultConfig"],
+        message: "The library default must match its canonical definition"
+      });
+    }
+  });
+export type NodeLibraryItem = z.infer<typeof NodeLibraryItemSchema>;
+
 const ConfigSchemaSchema = z.custom<z.ZodType<NodeConfig>>(
   (value) => value instanceof z.ZodType,
   "Expected a Zod node configuration schema"

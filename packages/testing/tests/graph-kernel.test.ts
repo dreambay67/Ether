@@ -24,6 +24,7 @@ import {
   expandModuleBoundaries,
   getNodeDefinition,
   nodeDefinitions,
+  nodeLibraryItems,
   planTraversal,
   previewGraphTransaction,
   resolveOutputSelector,
@@ -214,6 +215,16 @@ describe("Ether 4.0 graph kernel registry", () => {
     expect(getNodeDefinition("review.filter").contract.consequences.data?.subject?.preservationRule).toBe("preserve-role");
     expect(getNodeDefinition("output.collection").contract.consequences.image?.style?.preservationRule).toBe("preserve-role");
     expect(() => getNodeDefinition("assistant.worker" as never)).toThrow(/Unknown node definition/);
+    expect(nodeLibraryItems).toHaveLength(17);
+    expect(nodeLibraryItems.map((item) => item.definitionId)).toEqual(nodeDefinitions.map((definition) => definition.id));
+    for (const item of nodeLibraryItems) {
+      expect(item.defaultConfig.kind).toBe(item.definitionId);
+      expect(item.description).not.toMatch(/ node\.$/u);
+      expect(item.example.length).toBeGreaterThan(12);
+      expect(item.synonyms.length).toBeGreaterThan(2);
+      expect(item.inputChannels).toEqual(getNodeDefinition(item.definitionId).library.inputChannels);
+      expect(item.outputChannels).toEqual(getNodeDefinition(item.definitionId).library.outputChannels);
+    }
   });
 
   it("fails registry initialization for incomplete or invalid semantic definitions", () => {

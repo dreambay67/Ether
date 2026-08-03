@@ -1,7 +1,7 @@
 import "@xyflow/react/dist/style.css";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ImagePlus, Plus, RefreshCcw, Sparkles, Unlink, Workflow, X } from "lucide-react";
-import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, RecipeManifest } from "@ether/schema";
+import { RefreshCcw, Sparkles, Unlink, Workflow, X } from "lucide-react";
+import type { ApplicationCommand, ApplicationQuery, EtherGraph, GraphTransaction, NodeLibraryItem, RecipeManifest } from "@ether/schema";
 
 import type {
   DesktopReference,
@@ -26,6 +26,7 @@ import { useProjectSession } from "./project/useProjectSession";
 import { EtherShell } from "./shell/EtherShell";
 import { EtherCanvas, type EtherCanvasHandle } from "./canvas/EtherCanvas";
 import { InspectorPanel } from "./canvas/InspectorPanel";
+import { NodeLibrary } from "./canvas/library/NodeLibrary";
 import type { InspectorContext } from "./canvas/inspector/types";
 import { ReferenceDesk } from "./references/ReferenceDesk";
 import type { RecipeSetup, RecipeSetupRequest } from "./canvas/library/TemplateGallery";
@@ -44,6 +45,8 @@ export function App() {
   const [references, setReferences] = useState<DesktopReference[]>([]);
   const [artifactRevision, setArtifactRevision] = useState(0);
   const [inspectorContext, setInspectorContext] = useState<InspectorContext | null>(null);
+  const [nodeCatalog, setNodeCatalog] = useState<readonly NodeLibraryItem[]>([]);
+  const [nodeCatalogError, setNodeCatalogError] = useState<string | null>(null);
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [recipes, setRecipes] = useState<readonly RecipeManifest[]>([]);
   const [recipeCatalogError, setRecipeCatalogError] = useState<string | null>(null);
@@ -132,6 +135,25 @@ export function App() {
     });
     return () => { current = false; };
   }, [applicationAvailable, recipesOpen]);
+
+  useEffect(() => {
+    if (!applicationAvailable) {
+      setNodeCatalogError("The canonical node catalog is unavailable in this compatibility session.");
+      return;
+    }
+    let current = true;
+    const query: ApplicationQuery = {
+      kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "node.catalog", payload: {}
+    };
+    void window.ether.application.query(query).then((response) => {
+      if (!current || response.name !== "node.catalog") return;
+      setNodeCatalog(response.payload.nodes);
+      setNodeCatalogError(null);
+    }).catch((error) => {
+      if (current) setNodeCatalogError(error instanceof Error ? error.message : "The canonical node catalog could not be loaded.");
+    });
+    return () => { current = false; };
+  }, [applicationAvailable]);
 
   useEffect(() => {
     if (!recipesOpen) return;
@@ -322,13 +344,14 @@ export function App() {
         />
       )}
       tools={(
-        <aside className="document-tool-rail" aria-label="Graph tools">
-          <button type="button" title="Add Prompt node" onClick={() => canvasRef.current?.addPrompt()} disabled={document.mode === "read-only"}>
-            <Plus size={16} aria-hidden="true" />Prompt
-          </button>
-          <button type="button" title="Add Image Generator node" onClick={() => canvasRef.current?.addImage()} disabled={document.mode === "read-only"}>
-            <ImagePlus size={16} aria-hidden="true" />Image
-          </button>
+        <div className="document-tool-rail" aria-label="Graph tools">
+          <NodeLibrary
+            catalog={nodeCatalog}
+            error={nodeCatalogError}
+            readOnly={document.mode === "read-only"}
+            onAdd={(definitionId) => canvasRef.current?.addNode(definitionId)}
+          />
+          <aside className="node-library-utilities" aria-label="Library utilities">
           {document.simulationEnabled ? (
             <button type="button" title="Create diagnostic simulation output" onClick={() => void simulate()} disabled={document.mode === "read-only"}>
               <Sparkles size={16} aria-hidden="true" />Simulation output
@@ -340,9 +363,10 @@ export function App() {
           <button ref={recipesButtonRef} type="button" title="Open Recipe Gallery" aria-expanded={recipesOpen} aria-pressed={recipesOpen} onClick={() => setRecipesOpen((open) => !open)}>
             <Workflow size={16} aria-hidden="true" />Recipes
           </button>
-        </aside>
+          </aside>
+        </div>
       )}
-      canvas={<EtherCanvas ref={canvasRef} graph={graph} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
+      canvas={<EtherCanvas ref={canvasRef} graph={graph} catalog={nodeCatalog} document={document} onGraph={setGraph} onStatus={setMessage} onInspectorChange={setInspectorContext} />}
       inspector={<InspectorPanel context={inspectorContext} />}
       referenceDesk={applicationAvailable && graph ? <ReferenceDesk documentId={document.documentId} graph={graph} onGraphUpdated={() => loadGraph(document)} onStatus={setMessage} /> : <p>{graph ? "Reference Desk is unavailable in this compatibility session." : "Loading references…"}</p>}
       batchMatrix={applicationAvailable && graph ? <Suspense fallback={<p>Loading batch plan…</p>}><BatchMatrix documentId={document.documentId} graph={graph} onUpdated={() => loadGraph(document)} onStatus={setMessage} /></Suspense> : <p>{graph ? "Batch Matrix is unavailable in this compatibility session." : "Loading batch plan…"}</p>}

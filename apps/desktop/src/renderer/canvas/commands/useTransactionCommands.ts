@@ -27,10 +27,18 @@ export function useTransactionCommands({ document, graph, revisionSeed, onGraph,
       waitingForDescriptor: false
     };
   }, [revisionSeed]);
-  const apply = useCallback(async (operations: GraphOperation[], title: string) => {
+  const seedRevision = useCallback((seed: GraphRevisionSeed) => {
+    revisions.current = {
+      ...revisions.current,
+      documentRevisionId: seed.documentRevisionId,
+      graphRevisionIds: { ...revisions.current.graphRevisionIds, [seed.graphId]: seed.graphRevisionId },
+      waitingForDescriptor: false
+    };
+  }, []);
+  const apply = useCallback(async (operations: GraphOperation[], title: string, options: { requiredGraphIds?: readonly string[] } = {}) => {
     if (document.mode !== "writable") { onStatus("This document is read-only."); return false; }
     if (revisions.current.pending || revisions.current.waitingForDescriptor) { onStatus("Waiting for the saved graph revision before the next edit."); return false; }
-    const affectedGraphIds = [...new Set(operations.map((operation) => operation.graphId))];
+    const affectedGraphIds = [...new Set([...operations.map((operation) => operation.graphId), ...(options.requiredGraphIds ?? [])])];
     const baseGraphRevisions: Record<string, string> = {};
     for (const graphId of affectedGraphIds) {
       const revision = revisions.current.graphRevisionIds[graphId];
@@ -88,5 +96,5 @@ export function useTransactionCommands({ document, graph, revisionSeed, onGraph,
       onStatus(name === "graph.undo" ? "Undid graph transaction" : "Redid graph transaction");
     } catch (error) { revisions.current.pending = false; onStatus(error instanceof Error ? error.message : "History could not be changed."); }
   }, [document.documentId, graph.id, onGraph, onStatus]);
-  return { apply, undo: () => history("graph.undo"), redo: () => history("graph.redo") };
+  return { apply, seedRevision, undo: () => history("graph.undo"), redo: () => history("graph.redo") };
 }

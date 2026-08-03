@@ -107,6 +107,33 @@ afterEach(async () => {
 });
 
 describe("Ether 4.0 application boundary", () => {
+  it("projects all canonical factory defaults through the serializable node catalog", async () => {
+    const root = await temporaryRoot();
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider()
+    });
+    const response = await app.query({
+      kind: "query",
+      id: "node-catalog",
+      correlationId: "node-catalog",
+      name: "node.catalog",
+      payload: {}
+    });
+    expect(response).toMatchObject({ kind: "response", name: "node.catalog" });
+    if (response.kind !== "response" || response.name !== "node.catalog") {
+      throw new Error("The node catalog did not return.");
+    }
+    expect(response.payload.nodes).toHaveLength(17);
+    expect(response.payload.nodes.map((item) => item.definitionId)).toEqual(nodeDefinitions.map((item) => item.id));
+    for (const item of response.payload.nodes) {
+      expect(item.defaultConfig.kind).toBe(item.definitionId);
+      expect(item.description.length).toBeGreaterThan(24);
+      expect(item.presentation.width).toBeGreaterThanOrEqual(220);
+    }
+  });
+
   it("previews a provider-free node without requiring an unrelated reasoning route", async () => {
     const root = await temporaryRoot();
     const worker = nodeDefinitions.find((definition) => definition.id === "prompt.worker")!;

@@ -3,6 +3,7 @@
 @import "./styles/project.css";
 @import "./styles/document-history.css";
 @import "./styles/canvas.css";
+@import "./styles/node-library.css";
 @import "./styles/inspector.css";
 @import "./styles/artifacts.css";
 @import "./styles/runs.css";

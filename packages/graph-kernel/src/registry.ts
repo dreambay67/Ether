@@ -8,6 +8,7 @@ import {
   type NodeConfig,
   type NodeDefinition,
   type NodeDefinitionId,
+  type NodeLibraryItem,
   type PayloadChannel
 } from "@ether/schema";
 
@@ -16,6 +17,9 @@ export type KernelNodeDefinition = NodeDefinition & {
     definitionId: NodeDefinitionId;
     inputChannels: PayloadChannel[];
     outputChannels: PayloadChannel[];
+    example: string;
+    setupRequirement: "none" | "provider-capability" | "path-grant";
+    synonyms: string[];
   };
   mcp: { definitionId: NodeDefinitionId; operation: "inspect" | "execute" };
   recipe: { definitionId: NodeDefinitionId; configurablePaths: string[] };
@@ -47,6 +51,116 @@ const contracts: Record<NodeDefinitionId, {
   "output.export": { family: "output", executor: "export", inputs: allChannels, outputs: ["data"], title: "Export" },
   "canvas.note": { family: "canvas", executor: "non-runnable", inputs: [], outputs: ["text", "data"], title: "Note" },
   "canvas.drawing": { family: "canvas", executor: "drawing", inputs: ["image", "data"], outputs: ["image", "mask", "data"], title: "Drawing" }
+};
+
+const libraryMetadata: Record<NodeDefinitionId, {
+  description: string;
+  example: string;
+  setupRequirement: KernelNodeDefinition["library"]["setupRequirement"];
+  synonyms: string[];
+}> = {
+  "prompt.text": {
+    description: "Write and assemble the creative direction that travels through a workflow.",
+    example: "Describe a quiet coastal campaign with crisp morning light.",
+    setupRequirement: "none",
+    synonyms: ["instruction", "copy", "text", "brief"]
+  },
+  "prompt.worker": {
+    description: "Use Codex to rewrite, expand, critique, or structure incoming creative material.",
+    example: "Turn the campaign brief into three faithful image prompts.",
+    setupRequirement: "provider-capability",
+    synonyms: ["llm", "agent", "assistant", "rewrite", "brainstorm"]
+  },
+  "reference.set": {
+    description: "Keep an ordered set of linked or embedded source material together.",
+    example: "Collect the product packshot, palette, and lighting reference.",
+    setupRequirement: "none",
+    synonyms: ["moodboard", "assets", "media", "images", "sources"]
+  },
+  "generation.image": {
+    description: "Generate image artifacts from prompts, references, and structured settings.",
+    example: "Create four square campaign concepts from the approved direction.",
+    setupRequirement: "provider-capability",
+    synonyms: ["generate", "render", "picture", "art", "nano banana"]
+  },
+  "edit.image": {
+    description: "Apply a provider-backed visual edit using an image, mask, and instruction.",
+    example: "Replace the background while preserving the photographed product.",
+    setupRequirement: "provider-capability",
+    synonyms: ["retouch", "inpaint", "outpaint", "modify"]
+  },
+  "edit.mask": {
+    description: "Draw or derive the protected and editable regions of an image.",
+    example: "Mask the backdrop but leave the subject untouched.",
+    setupRequirement: "none",
+    synonyms: ["selection", "matte", "stencil", "alpha"]
+  },
+  "edit.transform": {
+    description: "Resize, crop, or convert images with deterministic local operations.",
+    example: "Crop approved artwork to a 4:5 social format.",
+    setupRequirement: "none",
+    synonyms: ["resize", "crop", "convert", "format"]
+  },
+  "review.compare": {
+    description: "Compare candidates and record a deliberate human selection.",
+    example: "Choose the strongest hero image from eight variations.",
+    setupRequirement: "none",
+    synonyms: ["review", "pick", "select", "side by side"]
+  },
+  "review.evaluate": {
+    description: "Score text or media with a visible Codex instruction and rubric.",
+    example: "Evaluate legibility, product fidelity, and lighting quality.",
+    setupRequirement: "provider-capability",
+    synonyms: ["score", "rubric", "judge", "critique"]
+  },
+  "review.filter": {
+    description: "Route items through deterministic rules with an explanation for each match.",
+    example: "Send every candidate rated four or higher to Selects.",
+    setupRequirement: "none",
+    synonyms: ["route", "rules", "condition", "branch"]
+  },
+  "flow.variables": {
+    description: "Define typed reusable values and preview their text interpolation.",
+    example: "Vary product name, market, and campaign season.",
+    setupRequirement: "none",
+    synonyms: ["parameters", "values", "template", "tokens"]
+  },
+  "flow.batch": {
+    description: "Expand controlled dimensions into a visible set of work items.",
+    example: "Combine three prompts with four references for twelve items.",
+    setupRequirement: "none",
+    synonyms: ["matrix", "variations", "bulk", "grid"]
+  },
+  "flow.join": {
+    description: "Bring parallel work-item pools back together in an explicit order.",
+    example: "Wait for every aspect-ratio branch before review.",
+    setupRequirement: "none",
+    synonyms: ["merge", "combine", "fan in", "gather"]
+  },
+  "output.collection": {
+    description: "Add artifacts to a durable, non-destructive project collection.",
+    example: "Collect approved hero candidates without moving their originals.",
+    setupRequirement: "none",
+    synonyms: ["album", "folder", "selects", "organize"]
+  },
+  "output.export": {
+    description: "Write selected artifacts and optional metadata to a granted folder.",
+    example: "Export approved images with collision-safe campaign names.",
+    setupRequirement: "path-grant",
+    synonyms: ["save files", "deliver", "publish", "output"]
+  },
+  "canvas.note": {
+    description: "Annotate the canvas with durable text that does not execute.",
+    example: "Explain the review criteria beside the evaluation branch.",
+    setupRequirement: "none",
+    synonyms: ["annotation", "comment", "cloud", "bubble"]
+  },
+  "canvas.drawing": {
+    description: "Sketch, erase, and select strokes that can become image or mask output.",
+    example: "Draw a rough composition guide for the generation branch.",
+    setupRequirement: "none",
+    synonyms: ["sketch", "free draw", "paint", "scribble"]
+  }
 };
 
 const defaults: Record<NodeDefinitionId, () => NodeConfig> = {
@@ -104,19 +218,27 @@ function ports(channels: PayloadChannel[], multiple = true) {
 
 function makeDefinition(id: NodeDefinitionId): KernelNodeDefinition {
   const metadata = contracts[id];
+  const library = libraryMetadata[id];
   const consequences = Object.fromEntries(metadata.inputs.map((channel) => [channel, Object.fromEntries(connectionRoles.map((role) => [role, consequence(id, channel, role)]))]));
   return {
     id,
     family: metadata.family,
     title: metadata.title,
-    description: `${metadata.title} node.`,
+    description: library.description,
     configSchema: NodeConfigSchemas[id],
     defaultConfig: defaults[id],
     contract: { inputs: ports(metadata.inputs), outputs: ports(metadata.outputs), consequences },
     inspector: { sections: [{ id: "main", title: metadata.title, fields: inspectorFields[id] }] },
     executor: metadata.executor,
     presentation: { width: 220, height: 140, previewMode: id === "prompt.text" ? "content" : "summary" },
-    library: { definitionId: id, inputChannels: [...metadata.inputs], outputChannels: [...metadata.outputs] },
+    library: {
+      definitionId: id,
+      inputChannels: [...metadata.inputs],
+      outputChannels: [...metadata.outputs],
+      example: library.example,
+      setupRequirement: library.setupRequirement,
+      synonyms: [...library.synonyms]
+    },
     mcp: { definitionId: id, operation: metadata.executor === "non-runnable" ? "inspect" : "execute" },
     recipe: { definitionId: id, configurablePaths: [...inspectorFields[id]] }
   } as KernelNodeDefinition;
@@ -170,6 +292,21 @@ export function createNodeRegistry(definitions: readonly KernelNodeDefinition[])
 
 export const nodeDefinitions = canonicalNodeDefinitionIds.map(makeDefinition);
 export const nodeRegistry = createNodeRegistry(nodeDefinitions);
+export const nodeLibraryItems: readonly NodeLibraryItem[] = nodeDefinitions.map((definition) => ({
+  definitionId: definition.id,
+  family: definition.family,
+  title: definition.title,
+  description: definition.description,
+  example: definition.library.example,
+  synonyms: [...definition.library.synonyms],
+  inputChannels: [...definition.library.inputChannels],
+  outputChannels: [...definition.library.outputChannels],
+  defaultConfig: definition.defaultConfig(),
+  inspector: definition.inspector,
+  executor: definition.executor,
+  presentation: definition.presentation,
+  setupRequirement: definition.library.setupRequirement
+}));
 
 export function getNodeDefinition(id: NodeDefinitionId): KernelNodeDefinition {
   const definition = nodeRegistry.get(id);

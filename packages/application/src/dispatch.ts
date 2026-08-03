@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 
 import type { DocumentStore } from "@ether/document";
-import { validateFullGraphState } from "@ether/graph-kernel";
+import { nodeLibraryItems, validateFullGraphState } from "@ether/graph-kernel";
 import type { GenerationProvider } from "@ether/providers";
 import { BUILTIN_RECIPES, inspectRecipeProviderSetup, instantiateRecipe, recipeById } from "@ether/recipes";
 import {
@@ -530,6 +530,9 @@ export async function executeApplicationQuery(
   app: EtherApplication,
   query: ApplicationQuery
 ): Promise<QueryResponse> {
+  // The canonical registry is process-global and must be available on the blank start screen,
+  // before any document boundary exists.
+  if (query.name === "node.catalog") return queryResponse(query, { nodes: nodeLibraryItems });
   const store = app.boundaryStore();
   if ("documentId" in query) assertDocument(query, store);
 
