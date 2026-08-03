@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const shellEvidenceDirectory = process.env.ETHER_SHELL_EVIDENCE_DIR ?? "../../test-results";
+
 test("Build, Focus, Run, and Review retain accessible adaptive shell controls", async ({ page }) => {
   await openShell(page);
 
@@ -211,7 +213,7 @@ test("keeps pointer workflows and primary controls usable across the required sc
       await imageInput.click();
       await expect(page.getByTestId("edge-role-chip")).toHaveCount(1);
     }
-    await page.screenshot({ path: `../../test-results/phase5-shell-${entry.width}x${entry.height}-${Math.round(entry.scale * 100)}-percent.png`, fullPage: true });
+    await page.screenshot({ path: `${shellEvidenceDirectory}/phase5-shell-${entry.width}x${entry.height}-${Math.round(entry.scale * 100)}-percent.png`, fullPage: true });
     await context.close();
   }
 });

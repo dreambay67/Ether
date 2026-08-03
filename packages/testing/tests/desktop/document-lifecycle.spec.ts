@@ -1968,6 +1968,20 @@ describe("autosave and event ordering", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("counts successful mutation work toward the idle-save window", async () => {
+    vi.useFakeTimers();
+    const changedAt = Date.now();
+    let calls = 0;
+    const coordinator = new AutosaveCoordinator(async () => { calls += 1; });
+
+    await vi.advanceTimersByTimeAsync(1_200);
+    coordinator.markDirty(changedAt);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(calls).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toBe(1);
+  });
+
   it("preserves dirty state and reports attention after a failed save", async () => {
     vi.useFakeTimers();
     const coordinator = new AutosaveCoordinator(async () => {

@@ -120,19 +120,20 @@ export class AutosaveCoordinator {
     private readonly onState: (state: { dirty: boolean; saveState: SaveState; error?: unknown }) => void = () => undefined
   ) {}
 
-  markDirty(): void {
+  markDirty(changedAt = Date.now()): void {
     if (this.disposed) return;
     this.dirty = true;
     this.generation += 1;
     if (this.lastError === undefined) this.saveState = "saving";
     const now = Date.now();
-    this.lastDirtyAt = now;
+    const boundedChangedAt = Math.min(now, changedAt);
+    this.lastDirtyAt = Math.max(this.lastDirtyAt ?? boundedChangedAt, boundedChangedAt);
     if (this.firstDirtyAt === null) {
-      this.firstDirtyAt = now;
-      this.maximumTimer = setTimeout(() => void this.flush(), 10_000);
+      this.firstDirtyAt = boundedChangedAt;
+      this.maximumTimer = setTimeout(() => void this.flush(), Math.max(0, 10_000 - (now - boundedChangedAt)));
     }
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => void this.flush(), 1_500);
+    this.idleTimer = setTimeout(() => void this.flush(), Math.max(0, 1_500 - (now - this.lastDirtyAt)));
     this.onState(this.state());
   }
 
@@ -1110,10 +1111,11 @@ export class DesktopApplicationService {
 
   private async applyGraphTransactionNow(documentId: string, transaction: GraphTransaction) {
     this.assertScope(documentId);
+    const changedAt = Date.now();
     await this.options.mutationOperationCheckpoint?.("graph");
     await this.requireApplication().applyGraphTransaction({ commandId: randomUUID(), transaction });
     const snapshot = await this.refresh("graph", "saving");
-    this.autosaveCoordinator?.markDirty();
+    this.autosaveCoordinator?.markDirty(changedAt);
     return { graph: await this.requireApplication().queryGraph(snapshot.graphId), revision: snapshot.revision };
   }
 
