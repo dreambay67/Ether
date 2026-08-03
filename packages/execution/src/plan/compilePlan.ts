@@ -78,8 +78,23 @@ export interface CompilePlanInput {
   workerRuntimeIntegration?: {
     schemaCatalog?: readonly StructuredOutputSchema[];
   };
+  /** Exact enabled Reference Set members, resolved during preview and sealed into the plan. */
+  referenceInputs?: readonly ReferenceInputBinding[];
   createdAt: string;
 }
+
+type ReferenceInputBinding = {
+  id: string;
+  edgeId: string;
+  sourceNodeId: string;
+  payloadId: string;
+  channel: PayloadEnvelope["channel"];
+  role: ConnectionRole;
+  order: number;
+  displayName: string;
+  mediaType: string;
+  memberKind: "linked-reference" | "embedded-reference" | "embedded-artifact";
+};
 
 export type PlanCompilationErrorCode =
   | "INVALID_GRAPH"
@@ -732,6 +747,13 @@ function makeNodeStep(input: {
       sourceChannel: edge.edge.from.kind === "node" ? edge.edge.from.channel : "data",
       targetChannel: edge.edge.to.kind === "node" ? edge.edge.to.channel : "data"
     }));
+  const referenceInputs = input.incoming
+    .flatMap((edge) => (input.input.referenceInputs ?? []).filter((binding) =>
+      binding.edgeId === edge.edge.id &&
+      binding.sourceNodeId === edge.source.id &&
+      binding.channel === (edge.edge.from.kind === "node" ? edge.edge.from.channel : "data")
+    ))
+    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
   const inputContext = input.incoming.map((edge) => jsonObject({
     edgeId: edge.edge.id,
     sourceNodeId: edge.source.id,
@@ -760,6 +782,7 @@ function makeNodeStep(input: {
       nodeId: input.target.id,
       definitionId: input.target.definitionId,
       inputBindings: inputContext,
+      referenceInputs: referenceInputs as unknown as JsonObject[],
       resolverInputs,
       sourceEdgeIds: input.incoming.map((edge) => edge.edge.id),
       promptSections: compilePromptSections(input.target, input.incoming),

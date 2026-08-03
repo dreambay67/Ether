@@ -1,15 +1,63 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, realpath } from "node:fs/promises";
+import { copyFile, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-import { streamBlobRange, type ClaimedExecution, type DocumentStore } from "@ether/document";
+import {
+  streamBlobRange,
+  verifyExecutionEmbeddedReference,
+  verifyExecutionReference,
+  type ClaimedExecution,
+  type DocumentStore
+} from "@ether/document";
 import { resolveOutputSelector } from "@ether/graph-kernel";
-import { OutputSelectorSchema, PayloadChannelSchema, type Artifact, type ExecutionJob, type PayloadEnvelope } from "@ether/schema";
+import {
+  ConnectionRoleSchema,
+  OutputSelectorSchema,
+  PayloadChannelSchema,
+  type Artifact,
+  type ExecutionJob,
+  type NodeOutputVersion,
+  type PayloadEnvelope
+} from "@ether/schema";
 
 import { ExecutorFailure, type ExecutorClaim } from "../executors/types.js";
+
+type ReferenceInputBindingBase = {
+  id: string;
+  edgeId: string;
+  sourceNodeId: string;
+  payloadId: string;
+  channel: PayloadEnvelope["channel"];
+  role: PayloadEnvelope["role"];
+  order: number;
+  displayName: string;
+  mediaType: string;
+};
+
+type ReferenceInputBinding =
+  | (ReferenceInputBindingBase & {
+    memberKind: "linked-reference";
+    referenceId: string;
+    originalPath: string;
+    pathGrantId: string;
+    identity: { platform: string; device: string; fileId: string };
+    fingerprint: { byteLength: number; modifiedAt: number; sampleSha256: string };
+  })
+  | (ReferenceInputBindingBase & {
+    memberKind: "embedded-reference";
+    referenceId: string;
+    contentKey: string;
+    byteLength: number;
+  })
+  | (ReferenceInputBindingBase & {
+    memberKind: "embedded-artifact";
+    artifactId: string;
+    contentKey: string;
+    byteLength: number;
+  });
 
 export type SchedulerPersistence = {
   readonly documentId: string;
@@ -154,7 +202,7 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
         stagingDirectory
       );
       const dynamicById = new Map(dynamic.map((entry) => [entry.payload.id, entry]));
-      return resolved.map((payload) => {
+      const runtimeInputs = resolved.map((payload) => {
         const binding = dynamicById.get(payload.id);
         return binding === undefined ? payload : {
           ...payload,
@@ -162,6 +210,8 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
           source: { ...payload.source, ...(binding.edgeId === undefined ? {} : { edgeId: binding.edgeId }) }
         };
       });
+      const referenceInputs = await materializePlanReferences(store, claim, step, stagingDirectory);
+      return [...runtimeInputs, ...referenceInputs];
     },
     waitForReview: async (input) => {
       await store.transaction(({ execution }) => {
@@ -178,6 +228,306 @@ export function documentStorePersistence(store: DocumentStoreLike): SchedulerPer
     }
   };
   return persistence;
+}
+
+async function materializePlanReferences(
+  store: DocumentStoreLike,
+  claim: ExecutorClaim,
+  step: ExecutorClaim["plan"]["steps"][number],
+  stagingDirectory: string
+): Promise<PayloadEnvelope[]> {
+  const bindings = planReferenceInputs(step);
+  if (bindings.length === 0) return [];
+  const assetRoot = await referenceAssetRoot(stagingDirectory);
+  const resolved: PayloadEnvelope[] = [];
+  for (const binding of bindings) {
+    const assetPath = path.join(
+      assetRoot,
+      `${createHash("sha256").update(binding.id).digest("hex")}${extensionForMediaType(binding.mediaType)}`
+    );
+    let material: ReferenceMaterial;
+    if (binding.memberKind === "linked-reference") {
+      try {
+        await verifyExecutionReference(store as DocumentStore, { ...binding, id: binding.referenceId });
+        await copyFile(binding.originalPath, assetPath);
+        material = {
+          byteLength: binding.fingerprint.byteLength,
+          contentKey: null,
+          fingerprint: binding.fingerprint
+        };
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : "REFERENCE_SOURCE_UNAVAILABLE";
+        throw new ExecutorFailure(
+          code,
+          `Reference Set member ${binding.referenceId} cannot be materialized for step ${step.id}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    } else if (binding.memberKind === "embedded-reference") {
+      try {
+        await verifyExecutionEmbeddedReference(store as DocumentStore, { ...binding, id: binding.referenceId });
+        await pipeline(
+          Readable.from(streamBlobRange(store as DocumentStore, binding.contentKey, 0, binding.byteLength)),
+          createWriteStream(assetPath, { flags: "w" })
+        );
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : "REFERENCE_SOURCE_UNAVAILABLE";
+        throw new ExecutorFailure(
+          code,
+            `Embedded Reference Set member ${binding.referenceId} cannot be materialized for step ${step.id}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      material = {
+        byteLength: binding.byteLength,
+        contentKey: binding.contentKey,
+        fingerprint: null
+      };
+    } else {
+      const artifact = await store.read(({ artifacts }) => callMethod<Artifact | undefined>(artifacts, "get", [binding.artifactId]));
+      if (
+        artifact === undefined ||
+        artifact.contentKey !== binding.contentKey ||
+        artifact.byteLength !== binding.byteLength ||
+        artifact.mediaType !== binding.mediaType ||
+        artifact.channel !== binding.channel
+      ) {
+        throw new ExecutorFailure(
+          "REFERENCE_ARTIFACT_SNAPSHOT_STALE",
+          `Reference Set artifact ${binding.artifactId} no longer matches the immutable execution plan.`
+        );
+      }
+      await pipeline(
+        Readable.from(streamBlobRange(store as DocumentStore, artifact.contentKey, 0, artifact.byteLength)),
+        createWriteStream(assetPath, { flags: "w" })
+      );
+      material = {
+        assetId: artifact.id,
+        byteLength: artifact.byteLength,
+        contentKey: artifact.contentKey,
+        fingerprint: null
+      };
+    }
+    const payload = await persistReferenceMaterial(
+      store as DocumentStore,
+      claim,
+      binding,
+      material
+    );
+    resolved.push({ ...payload, metadata: { ...payload.metadata, assetPath } });
+  }
+  return resolved;
+}
+
+type ReferenceMaterial = {
+  assetId?: string;
+  byteLength: number;
+  contentKey: string | null;
+  fingerprint: { byteLength: number; modifiedAt: number; sampleSha256: string } | null;
+};
+
+async function persistReferenceMaterial(
+  store: DocumentStore,
+  claim: ExecutorClaim,
+  binding: ReferenceInputBinding,
+  material: ReferenceMaterial
+): Promise<PayloadEnvelope> {
+  const now = new Date().toISOString();
+  return store.transaction(({ outputs }) => {
+    const existing = outputs.getPayload(binding.payloadId);
+    if (existing !== undefined) {
+      if (
+        existing.source.nodeId !== binding.sourceNodeId ||
+        existing.source.outputVersionId !== binding.id ||
+        existing.source.edgeId !== binding.edgeId
+      ) {
+        throw new ExecutorFailure(
+          "REFERENCE_PLAN_CONTRACT_INVALID",
+          `Reference Set payload ${binding.payloadId} conflicts with a different durable source.`
+        );
+      }
+      return existing;
+    }
+    const payload: PayloadEnvelope = {
+      id: binding.payloadId,
+      channel: binding.channel,
+      role: binding.role,
+      content: binding.memberKind === "embedded-artifact"
+        ? { kind: "artifact", artifactId: material.assetId! }
+        : {
+          kind: "object",
+          value: {
+            kind: "reference-material",
+            referenceId: binding.referenceId,
+            contentKey: material.contentKey,
+            byteLength: material.byteLength,
+            mediaType: binding.mediaType,
+            fingerprint: material.fingerprint
+          }
+        },
+      source: {
+        nodeId: binding.sourceNodeId,
+        outputVersionId: binding.id,
+        edgeId: binding.edgeId,
+        lineageKey: `${claim.plan.id}:${binding.id}`
+      },
+      metadata: {
+        mediaType: binding.mediaType,
+        referenceBindingId: binding.id,
+        referenceMemberKind: binding.memberKind,
+        referenceOrder: binding.order,
+        referenceByteLength: material.byteLength,
+        ...(material.contentKey === null ? {} : { referenceContentKey: material.contentKey }),
+        ...(material.fingerprint === null ? {} : {
+          referenceFingerprintByteLength: material.fingerprint.byteLength,
+          referenceFingerprintModifiedAt: material.fingerprint.modifiedAt,
+          referenceFingerprintSampleSha256: material.fingerprint.sampleSha256
+        }),
+        ...(binding.memberKind === "embedded-artifact"
+          ? { referenceArtifactId: binding.artifactId }
+          : { referenceId: binding.referenceId })
+      }
+    };
+    const version: NodeOutputVersion = {
+      id: binding.id,
+      nodeId: binding.sourceNodeId,
+      graphId: claim.plan.graphId,
+      graphRevisionId: claim.plan.graphRevisionId,
+      inputPayloadIds: [],
+      selectedOutputVersionIds: [],
+      compiledContextHash: claim.plan.contentHash,
+      producer: { kind: "local", executor: "asset-resolution" },
+      outputPayloadIds: [payload.id],
+      parentOutputVersionId: null,
+      approval: { state: "approved", actor: "system", at: now },
+      runId: null,
+      stepId: null,
+      workItemId: null,
+      attemptId: null,
+      timing: { startedAt: now, completedAt: now },
+      failure: null,
+      createdAt: now
+    };
+    outputs.insert(version, [payload]);
+    return payload;
+  });
+}
+
+function planReferenceInputs(step: ExecutorClaim["plan"]["steps"][number]): ReferenceInputBinding[] {
+  const value = step.compiledContext.referenceInputs;
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    return invalidReferencePlan(step.id);
+  }
+  return value
+    .map((candidate) => parseReferenceInputBinding(step.id, candidate))
+    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+}
+
+function parseReferenceInputBinding(stepId: string, value: unknown): ReferenceInputBinding {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return invalidReferencePlan(stepId);
+  const record = value as Record<string, unknown>;
+  const channel = PayloadChannelSchema.safeParse(record.channel);
+  const role = ConnectionRoleSchema.safeParse(record.role);
+  const base: ReferenceInputBindingBase = {
+    id: requiredReferenceString(stepId, record.id),
+    edgeId: requiredReferenceString(stepId, record.edgeId),
+    sourceNodeId: requiredReferenceString(stepId, record.sourceNodeId),
+    payloadId: requiredReferenceString(stepId, record.payloadId),
+    channel: channel.success ? channel.data : invalidReferencePlan(stepId),
+    role: role.success ? role.data : invalidReferencePlan(stepId),
+    order: nonnegativeReferenceInteger(stepId, record.order),
+    displayName: requiredReferenceString(stepId, record.displayName),
+    mediaType: requiredReferenceString(stepId, record.mediaType)
+  };
+  if (record.memberKind === "linked-reference") {
+    const identity = referenceRecord(stepId, record.identity);
+    const fingerprint = referenceRecord(stepId, record.fingerprint);
+    return {
+      ...base,
+      memberKind: "linked-reference",
+      referenceId: requiredReferenceString(stepId, record.referenceId),
+      originalPath: requiredReferenceString(stepId, record.originalPath),
+      pathGrantId: requiredReferenceString(stepId, record.pathGrantId),
+      identity: {
+        platform: requiredReferenceString(stepId, identity.platform),
+        device: requiredReferenceString(stepId, identity.device),
+        fileId: requiredReferenceString(stepId, identity.fileId)
+      },
+      fingerprint: {
+        byteLength: nonnegativeReferenceInteger(stepId, fingerprint.byteLength),
+        modifiedAt: nonnegativeReferenceNumber(stepId, fingerprint.modifiedAt),
+        sampleSha256: contentKey(stepId, fingerprint.sampleSha256)
+      }
+    };
+  }
+  if (record.memberKind === "embedded-reference") {
+    return {
+      ...base,
+      memberKind: "embedded-reference",
+      referenceId: requiredReferenceString(stepId, record.referenceId),
+      contentKey: contentKey(stepId, record.contentKey),
+      byteLength: nonnegativeReferenceInteger(stepId, record.byteLength)
+    };
+  }
+  if (record.memberKind === "embedded-artifact") {
+    return {
+      ...base,
+      memberKind: "embedded-artifact",
+      artifactId: requiredReferenceString(stepId, record.artifactId),
+      contentKey: contentKey(stepId, record.contentKey),
+      byteLength: nonnegativeReferenceInteger(stepId, record.byteLength)
+    };
+  }
+  return invalidReferencePlan(stepId);
+}
+
+function requiredReferenceString(stepId: string, value: unknown): string {
+  return typeof value === "string" && value.length > 0 ? value : invalidReferencePlan(stepId);
+}
+
+function nonnegativeReferenceInteger(stepId: string, value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
+    ? value
+    : invalidReferencePlan(stepId);
+}
+
+function nonnegativeReferenceNumber(stepId: string, value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : invalidReferencePlan(stepId);
+}
+
+function contentKey(stepId: string, value: unknown): string {
+  const key = requiredReferenceString(stepId, value);
+  return /^[a-f0-9]{64}$/i.test(key) ? key : invalidReferencePlan(stepId);
+}
+
+function referenceRecord(stepId: string, value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : invalidReferencePlan(stepId);
+}
+
+function invalidReferencePlan(stepId: string): never {
+  throw new ExecutorFailure("REFERENCE_PLAN_CONTRACT_INVALID", `Step ${stepId} has an invalid Reference Set plan binding.`);
+}
+
+async function referenceAssetRoot(stagingDirectory: string): Promise<string> {
+  const assetRoot = path.join(stagingDirectory, "resolved-references");
+  await mkdir(assetRoot, { recursive: true });
+  const canonicalStaging = await realpath(stagingDirectory);
+  const canonicalAssetRoot = await realpath(assetRoot);
+  const relative = path.relative(canonicalStaging, canonicalAssetRoot);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new ExecutorFailure(
+      "INPUT_ASSET_PATH_INVALID",
+      "Resolved Reference Set assets must remain inside the scheduler-owned attempt staging directory."
+    );
+  }
+  return canonicalAssetRoot;
 }
 
 function extensionForMediaType(mediaType: string): string {

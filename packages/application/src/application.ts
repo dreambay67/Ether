@@ -54,6 +54,7 @@ import {
   ApplicationQuerySchema,
   ExecutionJobSchema,
   ExecutionPlanSchema,
+  referenceSetMembers,
   readArtifactThumbnailMetadata,
   type ApplicationCommand,
   type ApplicationCommandResponse,
@@ -73,6 +74,7 @@ import type {
   ExecutionWorkItem,
   ExportRecord,
   GraphTransaction,
+  LinkedReference,
   NodeOutputVersion,
   PayloadEnvelope,
   ProviderCapability
@@ -814,13 +816,14 @@ export class EtherApplication implements EtherApplicationService {
     scope: ExecutionScope;
   }): Promise<ExecutionPlan> {
     const store = this.requireWritableStore();
+    const planId = `plan-${randomUUID()}`;
     const existing = await store.read(({ execution }) =>
       execution.getCommandResult(input.commandId, "run.preview")
     );
     if (existing !== undefined) {
       return deepFreezeSnapshot(ExecutionPlanSchema.parse(existing.plan));
     }
-    const snapshot = await store.read(({ graphs, outputs, revisions }) => {
+    const snapshot = await store.read(({ artifacts, blobs, graphs, outputs, references, revisions }) => {
       const graph = graphs.get(input.graphId);
       if (graph === undefined) throw new ApplicationServiceError("GRAPH_NOT_FOUND", `Unknown graph ${input.graphId}.`);
       const versions = graph.nodes.flatMap((node) => outputs.listByNode(node.id));
@@ -828,7 +831,19 @@ export class EtherApplication implements EtherApplicationService {
         const payload = outputs.getPayload(payloadId);
         return payload === undefined ? [] : [payload];
       }));
-      return { graph, head: revisions.head(), versions, payloads };
+      return {
+        graph,
+        head: revisions.head(),
+        versions,
+        payloads,
+        referenceInputs: referenceInputBindings(
+          graph,
+          (referenceId) => references.get(referenceId),
+          (artifactId) => artifacts.get(artifactId),
+          (contentKey) => blobs.get(contentKey),
+          planId
+        )
+      };
     });
     const capabilities = await planningCapabilities(
       snapshot.graph,
@@ -838,7 +853,7 @@ export class EtherApplication implements EtherApplicationService {
     );
     const planCompilationStartedAt = performance.now();
     const plan = compilePlan({
-      id: `plan-${randomUUID()}`,
+      id: planId,
       documentId: store.documentId,
       documentRevisionId: snapshot.head.documentRevisionId,
       graph: snapshot.graph,
@@ -847,6 +862,7 @@ export class EtherApplication implements EtherApplicationService {
       capability: capabilities.primary,
       providerCapabilities: capabilities.all,
       workerRuntimeIntegration: { schemaCatalog: this.options.workerSchemaCatalog ?? [] },
+      referenceInputs: snapshot.referenceInputs,
       outputVersions: snapshot.versions,
       payloads: snapshot.payloads,
       createdAt: new Date().toISOString()
@@ -2071,6 +2087,209 @@ function mediaTypeForPath(filePath: string): string {
     case ".mp3": return "audio/mpeg";
     default: return "application/octet-stream";
   }
+}
+
+type ReferenceInputBindingBase = {
+  id: string;
+  edgeId: string;
+  sourceNodeId: string;
+  payloadId: string;
+  channel: PayloadEnvelope["channel"];
+  role: PayloadEnvelope["role"];
+  order: number;
+  displayName: string;
+  mediaType: string;
+};
+
+type ReferenceInputBinding =
+  | (ReferenceInputBindingBase & {
+    memberKind: "linked-reference";
+    referenceId: string;
+    originalPath: string;
+    pathGrantId: string;
+    identity: NonNullable<LinkedReference["identity"]>;
+    fingerprint: LinkedReference["fingerprint"];
+  })
+  | (ReferenceInputBindingBase & {
+    memberKind: "embedded-reference";
+    referenceId: string;
+    contentKey: string;
+    byteLength: number;
+  })
+  | (ReferenceInputBindingBase & {
+    memberKind: "embedded-artifact";
+    artifactId: string;
+    contentKey: string;
+    byteLength: number;
+  });
+
+function referenceInputBindings(
+  graph: EtherGraph,
+  getReference: (referenceId: string) => LinkedReference | undefined,
+  getArtifact: (artifactId: string) => Artifact | undefined,
+  getBlob: (contentKey: string) => { byteLength: number; mediaType: string } | undefined,
+  planId: string
+): ReferenceInputBinding[] {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const bindings: ReferenceInputBinding[] = [];
+  const edges = graph.edges
+    .filter((edge) => edge.enabled && edge.from.kind === "node" && edge.to.kind === "node")
+    .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+  for (const edge of edges) {
+    if (edge.from.kind !== "node" || edge.to.kind !== "node") continue;
+    const source = nodes.get(edge.from.nodeId);
+    if (source === undefined || source.config.kind !== "reference.set") continue;
+    const config = source.config;
+    if (!config.enabledChannels.includes(edge.from.channel)) continue;
+    const candidates: Array<{
+      manualOrder: number;
+      createdAt: string;
+      displayName: string;
+      binding: ReferenceInputBinding;
+    }> = [];
+    for (const [manualOrder, member] of referenceSetMembers(config).entries()) {
+      if (!member.enabled) continue;
+      if (member.kind === "linked-reference") {
+        const reference = getReference(member.referenceId);
+        if (reference === undefined) {
+          throw new ApplicationServiceError(
+            "REFERENCE_SOURCE_UNAVAILABLE",
+            `Enabled Reference Set member ${member.referenceId} is not an authorized linked source.`
+          );
+        }
+        const channel = channelForReferenceMediaType(reference.mediaType);
+        if (channel !== edge.from.channel) continue;
+        if (reference.state === "embedded") {
+          const contentKey = reference.contentKey;
+          const blob = contentKey === null ? undefined : getBlob(contentKey);
+          if (contentKey === null || blob === undefined || blob.mediaType !== reference.mediaType) {
+            throw new ApplicationServiceError(
+              "REFERENCE_SOURCE_UNAVAILABLE",
+              `Embedded Reference Set member ${member.referenceId} has no durable source content.`
+            );
+          }
+          candidates.push({
+            manualOrder,
+            createdAt: reference.createdAt,
+            displayName: reference.displayName,
+            binding: {
+              id: referenceBindingId(planId, edge.id, `embedded-reference:${reference.id}:${contentKey}`),
+              edgeId: edge.id,
+              sourceNodeId: source.id,
+              payloadId: referencePayloadId(planId, edge.id, `embedded-reference:${reference.id}:${contentKey}`),
+              channel,
+              role: member.roleOverride ?? edge.role,
+              order: 0,
+              displayName: reference.displayName,
+              mediaType: reference.mediaType,
+              memberKind: "embedded-reference",
+              referenceId: reference.id,
+              contentKey,
+              byteLength: blob.byteLength
+            }
+          });
+          continue;
+        }
+        if (reference.state !== "linked" || reference.originalPath === null || reference.pathGrantId === null || reference.identity === null) {
+          throw new ApplicationServiceError(
+            "REFERENCE_SOURCE_UNAVAILABLE",
+            `Enabled Reference Set member ${member.referenceId} is not an authorized linked source.`
+          );
+        }
+        candidates.push({
+          manualOrder,
+          createdAt: reference.createdAt,
+          displayName: reference.displayName,
+          binding: {
+            id: referenceBindingId(planId, edge.id, linkedReferenceSnapshotId(reference)),
+            edgeId: edge.id,
+            sourceNodeId: source.id,
+            payloadId: referencePayloadId(planId, edge.id, linkedReferenceSnapshotId(reference)),
+            channel,
+            role: member.roleOverride ?? edge.role,
+            order: 0,
+            displayName: reference.displayName,
+            mediaType: reference.mediaType,
+            memberKind: "linked-reference",
+            referenceId: reference.id,
+            originalPath: reference.originalPath,
+            pathGrantId: reference.pathGrantId,
+            identity: reference.identity,
+            fingerprint: reference.fingerprint
+          }
+        });
+        continue;
+      }
+      const artifact = getArtifact(member.artifactId);
+      if (artifact === undefined) {
+        throw new ApplicationServiceError("REFERENCE_MEMBER_NOT_FOUND", `Reference artifact ${member.artifactId} does not exist.`);
+      }
+      if (artifact.channel !== edge.from.channel) continue;
+      const displayName = typeof artifact.metadata.title === "string" ? artifact.metadata.title : artifact.id;
+      candidates.push({
+        manualOrder,
+        createdAt: artifact.createdAt,
+        displayName,
+        binding: {
+          id: referenceBindingId(planId, edge.id, `embedded-artifact:${artifact.id}:${artifact.contentKey}`),
+          edgeId: edge.id,
+          sourceNodeId: source.id,
+          payloadId: referencePayloadId(planId, edge.id, `embedded-artifact:${artifact.id}:${artifact.contentKey}`),
+          channel: artifact.channel,
+          role: member.roleOverride ?? edge.role,
+          order: 0,
+          displayName,
+          mediaType: artifact.mediaType,
+          memberKind: "embedded-artifact",
+          artifactId: artifact.id,
+          contentKey: artifact.contentKey,
+          byteLength: artifact.byteLength
+        }
+      });
+    }
+    candidates.sort((left, right) => referenceMemberOrder(config.ordering, left, right));
+    for (const candidate of candidates) {
+      bindings.push({ ...candidate.binding, order: bindings.length });
+    }
+  }
+  return bindings;
+}
+
+function channelForReferenceMediaType(mediaType: string): ReferenceInputBinding["channel"] | null {
+  if (mediaType.startsWith("image/")) return "image";
+  if (mediaType.startsWith("video/")) return "video";
+  if (mediaType.startsWith("audio/")) return "audio";
+  if (mediaType.startsWith("text/")) return "text";
+  if (mediaType === "application/json") return "data";
+  return null;
+}
+
+function referenceMemberOrder(
+  ordering: "manual" | "created" | "name",
+  left: { manualOrder: number; createdAt: string; displayName: string },
+  right: { manualOrder: number; createdAt: string; displayName: string }
+): number {
+  if (ordering === "manual") return left.manualOrder - right.manualOrder;
+  if (ordering === "created") return left.createdAt.localeCompare(right.createdAt) || left.manualOrder - right.manualOrder;
+  return left.displayName.localeCompare(right.displayName) || left.manualOrder - right.manualOrder;
+}
+
+function linkedReferenceSnapshotId(reference: LinkedReference): string {
+  return [
+    "linked-reference",
+    reference.id,
+    reference.fingerprint.sampleSha256,
+    reference.fingerprint.byteLength,
+    reference.fingerprint.modifiedAt
+  ].join(":");
+}
+
+function referenceBindingId(planId: string, edgeId: string, sourceId: string): string {
+  return `reference-binding-${createHash("sha256").update(`${planId}\u0000${edgeId}\u0000${sourceId}`).digest("hex").slice(0, 24)}`;
+}
+
+function referencePayloadId(planId: string, edgeId: string, sourceId: string): string {
+  return `reference-payload-${createHash("sha256").update(`${planId}\u0000${edgeId}\u0000${sourceId}`).digest("hex").slice(0, 24)}`;
 }
 
 function liveOutputTemplate(policy: "artifact" | "node" | "template"): string {

@@ -55,6 +55,8 @@ export {
   ReferenceError,
   relinkReference,
   resolveReference,
+  verifyExecutionEmbeddedReference,
+  verifyExecutionReference,
   revokeReferenceGrant
 } from "./repositories/references.js";
 export {

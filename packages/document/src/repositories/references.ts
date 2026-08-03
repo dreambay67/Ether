@@ -423,6 +423,85 @@ export async function resolveReference(
   }
 }
 
+/**
+ * Revalidate the exact linked-reference snapshot sealed into an execution plan.
+ * Unlike resolveReference(), this never updates the document to accept a newer
+ * file fingerprint: a changed or relinked source must invalidate that plan.
+ */
+export async function verifyExecutionReference(
+  store: DocumentStore,
+  expected: {
+    id: string;
+    mediaType: string;
+    originalPath: string;
+    pathGrantId: string;
+    identity: ReferenceFileIdentity;
+    fingerprint: ReferenceFingerprint;
+  }
+): Promise<LinkedReference> {
+  const current = await store.read(({ references }) => references.get(expected.id));
+  if (current === undefined) {
+    throw new ReferenceError("REFERENCE_NOT_FOUND", `Reference ${expected.id} does not exist.`);
+  }
+  if (
+    current.state !== "linked" ||
+    current.originalPath === null ||
+    current.pathGrantId === null ||
+    current.mediaType !== expected.mediaType ||
+    current.originalPath !== expected.originalPath ||
+    current.pathGrantId !== expected.pathGrantId ||
+    !sameIdentity(current.identity, expected.identity) ||
+    !sameFingerprint(current.fingerprint, expected.fingerprint)
+  ) {
+    throw new ReferenceError(
+      "REFERENCE_PLAN_SNAPSHOT_STALE",
+      `Reference ${expected.id} no longer matches the source approved for this execution plan.`
+    );
+  }
+  store.authorizeReferencePath({
+    grantId: expected.pathGrantId,
+    operation: "resolve",
+    path: expected.originalPath
+  });
+  const inspected = await inspectReferenceFile(expected.originalPath, expected.mediaType);
+  store.validateReferenceFingerprint({
+    fingerprint: inspected.fingerprint,
+    grantId: expected.pathGrantId,
+    operation: "resolve",
+    path: expected.originalPath
+  });
+  if (
+    !sameIdentity(expected.identity, inspected.identity) ||
+    !sameFingerprint(expected.fingerprint, inspected.fingerprint)
+  ) {
+    throw new ReferenceError(
+      "REFERENCE_CHANGED",
+      `Reference ${expected.id} changed after preview and cannot be used by this execution plan.`
+    );
+  }
+  return current;
+}
+
+/** Verify that an embedded linked-reference still names the exact sealed blob. */
+export async function verifyExecutionEmbeddedReference(
+  store: DocumentStore,
+  expected: { id: string; mediaType: string; contentKey: string }
+): Promise<LinkedReference> {
+  const current = await store.read(({ references }) => references.get(expected.id));
+  if (
+    current === undefined ||
+    current.state !== "embedded" ||
+    current.mediaType !== expected.mediaType ||
+    current.contentKey !== expected.contentKey
+  ) {
+    throw new ReferenceError(
+      "REFERENCE_PLAN_SNAPSHOT_STALE",
+      `Embedded reference ${expected.id} no longer matches the source approved for this execution plan.`
+    );
+  }
+  return current;
+}
+
 export async function relinkReference(
   store: DocumentStore,
   referenceId: string,

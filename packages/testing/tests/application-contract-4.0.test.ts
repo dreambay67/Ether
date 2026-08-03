@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -696,5 +697,146 @@ describe("Ether 4.0 application boundary", () => {
     const inspected = (await app.queryNodeOutputs("worker-b")).find((output) => output.runId === inspectStart.payload.job.id);
     expect(inspected).toMatchObject({ approval: { state: "unreviewed" } });
     await app.closeDocument();
+  });
+
+  it("seals enabled Reference Set material for a downstream Worker", async () => {
+    const root = await temporaryRoot();
+    const sources = new Map<string, string>();
+    const workerCalls: Array<{
+      inputs?: Array<Record<string, unknown>>;
+      stagedAssets: Array<{ referenceId: string | null; referenceArtifactId: string | null; sha256: string }>;
+    }> = [];
+    const image = new FakeImageProvider();
+    const workerCapability: ProviderCapability = {
+      providerId: "reference-worker", profileId: "reference-worker-v1", modelId: "reference-worker-v1", reasoningEfforts: ["medium"],
+      operation: "llm", inputChannels: ["image", "text", "data"], outputChannels: ["text", "data"],
+      aspectRatios: [], resolutions: [], maxReferences: 4, maxOutputsPerCall: 1, maxParallelism: 1,
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
+    };
+    const imageCapability: ProviderCapability = {
+      providerId: "ether-fake-local", profileId: "fake-image-default", operation: "generate-image",
+      inputChannels: ["text", "image", "data"], outputChannels: ["image"], aspectRatios: ["1:1"],
+      resolutions: [{ id: "32", width: 32, height: 32, label: "32 x 32" }], maxReferences: 4, maxOutputsPerCall: 1,
+      supportsCancellation: true, supportsSeed: false, provenance: "runtime-discovered", limitations: []
+    };
+    const workerConfig = {
+      kind: "prompt.worker" as const, behavior: "rewrite" as const, instruction: "Use the staged reference images.", profile: "balanced" as const,
+      providerId: "reference-worker", profileId: "reference-worker-v1", model: "reference-worker-v1", reasoningEffort: "medium",
+      variation: 0.1, reviewPolicy: "auto-apply" as const,
+      contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 2_000 },
+      memoryPolicy: { mode: "stateless" as const }, outputContract: { channel: "text" as const, count: 1, selectionPolicy: "latest" as const }
+    };
+    const referenceGraph = EtherGraphSchema.parse({
+      ...graph(), id: "reference-material-graph",
+      nodes: [
+        { id: "seed", definitionId: "generation.image", title: "Seed", position: { x: 0, y: 0 }, size: { width: 220, height: 160 }, config: { kind: "generation.image", providerId: "ether-fake-local", profileId: "fake-image-default", aspectRatio: "1:1", resolution: { width: 32, height: 32 }, outputCount: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "refs", definitionId: "reference.set", title: "References", position: { x: 0, y: 240 }, size: { width: 220, height: 160 }, config: { kind: "reference.set", members: [], enabledChannels: ["image"], ordering: "manual" }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "worker", definitionId: "prompt.worker", title: "Reference worker", position: { x: 320, y: 120 }, size: { width: 220, height: 160 }, config: workerConfig, presentation: { collapsed: false, accent: "default", previewMode: "content" } }
+      ],
+      edges: [{ id: "refs-worker", from: { kind: "node", nodeId: "refs", channel: "image" }, to: { kind: "node", nodeId: "worker", channel: "image" }, role: "subject", order: 0, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true }]
+    });
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: image,
+      providerCapabilities: [workerCapability, imageCapability],
+      pathGrantResolver: {
+        resolve: ({ pathGrantId }) => ({ kind: "file", path: sources.get(pathGrantId)!, mediaType: "image/png" })
+      },
+      providerResolver: () => ({
+        image,
+        worker: {
+          run: async (input) => {
+            const inputs = input.inputs as Array<Record<string, unknown>>;
+            const stagedAssets = await Promise.all(inputs.map(async (reference) => {
+              if (typeof reference.assetPath !== "string") {
+                throw new Error("Reference worker input did not contain a staged top-level asset.");
+              }
+              const metadata = reference.metadata as Record<string, unknown>;
+              return {
+                referenceId: typeof metadata.referenceId === "string" ? metadata.referenceId : null,
+                referenceArtifactId: typeof metadata.referenceArtifactId === "string" ? metadata.referenceArtifactId : null,
+                sha256: createHash("sha256").update(await readFile(reference.assetPath)).digest("hex")
+              };
+            }));
+            workerCalls.push({ inputs, stagedAssets });
+            return { providerId: "reference-worker", providerName: "Reference Worker", capabilities: ["assistant.text"], text: "A staged reference-aware image prompt." };
+          }
+        }
+      })
+    });
+    try {
+      await app.createDocument({ path: path.join(root, "reference-material.ether"), title: "Reference material", initialGraph: referenceGraph });
+      const run = async (commandId: string, scope: { kind: "node"; nodeId: string }) => {
+        const plan = await app.previewRun({ commandId: `${commandId}-preview`, graphId: referenceGraph.id, scope });
+        const permit = await app.grantRunPermit({ commandId: `${commandId}-permit`, planId: plan.id, contentHash: plan.contentHash });
+        const job = await app.startRun({ commandId: `${commandId}-start`, planId: plan.id, contentHash: plan.contentHash, runPermitId: permit.id });
+        return { plan, job: await app.waitForJob(job.id) };
+      };
+      await run("seed", { kind: "node", nodeId: "seed" });
+      const seedOutput = (await app.queryNodeOutputs("seed"))[0]!;
+      const seedArtifactId = await app.boundaryStore().read(({ outputs }) => {
+        const payload = outputs.getPayload(seedOutput.outputPayloadIds[0]!);
+        if (payload?.content.kind !== "artifact") throw new Error("Seed image did not publish an artifact payload.");
+        return payload.content.artifactId;
+      });
+      const seedBytes = await app.readArtifactBytes(seedArtifactId);
+      const livePath = path.join(root, "live-reference.png");
+      const embeddedPath = path.join(root, "embedded-reference.png");
+      const disabledPath = path.join(root, "disabled-reference.png");
+      await Promise.all([writeFile(livePath, seedBytes), writeFile(embeddedPath, seedBytes), writeFile(disabledPath, seedBytes)]);
+      sources.set("live-grant", livePath);
+      sources.set("embedded-grant", embeddedPath);
+      sources.set("disabled-grant", disabledPath);
+      await app.grantPathPermit("live-grant-permit", "live-grant", "reference");
+      await app.grantPathPermit("embedded-grant-permit", "embedded-grant", "reference");
+      await app.grantPathPermit("disabled-grant-permit", "disabled-grant", "reference");
+      const live = await app.linkDocumentReference({ graphId: referenceGraph.id, nodeId: "refs", pathGrantId: "live-grant", role: "style" });
+      const embedded = await app.linkDocumentReference({ graphId: referenceGraph.id, nodeId: "refs", pathGrantId: "embedded-grant", role: "subject" });
+      const disabled = await app.linkDocumentReference({ graphId: referenceGraph.id, nodeId: "refs", pathGrantId: "disabled-grant", role: "face" });
+      await app.embedAvailableReference(embedded.id);
+      await app.assignReferenceSet("refs", [
+        { kind: "linked-reference", referenceId: live.id, enabled: true, roleOverride: "style" },
+        { kind: "linked-reference", referenceId: embedded.id, enabled: true, roleOverride: "subject" },
+        { kind: "embedded-artifact", artifactId: seedArtifactId, enabled: true, roleOverride: "lighting" },
+        { kind: "linked-reference", referenceId: disabled.id, enabled: false, roleOverride: "face" }
+      ], true);
+      const plan = await app.previewRun({ commandId: "references-preview", graphId: referenceGraph.id, scope: { kind: "node", nodeId: "worker" } });
+      const workerStep = plan.steps.find((step) => step.nodeId === "worker")!;
+      expect(workerStep.compiledContext.referenceInputs).toEqual(expect.arrayContaining([
+        expect.objectContaining({ memberKind: "linked-reference", referenceId: live.id, role: "style", order: 0 }),
+        expect.objectContaining({ memberKind: "embedded-reference", referenceId: embedded.id, role: "subject", order: 1 }),
+        expect.objectContaining({ memberKind: "embedded-artifact", artifactId: seedArtifactId, role: "lighting", order: 2 })
+      ]));
+      const permit = await app.grantRunPermit({ commandId: "references-permit", planId: plan.id, contentHash: plan.contentHash });
+      await app.assignReferenceSet("refs", [], true);
+      const job = await app.startRun({ commandId: "references-start", planId: plan.id, contentHash: plan.contentHash, runPermitId: permit.id });
+      expect((await app.waitForJob(job.id)).status).toBe("completed");
+      expect(workerCalls).toHaveLength(1);
+      expect(workerCalls[0]?.inputs).toEqual([
+        expect.objectContaining({ channel: "image", role: "style", sourceNodeId: "refs", sourceEdgeId: "refs-worker", assetPath: expect.stringContaining("resolved-references"), metadata: expect.objectContaining({ referenceId: live.id }) }),
+        expect.objectContaining({ channel: "image", role: "subject", sourceNodeId: "refs", sourceEdgeId: "refs-worker", assetPath: expect.stringContaining("resolved-references"), metadata: expect.objectContaining({ referenceId: embedded.id }) }),
+        expect.objectContaining({ channel: "image", role: "lighting", assetId: seedArtifactId, sourceNodeId: "refs", sourceEdgeId: "refs-worker", assetPath: expect.stringContaining("resolved-references"), metadata: expect.objectContaining({ referenceArtifactId: seedArtifactId }) })
+      ]);
+      expect(workerCalls[0]?.inputs?.some((input) => (input.metadata as Record<string, unknown>).referenceId === disabled.id)).toBe(false);
+      const seedSha256 = createHash("sha256").update(seedBytes).digest("hex");
+      expect(workerCalls[0]?.stagedAssets).toEqual([
+        { referenceId: live.id, referenceArtifactId: null, sha256: seedSha256 },
+        { referenceId: embedded.id, referenceArtifactId: null, sha256: seedSha256 },
+        { referenceId: null, referenceArtifactId: seedArtifactId, sha256: seedSha256 }
+      ]);
+      const workerOutput = (await app.queryNodeOutputs("worker")).find((output) => output.runId === job.id)!;
+      expect(workerOutput.inputPayloadIds).toEqual((workerStep.compiledContext.referenceInputs as Array<{ payloadId: string }>).map((input) => input.payloadId));
+
+      await app.assignReferenceSet("refs", [{ kind: "linked-reference", referenceId: live.id, enabled: true, roleOverride: "style" }], true);
+      const changedPlan = await app.previewRun({ commandId: "changed-reference-preview", graphId: referenceGraph.id, scope: { kind: "node", nodeId: "worker" } });
+      const changedPermit = await app.grantRunPermit({ commandId: "changed-reference-permit", planId: changedPlan.id, contentHash: changedPlan.contentHash });
+      await writeFile(livePath, Buffer.concat([seedBytes, Buffer.from([0]) ]));
+      const changedJob = await app.startRun({ commandId: "changed-reference-start", planId: changedPlan.id, contentHash: changedPlan.contentHash, runPermitId: changedPermit.id });
+      expect((await app.waitForJob(changedJob.id)).status).toBe("failed");
+      expect(workerCalls).toHaveLength(1);
+    } finally {
+      await app.closeDocument();
+    }
   });
 });
