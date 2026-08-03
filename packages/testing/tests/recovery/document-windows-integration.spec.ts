@@ -49,6 +49,7 @@ import {
   describeWindowsShellSetupDelta,
   recycleProvenRecoveryAutomaticDestination,
   formatWindowsShellStateChanges,
+  requireNoTestOwnedRecentShortcuts,
   recoveryShellIdentityArgument,
   recoveryShellTaskbarName,
   resnapshotWindowsShellState,
@@ -394,6 +395,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
   let jumpListShellStateRestored = false;
   let recentModeLaunched = false;
   let shellS1: WindowsShellStateSnapshot | null = null;
+  let s1RecentShortcutPaths: string[] | null = null;
   let jumpListFailure: unknown = null;
   const finalizationFailures: unknown[] = [];
   try {
@@ -417,13 +419,20 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     setupSession = null;
     if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured after ordinary-recovery setup.");
     await assertShellCheckpointRestored(shellS1);
+    const realAppData = process.env.APPDATA;
+    if (realAppData === undefined) throw new Error("Jump List S1 shortcut checkpoint requires the real APPDATA path.");
+    s1RecentShortcutPaths = [
+      ...await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] }),
+      ...await snapshotTestOwnedRecentShortcuts({ appData: realAppData, root, documentPaths: [documentPath] })
+    ];
+    requireNoTestOwnedRecentShortcuts(s1RecentShortcutPaths);
 
     recentModeLaunched = true;
     session = await launch(executable, "a02-windows-jump-list", profile, documentPath, true);
     await snapshotTestOwnedRecentShortcuts({ appData: profile.appData, root, documentPaths: [documentPath] });
     primaryPid = await findExactPackagedProcessId(executable, profile.userData);
     await expect(session.page.getByTestId("project-header")).toContainText(path.basename(documentPath), { timeout: 30_000 });
-    session.input.observe("Open existing S1 document in approved Recent mode", "The approved Jump List session opens the ordinary-recovery document and does not invoke a native Save dialog.", `Opened ${path.basename(documentPath)} from the same disposable profile/token.`);
+    session.input.observe("Open existing S1 document in approved Recent mode", "The approved Jump List session opens the ordinary-recovery document and does not invoke a native Save dialog; both real and isolated S1 Recent roots contained zero matching target links.", `Opened ${path.basename(documentPath)} from the same disposable profile/token; S1 matching links=0.`);
     await session.page.waitForTimeout(1_000);
     plan = await createAssociationDryRunPlan({ executablePath: executable, documentPath, root, recoveryShellToken: shellToken, userData: profile.userData });
     watchdog = await startAssociationRestorationWatchdog(plan);
@@ -459,7 +468,9 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
     session.input.observe("Close isolated Jump List journey", "A native Alt+F4 closes only the exact recovery-AUMID Ether window before shell-state verification.", closeAction);
     await expect.poll(() => session?.page.isClosed() ?? false, { timeout: 15_000 }).toBe(true);
     if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
+    if (s1RecentShortcutPaths === null) throw new Error("S1 Recent shortcut baseline was not captured before approved Jump List cleanup.");
     const approvedShellS1 = shellS1;
+    const approvedRecentShortcutPaths = s1RecentShortcutPaths;
     await session.close("passed", {
       afterApplicationExit: async () => {
         const shellDisposition = await restoreApprovedJumpListShellState({
@@ -467,6 +478,7 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
           documentPaths: [documentPath],
           profile,
           root,
+          s1RecentShortcutPaths: approvedRecentShortcutPaths,
           token: shellToken
         });
         session?.input.observe("Jump List app-scoped cleanup", "Only the exact post-S1 2560-byte recovery-AUMID AutomaticDestinations artifact is recycled after COM cleanup, then the complete real and isolated shell state matches S1.", shellDisposition);
@@ -517,7 +529,8 @@ test("runs the separately approved Windows Jump List known-and-missing target ro
         await session.close("failed", recentModeLaunched && !jumpListShellStateRestored ? {
           afterApplicationExit: async () => {
             if (shellS1 === null) throw new Error("S1 shell checkpoint was not captured before approved Jump List cleanup.");
-            await restoreApprovedJumpListShellState({ before: shellS1, documentPaths: [documentPath], profile, root, token: shellToken });
+            if (s1RecentShortcutPaths === null) throw new Error("S1 Recent shortcut baseline was not captured before approved Jump List cleanup.");
+            await restoreApprovedJumpListShellState({ before: shellS1, documentPaths: [documentPath], profile, root, s1RecentShortcutPaths, token: shellToken });
             jumpListShellStateRestored = true;
           }
         } : {});
@@ -615,10 +628,18 @@ async function restoreApprovedJumpListShellState(input: {
   documentPaths: readonly string[];
   profile: RecoveryJourneySession["profile"];
   root: string;
+  s1RecentShortcutPaths: readonly string[];
   token: string;
 }): Promise<string> {
   const realAppData = process.env.APPDATA;
   if (realAppData === undefined) throw new Error("Jump List cleanup requires the real APPDATA snapshot root.");
+  requireNoTestOwnedRecentShortcuts(input.s1RecentShortcutPaths);
+  const removedShortcuts = await cleanupTestOwnedRecentShortcuts({
+    appData: input.profile.appData,
+    additionalAppData: [realAppData],
+    root: input.root,
+    documentPaths: input.documentPaths
+  });
   const preCleanup = await resnapshotWindowsShellState(input.before);
   const createdByJourney = compareWindowsShellState(input.before, preCleanup);
   const candidate = requireSingleRecoveryAutomaticDestination(createdByJourney, path.resolve(realAppData), "practical Jump List route");
@@ -640,7 +661,7 @@ async function restoreApprovedJumpListShellState(input: {
 
   const disposition = await recycleProvenRecoveryAutomaticDestination({ appData: realAppData, file: postFile });
   await assertWindowsShellStateRestored(input.before);
-  return disposition;
+  return `${disposition}; removed exact post-S1 Recent shortcuts=${removedShortcuts.length}${removedShortcuts.length === 0 ? "" : `: ${removedShortcuts.join(", ")}`}`;
 }
 
 function requireSingleRecoveryAutomaticDestination(

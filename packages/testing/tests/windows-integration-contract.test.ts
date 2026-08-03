@@ -29,6 +29,7 @@ import {
   createWindowsIntegrationRoot,
   isAssociationMutationApproved,
   removeTestOwnedDisposableRoots,
+  requireNoTestOwnedRecentShortcuts,
   requireAssociationMutationApproval,
   requireShellUiApproval
 } from "../recovery/windowsIntegration.js";
@@ -82,6 +83,11 @@ describe("A02 Windows integration harness contracts", () => {
     expect(describeWindowsShellSetupDelta(s0, s1)).toMatch(/S0→S1 OS-native setup delta.*without restoration claim/u);
     expect(() => assertWindowsShellCheckpointStable(s1, s1)).not.toThrow();
     expect(() => assertWindowsShellCheckpointStable(s1, postS1)).toThrow(/S1 checkpoint changed after setup/u);
+  });
+
+  it("requires an empty exact-target Recent-link baseline before Recent mode", () => {
+    expect(() => requireNoTestOwnedRecentShortcuts([])).not.toThrow();
+    expect(() => requireNoTestOwnedRecentShortcuts(["C:\\real\\Recent\\Jump List.lnk"])).toThrow(/S1 contains matching test-owned Recent shortcuts/u);
   });
 
   it("requires a separate explicit approval before pointer/taskbar shell interaction", () => {

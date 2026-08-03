@@ -108,6 +108,13 @@ export function assertWindowsShellCheckpointStable(
   }
 }
 
+/** S1 must not already contain a matching target link before Recent mode is admitted. */
+export function requireNoTestOwnedRecentShortcuts(paths: readonly string[], label = "S1"): void {
+  if (paths.length > 0) {
+    throw new Error(`${label} contains matching test-owned Recent shortcuts: ${paths.join(", ")}`);
+  }
+}
+
 export type AssociationRestorationWatchdog = {
   child: ChildProcess;
   completePath: string;
