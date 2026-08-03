@@ -96,7 +96,9 @@ async function commandOnce(
   command: ApplicationCommand,
   payloadKey: string,
   run: (repositories: Parameters<DocumentStore["transaction"]>[0] extends (repositories: infer R) => unknown ? R : never) => unknown,
-  events: ReadonlyArray<{ name: string; payload: Record<string, unknown> }> = []
+  events:
+    | ReadonlyArray<{ name: string; payload: Record<string, unknown> }>
+    | ((result: unknown) => ReadonlyArray<{ name: string; payload: Record<string, unknown> }>) = []
 ): Promise<unknown> {
   const store = app.boundaryStore();
   assertDocument(command, store);
@@ -104,11 +106,12 @@ async function commandOnce(
     const existing = repositories.execution.getCommandResult(command.id, command.name);
     if (existing !== undefined) return responseFromSaved(existing, payloadKey);
     const result = run(repositories as never);
+    const pendingEvents = typeof events === "function" ? events(result) : events;
     repositories.execution.completeCommand(
       command.id,
       command.name,
       { [payloadKey]: result },
-      events as never,
+      pendingEvents as never,
       command.correlationId
     );
     return result;
@@ -367,21 +370,21 @@ export async function executeApplicationCommand(
         title: command.payload.title,
         description: command.payload.description ?? "",
         primary: command.payload.primary ?? false
-      }), [{ name: "collection.changed", payload: { collectionId: "created", change: "created" } }]);
+      }), (result) => [{ name: "collection.changed", payload: { collectionId: (result as { id: string }).id, change: "created" } }]);
       return commandResponse(command, { collection });
     }
     case "collection.update": {
       const collection = await commandOnce(app, command, "collection", (repositories) => repositories.collections.update(
         command.payload.collectionId,
         command.payload
-      ));
+      ), [{ name: "collection.changed", payload: { collectionId: command.payload.collectionId, change: "updated" } }]);
       return commandResponse(command, { collection });
     }
     case "collection.delete":
       await commandOnce(app, command, "acknowledgement", (repositories) => {
         if (!repositories.collections.remove(command.payload.collectionId)) throw new Error(`Unknown collection ${command.payload.collectionId}.`);
         return acknowledgement();
-      });
+      }, [{ name: "collection.changed", payload: { collectionId: command.payload.collectionId, change: "deleted" } }]);
       return commandResponse(command, acknowledgement());
     case "collection.addMembers":
       await commandOnce(app, command, "acknowledgement", (repositories) => {
@@ -390,16 +393,16 @@ export async function executeApplicationCommand(
           source: { commandId: command.id }
         })));
         return acknowledgement();
-      });
+      }, [{ name: "collection.changed", payload: { collectionId: command.payload.collectionId, change: "membership" } }]);
       return commandResponse(command, acknowledgement());
     case "collection.removeMembers":
       await commandOnce(app, command, "acknowledgement", (repositories) => {
         repositories.collections.removeMembers(command.payload.collectionId, command.payload.artifactIds);
         return acknowledgement();
-      });
+      }, [{ name: "collection.changed", payload: { collectionId: command.payload.collectionId, change: "membership" } }]);
       return commandResponse(command, acknowledgement());
     case "collection.setPrimary": {
-      const collection = await commandOnce(app, command, "collection", (repositories) => repositories.collections.setPrimary(command.payload.collectionId));
+      const collection = await commandOnce(app, command, "collection", (repositories) => repositories.collections.setPrimary(command.payload.collectionId), [{ name: "collection.changed", payload: { collectionId: command.payload.collectionId, change: "primary" } }]);
       return commandResponse(command, { collection });
     }
     case "review.route":
@@ -410,7 +413,7 @@ export async function executeApplicationCommand(
           source: { commandId: command.id }
         }]);
         return acknowledgement();
-      });
+      }, [{ name: "collection.changed", payload: { collectionId: command.payload.collectionId, change: "membership" } }]);
       return commandResponse(command, acknowledgement());
     case "review.rate":
       await commandOnce(app, command, "acknowledgement", (repositories) => {

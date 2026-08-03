@@ -125,6 +125,7 @@ export class EtherApplication implements EtherApplicationService {
   private scheduler: DurableScheduler | undefined;
   private inspectedAccess: "prefer-write" | "read-only" | "require-write" | undefined;
   private eventDrain: Promise<void> = Promise.resolve();
+  private liveOutputRefresh: Promise<void> = Promise.resolve();
   private readonly permits = new ApplicationPermitStore();
   private recoveryReport: { dismissed: boolean; message: string | null; reportId: string | null; state: "attention" | "healthy" | "recovering" } = {
     dismissed: false,
@@ -1412,15 +1413,22 @@ export class EtherApplication implements EtherApplicationService {
       const artifact = artifacts.get(artifactId);
       if (artifact === undefined) throw new ApplicationServiceError("ARTIFACT_NOT_FOUND", `Unknown artifact ${artifactId}.`);
       const id = stableApplicationId("export", input.commandId, artifactId);
-      const collectionFolder = input.hierarchy === "collection"
-        ? exportDetails[index]?.collections[0]?.title
+      const relativePath = exportName(
+        input.namingTemplate,
+        artifact,
+        input.format ?? "original",
+        exportDetails[index]?.collections[0]
+      );
+      const collectionFolder = input.hierarchy === "collection" && !templateUsesCollection(input.namingTemplate)
+        ? exportDetails[index]?.collections[0]
         : undefined;
-      const relativePath = exportName(input.namingTemplate, artifact, input.format ?? "original");
       return exports.get(id) ?? exports.create({
         id,
         artifactId,
         pathGrantId: input.pathGrantId,
-        relativePath: collectionFolder === undefined ? relativePath : path.join(safeFileName(collectionFolder), relativePath),
+        relativePath: collectionFolder === undefined
+          ? relativePath
+          : path.join(safeFileName(collectionFolder.title || collectionFolder.id), relativePath),
         contentKey: artifact.contentKey,
         status: "planned",
         createdAt: new Date().toISOString(),
@@ -1646,12 +1654,47 @@ export class EtherApplication implements EtherApplicationService {
           level: "info",
           message: `Application event ${event.name} was published.`
         });
-        if (!this.events.publish(event)) return;
+        this.queueLiveOutputRefresh(event);
+        if (!this.events.publish(event)) {
+          await this.liveOutputRefresh;
+          return;
+        }
         await store.transaction(({ execution }) => execution.markEventDelivered(event.id));
       }
+      await this.liveOutputRefresh;
     };
     this.eventDrain = this.eventDrain.then(drain, drain);
     return this.eventDrain;
+  }
+
+  private queueLiveOutputRefresh(event: ApplicationEvent): void {
+    if (event.name !== "artifact.changed" && event.name !== "artifact.accepted" && event.name !== "collection.changed") return;
+    this.liveOutputRefresh = this.liveOutputRefresh
+      .catch(() => undefined)
+      .then(() => this.refreshEnabledLiveOutput())
+      .catch((error) => {
+        this.emitDiagnostic({
+          causeId: event.correlationId,
+          correlationId: event.correlationId,
+          details: { applicationEventId: event.id, applicationEventName: event.name },
+          event: "liveOutput.refresh.failed",
+          level: "error",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      });
+  }
+
+  private async refreshEnabledLiveOutput(): Promise<void> {
+    const settings = await this.liveOutputStatus();
+    if (!settings.enabled || settings.pathGrantId === null) return;
+    const grant = this.liveOutputGrant(settings.pathGrantId);
+    const items = await this.liveOutputItems(liveOutputPolicyFromTemplate(settings.namingPolicy.template));
+    await this.requireWritableStore().runLiveOutput((repository) => materializeLiveOutput(repository, {
+      fileSystem: this.options.liveOutputFileSystem,
+      grant,
+      grantValidator: () => this.permits.isActivePath(settings.pathGrantId!, "live-output"),
+      items
+    }));
   }
 
   private emitDiagnostic(record: ApplicationDiagnosticRecord): void {
@@ -1734,16 +1777,23 @@ export class EtherApplication implements EtherApplicationService {
   }
 
   private async liveOutputItems(namingPolicy: "artifact" | "node" | "template") {
-    const artifacts = await this.requireStore().read(({ artifacts }) => artifacts.list());
-    return Promise.all(artifacts.map(async (artifact) => ({
+    const artifacts = await this.requireStore().read(({ artifacts }) => artifacts.list().map((artifact) => ({
+      artifact,
+      detail: artifacts.detail(artifact.id)
+    })));
+    return Promise.all(artifacts.map(async ({ artifact, detail }) => {
+      const primaryCollection = detail?.collections[0];
+      const collectionLabel = primaryCollection?.title || primaryCollection?.id;
+      return {
       artifactId: artifact.id,
       byteLength: artifact.byteLength,
-      collectionId: null,
+      collectionId: primaryCollection?.id ?? null,
       contentKey: artifact.contentKey,
       expectedHash: artifact.contentKey,
-      relativePath: liveOutputName(artifact, namingPolicy),
+      relativePath: liveOutputName(artifact, namingPolicy, collectionLabel),
       bytes: await this.readArtifactBytes(artifact.id)
-    })));
+      };
+    }));
   }
 
   private publishPermission(permit: ApplicationPermit, state: "granted" | "revoked" | "expired"): void {
@@ -2317,16 +2367,26 @@ function liveOutputTemplate(policy: "artifact" | "node" | "template"): string {
   return "{node}-{version}";
 }
 
+function liveOutputPolicyFromTemplate(template: string): "artifact" | "node" | "template" {
+  if (template === "{artifact}") return "artifact";
+  if (template === "{node}-{artifact}") return "node";
+  return "template";
+}
+
 function liveOutputName(
   artifact: Artifact,
-  policy: "artifact" | "node" | "template"
+  policy: "artifact" | "node" | "template",
+  collectionLabel?: string
 ): string {
   const extension = extensionForMediaType(artifact.mediaType);
   const node = typeof artifact.metadata.nodeId === "string" ? artifact.metadata.nodeId : "output";
   const base = policy === "artifact"
     ? artifact.id
     : policy === "node" ? `${node}-${artifact.id}` : `${node}-${artifact.source.outputVersionId}`;
-  return `${safeFileName(base)}${extension}`;
+  const fileName = `${safeFileName(base)}${extension}`;
+  return collectionLabel === undefined
+    ? fileName
+    : `${safeFileName(collectionLabel)}/${fileName}`;
 }
 
 function extensionForMediaType(mediaType: string): string {
@@ -2351,14 +2411,51 @@ function safeFileName(value: string): string {
 function exportName(
   template: string,
   artifact: Artifact,
-  format: "original" | "png" | "jpeg" | "webp" = "original"
+  format: "original" | "png" | "jpeg" | "webp" = "original",
+  collection?: { id: string; title: string }
 ): string {
-  const expanded = template
-    .replaceAll("{artifact}", artifact.id)
-    .replaceAll("{id}", artifact.id)
-    .replaceAll("{version}", artifact.source.outputVersionId);
+  const title = typeof artifact.metadata.title === "string" ? artifact.metadata.title : artifact.id;
+  const node = typeof artifact.metadata.nodeId === "string" ? artifact.metadata.nodeId : "output";
+  const index = typeof artifact.metadata.ordinal === "number" ? String(artifact.metadata.ordinal) : "0";
+  const values: Record<string, string> = {
+    artifact: artifact.id,
+    artifactId: artifact.id,
+    collection: collection?.title || collection?.id || "uncollected",
+    id: artifact.id,
+    index,
+    node,
+    title,
+    version: artifact.source.outputVersionId
+  };
+  if (template.trim().length === 0) {
+    throw new ApplicationServiceError("EXPORT_TEMPLATE_INVALID", "Export naming templates must not be empty.");
+  }
+  if (path.posix.isAbsolute(template) || path.win32.isAbsolute(template) || /^[\\/]/.test(template) || /^[A-Za-z]:/.test(template)) {
+    throw new ApplicationServiceError("EXPORT_TEMPLATE_INVALID", "Export naming templates must stay inside the granted folder.");
+  }
+  const allowedTokens = new Set(["artifact", "artifactId", "collection", "id", "index", "node", "title", "version"]);
+  const tokens = template.match(/\{[^{}]*\}/g) ?? [];
+  const unmatchedBraces = template.replace(/\{[^{}]*\}/g, "");
+  if (/[{}]/.test(unmatchedBraces) || tokens.some((token) => !allowedTokens.has(token.slice(1, -1)))) {
+    throw new ApplicationServiceError("EXPORT_TEMPLATE_INVALID", "Export naming templates contain an unknown placeholder.");
+  }
+  const segments = template.split(/[\\/]/);
+  if (segments.some((segment) => segment === ".." || segment === ".")) {
+    throw new ApplicationServiceError("EXPORT_TEMPLATE_INVALID", "Export naming templates cannot contain traversal segments.");
+  }
+  const safeSegments = segments
+    .filter((segment) => segment.length > 0)
+    .map((segment) => safeFileName(segment.replace(/\{(collection|title|artifactId|artifact|id|version|node|index)\}/g, (token) => values[token.slice(1, -1)] ?? token)));
+  if (safeSegments.length === 0) {
+    throw new ApplicationServiceError("EXPORT_TEMPLATE_INVALID", "Export naming templates must contain a file name.");
+  }
   const extension = format === "original" ? extensionForMediaType(artifact.mediaType) : exportFormatExtension(format);
-  return `${safeFileName(expanded)}${extension}`;
+  const stem = path.join(...safeSegments);
+  return `${stem}${extension}`;
+}
+
+function templateUsesCollection(template: string): boolean {
+  return template.includes("{collection}");
 }
 
 function exportFormat(value: unknown): "original" | "png" | "jpeg" | "webp" {
