@@ -4,6 +4,7 @@ import type { EtherNode } from "@ether/schema";
 import { commandIdForKeyboard } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
 import { toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
+import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
 
 const presentation = { collapsed: false, accent: "default", previewMode: "content" as const };
 const base = { id: "node-1", title: "Node", position: { x: 10, y: 20 }, size: { width: 240, height: 150 }, presentation };
@@ -31,6 +32,14 @@ describe("canvas authoring command map", () => {
   it("toggles additive selection without duplicate IDs", () => {
     expect(toggleId(["a", "b"], "c")).toEqual(["a", "b", "c"]);
     expect(toggleId(["a", "b"], "a")).toEqual(["b"]);
+  });
+
+  it("centers blank insertions and finds the first non-overlapping registry slot", () => {
+    const centered = centeredCanvasPosition({ x: 600, y: 400 }, { width: 220, height: 140 });
+    expect(centered).toEqual({ x: 490, y: 330 });
+    expect(openCanvasPosition(centered, [])).toEqual(centered);
+    expect(openCanvasPosition(centered, [{ position: centered, size: { width: 220, height: 140 } }]))
+      .toEqual({ x: 230, y: 150 });
   });
 });
 

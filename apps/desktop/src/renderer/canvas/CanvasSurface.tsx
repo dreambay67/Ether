@@ -156,6 +156,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     interaction.settle();
   }, [graph.nodes, interaction, onMove, onMoveGroup, onMoveModule, readOnly, selectedIds]);
   const fitSmallGraph = graph.nodes.length > 0 && graph.nodes.length < 250;
+  const fitViewOnMount = useRef({ graphId: graph.id, enabled: fitSmallGraph });
+  if (fitViewOnMount.current.graphId !== graph.id) {
+    fitViewOnMount.current = { graphId: graph.id, enabled: fitSmallGraph };
+  }
   const updateSemanticZoom = useCallback((_event: MouseEvent | TouchEvent | null, nextViewport: Viewport) => {
     if (!viewportInitialized.current) return;
     const nextOverview = graph.nodes.length >= 500 && nextViewport.zoom < 0.4;
@@ -215,7 +219,8 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         edgeTypes={edgeTypes}
         defaultViewport={initialViewport}
         minZoom={0.1}
-        fitView={fitSmallGraph}
+        maxZoom={1.25}
+        fitView={fitViewOnMount.current.enabled}
         onlyRenderVisibleElements={!showSemanticOverview}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
@@ -259,7 +264,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         onMoveStart={(event) => {
           if (event instanceof MouseEvent && event.button === 2) interaction.beginPan();
         }}
-        onMoveEnd={(_event, nextViewport) => { interaction.settle(); onViewport(nextViewport); }}
+        onMoveEnd={(event, nextViewport) => {
+          interaction.settle();
+          if (event !== null && event !== undefined) onViewport(nextViewport);
+        }}
         onPaneClick={(event) => {
           if ((event.target as HTMLElement).closest(".react-flow__node")) return;
           interaction.clearSelection();

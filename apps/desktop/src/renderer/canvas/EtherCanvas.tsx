@@ -12,6 +12,7 @@ import { configFromPrimaryDraft, primaryEditorFor, type CanvasEditorField } from
 import { useGraphCommands } from "./commands/useGraphCommands";
 import type { InspectorContext } from "./inspector/types";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
+import { centeredCanvasPosition, openCanvasPosition } from "./placement";
 
 export type EtherCanvasHandle = { addNode(definitionId: NodeDefinitionId): void; addPrompt(): void; addImage(): void; focusNode(nodeId: string): void; };
 export type EtherCanvasProps = { graph: EtherGraph | null; catalog: readonly NodeLibraryItem[]; document: DocumentDescriptor; onGraph(graph: EtherGraph): void; onStatus(message: string): void; onInspectorChange?(context: InspectorContext | null): void; };
@@ -149,17 +150,22 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     }
   }, [document.documentId, graph.id, onGraph, report]);
   useEffect(() => { onInspectorChange?.(selectedEdgeId ? { graph, document, nodeId: null, edgeId: selectedEdgeId, apply: transactions.apply, refreshGraph, report } : selectedIds.length === 1 ? { graph, document, nodeId: selectedIds[0]!, edgeId: null, apply: transactions.apply, refreshGraph, report } : null); }, [document, graph, onInspectorChange, refreshGraph, report, selectedEdgeId, selectedIds, transactions.apply]);
-  const insertionCenter = useCallback((): NodePosition => {
+  const insertionCenter = useCallback((definitionId: NodeDefinitionId): NodePosition => {
     const surface = globalThis.document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
     if (surface === null) return { x: 120 + graph.nodes.length * 28, y: 120 + graph.nodes.length * 20 };
     const bounds = surface.getBoundingClientRect();
+    const definition = catalog.find((item) => item.definitionId === definitionId);
+    const size = definition?.presentation ?? { width: 220, height: 140 };
     return openCanvasPosition(
-      flow.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }),
+      centeredCanvasPosition(
+        flow.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }),
+        size
+      ),
       [...graph.nodes, ...graph.modules]
     );
-  }, [flow, graph.modules, graph.nodes]);
+  }, [catalog, flow, graph.modules, graph.nodes]);
   const addAtCenter = useCallback((definitionId: NodeDefinitionId) => {
-    if (!readOnly) void nodes.createNode(definitionId, insertionCenter());
+    if (!readOnly) void nodes.createNode(definitionId, insertionCenter(definitionId));
   }, [insertionCenter, nodes, readOnly]);
   useImperativeHandle(ref, () => ({
     addNode: addAtCenter,
@@ -306,19 +312,3 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
   return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onMove={nodes.moveNodes} onMoveGroup={nodes.moveGroup} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={(id) => { setActiveEditor(null); setSelectedIds([]); setSelectedEdgeId(id); }} onModuleSelected={(id) => { setActiveEditor(null); setSelectedEdgeId(null); setSelectedIds([]); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runDetail={preparedSelection ? "The exact selected-node plan is ready." : "Prepare an exact plan before any provider work starts."} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} /></div>;
 });
-
-export function openCanvasPosition(origin: NodePosition, obstacles: readonly { position: NodePosition; size: { width: number; height: number } }[]): NodePosition {
-  const horizontalStep = 260;
-  const verticalStep = 180;
-  for (let radius = 0; radius <= 12; radius += 1) {
-    for (let row = -radius; row <= radius; row += 1) {
-      for (let column = -radius; column <= radius; column += 1) {
-        if (radius > 0 && Math.abs(row) !== radius && Math.abs(column) !== radius) continue;
-        const candidate = { x: origin.x + column * horizontalStep, y: origin.y + row * verticalStep };
-        const occupied = obstacles.some((obstacle) => candidate.x < obstacle.position.x + obstacle.size.width + 20 && candidate.x + 220 > obstacle.position.x - 20 && candidate.y < obstacle.position.y + obstacle.size.height + 20 && candidate.y + 140 > obstacle.position.y - 20);
-        if (!occupied) return candidate;
-      }
-    }
-  }
-  return { x: origin.x + obstacles.length * 32, y: origin.y + obstacles.length * 24 };
-}
