@@ -8,8 +8,9 @@ scope or UI/OS assertion open; `A-GAP` means no qualifying automated assertion
 was found. A result here never supplies required packaged (`P`) or owner (`M`)
 evidence, and does not close T03 or Phase 0.
 
-The focused runs were executed with `pnpm.cmd` on the fixer checkout; the
-additional update runs are listed after the baseline totals:
+The focused runs were executed with `pnpm.cmd` on the fixer checkout. The
+historical baseline below is retained for audit traceability and is not the
+current fixer result:
 
 | Command | Result |
 | --- | --- |
@@ -18,11 +19,31 @@ additional update runs are listed after the baseline totals:
 | `pnpm.cmd --dir packages/testing exec vitest run --config vitest.config.ts tests/desktop-ipc-contract.test.ts tests/recovery-journey-driver.test.ts tests/acceptance-docs.test.ts` | 3 files, 26 passed, 0 failed |
 | `$env:ETHER_RUN_DESTRUCTIVE_CHAOS='1'; $env:ETHER_TEST_SUITE='destructive-chaos'; pnpm.cmd --dir packages/testing exec vitest run --config vitest.integration.config.ts tests/document-chaos.integration.ts` | 1 file, 15 passed, 0 failed |
 
-Total: **14 files and 309 passed tests, 0 failures**. The Playwright
+Historical baseline total: **14 files and 309 passed tests, 0 failures**. The Playwright
 `document-lifecycle-recovery.spec.ts` is intentionally not used as A evidence:
 it is the required packaged journey (P) and is skipped unless the Windows
 journey mode is explicitly run. No row below claims that a packaged journey or
 manual owner review has happened.
+
+Current fixer verification was rerun at source HEAD
+`7c11d8b742cb0aaa21b24649fa497c322597e7ca` on 2026-08-03. C1, C2, C3, and C4
+are the same four command groups above; C5 is the separate Windows contract
+check reported by the phase auditor:
+
+| Current check | Result |
+| --- | --- |
+| C1 lifecycle/recovery group | 6 files, 205 passed, 0 failed |
+| C2 repository/durability group — `pnpm.cmd --dir packages/testing exec vitest run --config vitest.integration.config.ts tests/document-graph-repository.test.ts tests/application-durability.test.ts tests/durable-repositories.test.ts tests/application-vertical-slice.test.ts` | 4 files, 75 passed, 0 failed |
+| C3 contract-driver group | 3 files, 31 passed, 0 failed |
+| C4 destructive-chaos group | 1 file, 15 passed, 0 failed |
+| C5 Windows integration contract | 1 file, 25 passed, 0 failed |
+
+The current C1–C4 rerun is **14 files and 326 passed tests, 0 failures**;
+C5 is reported separately and is not folded into that total. The earlier
+`document-graph-repository.test.ts` `revisionKeys` failure caused by the newly
+exposed `revisions.listHistory` facade is retained as a historical diagnosis;
+commit `7c11d8b` corrected the contract assertion, so it is not a current
+failure.
 
 Additional focused runs for this update:
 
