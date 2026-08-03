@@ -922,7 +922,7 @@ describe("desktop document lifecycle", () => {
     expect(await selected.request("drop", filePath)).toBe(true);
   });
 
-  it("records token-bound recovery association receipt, disposition, focus state, and failure ordering", () => {
+  it("buffers token-bound recovery association diagnostics until activation is handled", () => {
     const recoveryToken = "0123456789abcdef0123456789abcdef";
     const candidatePath = "C:\\private\\Association.ether";
     const records: Array<{ correlationId: string; details?: Record<string, unknown>; event: string }> = [];
@@ -947,16 +947,27 @@ describe("desktop document lifecycle", () => {
       candidatePath
     ], candidatePath);
     trace.focusAttempt();
+    expect(records).toHaveLength(0);
+    expect(flushes).toBe(0);
     trace.handled({ canonicalPath: candidatePath, disposition: "focused" });
-    deferred.forEach((callback) => callback());
+    trace.handled({ canonicalPath: candidatePath, disposition: "opened" });
     trace.failed(Object.assign(new Error("C:\\private\\secret"), { code: "ENOENT" }));
+    trace.focusAttempt();
+    expect(records.map((record) => record.event)).toEqual([
+      "desktop.recovery.association.second-instance.received",
+      "desktop.recovery.association.second-instance.focus-attempt",
+      "desktop.recovery.association.second-instance.handled"
+    ]);
+    expect(flushes).toBe(1);
+    expect(deferred).toHaveLength(1);
+    deferred.forEach((callback) => callback());
+    deferred.forEach((callback) => callback());
 
     expect(records.map((record) => record.event)).toEqual([
       "desktop.recovery.association.second-instance.received",
       "desktop.recovery.association.second-instance.focus-attempt",
       "desktop.recovery.association.second-instance.handled",
-      "desktop.recovery.association.second-instance.focus-state",
-      "desktop.recovery.association.second-instance.failed"
+      "desktop.recovery.association.second-instance.focus-state"
     ]);
     expect(new Set(records.map((record) => record.correlationId)).size).toBe(1);
     expect(records[0]?.details).toMatchObject({ candidate: "ether-argument", etherArgumentCount: 1, primaryProcessId: process.pid });
@@ -965,15 +976,47 @@ describe("desktop document lifecycle", () => {
     expect(records[0]?.details).not.toHaveProperty("candidatePath");
     expect(records[2]?.details).toMatchObject({ disposition: "focused" });
     expect(records[3]?.details).toMatchObject({ postSettleFocused: false, postSettleMinimized: false, postSettleVisible: true });
-    expect(records[4]?.details).toMatchObject({ errorCode: "ENOENT" });
     expect(JSON.stringify(records)).not.toContain("C:\\private");
-    expect(flushes).toBe(5);
+    expect(flushes).toBe(2);
   });
 
-  it("keeps recovery association diagnostics non-throwing when the logger or settled window is unavailable", () => {
+  it("commits a failed recovery association batch once without activation-time logging", () => {
+    const records: Array<{ details?: Record<string, unknown>; event: string }> = [];
+    let flushes = 0;
+    const diagnostics = createRecoveryAssociationDiagnostics({
+      flushSync: () => { flushes += 1; },
+      log: (record) => { records.push(record); },
+      recoveryShell: {
+        appUserModelId: "com.dreambay.ether.recovery.0123456789abcdef0123456789abcdef",
+        recentEnabled: false,
+        taskbarName: "Ether Recovery 01234567",
+        token: "0123456789abcdef0123456789abcdef"
+      },
+      schedulePostFocus: () => {},
+      window: { isFocused: () => true, isMinimized: () => false, isVisible: () => true }
+    });
+    const trace = diagnostics!.received(["C:\\private\\Association.ether"], "C:\\private\\Association.ether");
+    trace.focusAttempt();
+    expect(records).toHaveLength(0);
+    expect(flushes).toBe(0);
+    trace.failed(Object.assign(new Error("C:\\private\\secret"), { code: "ENOENT" }));
+    trace.failed(Object.assign(new Error("C:\\private\\secret"), { code: "EACCES" }));
+    trace.handled({ canonicalPath: "C:\\private\\Association.ether", disposition: "focused" });
+    expect(records.map((record) => record.event)).toEqual([
+      "desktop.recovery.association.second-instance.received",
+      "desktop.recovery.association.second-instance.focus-attempt",
+      "desktop.recovery.association.second-instance.failed"
+    ]);
+    expect(records[2]?.details).toMatchObject({ errorCode: "ENOENT" });
+    expect(JSON.stringify(records)).not.toContain("C:\\private");
+    expect(flushes).toBe(1);
+  });
+
+  it("keeps recovery association diagnostics non-throwing when observers or settled windows fail", () => {
     const deferred: Array<() => void> = [];
     const records: Array<{ details?: Record<string, unknown>; event: string }> = [];
     const diagnostics = createRecoveryAssociationDiagnostics({
+      flushSync: () => { throw new Error("injected flush failure"); },
       log: (record) => {
         records.push(record);
         if (record.event.endsWith("focus-attempt")) throw new Error("injected logger failure");
@@ -993,11 +1036,29 @@ describe("desktop document lifecycle", () => {
     });
     const trace = diagnostics!.received(["C:\\private\\Association.ether"], "C:\\private\\Association.ether");
     expect(() => trace.focusAttempt()).not.toThrow();
+    expect(records).toHaveLength(0);
+    expect(() => trace.handled({ canonicalPath: "C:\\private\\Association.ether", disposition: "focused" })).not.toThrow();
     expect(() => deferred.forEach((callback) => callback())).not.toThrow();
     expect(records.at(-1)).toMatchObject({
       details: { postSettleState: "unavailable" },
       event: "desktop.recovery.association.second-instance.focus-state"
     });
+
+    const schedulerFailure = createRecoveryAssociationDiagnostics({
+      flushSync: () => { throw new Error("injected flush failure"); },
+      log: () => { throw new Error("injected logger failure"); },
+      recoveryShell: {
+        appUserModelId: "com.dreambay.ether.recovery.0123456789abcdef0123456789abcdef",
+        recentEnabled: false,
+        taskbarName: "Ether Recovery 01234567",
+        token: "0123456789abcdef0123456789abcdef"
+      },
+      schedulePostFocus: () => { throw new Error("injected scheduler failure"); },
+      window: { isFocused: () => true, isMinimized: () => false, isVisible: () => true }
+    });
+    const failingTrace = schedulerFailure!.received(["C:\\private\\Association.ether"], "C:\\private\\Association.ether");
+    expect(() => failingTrace.focusAttempt()).not.toThrow();
+    expect(() => failingTrace.failed(Object.assign(new Error("C:\\private\\secret"), { code: "ENOENT" }))).not.toThrow();
   });
 
   it("does not enable association diagnostics outside the token-bound recovery identity", () => {

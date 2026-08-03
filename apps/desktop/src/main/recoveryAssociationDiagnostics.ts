@@ -28,11 +28,13 @@ export function createRecoveryAssociationDiagnostics(input: {
   if (input.recoveryShell === null || input.recoveryShell.recentEnabled) return null;
   const recoveryTokenHash = safeDigest(input.recoveryShell.token);
   const schedulePostFocus = input.schedulePostFocus ?? ((callback) => { setTimeout(callback, 100); });
-  const emit = (record: DiagnosticRecord) => {
-    try {
-      input.log(record);
-      input.flushSync?.();
-    } catch {
+  const emitAndFlush = (records: readonly DiagnosticRecord[]) => {
+    for (const record of records) {
+      try { input.log(record); } catch {
+        // Diagnostics must never affect document activation.
+      }
+    }
+    try { input.flushSync?.(); } catch {
       // Diagnostics must never affect document activation.
     }
   };
@@ -53,43 +55,50 @@ export function createRecoveryAssociationDiagnostics(input: {
     received(argv, candidate) {
       const correlationId = safeCorrelationId();
       const details = describeRecoverySecondInstance(argv, candidate, describeCandidate, recoveryTokenHash);
-      emit({
+      const pending: DiagnosticRecord[] = [{
         correlationId,
         details,
         event: "desktop.recovery.association.second-instance.received",
         level: "info",
         message: "Recovery association received a second-instance request."
-      });
+      }];
+      let focusObserved = false;
+      let postSettleRecorded = false;
+      let postSettleRecord: DiagnosticRecord | null = null;
+      let terminalCommitted = false;
+      let postSettleCommitted = false;
+      const commitPostSettle = () => {
+        if (!terminalCommitted || postSettleCommitted || postSettleRecord === null) return;
+        postSettleCommitted = true;
+        emitAndFlush([postSettleRecord]);
+      };
+      const commitTerminal = (record: DiagnosticRecord) => {
+        if (terminalCommitted) return;
+        terminalCommitted = true;
+        pending.push(record);
+        emitAndFlush(pending);
+        pending.length = 0;
+        commitPostSettle();
+      };
       return {
         correlationId,
         failed(error) {
-          try {
-            const candidateError = error as { code?: unknown; name?: unknown } | null;
-            emit({
-              correlationId,
-              details: {
-                ...details,
-                errorCode: safeErrorCode(candidateError?.code),
-                errorName: safeErrorName(candidateError?.name)
-              },
-              event: "desktop.recovery.association.second-instance.failed",
-              level: "error",
-              message: "Recovery association second-instance handling failed."
-            });
-          } catch {
-            // Diagnostics must never affect document activation.
-          }
+          commitTerminal(createFailedRecord(correlationId, details, error));
         },
         focusAttempt() {
+          if (focusObserved || terminalCommitted) return;
+          focusObserved = true;
+          pending.push({
+            correlationId,
+            details,
+            event: "desktop.recovery.association.second-instance.focus-attempt",
+            level: "info",
+            message: "Recovery association requested focus for an already open document."
+          });
           try {
-            emit({
-              correlationId,
-              details,
-              event: "desktop.recovery.association.second-instance.focus-attempt",
-              level: "info",
-              message: "Recovery association requested focus for an already open document."
-            });
             schedulePostFocus(() => {
+              if (postSettleRecorded) return;
+              postSettleRecorded = true;
               let state: Record<string, unknown>;
               try {
                 state = {
@@ -100,36 +109,21 @@ export function createRecoveryAssociationDiagnostics(input: {
               } catch {
                 state = { postSettleState: "unavailable" };
               }
-              emit({
+              postSettleRecord = {
                 correlationId,
                 details: { ...details, ...state },
                 event: "desktop.recovery.association.second-instance.focus-state",
                 level: "info",
                 message: "Recovery association recorded post-settle focus state."
-              });
+              };
+              commitPostSettle();
             });
           } catch {
             // Diagnostics must never affect document activation.
           }
         },
         handled(handled) {
-          try {
-            const handledDetails = {
-              ...details,
-              canonicalBasenameHash: safeDigest(`${input.recoveryShell!.token}\0${path.basename(handled.canonicalPath)}`),
-              canonicalPathHash: safeDigest(`${input.recoveryShell!.token}\0${handled.canonicalPath.toLocaleLowerCase("en-US")}`),
-              disposition: handled.disposition
-            };
-            emit({
-              correlationId,
-              details: handledDetails,
-              event: "desktop.recovery.association.second-instance.handled",
-              level: "info",
-              message: "Recovery association second-instance request was handled."
-            });
-          } catch {
-            // Diagnostics must never affect document activation.
-          }
+          commitTerminal(createHandledRecord(correlationId, details, input.recoveryShell!.token, handled));
         }
       };
     }
@@ -142,6 +136,62 @@ function safeCorrelationId(): string {
   } catch {
     return `recovery-association-${process.pid}-${Date.now()}`;
   }
+}
+
+function createHandledRecord(
+  correlationId: string,
+  details: Record<string, string | number>,
+  recoveryToken: string,
+  handled: OpenDocumentHandled
+): DiagnosticRecord {
+  let handledDetails: Record<string, unknown>;
+  try {
+    handledDetails = {
+      ...details,
+      canonicalBasenameHash: safeDigest(`${recoveryToken}\0${path.basename(handled.canonicalPath)}`),
+      canonicalPathHash: safeDigest(`${recoveryToken}\0${handled.canonicalPath.toLocaleLowerCase("en-US")}`),
+      disposition: handled.disposition
+    };
+  } catch {
+    handledDetails = {
+      ...details,
+      canonicalBasenameHash: "unavailable",
+      canonicalPathHash: "unavailable",
+      disposition: "unavailable"
+    };
+  }
+  return {
+    correlationId,
+    details: handledDetails,
+    event: "desktop.recovery.association.second-instance.handled",
+    level: "info",
+    message: "Recovery association second-instance request was handled."
+  };
+}
+
+function createFailedRecord(
+  correlationId: string,
+  details: Record<string, string | number>,
+  error: unknown
+): DiagnosticRecord {
+  let failureDetails: Record<string, unknown>;
+  try {
+    const candidateError = error as { code?: unknown; name?: unknown } | null;
+    failureDetails = {
+      ...details,
+      errorCode: safeErrorCode(candidateError?.code),
+      errorName: safeErrorName(candidateError?.name)
+    };
+  } catch {
+    failureDetails = { ...details, errorCode: "UNKNOWN", errorName: "UnknownError" };
+  }
+  return {
+    correlationId,
+    details: failureDetails,
+    event: "desktop.recovery.association.second-instance.failed",
+    level: "error",
+    message: "Recovery association second-instance handling failed."
+  };
 }
 
 function describeRecoverySecondInstance(
