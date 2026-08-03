@@ -143,3 +143,7 @@ export function commandIdForKeyboard(event: Pick<KeyboardEvent, "key" | "ctrlKey
   if (key === "k") return "palette";
   return null;
 }
+
+export function commandPreservesCanvasFocus(id: GraphCommandId) {
+  return id !== "rename" && id !== "edit" && id !== "palette";
+}

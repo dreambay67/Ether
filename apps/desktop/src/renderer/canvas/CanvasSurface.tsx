@@ -10,7 +10,7 @@ import { projectCanvasChannelActivity } from "./projection";
 import { markPerformance, measurePerformance } from "../performance/marks";
 import { notifyRendererInteractive } from "../runtime/interactive";
 import { NODE_LIBRARY_DRAG_TYPE, QuickAddPalette } from "./library/NodeLibrary";
-import { commandIdForKeyboard, type GraphCommand } from "./commands/useGraphCommands";
+import { commandIdForKeyboard, commandPreservesCanvasFocus, type GraphCommand } from "./commands/useGraphCommands";
 import type { CanvasEditorField } from "./commands/directEditing";
 
 function GroupNode({ data }: { data: { title: string; color: string } }) { return <div className="ether-group-frame" style={{ "--group-color": data.color } as React.CSSProperties}><span>{data.title}</span></div>; }
@@ -212,7 +212,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         const command = commandId === null ? undefined : commands.find((item) => item.id === commandId);
         if (command !== undefined) {
           event.preventDefault();
-          if (command.enabled) void command.execute();
+          if (command.enabled) {
+            if (commandPreservesCanvasFocus(command.id)) event.currentTarget.focus({ preventScroll: true });
+            void command.execute();
+          }
           else if (command.disabledReason) onCommandUnavailable(command.disabledReason);
         } else if (event.key === "Escape") {
           event.preventDefault();

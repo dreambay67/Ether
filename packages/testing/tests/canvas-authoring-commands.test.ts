@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EtherNode } from "@ether/schema";
 
-import { commandIdForKeyboard } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
+import { commandIdForKeyboard, commandPreservesCanvasFocus } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
 import { marqueeHitIds, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
@@ -27,6 +27,14 @@ describe("canvas authoring command map", () => {
     expect(key("Enter", { ctrlKey: true })).toBe("runSelected");
     expect(key("k", { ctrlKey: true })).toBe("palette");
     expect(key("Home")).toBe("fit");
+  });
+
+  it("keeps canvas focus for graph commands that do not open an editor or dialog", () => {
+    expect(commandPreservesCanvasFocus("delete")).toBe(true);
+    expect(commandPreservesCanvasFocus("undo")).toBe(true);
+    expect(commandPreservesCanvasFocus("edit")).toBe(false);
+    expect(commandPreservesCanvasFocus("rename")).toBe(false);
+    expect(commandPreservesCanvasFocus("palette")).toBe(false);
   });
 
   it("toggles additive selection without duplicate IDs", () => {
