@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t21-plugin-coproduction",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T15:08:38.475Z",
+  "finishedAt": "2026-08-09T15:09:26.064Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "e5de95dc6fe5c8978815c1435d6451f941656352",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+      }
+    ]
+  },
+  "actions": [],
+  "errors": []
+}

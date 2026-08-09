@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t23-j06-keyboard-packaged",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T15:25:36.032Z",
+  "finishedAt": "2026-08-09T15:25:48.642Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "2dd2fd54e60e421386f9bba92b8d331fbd46b748",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "2d90842c3b03c131567522e8cd9b63b31064cb97fa52d4c1b31bb1d7e19337ec"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Initial keyboard focus",
+      "expected": "The keyboard-only J06 route starts from the application's actual current focus.",
+      "actual": "body",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "observation",
+      "label": "Reach the Library search",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached  with 27 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 3,
+      "kind": "keyboard-command",
+      "label": "Select the Library query",
+      "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 3
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Filter Library for Prompt",
+      "expected": "The Library narrows using text typed through its keyboard-reached search field.",
+      "actual": "Typed 6 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 5,
+      "kind": "observation",
+      "label": "Add Prompt from the Library",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Add Prompt with 1 Tab key event.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 6,
+      "kind": "keyboard-command",
+      "label": "Add Prompt from the Library",
+      "expected": "Enter creates the canonical node through the ordinary Library command.",
+      "actual": "Pressed Enter.",
+      "durationMs": 51
+    },
+    {
+      "sequence": 7,
+      "kind": "observation",
+      "label": "Reach the Library search",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached  with 57 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 8,
+      "kind": "keyboard-command",
+      "label": "Select the Library query",
+      "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 9,
+      "kind": "observation",
+      "label": "Filter Library for Worker",
+      "expected": "The Library narrows using text typed through its keyboard-reached search field.",
+      "actual": "Typed 6 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 10,
+      "kind": "observation",
+      "label": "Add Worker from the Library",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Add Worker with 2 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 11,
+      "kind": "keyboard-command",
+      "label": "Add Worker from the Library",
+      "expected": "Enter creates the canonical node through the ordinary Library command.",
+      "actual": "Pressed Enter.",
+      "durationMs": 34
+    },
+    {
+      "sequence": 12,
+      "kind": "observation",
+      "label": "Reach the Library search",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached  with 63 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 13,
+      "kind": "keyboard-command",
+      "label": "Select the Library query",
+      "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 3
+    },
+    {
+      "sequence": 14,
+      "kind": "observation",
+      "label": "Filter Library for Worker",
+      "expected": "The Library narrows using text typed through its keyboard-reached search field.",
+      "actual": "Typed 6 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 15,
+      "kind": "observation",
+      "label": "Add Worker from the Library",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Add Worker with 3 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 16,
+      "kind": "keyboard-command",
+      "label": "Add Worker from the Library",
+      "expected": "Enter creates the canonical node through the ordinary Library command.",
+      "actual": "Pressed Enter.",
+      "durationMs": 26
+    },
+    {
+      "sequence": 17,
+      "kind": "observation",
+      "label": "Reach the Library search",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached  with 75 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 18,
+      "kind": "keyboard-command",
+      "label": "Select the Library query",
+      "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 19,
+      "kind": "observation",
+      "label": "Filter Library for Image Generator",
+      "expected": "The Library narrows using text typed through its keyboard-reached search field.",
+      "actual": "Typed 15 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 20,
+      "kind": "observation",
+      "label": "Add Image Generator from the Library",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Add Image Generator with 3 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 21,
+      "kind": "keyboard-command",
+      "label": "Add Image Generator from the Library",
+      "expected": "Enter creates the canonical node through the ordinary Library command.",
+      "actual": "Pressed Enter.",
+      "durationMs": 27
+    },
+    {
+      "sequence": 22,
+      "kind": "observation",
+      "label": "Begin Prompt to Worker A",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Text output with 17 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 23,
+      "kind": "keyboard-command",
+      "label": "Begin Prompt to Worker A",
+      "expected": "Enter begins a keyboard-owned connection intent from the source channel.",
+      "actual": "Pressed Enter.",
+      "durationMs": 11
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t23-keyboard-packaged",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T15:25:49.587Z",
+  "finishedAt": "2026-08-09T15:26:02.908Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "2dd2fd54e60e421386f9bba92b8d331fbd46b748",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "2d90842c3b03c131567522e8cd9b63b31064cb97fa52d4c1b31bb1d7e19337ec"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "observation",
+      "label": "Initial keyboard focus",
+      "expected": "Keyboard traversal begins from the application's actual initial active element.",
+      "actual": "body",
+      "durationMs": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "observation",
+      "label": "Reach the Library search",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached  with 27 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 3,
+      "kind": "keyboard-command",
+      "label": "Select the Library query",
+      "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 3
+    },
+    {
+      "sequence": 4,
+      "kind": "observation",
+      "label": "Filter Library for Prompt",
+      "expected": "The Library narrows using text typed through its keyboard-reached search field.",
+      "actual": "Typed 6 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 5,
+      "kind": "observation",
+      "label": "Add Prompt from the Library",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Add Prompt with 1 Tab key event.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 6,
+      "kind": "keyboard-command",
+      "label": "Add Prompt from the Library",
+      "expected": "Enter creates the canonical node through the ordinary Library command.",
+      "actual": "Pressed Enter.",
+      "durationMs": 39
+    },
+    {
+      "sequence": 7,
+      "kind": "observation",
+      "label": "Reach the authoring canvas",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Authoring canvas with 15 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 8,
+      "kind": "keyboard-command",
+      "label": "Open canvas quick add",
+      "expected": "N opens the searchable node palette while the canvas owns focus.",
+      "actual": "Pressed N.",
+      "durationMs": 16
+    },
+    {
+      "sequence": 9,
+      "kind": "observation",
+      "label": "Filter quick add for Note",
+      "expected": "Quick add filters with text typed into its product-owned autofocus field.",
+      "actual": "Typed 4 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 10,
+      "kind": "keyboard-command",
+      "label": "Insert Note from quick add",
+      "expected": "Enter inserts the active matching canonical node and returns focus to the canvas.",
+      "actual": "Pressed Enter.",
+      "durationMs": 30
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t22-shell-1920x1080-100",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T15:13:05.885Z",
+  "finishedAt": "2026-08-09T15:13:10.329Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "938ed29882cb7dc7c124dc7d90a182d21ecd8fbc",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Open Build workspace",
+      "expected": "Build keeps the ordinary document workspace available without replacing the durable graph.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 74
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Open Focus workspace",
+      "expected": "Focus keeps the ordinary document workspace available without replacing the durable graph.",
+      "actual": "Left click at (110, 89).",
+      "durationMs": 32
+    },
+    {
+      "sequence": 3,
+      "kind": "left-click",
+      "label": "Open Run workspace",
+      "expected": "Run keeps the ordinary document workspace available without replacing the durable graph.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 36
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Open Review workspace",
+      "expected": "Review keeps the ordinary document workspace available without replacing the durable graph.",
+      "actual": "Left click at (232, 89).",
+      "durationMs": 35
+    },
+    {
+      "sequence": 5,
+      "kind": "left-click",
+      "label": "Open Build workspace",
+      "expected": "Build keeps the ordinary document workspace available without replacing the durable graph.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 46
+    },
+    {
+      "sequence": 6,
+      "kind": "left-click",
+      "label": "Add prompt.text from Node Library",
+      "expected": "The blank document creates prompt.text through the canonical registry.",
+      "actual": "Left click at (108, 511).",
+      "durationMs": 92
+    },
+    {
+      "sequence": 7,
+      "kind": "left-click",
+      "label": "Add generation.image from Node Library",
+      "expected": "The blank document creates generation.image through the canonical registry.",
+      "actual": "Left click at (108, 878).",
+      "durationMs": 53
+    }
+  ],
+  "errors": []
+}

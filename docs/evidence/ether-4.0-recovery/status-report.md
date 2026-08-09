@@ -1,8 +1,8 @@
-# Ether 4.0 recovery baseline status report
+# Ether 4.0 recovery gate status report
 
-Generated from ledger schema ether-4.0-recovery-ledger@1 at source baseline commit `03beeadad2ce494ca6b972791ce554a8a3b7e552` (recovery-plan baseline `537607ebc2ad4bdec476fbb987a38fadf268b125`).
+Generated from ledger schema ether-4.0-recovery-ledger@1 at candidate commit `2dd2fd54e60e421386f9bba92b8d331fbd46b748` and canonical app.asar hash `f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875`.
 
-This is a Phase 0 triage report. It does not approve a phase gate or release.
+This is a gate validator report. It does not approve a phase gate or release.
 
 ## Counts by current status
 
@@ -18,7 +18,7 @@ This is a Phase 0 triage report. It does not approve a phase gate or release.
 | VERIFIED-PACKAGED | 0 |
 | **Total** | **250** |
 
-Release-blocker records: 250; unresolved at baseline: 250.
+Release-blocker records: 250; unresolved in the ledger: 250.
 
 ## Counts by area
 
@@ -51,4 +51,531 @@ T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit 
 
 Historical checked items are retained in `priorEvidence` only and remain PRESENT-UNPROVEN until candidate evidence is rerun. Every requirement carries required evidence classes, owners, release-blocker state, and (for M requirements) J01-J10 owner routes.
 
-Validator baseline result: PASS (schema/coverage only).
+Validator gate result: FAIL (524 errors).
+
+## Validator findings
+
+- AC-A01-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A01-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-013 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-014 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-015 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-016 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-017 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-018 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-019 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-020 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-021 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-022 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-023 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-024 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-025 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A02-026 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A03-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A04-001 lacks terminal gate evidence (FAIL).
+- AC-A04-002 lacks terminal gate evidence (FAIL).
+- AC-A04-003 lacks terminal gate evidence (FAIL).
+- AC-A04-004 lacks terminal gate evidence (FAIL).
+- AC-A04-005 lacks terminal gate evidence (FAIL).
+- AC-A04-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A04-007 lacks terminal gate evidence (FAIL).
+- AC-A04-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-003 lacks terminal gate evidence (FAIL).
+- AC-A05-004 lacks terminal gate evidence (FAIL).
+- AC-A05-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A05-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-013 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A06-014 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A07-001 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A07-002 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A07-003 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A07-004 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A08-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-013 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-014 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A08-015 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A09-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A10-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A11-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A11-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A11-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A11-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-013 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-014 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-015 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-016 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A12-017 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A13-001 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-002 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-003 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-004 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-005 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-006 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-007 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-008 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-009 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-010 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-011 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-012 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-013 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-014 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A13-015 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A14-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-013 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-014 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-015 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-016 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A14-017 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A15-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-013 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A16-014 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A17-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-002 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-003 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-004 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-005 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-006 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-007 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-008 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-009 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-010 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-011 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A18-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- AC-A19-001 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-002 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-003 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-004 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-005 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-006 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-007 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- AC-A19-008 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-002 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-002 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-002 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-003 lacks terminal gate evidence (FAIL).
+- RX-003 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-003 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-004 lacks terminal gate evidence (MISSING).
+- RX-005 lacks terminal gate evidence (MISSING).
+- RX-006 lacks terminal gate evidence (FAIL).
+- RX-007 lacks terminal gate evidence (MISSING).
+- RX-008 lacks terminal gate evidence (MISSING).
+- RX-009 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-010 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-010 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-010 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-011 lacks terminal gate evidence (FAIL).
+- RX-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-013 lacks terminal gate evidence (MISSING).
+- RX-014 lacks terminal gate evidence (MISSING).
+- RX-015 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-016 lacks terminal gate evidence (MISSING).
+- RX-017 lacks terminal gate evidence (FAIL).
+- RX-018 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-019 lacks terminal gate evidence (MISSING).
+- RX-020 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-021 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-021 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-021 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-022 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-022 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-022 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-023 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-023 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-023 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-024 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-024 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
+- RX-024 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-025 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- RX-026 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-027 lacks terminal gate evidence (PRESENT-UNPROVEN).
+- RX-028 lacks terminal gate evidence (MISSING).
+- RX-029 lacks terminal gate evidence (FAIL).
+- RX-030 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
+- J01 primary journey is missing an action log.
+- J02 primary journey is missing an action log.
+- J03 primary journey is missing an action log.
+- J04 primary journey is missing an action log.
+- J05 primary journey is missing an action log.
+- J06 primary journey is missing an action log.
+- J07 primary journey is missing an action log.
+- J08 primary journey is missing an action log.
+- J09 primary journey is missing an action log.
+- J10 primary journey is missing an action log.
+- AC-A01-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A01-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-015 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-016 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-017 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-018 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-019 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-020 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-021 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-022 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-023 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-024 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-025 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A02-026 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A03-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A04-001 is an open release blocker (FAIL).
+- AC-A04-002 is an open release blocker (FAIL).
+- AC-A04-003 is an open release blocker (FAIL).
+- AC-A04-004 is an open release blocker (FAIL).
+- AC-A04-005 is an open release blocker (FAIL).
+- AC-A04-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A04-007 is an open release blocker (FAIL).
+- AC-A04-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-003 is an open release blocker (FAIL).
+- AC-A05-004 is an open release blocker (FAIL).
+- AC-A05-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A05-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A06-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A07-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A07-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A07-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A07-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A08-015 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A09-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A10-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A11-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A11-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A11-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A11-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-015 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-016 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A12-017 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-001 is an open release blocker (FAIL).
+- AC-A13-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A13-015 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-015 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-016 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A14-017 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A15-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-013 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A16-014 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A17-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-008 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-009 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-010 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-011 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A18-012 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-001 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-002 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-003 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-004 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-005 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-006 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-007 is an open release blocker (PRESENT-UNPROVEN).
+- AC-A19-008 is an open release blocker (PRESENT-UNPROVEN).
+- RX-001 is an open release blocker (PRESENT-UNPROVEN).
+- RX-002 is an open release blocker (FAIL).
+- RX-003 is an open release blocker (FAIL).
+- RX-004 is an open release blocker (MISSING).
+- RX-005 is an open release blocker (MISSING).
+- RX-006 is an open release blocker (FAIL).
+- RX-007 is an open release blocker (MISSING).
+- RX-008 is an open release blocker (MISSING).
+- RX-009 is an open release blocker (FAIL).
+- RX-010 is an open release blocker (FAIL).
+- RX-011 is an open release blocker (FAIL).
+- RX-012 is an open release blocker (PRESENT-UNPROVEN).
+- RX-013 is an open release blocker (MISSING).
+- RX-014 is an open release blocker (MISSING).
+- RX-015 is an open release blocker (PRESENT-UNPROVEN).
+- RX-016 is an open release blocker (MISSING).
+- RX-017 is an open release blocker (FAIL).
+- RX-018 is an open release blocker (FAIL).
+- RX-019 is an open release blocker (MISSING).
+- RX-020 is an open release blocker (FAIL).
+- RX-021 is an open release blocker (PRESENT-UNPROVEN).
+- RX-022 is an open release blocker (PRESENT-UNPROVEN).
+- RX-023 is an open release blocker (PRESENT-UNPROVEN).
+- RX-024 is an open release blocker (PRESENT-UNPROVEN).
+- RX-025 is an open release blocker (PRESENT-UNPROVEN).
+- RX-026 is an open release blocker (PRESENT-UNPROVEN).
+- RX-027 is an open release blocker (PRESENT-UNPROVEN).
+- RX-028 is an open release blocker (MISSING).
+- RX-029 is an open release blocker (FAIL).
+- RX-030 is an open release blocker (PRESENT-UNPROVEN).

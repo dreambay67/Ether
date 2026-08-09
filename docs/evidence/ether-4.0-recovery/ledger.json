@@ -8,10 +8,11 @@
     "recovery": "docs/product/ether-4.0-recovery-acceptance.md"
   },
   "candidate": {
-    "commit": null,
-    "packageHash": null,
-    "installerHash": null,
-    "validatedAt": null
+    "commit": "2dd2fd54e60e421386f9bba92b8d331fbd46b748",
+    "packageHash": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875",
+    "packageArtifact": "release/windows/win-unpacked/resources/app.asar",
+    "installerHash": "0c64425960a92ae9508964828e0ee8095550011286aac35a7ae5377eb31954ea",
+    "validatedAt": "2026-08-09T23:56:12.5913513+02:00"
   },
   "statusModel": [
     "OPEN",
