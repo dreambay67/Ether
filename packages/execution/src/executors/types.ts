@@ -58,6 +58,8 @@ export type LocalMediaOutput = {
 export type ExecutorResult =
   | {
       kind: "complete";
+      /** Provider identity returned by a provider-backed executor. */
+      providerId?: string;
       outputs: ExecutorPayloadDraft[];
       effects?: Array<Record<string, unknown>>;
       adapterIntermediates?: Array<{
@@ -95,7 +97,7 @@ export type MediaInterpretationFacet = {
     model?: string;
     reasoningEffort?: string;
     signal: AbortSignal;
-  }): Promise<{ text: string; metadata?: Record<string, unknown> }>;
+  }): Promise<{ providerId: string; text: string; metadata?: Record<string, unknown> }>;
 };
 
 export type LocalMediaFacet = {

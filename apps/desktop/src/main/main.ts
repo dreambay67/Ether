@@ -59,6 +59,10 @@ import {
 } from "./lifecycle.js";
 import { resolveRecoveryShellIdentity } from "./recoveryShellIdentity.js";
 import { RECOVERY_SIMULATION_CAPABILITIES, resolveRecoverySimulation } from "./recoverySimulation.js";
+import {
+  RECOVERY_WORKER_SIMULATION_CAPABILITIES,
+  createRecoveryWorkerSimulationFacets
+} from "./recoveryWorkerSimulation.js";
 import { createRecoveryAssociationDiagnostics } from "./recoveryAssociationDiagnostics.js";
 import { canvasCommandForAccelerator } from "./canvasAccelerator.js";
 import {
@@ -198,13 +202,18 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
           notes: ["Task 9 production lifecycle does not install a generation provider."]
         }, "No production image provider is configured."),
     simulationMode,
-    ...(providerService ? { executionProviders: {
+    ...(simulationMode ? {
+      executionProviders: createRecoveryWorkerSimulationFacets()
+    } : providerService ? { executionProviders: {
       image: providerService.codex.generation,
       worker: providerService.codex.assistant,
       evaluation: providerService.codex.evaluation
     } } : {}),
     ...(simulationMode ? {
-      providerCapabilities: RECOVERY_SIMULATION_CAPABILITIES
+      providerCapabilities: [
+        ...RECOVERY_SIMULATION_CAPABILITIES,
+        ...RECOVERY_WORKER_SIMULATION_CAPABILITIES
+      ]
     } : providerService ? {
       providerCapabilities: providerService.capabilities,
       providerResolver: ({ binding }) => providerService.resolveExecutionProviders(binding)

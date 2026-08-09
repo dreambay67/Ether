@@ -213,6 +213,43 @@ describe("DurableScheduler", () => {
     expect(resolved).toEqual(["unverified-image", "unverified-image"]);
   });
 
+  it("persists the verified sealed provider binding for provider-backed Worker completion", async () => {
+    const fixture = new ConcurrentJobsFixture();
+    const binding = providerBinding("codex-assistant", 1);
+    const job = fixture.addJob("provider-provenance", 1, binding, 1);
+    const executor = new ControlledExecutor();
+    const scheduler = fixture.scheduler(executor);
+
+    const run = scheduler.run(job.id);
+    await executor.waitForActive(1);
+    executor.release();
+    await run;
+
+    expect(fixture.acceptedProducers).toEqual([{
+      kind: "provider",
+      providerId: binding.providerId,
+      profileId: binding.profileId,
+      modelId: binding.modelId,
+      capabilitySnapshot: binding.capabilitySnapshot
+    }]);
+  });
+
+  it("rejects a Worker completion whose reported provider differs from its sealed binding", async () => {
+    const fixture = new ConcurrentJobsFixture();
+    const job = fixture.addJob("provider-mismatch", 1, providerBinding("codex-assistant", 1), 1);
+    const executor = new ControlledExecutor({ providerId: "unexpected-provider" });
+    const scheduler = fixture.scheduler(executor);
+
+    const run = scheduler.run(job.id);
+    await executor.waitForActive(1);
+    executor.release();
+    await run;
+
+    expect((await fixture.getJob(job.id))?.status).toBe("failed");
+    expect(fixture.failures).toEqual([expect.objectContaining({ code: "PROVIDER_MISMATCH" })]);
+    expect(fixture.acceptedProducers).toEqual([]);
+  });
+
   it("cancels a claim waiting for provider-family capacity without disturbing the active sibling", async () => {
     const fixture = new ConcurrentJobsFixture();
     const binding = providerBinding("codex-assistant", 4);
@@ -278,6 +315,7 @@ class ControlledExecutor implements StepExecutor {
     failWorkItemId?: string;
     failAfterActive?: number;
     failOnce?: boolean;
+    providerId?: string;
   } = {}) {
     this.released = new Promise<void>((resolve) => { this.releaseBlocked = resolve; });
   }
@@ -311,6 +349,7 @@ class ControlledExecutor implements StepExecutor {
       await this.released;
       return {
         kind: "complete",
+        providerId: this.options.providerId ?? binding.providerId,
         outputs: [{
           channel: "data",
           role: "general",
@@ -355,6 +394,7 @@ class ConcurrentJobsFixture implements SchedulerPersistence {
   readonly documentId = "concurrency-document";
   readonly path = "C:\\EtherTest\\scheduler-concurrency.ether";
   readonly failures: Array<{ attemptId: string; code: string; message: string }> = [];
+  readonly acceptedProducers: Array<Record<string, unknown>> = [];
   private readonly retryResults = new Map<string, ExecutionJob>();
   private readonly records = new Map<string, {
     job: ExecutionJob;
@@ -545,6 +585,8 @@ class ConcurrentJobsFixture implements SchedulerPersistence {
       (workItem) => workItem.id === claim.workItem.plannedWorkItemId
     );
     if (record.states[ordinal] !== "running") return {};
+    const outputs = input.outputs as Array<{ version: { producer: Record<string, unknown> } }>;
+    this.acceptedProducers.push(...outputs.map((output) => output.version.producer));
     record.states[ordinal] = "accepted";
     if (record.states.every((state) => state === "accepted")) {
       record.job = {

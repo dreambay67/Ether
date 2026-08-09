@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { EtherNode } from "@ether/schema";
 import { ContextHelp } from "../../help/ContextHelp";
 import { DraftConflict } from "./DraftConflict";
@@ -11,8 +11,9 @@ export function Help({ text, label }: { text: string; label: string }) {
 }
 
 export function InspectorSection({ title, help, children, advanced = false }: { title: string; help: string; children: React.ReactNode; advanced?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
   const content = <div className="inspector-section-content">{children}</div>;
-  return advanced ? <details className="inspector-section inspector-disclosure"><summary>{title}<Help label={title} text={help} /></summary>{content}</details> : <section className="inspector-section"><div className="inspector-section-heading"><h3>{title}</h3><Help label={title} text={help} /></div>{content}</section>;
+  return advanced ? <section className="inspector-section inspector-disclosure"><div className="inspector-disclosure-heading"><button type="button" className="inspector-disclosure-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{title}</button><Help label={title} text={help} /></div>{expanded ? content : null}</section> : <section className="inspector-section"><div className="inspector-section-heading"><h3>{title}</h3><Help label={title} text={help} /></div>{content}</section>;
 }
 
 export function NodeSetup({ node, disabled, onUpdate }: { node: EtherNode; disabled: boolean; onUpdate(next: EtherNode, title: string): Promise<boolean> }) {

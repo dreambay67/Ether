@@ -212,7 +212,16 @@ export class DurableScheduler {
       } else if (result.kind === "waiting-review") {
         await this.persistence.waitForReview({ claim, ...result.checkpoint });
       } else {
-        await this.acceptLocalCompletion(claim, step, inputs, result.outputs, result.effects, result.adapterIntermediates);
+        await this.acceptLocalCompletion(
+          claim,
+          step,
+          binding,
+          result.providerId,
+          inputs,
+          result.outputs,
+          result.effects,
+          result.adapterIntermediates
+        );
       }
     });
     await this.options.onEventsAvailable?.();
@@ -235,6 +244,8 @@ export class DurableScheduler {
   private async acceptLocalCompletion(
     claim: ExecutorClaim,
     step: ExecutorClaim["plan"]["steps"][number],
+    binding: ProviderBinding | null,
+    actualProviderId: string | undefined,
     inputs: PayloadEnvelope[],
     drafts: ExecutorPayloadDraft[],
     effects: Array<Record<string, unknown>> | undefined,
@@ -243,6 +254,7 @@ export class DurableScheduler {
     if (drafts.length === 0) {
       throw new ExecutorFailure("EMPTY_EXECUTOR_OUTPUT", `${step.executor} completed without producing an immutable output.`);
     }
+    const producer = completionProducer(step, binding, actualProviderId);
     const completedAt = new Date().toISOString();
     const outputs = drafts.map((draft, ordinal) => {
       const outputVersionId = stableId("output", claim.attempt.id, ordinal);
@@ -255,7 +267,7 @@ export class DurableScheduler {
         inputPayloadIds: inputs.map((input) => input.id),
         selectedOutputVersionIds: unique(inputs.map((input) => input.source.outputVersionId)),
         compiledContextHash: claim.plan.contentHash,
-        producer: { kind: "local", executor: step.executor },
+        producer,
         outputPayloadIds: [payloadId],
         parentOutputVersionId: null,
         approval: step.parameters.reviewPolicy === "auto-apply"
@@ -767,6 +779,27 @@ function providerBindingForWorkItem(
   // provider remains required in the persisted schema for compatibility with
   // plans compiled before nullable providerBinding existed.
   return LEGACY_PROVIDER_EXECUTORS.has(step.executor) ? step.provider : null;
+}
+
+function completionProducer(
+  step: PlanStep,
+  binding: ProviderBinding | null,
+  actualProviderId: string | undefined
+): NodeOutputVersion["producer"] {
+  if (binding === null) return { kind: "local", executor: step.executor };
+  if (actualProviderId !== binding.providerId) {
+    throw new ExecutorFailure(
+      "PROVIDER_MISMATCH",
+      `Step ${step.id} requires ${binding.providerId}, but its executor returned ${actualProviderId ?? "no provider identity"}.`
+    );
+  }
+  return {
+    kind: "provider",
+    providerId: binding.providerId,
+    profileId: binding.profileId,
+    modelId: binding.modelId,
+    capabilitySnapshot: binding.capabilitySnapshot
+  };
 }
 
 function effectiveStepForWorkItem(step: PlanStep, workItem: PlannedWorkItem): PlanStep {

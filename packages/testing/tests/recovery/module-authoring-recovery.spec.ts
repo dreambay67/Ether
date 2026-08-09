@@ -123,8 +123,8 @@ test("authors, protects, edits, navigates, reorganizes, and dissolves a Module f
     await expect(moduleCard).toHaveAttribute("data-module-locked", "true");
     await input.screenshot("04-module-membership-relocked.png", evidence, "Capture relocked membership", "The two-member Module is visibly relocked after a complete membership round trip.");
     await input.leftClick(inspector.getByRole("button", { name: "Unlock module" }), "Unlock before dissolution", "Dissolution remains a deliberate action unavailable while locked.");
-    const advanced = inspector.locator("details.inspector-disclosure");
-    await advanced.locator("summary").click();
+    const advanced = inspector.locator("section.inspector-disclosure");
+    await advanced.getByRole("button", { name: "Structure and dissolution", exact: true }).click();
     const dissolve = advanced.getByRole("button", { name: /Dissolve module/u });
     await expect(dissolve).toBeEnabled();
     page.once("dialog", (dialog) => void dialog.accept());

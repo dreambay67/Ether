@@ -63,7 +63,7 @@ export type RecoveryWorkerSimulationFacets = {
       model?: string;
       reasoningEffort?: string;
       signal: AbortSignal;
-    }): Promise<{ text: string; metadata?: Record<string, unknown> }>;
+    }): Promise<{ providerId: string; text: string; metadata?: Record<string, unknown> }>;
   };
 };
 
@@ -113,6 +113,7 @@ export function createRecoveryWorkerSimulationFacets(): RecoveryWorkerSimulation
     },
     media: {
       interpret: async (input) => ({
+        providerId: RECOVERY_WORKER_SIMULATION_PROVIDER_ID,
         text: transform(input),
         metadata: simulationMetadata("interpret")
       })

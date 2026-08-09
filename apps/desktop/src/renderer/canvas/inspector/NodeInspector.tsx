@@ -17,7 +17,11 @@ import { runPlanContextFingerprint } from "./runPlanPresentation";
 import type { InspectorNodeContext } from "./types";
 import { useInspectorDraft } from "./useInspectorDraft";
 
-type AppBridge = { command(command: unknown): Promise<{ payload?: unknown }>; query(query: unknown): Promise<{ payload?: Record<string, unknown> }> };
+type AppBridge = {
+  command(command: unknown): Promise<{ payload?: unknown }>;
+  query(query: unknown): Promise<{ payload?: Record<string, unknown> }>;
+  onEvent?(listener: (event: { name?: string; documentId?: string }) => void): () => void;
+};
 const app = () => (window.ether as unknown as { application?: AppBridge }).application;
 
 // Keep the renderer's capability matching browser-safe. The concrete provider
@@ -35,6 +39,17 @@ function OutputVersions({ context }: { context: InspectorNodeContext }) {
   const [pinEdges, setPinEdges] = useState<Record<string, string>>({});
   const refresh = useCallback(async () => { try { const response = await app()?.query(documentQuery("node.outputs", document.documentId, { nodeId: node.id })); setOutputs((response?.payload?.outputs as NodeOutputVersion[] | undefined) ?? []); } catch (error) { report(error instanceof Error ? error.message : "Output versions could not be loaded."); } }, [document.documentId, node.id, report]);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => app()?.onEvent?.((event) => {
+    if (event.documentId !== document.documentId) return;
+    if (
+      event.name === "output.created" ||
+      event.name === "output.reviewed" ||
+      event.name === "output.pinned" ||
+      event.name === "job.stateChanged" ||
+      event.name === "workItem.stateChanged" ||
+      event.name === "attempt.stateChanged"
+    ) void refresh();
+  }), [document.documentId, refresh]);
   const command = async (name: string, payload: Record<string, unknown>) => { try { await app()?.command(documentCommand(name, document.documentId, payload)); await refresh(); report(`${name.replace(".", " ")} saved.`); return true; } catch (error) { report(error instanceof Error ? error.message : "That output action needs attention."); return false; } };
   if (!outputs.length) return <section className="inspector-output-empty" data-testid="output-versions"><strong>Output versions</strong><span>Immutable versions appear here after execution completes.</span></section>;
   const outgoing = graph.edges.filter((edge) => edge.from.kind === "node" && edge.from.nodeId === node.id);

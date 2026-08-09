@@ -17,6 +17,7 @@ export class MediaInterpretationExecutor implements StepExecutor {
     });
     return {
       kind: "complete",
+      providerId: result.providerId,
       outputs: [{
         channel: "text",
         role: "general",

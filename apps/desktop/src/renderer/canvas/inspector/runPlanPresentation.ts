@@ -15,6 +15,26 @@ export type ProviderSettingsPresentation = {
   settings: string;
 };
 
+export type ReferenceInputPresentation = {
+  key: string;
+  displayName: string | null;
+  inclusion: "included" | "excluded" | null;
+  role: string | null;
+  channel: string | null;
+  memberKind: "linked-reference" | "embedded-reference" | "embedded-artifact" | null;
+  edgeId: string | null;
+  sourceNodeId: string | null;
+  bindingId: string | null;
+  payloadId: string | null;
+  referenceId: string | null;
+  artifactId: string | null;
+  fingerprint: {
+    byteLength: number | null;
+    modifiedAt: number | null;
+    sampleSha256: string | null;
+  } | null;
+};
+
 export type RunPlanPresentation = {
   planId: string | null;
   contentHash: string | null;
@@ -31,6 +51,7 @@ export type RunPlanPresentation = {
   effectiveParallelism: number | null;
   batchSummary: { dimensions: number; exclusions: number; workItemCount: number } | null;
   providerSettings: ProviderSettingsPresentation[];
+  referenceInputs: ReferenceInputPresentation[];
   steps: RunPlanStepPresentation[];
 };
 
@@ -62,6 +83,7 @@ export function runPlanPresentation(plan: Partial<ExecutionPlan>): RunPlanPresen
         settings: sanitizedProviderSettings(binding.settings)
       }];
     }),
+    referenceInputs: referenceInputsForPlan(steps.map((step) => step.compiledContext)),
     steps: steps.map((step) => ({
       id: step.id,
       subject: step.subject?.kind === "adapter" ? `Adapter · ${step.subject.adapterId}` : `Node · ${step.nodeId}`,
@@ -71,6 +93,65 @@ export function runPlanPresentation(plan: Partial<ExecutionPlan>): RunPlanPresen
       compiledPrompt: step.compiledPrompt
     }))
   };
+}
+
+/**
+ * `compiledContext` is persisted JSON, so preview it defensively instead of
+ * resolving the live Reference Set. A member appears here only when it was
+ * sealed into the immutable plan by the application compiler.
+ */
+function referenceInputsForPlan(compiledContexts: readonly unknown[]): ReferenceInputPresentation[] {
+  const candidates = compiledContexts.flatMap((compiledContext) =>
+    isRecord(compiledContext) && Array.isArray(compiledContext.referenceInputs) ? compiledContext.referenceInputs : []
+  );
+  return candidates
+    .map((candidate, index) => referenceInputPresentation(candidate, index))
+    .filter((candidate): candidate is { order: number | null; index: number; presentation: ReferenceInputPresentation } => candidate !== null)
+    .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) || left.index - right.index)
+    .map(({ presentation }) => presentation);
+}
+
+function referenceInputPresentation(candidate: unknown, index: number): { order: number | null; index: number; presentation: ReferenceInputPresentation } | null {
+  if (!isRecord(candidate)) return null;
+  const memberKind = candidate.memberKind;
+  const fingerprint = isRecord(candidate.fingerprint) ? {
+    byteLength: nonnegativeNumber(candidate.fingerprint.byteLength),
+    modifiedAt: nonnegativeNumber(candidate.fingerprint.modifiedAt),
+    sampleSha256: stringValue(candidate.fingerprint.sampleSha256)
+  } : null;
+  const bindingId = stringValue(candidate.id);
+  const payloadId = stringValue(candidate.payloadId);
+  return {
+    order: nonnegativeNumber(candidate.order),
+    index,
+    presentation: {
+      key: bindingId ?? payloadId ?? `reference-input-${index}`,
+      displayName: stringValue(candidate.displayName),
+      inclusion: typeof candidate.enabled === "boolean" ? candidate.enabled ? "included" : "excluded" : "included",
+      role: stringValue(candidate.role),
+      channel: stringValue(candidate.channel),
+      memberKind: memberKind === "linked-reference" || memberKind === "embedded-reference" || memberKind === "embedded-artifact" ? memberKind : null,
+      edgeId: stringValue(candidate.edgeId),
+      sourceNodeId: stringValue(candidate.sourceNodeId),
+      bindingId,
+      payloadId,
+      referenceId: stringValue(candidate.referenceId),
+      artifactId: stringValue(candidate.artifactId),
+      fingerprint
+    }
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function nonnegativeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 // This deliberately excludes updatedAt. Timestamps are not revision identities;

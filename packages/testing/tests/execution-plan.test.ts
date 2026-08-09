@@ -165,7 +165,7 @@ function compile(
     graphRevisionId: "graph-revision-1",
     scope,
     capability,
-    providerCapabilities: [workerCapability, ...(providerCapabilities ?? [])],
+    providerCapabilities: [...(providerCapabilities ?? []), workerCapability],
     capabilities: ["codex.vision"],
     createdAt: timestamp
   });
@@ -388,6 +388,25 @@ describe("Ether execution planner", () => {
       .toBe("generate-image");
     expect(plan.steps.find((step) => step.nodeId === "edit")?.providerBinding?.capabilitySnapshot.operation)
       .toBe("edit-image");
+  });
+
+  it("resolves an unbound Worker to the active verified runtime route", () => {
+    const runtimeWorker: ProviderCapability = {
+      ...workerCapability,
+      providerId: "runtime-worker",
+      profileId: "worker:deterministic-transform-v1",
+      modelId: "deterministic-transform-v1",
+      provenance: "runtime-discovered"
+    };
+
+    const plan = compile(representativeGraph(), { kind: "node", nodeId: "worker" }, [runtimeWorker]);
+
+    expect(plan.steps.find((step) => step.nodeId === "worker")?.providerBinding).toMatchObject({
+      providerId: "runtime-worker",
+      profileId: "worker:deterministic-transform-v1",
+      modelId: "deterministic-transform-v1",
+      capabilitySnapshot: { operation: "llm", provenance: "runtime-discovered" }
+    });
   });
 
   it("expands Cartesian batch work deterministically with exclusions and bounded parallelism", () => {

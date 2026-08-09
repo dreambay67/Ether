@@ -23,6 +23,8 @@
     "test:module-authoring-recovery:packaged": "pnpm --filter @ether/testing test:module-authoring-recovery:packaged",
     "test:connection-inspector-recovery:packaged": "pnpm --filter @ether/testing test:connection-inspector-recovery:packaged",
     "test:t13-run-safety:packaged": "pnpm --filter @ether/testing test:t13-run-safety:packaged",
+    "test:t14-worker-review:packaged": "pnpm --filter @ether/testing test:t14-worker-review:packaged",
+    "test:t15-reference-set:packaged": "pnpm --filter @ether/testing test:t15-reference-set:packaged",
     "test:manual-recovery:packaged": "pnpm --filter @ether/testing test:manual-recovery:packaged",
     "test:document-lifecycle-recovery:source": "pnpm --filter @ether/testing test:document-lifecycle-recovery:source",
     "test:document-lifecycle-recovery:packaged": "pnpm --filter @ether/testing test:document-lifecycle-recovery:packaged",

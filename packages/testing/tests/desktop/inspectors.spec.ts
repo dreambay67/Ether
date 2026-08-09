@@ -31,7 +31,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
       { providerId: "fake-image", profileId: "studio", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["1:1", "16:9"], resolutions: [{ id: "1024", width: 1024, height: 1024, label: "1024 square" }, { id: "wide", width: 1536, height: 864, label: "1536 x 864" }], maxReferences: 4, maxOutputsPerCall: 3, supportsCancellation: true, supportsSeed: false, provenance: "conformance-verified", limitations: ["No seed support"] },
       { providerId: "fake-image", profileId: "cinematic", operation: "generate-image", inputChannels: ["text", "image"], outputChannels: ["image"], aspectRatios: ["21:9", "16:9"], resolutions: [{ id: "cinema", width: 2048, height: 878, label: "2K · 21:9", aspectRatio: "21:9", tier: "2K" }, { id: "cinema-4k", width: 4096, height: 1755, label: "4K · 21:9", aspectRatio: "21:9", tier: "4K" }, { id: "hd", width: 1920, height: 1080, label: "2K · 16:9", aspectRatio: "16:9", tier: "2K" }, { id: "uhd", width: 3840, height: 2160, label: "4K · 16:9", aspectRatio: "16:9", tier: "4K" }], maxReferences: 6, maxOutputsPerCall: 2, supportsCancellation: true, supportsSeed: true, provenance: "conformance-verified", limitations: [] }
     ];
-    const outputs = [
+    let outputs = [
       { id: "output-version-one", approval: { state: "unreviewed" }, outputPayloadIds: ["payload-1"], createdAt: now.toISOString() },
       { id: "output-version-two", approval: { state: "approved", reviewedAt: now.toISOString(), reviewer: "user" }, outputPayloadIds: ["payload-2"], createdAt: completed }
     ];
@@ -74,11 +74,16 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
       };
       documentEventListener?.({ kind: "snapshot", documentId: "inspector-document", revision: documentRevision, saveState: "saved", snapshot: descriptor() });
     } });
+    const applicationEventListeners = new Set<(event: unknown) => void>();
+    Object.defineProperty(window, "__externalOutputCreated", { value: () => {
+      outputs = [...outputs, { id: "live-output", approval: { state: "unreviewed" }, outputPayloadIds: ["payload-live"], createdAt: new Date().toISOString() }];
+      for (const listener of applicationEventListeners) listener({ name: "job.stateChanged", documentId: "inspector-document", payload: { jobId: "live-job", state: "completed" } });
+    } });
     Object.defineProperty(window, "ether", { value: {
       document: { onEvent: (listener: (event: unknown) => void) => { documentEventListener = listener; return () => { documentEventListener = undefined; }; }, bootstrap: async () => descriptor(), new: async () => descriptor(), open: async () => descriptor(), openDropped: async () => descriptor(), save: async () => descriptor(), saveAs: async () => descriptor(), saveCopy: async () => descriptor(), compact: async () => ({ beforeBytes: 1, afterBytes: 1 }), makePortable: async () => ({ cancelled: false, embeddedCount: 0, embeddedBytes: 0, expectedBytes: 0, expectedCount: 0, missingReferences: [] }), close: async () => null },
       graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) },
       application: {
-        onEvent: () => () => undefined,
+        onEvent: (listener: (event: unknown) => void) => { applicationEventListeners.add(listener); return () => { applicationEventListeners.delete(listener); }; },
         command: async (command: { name: string; payload: Record<string, unknown> }) => {
           commands.push(command);
           const transaction = command.payload.transaction as { operations?: Array<{ type: string; node?: typeof graph.nodes[number]; nodeId?: string }> } | undefined;
@@ -102,7 +107,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
               })
             };
           }
-          if (command.name === "run.preview") return { payload: { plan: { id: `plan-preview-${commands.length}`, contentHash: `sha256:v1:${"b".repeat(64)}`, scope: command.payload.scope, estimatedCalls: 1, batchSummary: { dimensions: 2, exclusions: 1, workItemCount: 3 }, workItems: [{ id: "work-preview" }], warnings: [], steps: [{ id: "step-preview", nodeId: "worker", subject: { kind: "node", nodeId: "worker" }, executor: "codex-llm", inputPayloadIds: ["payload-preview"], resolvedInputBindings: [{ name: "Direction", payloadId: "payload-preview", selector: "latest-approved" }], compiledPrompt: "Preview the intended campaign direction.", provider: { providerId: "preview-provider", profileId: "preview-profile", modelId: "preview-model", settings: { temperature: 0.4, apiKey: "preview-secret", nested: { accessToken: "nested-secret", topP: 0.9 } } } }] } } };
+          if (command.name === "run.preview") return { payload: { plan: { id: `plan-preview-${commands.length}`, contentHash: `sha256:v1:${"b".repeat(64)}`, scope: command.payload.scope, estimatedCalls: 1, batchSummary: { dimensions: 2, exclusions: 1, workItemCount: 3 }, workItems: [{ id: "work-preview" }], warnings: [], steps: [{ id: "step-preview", nodeId: "worker", subject: { kind: "node", nodeId: "worker" }, executor: "codex-llm", inputPayloadIds: ["payload-preview"], resolvedInputBindings: [{ name: "Direction", payloadId: "payload-preview", selector: "latest-approved" }], compiledPrompt: "Preview the intended campaign direction.", compiledContext: { referenceInputs: Object.freeze([{ id: "reference-binding-poster", edgeId: "reference-edge", sourceNodeId: "references", payloadId: "reference-payload-poster", channel: "image", role: "style", order: 2, displayName: "Poster grain", mediaType: "image/png", memberKind: "linked-reference", referenceId: "reference-poster", fingerprint: { byteLength: 8192, modifiedAt: 1777777777777, sampleSha256: "poster-fingerprint" } }, { id: "reference-binding-palette", edgeId: "reference-edge", sourceNodeId: "references", payloadId: "reference-payload-palette", channel: "image", role: "composition", order: 0, displayName: "Palette study", mediaType: "image/png", memberKind: "embedded-reference", referenceId: "reference-palette", contentKey: "embedded-palette", byteLength: 4096 }, { id: "reference-binding-layout", edgeId: "reference-edge", sourceNodeId: "references", payloadId: "reference-payload-layout", channel: "image", role: "general", order: 1, displayName: "Layout rhythm", mediaType: "image/jpeg", memberKind: "embedded-artifact", artifactId: "artifact-layout", contentKey: "embedded-layout", byteLength: 2048 }]) }, provider: { providerId: "preview-provider", profileId: "preview-profile", modelId: "preview-model", settings: { temperature: 0.4, apiKey: "preview-secret", nested: { accessToken: "nested-secret", topP: 0.9 } } } }] } } };
           if (command.name === "permission.grantRun") return { payload: { permitId: "permit-preview" } };
           if (command.name === "run.start") return { payload: { job: { id: "job-preview" } } };
           return { payload: { documentRevisionId: "revision-2", graphRevisions: [{ graphId: "inspector-graph", revisionId: `graph-revision-${commands.length + 1}` }] } };
@@ -177,7 +182,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   expect(savedPromptAssembly).toBe("replace");
   await expect(page.getByRole("button", { name: "Generate Output", exact: true })).toHaveCount(0);
   await expect(page.getByText("Node ID:", { exact: false })).not.toBeVisible();
-  await page.getByTestId("node-inspector").locator("details", { hasText: "Diagnostics & provenance" }).locator("summary").click();
+  await page.getByTestId("node-inspector").getByRole("button", { name: "Diagnostics & provenance", exact: true }).click();
   await expect(page.getByText("Node ID:", { exact: false })).toBeVisible();
 
   const selectNode = async (nodeId: string) => {
@@ -224,6 +229,16 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await expect(preparedPlan).toContainText("Plan ID · plan-preview-");
   await expect(preparedPlan).toContainText("Content hash · sha256:v1:");
   await expect(preparedPlan).toContainText("Batch · 2 dimensions · 1 exclusion · 3 work items");
+  const sealedReferences = preparedPlan.getByLabel("Sealed Reference Set members");
+  await expect(sealedReferences).toContainText("Reference Set · 3 included");
+  await expect(sealedReferences.locator(":scope > article > strong")).toHaveText(["Palette study", "Layout rhythm", "Poster grain"]);
+  await expect(sealedReferences.locator(":scope > article").nth(0)).toContainText("Included in this plan · Composition · Image · Embedded reference");
+  await expect(sealedReferences.locator(":scope > article").nth(1)).toContainText("Included in this plan · General · Image · Embedded artifact");
+  await expect(sealedReferences.locator(":scope > article").nth(2)).toContainText("Included in this plan · Style · Image · Linked reference");
+  await expect(sealedReferences.getByText("reference-payload-palette", { exact: false })).not.toBeVisible();
+  await expect(sealedReferences.getByText("poster-fingerprint", { exact: false })).not.toBeVisible();
+  await sealedReferences.locator(":scope > article").nth(2).getByText("Reference details", { exact: true }).click();
+  await expect(sealedReferences.locator(":scope > article").nth(2)).toContainText("Fingerprint · 8192 bytes · modified 1777777777777 · SHA-256 poster-fingerprint");
   await preparedPlan.getByText("Sanitized provider settings", { exact: true }).click();
   await expect(preparedPlan).toContainText('"temperature": 0.4');
   await expect(preparedPlan).toContainText("[redacted]");
@@ -252,6 +267,8 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByRole("button", { name: "Pin" }).first().click();
   await page.getByRole("button", { name: "Restore" }).first().click();
   await expect.poll(commandNames).toEqual(expect.arrayContaining(["review.approve", "review.reject", "output.edit", "output.pin", "output.restore"]));
+  await page.evaluate(() => (window as typeof window & { __externalOutputCreated(): void }).__externalOutputCreated());
+  await expect(page.getByTestId("output-versions")).toContainText("live-output");
 
   await selectNode("image");
   const beforeProvider = await commandCount();
@@ -275,7 +292,7 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
   await page.getByRole("button", { name: "Save provider settings" }).click();
   await expect.poll(commandCount).toBe(beforeProvider + 1);
   await expect(page.getByText("Provenance: conformance-verified", { exact: true })).not.toBeVisible();
-  await page.getByTestId("node-inspector").locator("details", { hasText: "Provider capability" }).locator("summary").click();
+  await page.getByTestId("node-inspector").getByRole("button", { name: "Provider capability", exact: true }).click();
   await expect(page.getByText("Provenance: conformance-verified", { exact: true })).toBeVisible();
 
   await selectNode("references");

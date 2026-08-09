@@ -112,6 +112,8 @@ export const testSuites = {
   recoveryModuleAuthoring: ["tests/recovery/module-authoring-recovery.spec.ts"],
   recoveryConnectionInspector: ["tests/recovery/connection-inspector-recovery.spec.ts"],
   recoveryT13RunSafety: ["tests/recovery/t13-run-safety-packaged.spec.ts"],
+  recoveryT14WorkerReview: ["tests/recovery/t14-worker-review-packaged.spec.ts"],
+  recoveryT15ReferenceSet: ["tests/recovery/t15-reference-set-packaged.spec.ts"],
   recoveryManual: ["tests/recovery/manual-recovery.spec.ts"],
   recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
   recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],

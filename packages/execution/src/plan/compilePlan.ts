@@ -1193,8 +1193,31 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
   const config = node.config;
   switch (config.kind) {
     case "prompt.worker": {
-      const providerId = config.providerId ?? input.capability.providerId;
-      return makeProviderBinding(input, providerId, config.model, config, config.profileId, ["llm", "interpret"]);
+      const operations = ["llm", "interpret"] as const;
+      if (config.providerId !== undefined || config.profileId !== undefined) {
+        return makeProviderBinding(
+          input,
+          config.providerId ?? input.capability.providerId,
+          config.model,
+          config,
+          config.profileId,
+          operations
+        );
+      }
+      const capabilities = [...(input.providerCapabilities ?? []), input.capability]
+        .filter((capability) => operations.includes(capability.operation as "llm" | "interpret"));
+      const active = capabilities.find((capability) => capability.modelId === config.model) ?? capabilities[0];
+      if (active === undefined) {
+        return makeProviderBinding(input, input.capability.providerId, config.model, config, undefined, operations);
+      }
+      return makeProviderBinding(
+        input,
+        active.providerId,
+        active.modelId ?? config.model,
+        config,
+        active.profileId,
+        operations
+      );
     }
     case "generation.image": {
       const selection = resolveImageProviderAlias(config.providerId, config.profileId);

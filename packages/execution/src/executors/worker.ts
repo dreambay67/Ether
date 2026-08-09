@@ -92,6 +92,7 @@ export class WorkerExecutor implements StepExecutor {
     }
     return {
       kind: "complete",
+      providerId: result.providerId,
       outputs: validations.map((validation) => validatedAssistantOutput(validation.value!, request, runtime))
     };
   }
@@ -150,6 +151,7 @@ export class WorkerExecutor implements StepExecutor {
     );
     return {
       kind: "complete",
+      providerId: result.providerId,
       outputs: [{
         channel: "data",
         role: "general",
