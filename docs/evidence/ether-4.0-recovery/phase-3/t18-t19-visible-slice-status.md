@@ -1,8 +1,10 @@
 # T18-T19 visible slice status
 
-Date: 2026-08-03
+Date: 2026-08-09
 
-Status: source behavior focused-verified; packaged blank-document checkpoint passed; Phase 3 remains open.
+Status: source behavior focused-verified; the current 2026-08-09 packaged blank-document checkpoint passed; Phase 3 remains open.
+
+Current packaged checkpoint: `t16-t19-visible-packaged-status.md`. The older package identity below is retained as the historical 2026-08-03 boundary; it is not the current candidate.
 
 ## Delivered boundary
 

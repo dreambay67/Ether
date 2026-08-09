@@ -1,0 +1,854 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t16-t19-visible-packaged",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T12:01:05.795Z",
+  "finishedAt": "2026-08-09T12:01:26.328Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "db4dae9bc51badbb9576def813ec6e40341b0a8f",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "b63768f707b0c4569fde1a50e012c779a3779de7b594316f6d34cce8028f0225"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "fd08883ec95025e23d03d4fd2607eb985d995623d3052c928147c7b3ab8b9788"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Add flow.variables from Node Library",
+      "expected": "The blank document creates flow.variables through the canonical registry.",
+      "actual": "Left click at (108, 632).",
+      "durationMs": 82
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Add prompt.text from Node Library",
+      "expected": "The blank document creates prompt.text through the canonical registry.",
+      "actual": "Left click at (108, 557).",
+      "durationMs": 52
+    },
+    {
+      "sequence": 3,
+      "kind": "left-click",
+      "label": "Add generation.image from Node Library",
+      "expected": "The blank document creates generation.image through the canonical registry.",
+      "actual": "Left click at (108, 799).",
+      "durationMs": 63
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Add edit.transform from Node Library",
+      "expected": "The blank document creates edit.transform through the canonical registry.",
+      "actual": "Left click at (108, 661).",
+      "durationMs": 62
+    },
+    {
+      "sequence": 5,
+      "kind": "left-click",
+      "label": "Add review.compare from Node Library",
+      "expected": "The blank document creates review.compare through the canonical registry.",
+      "actual": "Left click at (108, 787).",
+      "durationMs": 52
+    },
+    {
+      "sequence": 6,
+      "kind": "left-click",
+      "label": "Add review.evaluate from Node Library",
+      "expected": "The blank document creates review.evaluate through the canonical registry.",
+      "actual": "Left click at (108, 799).",
+      "durationMs": 55
+    },
+    {
+      "sequence": 7,
+      "kind": "left-click",
+      "label": "Add review.filter from Node Library",
+      "expected": "The blank document creates review.filter through the canonical registry.",
+      "actual": "Left click at (108, 667).",
+      "durationMs": 62
+    },
+    {
+      "sequence": 8,
+      "kind": "left-click",
+      "label": "Add flow.batch from Node Library",
+      "expected": "The blank document creates flow.batch through the canonical registry.",
+      "actual": "Left click at (108, 799).",
+      "durationMs": 53
+    },
+    {
+      "sequence": 9,
+      "kind": "left-click",
+      "label": "Add flow.join from Node Library",
+      "expected": "The blank document creates flow.join through the canonical registry.",
+      "actual": "Left click at (108, 667).",
+      "durationMs": 54
+    },
+    {
+      "sequence": 10,
+      "kind": "left-click",
+      "label": "Add output.collection from Node Library",
+      "expected": "The blank document creates output.collection through the canonical registry.",
+      "actual": "Left click at (108, 782).",
+      "durationMs": 55
+    },
+    {
+      "sequence": 11,
+      "kind": "left-click",
+      "label": "Add output.export from Node Library",
+      "expected": "The blank document creates output.export through the canonical registry.",
+      "actual": "Left click at (108, 799).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 12,
+      "kind": "left-click",
+      "label": "Hide Reference Desk",
+      "expected": "The eleven-node recovery route remains fully visible while it is configured and connected.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 75
+    },
+    {
+      "sequence": 13,
+      "kind": "left-click",
+      "label": "Hide Build tools",
+      "expected": "The eleven-node recovery route remains fully visible while it is configured and connected.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 14,
+      "kind": "keyboard-command",
+      "label": "Fit the T16-T19 recovery route",
+      "expected": "All eleven blank-authored nodes fit in one ordinary canvas view before direct configuration continues.",
+      "actual": "Pressed Home.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 15,
+      "kind": "left-click",
+      "label": "Select Variables",
+      "expected": "The Inspector exposes typed values and an explicit interpolation preview.",
+      "actual": "Left click at (810, 643).",
+      "durationMs": 57
+    },
+    {
+      "sequence": 16,
+      "kind": "left-click",
+      "label": "Add the typed subject variable",
+      "expected": "One ordinary reusable string variable is added to the blank graph.",
+      "actual": "Left click at (1461, 673).",
+      "durationMs": 60
+    },
+    {
+      "sequence": 17,
+      "kind": "left-click",
+      "label": "Save typed Variables",
+      "expected": "The saved variable is available to reachable downstream text only.",
+      "actual": "Left click at (1416, 638).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 18,
+      "kind": "left-click",
+      "label": "Select Prompt for direct editing",
+      "expected": "The canvas-owned direct editor receives the variable token as authored text.",
+      "actual": "Left click at (565, 473).",
+      "durationMs": 46
+    },
+    {
+      "sequence": 19,
+      "kind": "keyboard-command",
+      "label": "Edit Prompt content",
+      "expected": "The focused Prompt opens its direct content editor without switching to a hidden form.",
+      "actual": "Pressed Enter.",
+      "durationMs": 22
+    },
+    {
+      "sequence": 20,
+      "kind": "keyboard-command",
+      "label": "Commit Prompt content",
+      "expected": "The reusable ${subject} prompt is saved as one ordinary graph edit.",
+      "actual": "Pressed Control+Enter.",
+      "durationMs": 54
+    },
+    {
+      "sequence": 21,
+      "kind": "left-click",
+      "label": "Select Batch",
+      "expected": "The Inspector exposes the exact dimension values and sequential default before any run is prepared.",
+      "actual": "Left click at (810, 812).",
+      "durationMs": 55
+    },
+    {
+      "sequence": 22,
+      "kind": "left-click",
+      "label": "Save the two-cell Batch",
+      "expected": "The reusable Batch has two visible lighting cells and sequential concurrency.",
+      "actual": "Left click at (1406, 580).",
+      "durationMs": 78
+    },
+    {
+      "sequence": 23,
+      "kind": "left-click",
+      "label": "Select Image Generator",
+      "expected": "The ordinary Provider section lists the recovery-only fake-local image profile.",
+      "actual": "Left click at (810, 473).",
+      "durationMs": 67
+    },
+    {
+      "sequence": 24,
+      "kind": "left-click",
+      "label": "Save fake Image Generator profile",
+      "expected": "The durable binding is the explicit local simulation profile, not a real provider fallback.",
+      "actual": "Left click at (1439, 580).",
+      "durationMs": 70
+    },
+    {
+      "sequence": 25,
+      "kind": "left-click",
+      "label": "Select Transform",
+      "expected": "The local Transform controls are configured before the generated source exists.",
+      "actual": "Left click at (1055, 473).",
+      "durationMs": 76
+    },
+    {
+      "sequence": 26,
+      "kind": "left-click",
+      "label": "Save deterministic resize",
+      "expected": "Resize settings become durable local-media behavior with no provider route.",
+      "actual": "Left click at (1418, 638).",
+      "durationMs": 74
+    },
+    {
+      "sequence": 27,
+      "kind": "left-click",
+      "label": "Select Compare",
+      "expected": "The human checkpoint stays visibly configured as a deliberate one-selection decision.",
+      "actual": "Left click at (565, 643).",
+      "durationMs": 83
+    },
+    {
+      "sequence": 28,
+      "kind": "left-click",
+      "label": "Select Evaluate",
+      "expected": "The Inspector exposes the visible instruction, rubric, and distinct evaluation model route.",
+      "actual": "Left click at (1055, 643).",
+      "durationMs": 57
+    },
+    {
+      "sequence": 29,
+      "kind": "left-click",
+      "label": "Add a visible evaluation criterion",
+      "expected": "The configured review instruction carries an explicit weighted criterion.",
+      "actual": "Left click at (1461, 723).",
+      "durationMs": 56
+    },
+    {
+      "sequence": 30,
+      "kind": "left-click",
+      "label": "Save Evaluate settings",
+      "expected": "The distinct recovery evaluation capability is saved with its authored instruction and rubric.",
+      "actual": "Left click at (1414, 638).",
+      "durationMs": 39
+    },
+    {
+      "sequence": 31,
+      "kind": "left-click",
+      "label": "Select Filter",
+      "expected": "The Inspector exposes deterministic rules and named matched routes without an implicit model call.",
+      "actual": "Left click at (565, 812).",
+      "durationMs": 104
+    },
+    {
+      "sequence": 32,
+      "kind": "left-click",
+      "label": "Add an evaluation-exists Filter rule",
+      "expected": "The Filter route checks persisted evaluator metadata rather than inferring a score from hidden text.",
+      "actual": "Left click at (1461, 512).",
+      "durationMs": 46
+    },
+    {
+      "sequence": 33,
+      "kind": "left-click",
+      "label": "Add a matched Selects route",
+      "expected": "Matched Filter outputs have a durable user-facing route label.",
+      "actual": "Left click at (1461, 855).",
+      "durationMs": 35
+    },
+    {
+      "sequence": 34,
+      "kind": "left-click",
+      "label": "Save deterministic Filter",
+      "expected": "The exact rule and route save before Filter runs after the human checkpoint.",
+      "actual": "Left click at (1403, 638).",
+      "durationMs": 63
+    },
+    {
+      "sequence": 35,
+      "kind": "left-click",
+      "label": "Hide Project lens to select Join",
+      "expected": "The ordinary canvas target is exposed without changing graph state.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 36,
+      "kind": "left-click",
+      "label": "Select Join",
+      "expected": "The Inspector exposes an explicit post-filter merge strategy and completeness behavior.",
+      "actual": "Left click at (1167, 812).",
+      "durationMs": 58
+    },
+    {
+      "sequence": 37,
+      "kind": "left-click",
+      "label": "Show Project lens for Join",
+      "expected": "The selected node's ordinary Inspector returns with the same graph selection.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 47
+    },
+    {
+      "sequence": 38,
+      "kind": "left-click",
+      "label": "Save Join strategy",
+      "expected": "The branch ends in a deterministic merge with its source lineage preserved.",
+      "actual": "Left click at (1401, 793).",
+      "durationMs": 55
+    },
+    {
+      "sequence": 39,
+      "kind": "left-click",
+      "label": "Hide Project lens to select Collection",
+      "expected": "The ordinary canvas target is exposed without changing graph state.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 60
+    },
+    {
+      "sequence": 40,
+      "kind": "left-click",
+      "label": "Select Collection",
+      "expected": "The graph Collection node exposes its non-destructive membership configuration separately from Review workspace collections.",
+      "actual": "Left click at (433, 304).",
+      "durationMs": 45
+    },
+    {
+      "sequence": 41,
+      "kind": "left-click",
+      "label": "Show Project lens for Collection",
+      "expected": "The selected node's ordinary Inspector returns with the same graph selection.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 42,
+      "kind": "left-click",
+      "label": "Hide Project lens to select Export",
+      "expected": "The ordinary canvas target is exposed without changing graph state.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 47
+    },
+    {
+      "sequence": 43,
+      "kind": "left-click",
+      "label": "Select Export",
+      "expected": "The graph Export node makes its own grant, naming, format, collision, and sidecar controls visible before any folder is requested.",
+      "actual": "Left click at (678, 304).",
+      "durationMs": 54
+    },
+    {
+      "sequence": 44,
+      "kind": "left-click",
+      "label": "Show Project lens for Export",
+      "expected": "The selected node's ordinary Inspector returns with the same graph selection.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 51
+    },
+    {
+      "sequence": 45,
+      "kind": "left-click",
+      "label": "Save graph Export delivery template",
+      "expected": "The graph node's durable Export setup remains gated on an explicit folder grant and does not write during authoring.",
+      "actual": "Left click at (1409, 638).",
+      "durationMs": 56
+    },
+    {
+      "sequence": 46,
+      "kind": "left-click",
+      "label": "Begin Variables to Prompt",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (914, 635).",
+      "durationMs": 243
+    },
+    {
+      "sequence": 47,
+      "kind": "left-click",
+      "label": "Complete Variables to Prompt",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (461, 465).",
+      "durationMs": 276
+    },
+    {
+      "sequence": 48,
+      "kind": "left-click",
+      "label": "Begin Prompt to Image Generator",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (670, 465).",
+      "durationMs": 46
+    },
+    {
+      "sequence": 49,
+      "kind": "left-click",
+      "label": "Complete Prompt to Image Generator",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (705, 465).",
+      "durationMs": 272
+    },
+    {
+      "sequence": 50,
+      "kind": "left-click",
+      "label": "Begin Image Generator to Transform",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (914, 487).",
+      "durationMs": 68
+    },
+    {
+      "sequence": 51,
+      "kind": "left-click",
+      "label": "Complete Image Generator to Transform",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (950, 487).",
+      "durationMs": 264
+    },
+    {
+      "sequence": 52,
+      "kind": "left-click",
+      "label": "Begin Transform to Compare",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (1159, 487).",
+      "durationMs": 59
+    },
+    {
+      "sequence": 53,
+      "kind": "left-click",
+      "label": "Complete Transform to Compare",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (461, 656).",
+      "durationMs": 269
+    },
+    {
+      "sequence": 54,
+      "kind": "left-click",
+      "label": "Inspect Transform to Compare lane",
+      "expected": "This local or review continuation intentionally consumes the latest durable output, including an unreviewed intermediate.",
+      "actual": "Left click at (810, 571).",
+      "durationMs": 39
+    },
+    {
+      "sequence": 55,
+      "kind": "left-click",
+      "label": "Close Transform to Compare role menu",
+      "expected": "The connection remains selected while its role menu no longer covers later canvas handles.",
+      "actual": "Left click at (810, 571).",
+      "durationMs": 37
+    },
+    {
+      "sequence": 56,
+      "kind": "left-click",
+      "label": "Begin Transform to Evaluate",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (1159, 487).",
+      "durationMs": 238
+    },
+    {
+      "sequence": 57,
+      "kind": "left-click",
+      "label": "Complete Transform to Evaluate",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (950, 656).",
+      "durationMs": 168
+    },
+    {
+      "sequence": 58,
+      "kind": "left-click",
+      "label": "Inspect Transform to Evaluate lane",
+      "expected": "This local or review continuation intentionally consumes the latest durable output, including an unreviewed intermediate.",
+      "actual": "Left click at (1054, 571).",
+      "durationMs": 37
+    },
+    {
+      "sequence": 59,
+      "kind": "left-click",
+      "label": "Close Transform to Evaluate role menu",
+      "expected": "The connection remains selected while its role menu no longer covers later canvas handles.",
+      "actual": "Left click at (1055, 571).",
+      "durationMs": 35
+    },
+    {
+      "sequence": 60,
+      "kind": "left-click",
+      "label": "Begin Evaluation image to Filter",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (1159, 656).",
+      "durationMs": 229
+    },
+    {
+      "sequence": 61,
+      "kind": "left-click",
+      "label": "Complete Evaluation image to Filter",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (461, 826).",
+      "durationMs": 164
+    },
+    {
+      "sequence": 62,
+      "kind": "left-click",
+      "label": "Inspect Evaluation image to Filter lane",
+      "expected": "This local or review continuation intentionally consumes the latest durable output, including an unreviewed intermediate.",
+      "actual": "Left click at (810, 741).",
+      "durationMs": 33
+    },
+    {
+      "sequence": 63,
+      "kind": "left-click",
+      "label": "Close Evaluation image to Filter role menu",
+      "expected": "The connection remains selected while its role menu no longer covers later canvas handles.",
+      "actual": "Left click at (810, 741).",
+      "durationMs": 33
+    },
+    {
+      "sequence": 64,
+      "kind": "left-click",
+      "label": "Begin Evaluation data to Filter",
+      "expected": "The compatible Data input handle becomes the intended receiver.",
+      "actual": "Left click at (1159, 699).",
+      "durationMs": 240
+    },
+    {
+      "sequence": 65,
+      "kind": "left-click",
+      "label": "Complete Evaluation data to Filter",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (461, 869).",
+      "durationMs": 300
+    },
+    {
+      "sequence": 66,
+      "kind": "left-click",
+      "label": "Inspect Evaluation data to Filter lane",
+      "expected": "This local or review continuation intentionally consumes the latest durable output, including an unreviewed intermediate.",
+      "actual": "Left click at (810, 784).",
+      "durationMs": 53
+    },
+    {
+      "sequence": 67,
+      "kind": "left-click",
+      "label": "Close Evaluation data to Filter role menu",
+      "expected": "The connection remains selected while its role menu no longer covers later canvas handles.",
+      "actual": "Left click at (810, 784).",
+      "durationMs": 36
+    },
+    {
+      "sequence": 68,
+      "kind": "left-click",
+      "label": "Begin Filter to Join",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (670, 826).",
+      "durationMs": 240
+    },
+    {
+      "sequence": 69,
+      "kind": "left-click",
+      "label": "Complete Filter to Join",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (950, 826).",
+      "durationMs": 268
+    },
+    {
+      "sequence": 70,
+      "kind": "left-click",
+      "label": "Inspect Filter to Join lane",
+      "expected": "This local or review continuation intentionally consumes the latest durable output, including an unreviewed intermediate.",
+      "actual": "Left click at (810, 825).",
+      "durationMs": 51
+    },
+    {
+      "sequence": 71,
+      "kind": "left-click",
+      "label": "Close Filter to Join role menu",
+      "expected": "The connection remains selected while its role menu no longer covers later canvas handles.",
+      "actual": "Left click at (810, 826).",
+      "durationMs": 43
+    },
+    {
+      "sequence": 72,
+      "kind": "left-click",
+      "label": "Open Batch Matrix",
+      "expected": "The two authored Batch cells and sequential concurrency are visible before any image run.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 35
+    },
+    {
+      "sequence": 73,
+      "kind": "left-click",
+      "label": "Exclude one Batch cell",
+      "expected": "The visible exclusion removes only the selected morning-or-evening cell.",
+      "actual": "Left click at (95, 241).",
+      "durationMs": 39
+    },
+    {
+      "sequence": 74,
+      "kind": "left-click",
+      "label": "Return to Build for the image run",
+      "expected": "The authored runtime route remains on the ordinary canvas after the isolated Batch grid/setup preview.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 75,
+      "kind": "left-click",
+      "label": "Select Image Generator",
+      "expected": "The provider-backed image node is the first explicit fake-provider run target.",
+      "actual": "Left click at (810, 473).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 76,
+      "kind": "left-click",
+      "label": "Preview fake Image Generator plan",
+      "expected": "The single offline image call is shown before its one-use permit is issued.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 82
+    },
+    {
+      "sequence": 77,
+      "kind": "left-click",
+      "label": "Permit and start fake Image Generator",
+      "expected": "Only the displayed local recovery simulation route starts; no real provider is contacted.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 38
+    },
+    {
+      "sequence": 78,
+      "kind": "left-click",
+      "label": "Wait for the fake Image Generator artifact",
+      "expected": "Job Center exposes the durable state transition created through the reviewed plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 79,
+      "kind": "left-click",
+      "label": "Return to Build for Transform review",
+      "expected": "The completed image is available to the authored local Transform node.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 40
+    },
+    {
+      "sequence": 80,
+      "kind": "left-click",
+      "label": "Inspect generated image before reuse",
+      "expected": "The latest-approved boundary remains deliberate rather than silently consuming an unreviewed provider output.",
+      "actual": "Left click at (810, 473).",
+      "durationMs": 43
+    },
+    {
+      "sequence": 81,
+      "kind": "left-click",
+      "label": "Approve generated image for Transform",
+      "expected": "The image becomes eligible for the protected latest-approved lane only through this explicit review action.",
+      "actual": "Left click at (1410, 723).",
+      "durationMs": 50
+    },
+    {
+      "sequence": 82,
+      "kind": "left-click",
+      "label": "Select Transform branch",
+      "expected": "Transform owns the local-media result and its downstream human and deterministic review sequence.",
+      "actual": "Left click at (1055, 473).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 83,
+      "kind": "left-click",
+      "label": "Preview Transform review branch",
+      "expected": "The visible branch includes one fake Evaluation call and its human Compare checkpoint before any permit is issued.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 83
+    },
+    {
+      "sequence": 84,
+      "kind": "screenshot",
+      "label": "Capture the authored Transform review branch",
+      "expected": "The blank-authored graph visibly joins local Transform, human Compare, fake Evaluation, deterministic Filter, and Join under one inspect-first branch plan.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 232,
+      "screenshotPath": "screenshots/01-image-transform-review-plan.png"
+    },
+    {
+      "sequence": 85,
+      "kind": "left-click",
+      "label": "Permit and start Transform review branch",
+      "expected": "The exact local Transform and deterministic evaluation branch is explicitly permitted without a real image or model request.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 45
+    },
+    {
+      "sequence": 86,
+      "kind": "left-click",
+      "label": "Wait for the human Compare checkpoint",
+      "expected": "Job Center exposes the durable state transition created through the reviewed plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 386
+    },
+    {
+      "sequence": 87,
+      "kind": "left-click",
+      "label": "Open Review for the Compare checkpoint",
+      "expected": "Artifact Observatory presents the durable human checkpoint instead of invoking an implicit model selection.",
+      "actual": "Left click at (232, 89).",
+      "durationMs": 70
+    },
+    {
+      "sequence": 88,
+      "kind": "left-click",
+      "label": "Open Compare Stage",
+      "expected": "The transform result appears as a sealed human candidate.",
+      "actual": "Left click at (429, 296).",
+      "durationMs": 46
+    },
+    {
+      "sequence": 89,
+      "kind": "left-click",
+      "label": "Select the transformed candidate",
+      "expected": "A person, not a model, makes the one-candidate Compare decision.",
+      "actual": "Left click at (254, 592).",
+      "durationMs": 30
+    },
+    {
+      "sequence": 90,
+      "kind": "left-click",
+      "label": "Complete the human Compare checkpoint",
+      "expected": "The exact selected version and review note persist before the independent Evaluate and Filter continuation finishes.",
+      "actual": "Left click at (1079, 830).",
+      "durationMs": 109
+    },
+    {
+      "sequence": 91,
+      "kind": "left-click",
+      "label": "Wait for Evaluate, Filter, and Join to finish after Compare",
+      "expected": "Job Center exposes the durable state transition created through the reviewed plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 145
+    },
+    {
+      "sequence": 92,
+      "kind": "left-click",
+      "label": "Return to Review for durable outputs",
+      "expected": "Artifact Observatory refreshes its local artifact and review views after the completed branch.",
+      "actual": "Left click at (232, 89).",
+      "durationMs": 41
+    },
+    {
+      "sequence": 93,
+      "kind": "left-click",
+      "label": "Inspect visible Evaluate configuration",
+      "expected": "The Review workspace shows the authored evaluation instruction, rubric, and deterministic simulation model identity.",
+      "actual": "Left click at (516, 296).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 94,
+      "kind": "left-click",
+      "label": "Inspect deterministic Filter explanations",
+      "expected": "The Review workspace exposes the saved evaluation metadata rule and Selects route without a provider call.",
+      "actual": "Left click at (592, 296).",
+      "durationMs": 26
+    },
+    {
+      "sequence": 95,
+      "kind": "left-click",
+      "label": "Select the visible generated and transformed artifacts",
+      "expected": "Artifact Observatory selects actual document artifacts without a synthetic result set.",
+      "actual": "Left click at (1153, 341).",
+      "durationMs": 19
+    },
+    {
+      "sequence": 96,
+      "kind": "left-click",
+      "label": "Open Collections",
+      "expected": "Many-to-many membership is edited in the Artifact Observatory rather than by moving or deleting originals.",
+      "actual": "Left click at (335, 296).",
+      "durationMs": 39
+    },
+    {
+      "sequence": 97,
+      "kind": "left-click",
+      "label": "Create Campaign selects collection",
+      "expected": "A durable collection is created through the ordinary Review workspace.",
+      "actual": "Left click at (1242, 395).",
+      "durationMs": 47
+    },
+    {
+      "sequence": 98,
+      "kind": "left-click",
+      "label": "Add selected artifacts to Campaign selects",
+      "expected": "Collection membership is non-destructive and remains visible beside the original artifacts.",
+      "actual": "Left click at (115, 542).",
+      "durationMs": 44
+    },
+    {
+      "sequence": 99,
+      "kind": "left-click",
+      "label": "Open Export delivery setup",
+      "expected": "Export presents its explicit destination-grant gate and delivery controls without opening a native folder picker.",
+      "actual": "Left click at (1242, 341).",
+      "durationMs": 34
+    },
+    {
+      "sequence": 100,
+      "kind": "screenshot",
+      "label": "Capture Review collection and direct Export grant gate",
+      "expected": "Generated artifacts are selected into Campaign selects while the Review-side direct Export dialog remains visibly blocked on its explicit folder choice; it is independent of the graph Export node and no native dialog or filesystem write occurs.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 186,
+      "screenshotPath": "screenshots/02-review-collections-export-gate.png"
+    },
+    {
+      "sequence": 101,
+      "kind": "left-click",
+      "label": "Close Export setup",
+      "expected": "The journey leaves delivery configuration without requesting a folder grant.",
+      "actual": "Left click at (1071, 236).",
+      "durationMs": 62
+    },
+    {
+      "sequence": 102,
+      "kind": "observation",
+      "label": "T16-T19 visible practical slice",
+      "expected": "A blank-authored image route, local Transform, human Compare, deterministic Evaluate/Filter/Join, an isolated Batch grid/setup preview, graph delivery setup, and the Review-side collection/direct-export gate are visible in one offline journey.",
+      "actual": "The only provider-facing calls used Ether's opt-in local recovery simulation. Collection membership was added in Artifact Observatory, while the independent direct Export dialog stayed at its visible folder-grant gate; no real provider, native folder selection, or filesystem export was requested.",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}

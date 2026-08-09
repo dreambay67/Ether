@@ -1,8 +1,10 @@
 # T17 Compare, Evaluate, and Filter slice status
 
-Date: 2026-08-03
+Date: 2026-08-09
 
-Status: source implementation and focused automated candidate evidence complete for the T17 boundary. Packaged, owner, and real-provider evidence remains open. This is not a Phase 3 or release claim.
+Status: source implementation and focused automated candidate evidence complete. The 2026-08-09 packaged checkpoint now proves the human Compare, recovery-only deterministic Evaluate, deterministic Filter, and downstream Join path; owner and real-provider evidence remains open. This is not a Phase 3 or release claim.
+
+Current packaged checkpoint: `t16-t19-visible-packaged-status.md`. The sections below preserve the earlier 2026-08-03 source micro-boundary record.
 
 ## Exact product identity
 
