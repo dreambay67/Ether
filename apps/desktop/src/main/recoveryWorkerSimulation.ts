@@ -3,13 +3,19 @@ import type {
   AssistantProviderInput,
   PayloadEnvelope,
   ProviderAssistantResult,
-  ProviderExecutionContext
+  ProviderExecutionContext,
+  VisionEvaluationProvider,
+  VisionEvaluationProviderInput,
+  VisionEvaluationProviderResult
 } from "@ether/providers";
 import type { ProviderCapability } from "@ether/schema";
 
 export const RECOVERY_WORKER_SIMULATION_PROVIDER_ID = "ether-fake-local";
 export const RECOVERY_WORKER_SIMULATION_PROFILE_ID = "worker:deterministic-transform-v1";
 export const RECOVERY_WORKER_SIMULATION_MODEL_ID = "deterministic-transform-v1";
+export const RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID = "ether-fake-local-evaluation";
+export const RECOVERY_EVALUATION_SIMULATION_PROFILE_ID = "evaluation:deterministic-v1";
+export const RECOVERY_EVALUATION_SIMULATION_MODEL_ID = "deterministic-evaluation-v1";
 
 /**
  * The schema represents LLM and media interpretation as distinct operations.
@@ -51,11 +57,30 @@ export const RECOVERY_WORKER_SIMULATION_CAPABILITIES = [
     supportsSeed: false,
     provenance: "runtime-discovered",
     limitations: ["Offline deterministic recovery simulation. No external interpretation provider is contacted."]
+  },
+  {
+    providerId: RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID,
+    profileId: RECOVERY_EVALUATION_SIMULATION_PROFILE_ID,
+    modelId: RECOVERY_EVALUATION_SIMULATION_MODEL_ID,
+    reasoningEfforts: ["low", "medium", "high"],
+    operation: "evaluate",
+    inputChannels: ["text", "image", "data"],
+    outputChannels: ["text", "data"],
+    aspectRatios: [],
+    resolutions: [],
+    maxReferences: 32,
+    maxOutputsPerCall: 32,
+    maxParallelism: 1,
+    supportsCancellation: true,
+    supportsSeed: false,
+    provenance: "runtime-discovered",
+    limitations: ["Offline deterministic recovery simulation. No external evaluation provider is contacted."]
   }
 ] satisfies ProviderCapability[];
 
 export type RecoveryWorkerSimulationFacets = {
   worker: Pick<AssistantProvider, "run">;
+  evaluation: Pick<VisionEvaluationProvider, "evaluate">;
   media: {
     interpret(input: {
       prompt: string;
@@ -111,6 +136,37 @@ export function createRecoveryWorkerSimulationFacets(): RecoveryWorkerSimulation
         return result;
       }
     },
+    evaluation: {
+      evaluate: async (
+        input: VisionEvaluationProviderInput,
+        context?: ProviderExecutionContext<VisionEvaluationProviderResult>
+      ): Promise<VisionEvaluationProviderResult> => {
+        const signal = context?.signal ?? new AbortController().signal;
+        throwIfAborted(signal);
+        context?.reportPhase?.("first-event");
+        const result: VisionEvaluationProviderResult = {
+          providerId: RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID,
+          providerName: "Ether Recovery Evaluation Simulation",
+          capabilities: ["evaluation.vision"],
+          items: input.images.map((image) => ({
+            id: image.id,
+            ...(image.assetId === undefined ? {} : { assetId: image.assetId }),
+            assetPath: image.assetPath,
+            score: 100,
+            tags: ["deterministic", "recovery-simulation"],
+            detectedIssues: [],
+            decision: "pass",
+            confidence: 1,
+            explanation: "Deterministic recovery simulation marked this item as passing."
+          })),
+          summary: deterministicEvaluationSummary(input),
+          metadata: simulationMetadata("evaluate")
+        };
+        throwIfAborted(signal);
+        await context?.complete(result);
+        return result;
+      }
+    },
     media: {
       interpret: async (input) => ({
         providerId: RECOVERY_WORKER_SIMULATION_PROVIDER_ID,
@@ -119,6 +175,18 @@ export function createRecoveryWorkerSimulationFacets(): RecoveryWorkerSimulation
       })
     }
   };
+}
+
+function deterministicEvaluationSummary(input: VisionEvaluationProviderInput): string {
+  const instruction = normalized(input.instruction);
+  const criteria = normalized(input.criteria);
+  return [
+    "[Ether recovery simulation: deterministic evaluation]",
+    `Items evaluated: ${input.images.length}`,
+    ...(instruction.length > 0 ? [`Instruction: ${instruction}`] : []),
+    ...(criteria.length > 0 ? [`Criteria: ${criteria}`] : []),
+    `Threshold: ${input.threshold}`
+  ].join("\n");
 }
 
 function deterministicTransformation(input: {
@@ -147,14 +215,15 @@ function normalized(value: string | undefined): string {
   return (value ?? "").trim().replace(/\s+/gu, " ");
 }
 
-function simulationMetadata(operation: "llm" | "interpret"): Record<string, unknown> {
+function simulationMetadata(operation: "llm" | "interpret" | "evaluate"): Record<string, unknown> {
+  const evaluation = operation === "evaluate";
   return {
     deterministic: true,
     simulation: "recovery",
     operation,
-    providerId: RECOVERY_WORKER_SIMULATION_PROVIDER_ID,
-    profileId: RECOVERY_WORKER_SIMULATION_PROFILE_ID,
-    modelId: RECOVERY_WORKER_SIMULATION_MODEL_ID
+    providerId: evaluation ? RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID : RECOVERY_WORKER_SIMULATION_PROVIDER_ID,
+    profileId: evaluation ? RECOVERY_EVALUATION_SIMULATION_PROFILE_ID : RECOVERY_WORKER_SIMULATION_PROFILE_ID,
+    modelId: evaluation ? RECOVERY_EVALUATION_SIMULATION_MODEL_ID : RECOVERY_WORKER_SIMULATION_MODEL_ID
   };
 }
 

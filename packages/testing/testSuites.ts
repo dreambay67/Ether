@@ -114,6 +114,7 @@ export const testSuites = {
   recoveryT13RunSafety: ["tests/recovery/t13-run-safety-packaged.spec.ts"],
   recoveryT14WorkerReview: ["tests/recovery/t14-worker-review-packaged.spec.ts"],
   recoveryT15ReferenceSet: ["tests/recovery/t15-reference-set-packaged.spec.ts"],
+  recoveryT16T19Visible: ["tests/recovery/t16-t19-visible-packaged.spec.ts"],
   recoveryManual: ["tests/recovery/manual-recovery.spec.ts"],
   recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
   recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],

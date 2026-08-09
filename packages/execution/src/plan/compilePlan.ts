@@ -1280,6 +1280,12 @@ function normalizedNodeParameters(
     parameters.providerId = binding.providerId;
     parameters.profileId = binding.profileId;
   }
+  if (
+    (config.kind === "prompt.worker" || config.kind === "review.evaluate") &&
+    binding !== null
+  ) {
+    parameters.model = binding.modelId;
+  }
   if (config.kind === "generation.image" && binding !== null) {
     const outputFormats = binding.capabilitySnapshot.outputFormats;
     const configured = config.outputFormat ?? "image/png";
@@ -1343,12 +1349,14 @@ function makeEvaluationProviderBinding(
   input: CompilePlanInput,
   config: Extract<PlannerNode["config"], { kind: "review.evaluate" }>
 ): ProviderBinding {
-  const capabilities = [...(input.providerCapabilities ?? []), input.capability];
+  const capabilities = [...(input.providerCapabilities ?? []), input.capability]
+    .filter((capability) =>
+      capability.operation === "evaluate" &&
+      capability.outputChannels.includes("data")
+    );
   const evaluation = capabilities.find((capability) =>
-    capability.operation === "evaluate" &&
-    capability.outputChannels.includes("data") &&
-    (capability.modelId === undefined || capability.modelId === config.model)
-  );
+    capability.modelId === undefined || capability.modelId === config.model
+  ) ?? (config.model === "gpt-5" ? capabilities[0] : undefined);
   if (evaluation === undefined) {
     throw new PlanCompilationError(
       "PROVIDER_CAPABILITY_UNAVAILABLE",
@@ -1356,7 +1364,7 @@ function makeEvaluationProviderBinding(
       { modelId: config.model, requiredOperation: "evaluate" }
     );
   }
-  return makeProviderBinding(input, evaluation.providerId, config.model, config, evaluation.profileId, ["evaluate"]);
+  return makeProviderBinding(input, evaluation.providerId, evaluation.modelId ?? config.model, config, evaluation.profileId, ["evaluate"]);
 }
 
 function compatibilityProvider(capability: ProviderCapability, settings: unknown): PlanStep["provider"] {

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { ProviderCapabilitySchema } from "@ether/schema";
 
 import {
+  RECOVERY_EVALUATION_SIMULATION_MODEL_ID,
+  RECOVERY_EVALUATION_SIMULATION_PROFILE_ID,
+  RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID,
   RECOVERY_WORKER_SIMULATION_CAPABILITIES,
   RECOVERY_WORKER_SIMULATION_MODEL_ID,
   RECOVERY_WORKER_SIMULATION_PROFILE_ID,
@@ -9,9 +13,10 @@ import {
 } from "../../../apps/desktop/src/main/recoveryWorkerSimulation.js";
 
 describe("recovery Worker simulation", () => {
-  it("advertises one local, runtime-discovered LLM/interpret route", () => {
-    expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES).toHaveLength(2);
-    expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES.map((capability) => capability.operation)).toEqual(["llm", "interpret"]);
+  it("advertises schema-valid local LLM, interpretation, and evaluation routes", () => {
+    expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES).toHaveLength(3);
+    expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES.map((capability) => capability.operation)).toEqual(["llm", "interpret", "evaluate"]);
+    expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES.map((capability) => ProviderCapabilitySchema.parse(capability))).toEqual(RECOVERY_WORKER_SIMULATION_CAPABILITIES);
     expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES).toEqual(expect.arrayContaining([
       expect.objectContaining({
         providerId: RECOVERY_WORKER_SIMULATION_PROVIDER_ID,
@@ -21,9 +26,73 @@ describe("recovery Worker simulation", () => {
         supportsCancellation: true
       })
     ]));
-    expect(new Set(RECOVERY_WORKER_SIMULATION_CAPABILITIES.map((capability) =>
+    expect(new Set(RECOVERY_WORKER_SIMULATION_CAPABILITIES.slice(0, 2).map((capability) =>
       `${capability.providerId}/${capability.profileId}/${capability.modelId}`
     ))).toEqual(new Set([`${RECOVERY_WORKER_SIMULATION_PROVIDER_ID}/${RECOVERY_WORKER_SIMULATION_PROFILE_ID}/${RECOVERY_WORKER_SIMULATION_MODEL_ID}`]));
+    expect(RECOVERY_WORKER_SIMULATION_CAPABILITIES[2]).toMatchObject({
+      providerId: RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID,
+      profileId: RECOVERY_EVALUATION_SIMULATION_PROFILE_ID,
+      modelId: RECOVERY_EVALUATION_SIMULATION_MODEL_ID,
+      operation: "evaluate",
+      supportsCancellation: true
+    });
+  });
+
+  it("returns deterministic structured evaluation under its advertised identity", async () => {
+    const facets = createRecoveryWorkerSimulationFacets();
+    let completed = false;
+    const input = {
+      workspacePath: "C:/recovery",
+      runId: "run-evaluate-1",
+      evaluationNodeId: "evaluate-1",
+      instruction: "  Score  the  product. ",
+      criteria: "  fidelity, composition ",
+      threshold: 80,
+      images: [{
+        id: "payload-image-1",
+        nodeId: "image-1",
+        title: "Product image",
+        assetId: "asset-1",
+        assetPath: "C:/recovery/product.png"
+      }],
+      requestedAt: "2026-08-09T12:00:00.000Z"
+    };
+
+    const [first, second] = await Promise.all([
+      facets.evaluation.evaluate(input, {
+        signal: new AbortController().signal,
+        providerAttemptId: "attempt-1",
+        attemptOrdinal: 1,
+        stagingDirectory: "C:/recovery/staging",
+        complete: async () => { completed = true; }
+      }),
+      facets.evaluation.evaluate(input)
+    ]);
+
+    expect(first).toEqual(second);
+    expect(completed).toBe(true);
+    expect(first).toMatchObject({
+      providerId: RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID,
+      capabilities: ["evaluation.vision"],
+      summary: "[Ether recovery simulation: deterministic evaluation]\nItems evaluated: 1\nInstruction: Score the product.\nCriteria: fidelity, composition\nThreshold: 80",
+      items: [{
+        id: "payload-image-1",
+        assetId: "asset-1",
+        assetPath: "C:/recovery/product.png",
+        score: 100,
+        detectedIssues: [],
+        decision: "pass",
+        confidence: 1
+      }],
+      metadata: {
+        deterministic: true,
+        simulation: "recovery",
+        operation: "evaluate",
+        providerId: RECOVERY_EVALUATION_SIMULATION_PROVIDER_ID,
+        profileId: RECOVERY_EVALUATION_SIMULATION_PROFILE_ID,
+        modelId: RECOVERY_EVALUATION_SIMULATION_MODEL_ID
+      }
+    });
   });
 
   it("is deterministic and only becomes executable when a caller requests its facets", async () => {
@@ -83,6 +152,22 @@ describe("recovery Worker simulation", () => {
       prompt: "Describe this.",
       inputs: [],
       signal: controller.signal
+    })).rejects.toMatchObject({ name: "AbortError" });
+    await expect(facets.evaluation.evaluate({
+      workspacePath: "C:/recovery",
+      runId: "run-evaluate-1",
+      evaluationNodeId: "evaluate-1",
+      instruction: "Score this.",
+      criteria: "quality",
+      threshold: 80,
+      images: [],
+      requestedAt: "2026-08-09T12:00:00.000Z"
+    }, {
+      signal: controller.signal,
+      providerAttemptId: "attempt-1",
+      attemptOrdinal: 1,
+      stagingDirectory: "C:/recovery/staging",
+      complete: async () => { completed = true; }
     })).rejects.toMatchObject({ name: "AbortError" });
     expect(completed).toBe(false);
   });

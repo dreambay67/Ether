@@ -277,6 +277,62 @@ describe("Ether execution planner", () => {
     ]);
   });
 
+  it("resolves a blank default Evaluate node to the active verified evaluation route", () => {
+    const graph: EtherGraph = {
+      id: "graph-evaluate",
+      title: "Evaluate graph",
+      kind: "root",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      nodes: [node("evaluate", {
+        kind: "review.evaluate",
+        instruction: "Score the available subject.",
+        rubric: [],
+        profile: "balanced",
+        model: "gpt-5",
+        reasoningEffort: "medium"
+      })],
+      edges: [],
+      groups: [],
+      modules: [],
+      viewState
+    };
+    const evaluationCapability: ProviderCapability = {
+      providerId: "ether-fake-local-evaluation",
+      profileId: "evaluation:deterministic-v1",
+      modelId: "deterministic-evaluation-v1",
+      reasoningEfforts: ["medium"],
+      operation: "evaluate",
+      inputChannels: ["text", "image", "data"],
+      outputChannels: ["text", "data"],
+      aspectRatios: [],
+      resolutions: [],
+      maxReferences: 32,
+      maxOutputsPerCall: 32,
+      maxParallelism: 1,
+      supportsCancellation: true,
+      supportsSeed: false,
+      provenance: "runtime-discovered",
+      limitations: ["Offline deterministic recovery simulation."]
+    };
+
+    const plan = compile(graph, { kind: "node", nodeId: "evaluate" }, [evaluationCapability]);
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0]?.providerBinding).toMatchObject({
+      providerId: evaluationCapability.providerId,
+      profileId: evaluationCapability.profileId,
+      modelId: evaluationCapability.modelId,
+      capabilitySnapshot: evaluationCapability
+    });
+    expect(plan.steps[0]?.parameters).toMatchObject({ model: evaluationCapability.modelId });
+
+    const evaluate = graph.nodes[0]!;
+    if (evaluate.config.kind !== "review.evaluate") throw new Error("Expected Evaluate node.");
+    evaluate.config = { ...evaluate.config, model: "explicit-unavailable-evaluator" };
+    expect(() => compile(graph, { kind: "node", nodeId: "evaluate" }, [evaluationCapability]))
+      .toThrow(/requires a verified evaluation capability/i);
+  });
+
   it("resolves a Batch scope as its downstream execution boundary and preserves its immutable scope", () => {
     const graph = representativeGraph();
     const scope = { kind: "batch", batchNodeId: "batch" } as const;

@@ -31,6 +31,7 @@
     "test:t13-run-safety:packaged": "playwright test --config playwright.t13-run-safety-packaged.config.ts",
     "test:t14-worker-review:packaged": "playwright test --config playwright.t14-worker-review-packaged.config.ts",
     "test:t15-reference-set:packaged": "playwright test --config playwright.t15-reference-set-packaged.config.ts",
+    "test:t16-t19-visible:packaged": "playwright test --config playwright.t16-t19-visible-packaged.config.ts",
     "test:manual-recovery:packaged": "playwright test --config playwright.manual-recovery.config.ts",
     "test:document-lifecycle-recovery:source": "cross-env ETHER_DOCUMENT_LIFECYCLE_MODE=source-electron playwright test --config playwright.document-lifecycle-recovery.config.ts",
     "test:document-lifecycle-recovery:packaged": "cross-env ETHER_DOCUMENT_LIFECYCLE_MODE=packaged playwright test --config playwright.document-lifecycle-recovery.config.ts",
