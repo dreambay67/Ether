@@ -14,8 +14,7 @@ import {
   type ApplicationQueryName,
   type ApplicationQueryResponse,
   type EtherApplicationService,
-  type GraphTransaction,
-  type NodeDefinition
+  type GraphTransaction
 } from "@ether/schema";
 
 import { EtherMcpError } from "./schemas.js";
@@ -64,7 +63,6 @@ export interface EtherMcpApplicationAdapter {
     runPermitId: string;
   }): Promise<Record<string, unknown>>;
   execute(command: ApplicationCommand): Promise<ApplicationCommandResponse | ApplicationErrorMessage>;
-  inspectNodeCatalog(): Promise<readonly NodeDefinition[]>;
   inspectPermits(): Promise<readonly PermitInspection[]>;
   instantiateRecipe(input: {
     command: ApplicationCommand;
@@ -87,7 +85,6 @@ export type ApplicationAdapterOptions = {
   activeDocument: () => ActiveDocument | null | Promise<ActiveDocument | null>;
   applyGraphTransaction: EtherMcpApplicationAdapter["applyGraphTransaction"];
   cancelRun: EtherMcpApplicationAdapter["cancelRun"];
-  inspectNodeCatalog: () => readonly NodeDefinition[] | Promise<readonly NodeDefinition[]>;
   inspectPermits: EtherMcpApplicationAdapter["inspectPermits"];
   instantiateRecipe: EtherMcpApplicationAdapter["instantiateRecipe"];
   previewGraphTransaction: (transaction: GraphTransaction) => TransactionPreview | Promise<TransactionPreview>;
@@ -97,7 +94,7 @@ export type ApplicationAdapterOptions = {
 /**
  * Wraps the schema-validated application boundary without reconstructing use cases.
  * The host supplies the three application capabilities not yet represented by a 4.0
- * application message: active-document selection, node catalog, and dry-run preview.
+ * application message: active-document selection and dry-run preview.
  */
 export function createApplicationServiceAdapter(
   service: EtherApplicationService,
@@ -108,7 +105,6 @@ export function createApplicationServiceAdapter(
     applyGraphTransaction: options.applyGraphTransaction,
     cancelRun: options.cancelRun,
     execute: (command) => service.execute(command),
-    inspectNodeCatalog: async () => options.inspectNodeCatalog(),
     inspectPermits: options.inspectPermits,
     instantiateRecipe: options.instantiateRecipe,
     previewGraphTransaction: async (transaction) => options.previewGraphTransaction(transaction),
@@ -209,7 +205,6 @@ export function createUnavailableApplicationAdapter(): EtherMcpApplicationAdapte
     applyGraphTransaction: async () => unavailable(),
     cancelRun: async () => unavailable(),
     execute: async () => unavailable(),
-    inspectNodeCatalog: async () => unavailable(),
     inspectPermits: async () => unavailable(),
     instantiateRecipe: async () => unavailable(),
     previewGraphTransaction: async () => unavailable(),

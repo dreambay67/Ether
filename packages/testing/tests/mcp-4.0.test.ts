@@ -61,6 +61,47 @@ afterEach(async () => {
 });
 
 describe("Ether 4.0 official MCP SDK integration", () => {
+  it("returns the serializable application node catalog for every canonical node", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-mcp-node-catalog-"));
+    roots.push(root);
+    const documentPath = path.join(root, "node-catalog.ether");
+    const descriptorPath = path.join(root, "mcp-session.json");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "app-data"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs({ saveDocument: async () => documentPath }),
+      provider: new FakeImageProvider(),
+      simulationMode: true,
+      dispatchMode: "manual"
+    });
+    const initial = await service.bootstrap();
+    await service.saveAs(initial.documentId);
+    const bridge = await startEtherMcpApplicationBridge(createDesktopMcpBridgeHost(service), { descriptorPath });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(workspaceRoot, "packages/mcp-server/dist/index.js")],
+      cwd: workspaceRoot,
+      env: { ...getDefaultEnvironment(), ETHER_MCP_SESSION_DESCRIPTOR: descriptorPath },
+      stderr: "pipe"
+    });
+    const client = new Client({ name: "ether-node-catalog-test", version: "4.0.0" });
+    try {
+      await client.connect(transport);
+      const catalog = await call(client, "ether.node.catalog");
+      const nodes = catalog.nodes;
+      if (!Array.isArray(nodes)) throw new TypeError("Expected node catalog entries.");
+      expect(nodes.map((node) => requiredString(record(node).definitionId))).toEqual(nodeDefinitions.map((definition) => definition.id));
+      expect(nodes.every((node) => {
+        const entry = record(node);
+        return !("library" in entry) && !("mcp" in entry) && !("recipe" in entry) && !("configSchema" in entry);
+      })).toBe(true);
+    } finally {
+      await client.close().catch(() => undefined);
+      await bridge.close().catch(() => undefined);
+      await service.close().catch(() => undefined);
+    }
+  }, 30_000);
+
   it("advertises only the typed active-document surface and structures malformed input", async () => {
     const fixture = await createFixture();
     const tools = await fixture.client.listTools();
@@ -339,7 +380,6 @@ async function createFixture(): Promise<Fixture> {
   const rootGraph = graph("graph-root");
   const application: EtherMcpApplicationAdapter = {
     activeDocument: async () => ({ documentId }),
-    inspectNodeCatalog: async () => nodeDefinitions,
     inspectPermits: async () => [...permits.values()],
     previewGraphTransaction: async (transaction) => {
       const preview = previewGraphTransaction({

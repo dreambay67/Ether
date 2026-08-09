@@ -8,7 +8,6 @@ import {
   ApplicationCommandResponseSchema,
   EtherErrorSchema,
   GraphTransactionSchema,
-  NodeDefinitionSchema,
   type ApplicationCommand,
   type ApplicationCommandResponse,
   type ApplicationErrorMessage,
@@ -51,7 +50,6 @@ export type BridgeRequest = BridgeEnvelope & (
   | { operation: "activeDocument" }
   | { operation: "execute"; command: ApplicationCommand }
   | { operation: "query"; query: ApplicationQuery }
-  | { operation: "inspectNodeCatalog" }
   | { operation: "inspectPermits" }
   | { operation: "previewGraphTransaction"; transaction: GraphTransaction }
   | { operation: "applyGraphTransaction"; commandId: string; documentId: string; editPermitId: string; transaction: GraphTransaction }
@@ -64,7 +62,6 @@ export const BridgeRequestSchema: z.ZodType<BridgeRequest> = z.discriminatedUnio
   z.object({ version: z.literal(1), requestId: id, authToken: id, operation: z.literal("activeDocument") }).strict(),
   z.object({ version: z.literal(1), requestId: id, authToken: id, operation: z.literal("execute"), command: ApplicationCommandSchema }).strict(),
   z.object({ version: z.literal(1), requestId: id, authToken: id, operation: z.literal("query"), query: ApplicationQuerySchema }).strict(),
-  z.object({ version: z.literal(1), requestId: id, authToken: id, operation: z.literal("inspectNodeCatalog") }).strict(),
   z.object({ version: z.literal(1), requestId: id, authToken: id, operation: z.literal("inspectPermits") }).strict(),
   z.object({ version: z.literal(1), requestId: id, authToken: id, operation: z.literal("previewGraphTransaction"), transaction: GraphTransactionSchema }).strict(),
   z.object({
@@ -106,7 +103,6 @@ export const TransactionPreviewSchema: z.ZodType<TransactionPreview> = z.object(
 }).strict();
 
 export const ActiveDocumentSchema = z.object({ documentId: id }).strict().nullable();
-export const NodeCatalogSchema = z.array(NodeDefinitionSchema);
 export const PermitInspectionSchema: z.ZodType<PermitInspection[]> = z.array(z.object({
   id,
   permission: z.enum(["edit", "path", "run"]),

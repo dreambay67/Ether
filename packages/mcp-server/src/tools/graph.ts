@@ -11,12 +11,12 @@ import { assertApplyBase } from "../transactions/editTransaction.js";
 export const graphTools: EtherToolDefinition[] = [
   {
     name: "ether.node.catalog",
-    description: "Inspect the canonical Ether 4.0 node catalog, ports, roles, adapters, and inspector metadata.",
+    description: "Inspect all canonical Ether 4.0 node types, validated defaults, input/output channels, setup requirements, and inspector metadata.",
     inputSchema: EmptyInputSchema,
     outputSchema: mcpToolOutputSchemas["ether.node.catalog"],
     annotations: readOnlyAnnotations,
     async run({ application }) {
-      return { nodes: await application.inspectNodeCatalog() };
+      return applicationQuery(application, "node.catalog", {}, true);
     }
   },
   {

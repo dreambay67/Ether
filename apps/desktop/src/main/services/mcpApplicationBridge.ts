@@ -1,4 +1,3 @@
-import { nodeDefinitions } from "@ether/graph-kernel";
 import type { EtherMcpBridgeHost } from "@ether/mcp-server/bridge";
 
 import type { DesktopApplicationService } from "./applicationService.js";
@@ -9,7 +8,6 @@ export function createDesktopMcpBridgeHost(service: DesktopApplicationService): 
     applyGraphTransaction: (input) => service.applyMcpGraphTransaction(input),
     cancelRun: (input) => service.cancelMcpRun(input),
     execute: (command) => service.executeMcpCommand(command),
-    inspectNodeCatalog: async () => nodeDefinitions,
     inspectPermits: async () => {
       const active = service.mcpActiveDocument();
       return active === null ? [] : service.mcpInspectPermits(active.documentId);

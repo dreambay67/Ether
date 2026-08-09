@@ -364,7 +364,6 @@ async function createFixture(): Promise<Fixture> {
       executed.push("run.cancel");
       return { accepted: true };
     },
-    inspectNodeCatalog: async () => nodeDefinitions,
     inspectPermits: async () => [
       { id: pathGrantId, permission: "path" as const, expiresAt: null, state: "active" as const },
       ...[...editPermits].map((id) => ({ id, permission: "edit" as const, expiresAt: null, state: "active" as const }))

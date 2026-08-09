@@ -18,7 +18,6 @@ import {
   BridgeRequestSchema,
   BridgeResponseSchema,
   BridgeSessionDescriptorSchema,
-  NodeCatalogSchema,
   PermitInspectionSchema,
   TransactionPreviewSchema,
   type BridgeRequest,
@@ -88,7 +87,6 @@ export function createLocalBridgeApplicationAdapter(
     execute: (command) => request({ operation: "execute", command }, ApplicationBridgeResponseSchema).then((response) => {
       return commandResponse(response, command);
     }),
-    inspectNodeCatalog: () => request({ operation: "inspectNodeCatalog" }, NodeCatalogSchema),
     inspectPermits: () => request({ operation: "inspectPermits" }, PermitInspectionSchema),
     instantiateRecipe: (input) => request({ operation: "instantiateRecipe", ...input }, recordSchema),
     previewGraphTransaction: (transaction) => request({ operation: "previewGraphTransaction", transaction }, TransactionPreviewSchema),
@@ -166,7 +164,6 @@ async function dispatchBridgeRequest(host: EtherMcpBridgeHost, request: BridgeRe
     case "activeDocument": return host.activeDocument();
     case "execute": return host.execute(request.command);
     case "query": return host.query(request.query);
-    case "inspectNodeCatalog": return host.inspectNodeCatalog();
     case "inspectPermits": return host.inspectPermits();
     case "previewGraphTransaction": return host.previewGraphTransaction(request.transaction);
     case "applyGraphTransaction": return host.applyGraphTransaction(request);

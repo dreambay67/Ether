@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import {
   GraphTransactionSchema,
-  NodeDefinitionSchema,
   applicationResponsePayloadSchemas
 } from "@ether/schema";
 
@@ -75,9 +74,7 @@ export const mcpToolOutputSchemas: Record<string, z.ZodTypeAny> = {
     permits: z.array(permitInspectionSchema)
   }).strict(),
 
-  "ether.node.catalog": z.object({
-    nodes: z.array(NodeDefinitionSchema)
-  }).strict(),
+  "ether.node.catalog": responses["node.catalog"],
   "ether.graph.catalog": responses["graph.catalog"],
   "ether.graph.inspect": responses["graph.snapshot"],
   "ether.graph.validate": responses["graph.validation"],
