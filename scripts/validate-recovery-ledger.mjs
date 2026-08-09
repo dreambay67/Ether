@@ -178,7 +178,9 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
         if (source.text !== item.text) push(errors, `${item.id} wording differs from recovery acceptance.`);
         if (source.evidence.join('+') !== item.requiredEvidence.join('+')) push(errors, `${item.id} required evidence differs from recovery acceptance.`);
       }
-      if (EXPECTED_RX_STATUS[item.id] && item.status !== EXPECTED_RX_STATUS[item.id]) push(errors, `${item.id} status ${item.status} does not match the evidence-based baseline classification (${EXPECTED_RX_STATUS[item.id]}).`);
+      // recoveryMap records immutable Phase 0 triage. Current requirement status advances with
+      // candidate evidence, so only baseline validation may require the original classification.
+      if (mode === 'baseline' && EXPECTED_RX_STATUS[item.id] && item.status !== EXPECTED_RX_STATUS[item.id]) push(errors, `${item.id} status ${item.status} does not match the evidence-based baseline classification (${EXPECTED_RX_STATUS[item.id]}).`);
       if (recoveryMap?.[item.id]?.reason && item.classificationReason !== recoveryMap[item.id].reason) push(errors, `${item.id} classificationReason does not match classification.recoveryMap.`);
     }
     for (const source of sources.recoveries) if (!recoveries.some((item) => item.id === source.id)) push(errors, `${source.id} is missing from ledger.`);
@@ -253,6 +255,19 @@ function runSelfTest() {
   wrongRxClassification.requirements.find((item) => item.id === 'RX-002').status = 'MISSING';
   const wrongRxResult = validateObject(wrongRxClassification, { mode: 'baseline' });
   if (!wrongRxResult.errors.some((error) => /RX-002 status .*evidence-based baseline classification/.test(error))) throw new Error('Self-test did not reject wrong RX classification.');
+  const candidateCommit = 'a'.repeat(40);
+  const candidateHash = 'b'.repeat(64);
+  const terminalCandidate = structuredClone(ledger);
+  terminalCandidate.candidate = { commit: candidateCommit, packageHash: candidateHash };
+  for (const item of terminalCandidate.requirements) {
+    item.status = 'VERIFIED-PACKAGED';
+    item.evidence = [{ classes: [...item.requiredEvidence], commit: candidateCommit, packageHash: candidateHash }];
+  }
+  for (const journey of terminalCandidate.journeys) journey.actionLog = 'docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md';
+  const candidateResult = validateObject(terminalCandidate, { mode: 'candidate', candidateCommit, candidateHash });
+  if (candidateResult.errors.length) throw new Error(`Self-test terminal candidate fixture failed: ${candidateResult.errors.join(' | ')}`);
+  const gateResult = validateObject(terminalCandidate, { mode: 'gate', candidateCommit, candidateHash });
+  if (gateResult.errors.length) throw new Error(`Self-test terminal gate fixture failed: ${gateResult.errors.join(' | ')}`);
   const incompleteRxMap = structuredClone(ledger);
   delete incompleteRxMap.classification.recoveryMap['RX-030'];
   const incompleteMapResult = validateObject(incompleteRxMap, { mode: 'baseline' });
@@ -273,7 +288,7 @@ function runSelfTest() {
   wrongCrashMap.evidenceMapOverrides['AC-A03-009'] = ['A', 'P'];
   const wrongCrashMapResult = validateObject(wrongCrashMap, { mode: 'baseline' });
   if (!wrongCrashMapResult.errors.some((error) => /AC-A03-009 evidence mapping is not/.test(error))) throw new Error('Self-test did not reject wrong deterministic crash evidence map.');
-  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status, RX-classification, journey-contract, and crash-evidence-map fixtures).');
+  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status, RX lifecycle, journey-contract, and crash-evidence-map fixtures).');
 }
 
 const args = process.argv.slice(2);
