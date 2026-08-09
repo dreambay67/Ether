@@ -9,6 +9,7 @@ import {
   JourneyActionRecorder,
   RealPageInput,
   assertExactPackagedBuildIdentity,
+  assertRecoveryEvidenceWorktreeClean,
   assertPackagedJourneyArgs,
   assertReusableJourneyProfile,
   createIsolatedJourneyProfile,
@@ -237,6 +238,23 @@ describe("Ether recovery journey driver", () => {
     expect(committed.root.replaceAll("\\", "/")).toContain("docs/evidence/ether-4.0-recovery/phase-0/source-electron");
     expect(nestedCommitted.root.replaceAll("\\", "/")).toContain("phase-0/authoring-baseline/packaged");
     expect(ephemeral.root.replaceAll("\\", "/")).toContain("test-results/recovery/phase-0/packaged/");
+  });
+
+  it("fails closed for committed evidence outside approved outputs while allowing evidence-only and ephemeral diagnostics", async () => {
+    const sourceDirtyStatus = " M packages/testing/recovery/journeyDriver.ts\0";
+    const evidenceOnlyStatus = [
+      " M docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "?? docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/01-first-run.png",
+      " M docs/product/ether-4.0-user-manual.pdf"
+    ].join("\0") + "\0";
+    const statusReader = (status: string) => async (_root: string) => status;
+
+    await expect(assertRecoveryEvidenceWorktreeClean(workspaceRoot, "committed", statusReader(sourceDirtyStatus)))
+      .rejects.toThrow(/dirty paths outside approved recovery evidence outputs/u);
+    await expect(assertRecoveryEvidenceWorktreeClean(workspaceRoot, "committed", statusReader(evidenceOnlyStatus)))
+      .resolves.toBeUndefined();
+    await expect(assertRecoveryEvidenceWorktreeClean(workspaceRoot, "ephemeral", statusReader(sourceDirtyStatus)))
+      .resolves.toBeUndefined();
   });
 });
 

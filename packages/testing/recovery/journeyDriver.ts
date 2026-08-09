@@ -28,6 +28,7 @@ const RECOVERY_JUMP_LIST_JOURNEY_ID = "a02-windows-jump-list";
 
 export type JourneyMode = "source-electron" | "packaged";
 export type EvidenceMode = "ephemeral" | "committed";
+export type GitStatusReader = (workspaceRoot: string) => Promise<string>;
 export type JourneyOutcome = "passed" | "failed" | "inconclusive" | "baseline-defects-reproduced";
 export type JourneyPoint = { x: number; y: number };
 export type JourneyInputKind =
@@ -292,6 +293,82 @@ export async function collectJourneyBuildIdentity(
     sha256: await hashIfFile(artifactPath)
   })));
   return { gitCommit, mode, artifacts };
+}
+
+const COMMITTED_EVIDENCE_DIRECTORY = "docs/evidence/ether-4.0-recovery/";
+const GENERATED_MANUAL_PDF = "docs/product/ether-4.0-user-manual.pdf";
+
+/**
+ * Refuse committed evidence when the candidate contains changes outside its
+ * evidence outputs. Recovery suites may write several evidence directories in
+ * one run, so those accumulated outputs are deliberately admissible.
+ */
+export async function assertRecoveryEvidenceWorktreeClean(
+  workspaceRoot: string,
+  evidenceMode: EvidenceMode,
+  readGitStatus: GitStatusReader = readGitPorcelainStatus
+): Promise<void> {
+  if (evidenceMode !== "committed") return;
+
+  const status = await readGitStatus(workspaceRoot);
+  if (status === "") return;
+  const dirtyPaths = parseGitPorcelainPaths(status);
+  if (dirtyPaths.every(isApprovedCommittedEvidenceOutput)) return;
+
+  // Do not report paths: a worktree can contain locally sensitive filenames.
+  throw new Error("Refusing committed recovery evidence: the worktree has dirty paths outside approved recovery evidence outputs.");
+}
+
+async function readGitPorcelainStatus(workspaceRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "-z"], {
+      cwd: workspaceRoot,
+      windowsHide: true
+    });
+    return stdout;
+  } catch {
+    throw new Error("Could not verify a clean worktree for committed recovery evidence.");
+  }
+}
+
+function parseGitPorcelainPaths(status: string): string[] {
+  const records = status.split("\0");
+  if (records.at(-1) !== "") {
+    throw new Error("Could not verify a clean worktree for committed recovery evidence.");
+  }
+
+  const paths: string[] = [];
+  for (let index = 0; index < records.length - 1; index += 1) {
+    const record = records[index];
+    if (record === undefined || record.length < 4 || record[2] !== " ") {
+      throw new Error("Could not verify a clean worktree for committed recovery evidence.");
+    }
+    const statusCode = record.slice(0, 2);
+    const pathname = record.slice(3);
+    if (statusCode !== "??" && statusCode !== "!!" && !/^[ MADRCUT][ MADRCUT]$/u.test(statusCode)) {
+      throw new Error("Could not verify a clean worktree for committed recovery evidence.");
+    }
+    if (pathname === "") throw new Error("Could not verify a clean worktree for committed recovery evidence.");
+    paths.push(pathname);
+
+    // Rename/copy entries include both paths in -z porcelain. Both sides must
+    // remain evidence-only; accepting one would permit a source-path mutation.
+    if (statusCode.includes("R") || statusCode.includes("C")) {
+      const originalPath = records[index + 1];
+      if (originalPath === undefined || originalPath === "") {
+        throw new Error("Could not verify a clean worktree for committed recovery evidence.");
+      }
+      paths.push(originalPath);
+      index += 1;
+    }
+  }
+  return paths;
+}
+
+function isApprovedCommittedEvidenceOutput(candidate: string): boolean {
+  const normalized = candidate.replaceAll("\\", "/");
+  if (normalized === "" || normalized.startsWith("/") || normalized.startsWith("../") || normalized.includes("/../")) return false;
+  return normalized.startsWith(COMMITTED_EVIDENCE_DIRECTORY) || normalized === GENERATED_MANUAL_PDF;
 }
 
 /** A shell-finalization sidecar must never present partial packaged identity as exact evidence. */
@@ -619,6 +696,8 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
   assertAuthoringJourneyDeclaration(config.declaration);
   assertRecoveryShellRecentAdmission(config);
   const workspaceRoot = path.resolve(config.workspaceRoot);
+  const evidenceMode = config.evidenceMode ?? "ephemeral";
+  await assertRecoveryEvidenceWorktreeClean(workspaceRoot, evidenceMode);
   const ownsProfile = config.profile === undefined;
   const profile = config.profile ?? await createIsolatedJourneyProfile();
   if (!ownsProfile) await assertReusableJourneyProfile(profile);
@@ -627,7 +706,7 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     workspaceRoot,
     config.journeyId,
     config.mode,
-    config.evidenceMode ?? "ephemeral",
+    evidenceMode,
     config.committedEvidencePath
   );
   const viewport = config.viewport ?? DEFAULT_VIEWPORT;

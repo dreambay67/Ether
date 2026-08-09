@@ -146,7 +146,7 @@ test("keeps pointer workflows and primary controls usable across the required sc
         const rect = element.getBoundingClientRect();
         return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
       };
-      const controls = [...document.querySelectorAll(".project-header-actions button, .workspace-switcher button")]
+      const controls = Array.from(document.querySelectorAll(".project-header-actions button, .workspace-switcher button"))
         .filter(visible)
         .map((element) => {
           const rect = element.getBoundingClientRect();
@@ -233,9 +233,9 @@ test("passes shell accessibility invariants and exposes keyboard help and channe
       return element.getAttribute("aria-label")?.trim() || labelledText || labelText || element.textContent?.trim() || element.getAttribute("title")?.trim() || "";
     };
     const failures: string[] = [];
-    const ids = [...document.querySelectorAll<HTMLElement>("[id]")].map((element) => element.id);
+    const ids = Array.from(document.querySelectorAll<HTMLElement>("[id]")).map((element) => element.id);
     for (const id of new Set(ids)) if (ids.filter((candidate) => candidate === id).length > 1) failures.push(`duplicate id: ${id}`);
-    for (const element of document.querySelectorAll("button, input, select, textarea, [role=button], [role=separator], [role=option], [tabindex]")) {
+    for (const element of Array.from(document.querySelectorAll("button, input, select, textarea, [role=button], [role=separator], [role=option], [tabindex]"))) {
       if (!visible(element) || element.getAttribute("tabindex") === "-1") continue;
       if (accessibleName(element).length === 0) failures.push(`unnamed control: ${element.tagName.toLowerCase()}.${element.className}`);
       const tabIndex = Number(element.getAttribute("tabindex") ?? "0");
@@ -244,8 +244,8 @@ test("passes shell accessibility invariants and exposes keyboard help and channe
         if (document.getElementById(id) === null) failures.push(`missing description ${id}: ${accessibleName(element)}`);
       }
     }
-    for (const image of document.querySelectorAll("img")) if (!image.hasAttribute("alt") && image.getAttribute("aria-hidden") !== "true") failures.push("image without alt text");
-    for (const dialog of document.querySelectorAll('[role="dialog"]')) if (accessibleName(dialog).length === 0) failures.push("unnamed dialog");
+    for (const image of Array.from(document.querySelectorAll("img"))) if (!image.hasAttribute("alt") && image.getAttribute("aria-hidden") !== "true") failures.push("image without alt text");
+    for (const dialog of Array.from(document.querySelectorAll('[role="dialog"]'))) if (accessibleName(dialog).length === 0) failures.push("unnamed dialog");
     return failures;
   });
   expect(violations).toEqual([]);

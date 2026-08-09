@@ -21,13 +21,16 @@ import {
   prepareProductionRuntime,
   prepareReleaseProject
 } from "../../../../scripts/package-windows.mjs";
+import {
+  assertExactPackagedBuildIdentity,
+  collectJourneyBuildIdentity,
+  type JourneyBuildIdentity
+} from "../../recovery/journeyDriver.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const packagedExecutable = path.join(repositoryRoot, "release", "windows", "win-unpacked", "Ether.exe");
 const packagedAsar = path.join(repositoryRoot, "release", "windows", "win-unpacked", "resources", "app.asar");
 const packagedInventoryPath = "release-inventory.json";
-const developmentElectron = path.join(repositoryRoot, "node_modules", "electron", "dist", "electron.exe");
-const desktopRoot = path.join(repositoryRoot, "apps", "desktop");
 const requiredProductionInventoryPaths = [
   "dist/index.html",
   "dist-electron/main/bootstrap.js",
@@ -70,16 +73,13 @@ test("required packaged performance rejects a stale build-output inventory", asy
       ? { ...entry, sha256: createHash("sha256").update("stale renderer").digest("hex") }
       : entry);
     expect(() => assertCurrentOutputInventory(stale, current)).toThrow(/stale.*dist\/index\.html/i);
-    await expect(resolvePackagedCandidate(true, async () => {
+    await expect(requirePackagedCandidate(async () => {
       assertCurrentOutputInventory(stale, current);
-    })).rejects.toThrow(/ETHER_PERFORMANCE_REQUIRE_PACKAGED=1 refused.*stale/i);
-    await expect(resolvePackagedCandidate(false, async () => {
-      assertCurrentOutputInventory(stale, current);
-    })).resolves.toBe(false);
+    })).rejects.toThrow(/Packaged performance refused.*stale/i);
     const staleDependency = current.map((entry) => entry.path === "node_modules/@ether/application/dist/index.js"
       ? { ...entry, sha256: createHash("sha256").update("stale application").digest("hex") }
       : entry);
-    await expect(resolvePackagedCandidate(true, async () => {
+    await expect(requirePackagedCandidate(async () => {
       assertCurrentOutputInventory(staleDependency, current);
     })).rejects.toThrow(/stale.*node_modules\/@ether\/application\/dist\/index\.js/i);
   } finally {
@@ -92,10 +92,13 @@ test("clean-profile production Electron reaches its usable Start surface under t
   const measurements: number[] = [];
   let warmupMs = 0;
   let runtime = "";
+  let identity: JourneyBuildIdentity | null = null;
   try {
     for (let trial = -1; trial < trialCount; trial += 1) {
       const launched = await launchProductionElectron(path.join(root, `profile-${trial}`));
       runtime = launched.runtime;
+      if (identity === null) identity = launched.identity;
+      else expect(launched.identity).toEqual(identity);
       try {
         const page = await firstPage(launched.browser);
         await page.locator('[data-testid="start-screen"], [data-testid="document-canvas"]').first()
@@ -110,7 +113,8 @@ test("clean-profile production Electron reaches its usable Start surface under t
       }
     }
     const summary = summarize(measurements);
-    reportMetric("production-electron-cold-start", { runtime, warmupMs, trialsMs: measurements, ...summary });
+    expect(identity).not.toBeNull();
+    reportMetric("production-electron-cold-start", { identity, runtime, warmupMs, trialsMs: measurements, ...summary });
     expect(summary.medianMs).toBeLessThan(3_000);
     expect(summary.maxMs).toBeLessThan(3_000);
   } finally {
@@ -148,10 +152,13 @@ test("production Electron opens and hydrates a real 1,000-node document and auto
     autosave: AutosaveUiTiming;
   } | null = null;
   let runtime = "";
+  let identity: JourneyBuildIdentity | null = null;
   try {
     for (let trial = -1; trial < trialCount; trial += 1) {
       const launched = await launchProductionElectron(path.join(root, `profile-${trial}`), documentPath);
       runtime = launched.runtime;
+      if (identity === null) identity = launched.identity;
+      else expect(launched.identity).toEqual(identity);
       try {
         const page = await firstPage(launched.browser);
         const surface = page.getByTestId("ether-canvas-surface");
@@ -188,7 +195,9 @@ test("production Electron opens and hydrates a real 1,000-node document and auto
         await closeProductionElectron(launched);
       }
     }
+    expect(identity).not.toBeNull();
     const metrics = {
+      identity,
       runtime,
       warmup,
       trials: {
@@ -221,8 +230,10 @@ test("production Electron opens and hydrates a real 1,000-node document and auto
 });
 
 async function launchProductionElectron(profileRoot: string, documentPath?: string) {
-  const packaged = await candidateIsCurrent();
-  const executable = packaged ? packagedExecutable : developmentElectron;
+  await candidateIsCurrent();
+  const identity = await collectJourneyBuildIdentity(repositoryRoot, "packaged");
+  assertExactPackagedBuildIdentity(identity);
+  const executable = packagedExecutable;
   if (!await isFile(executable)) {
     throw new Error(`Production Electron executable is unavailable: ${executable}`);
   }
@@ -245,7 +256,6 @@ async function launchProductionElectron(profileRoot: string, documentPath?: stri
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userData}`,
     "--disable-gpu",
-    ...(packaged ? [] : [desktopRoot]),
     ...(documentPath === undefined ? [] : [documentPath])
   ];
   const startedAt = performance.now();
@@ -261,7 +271,8 @@ async function launchProductionElectron(profileRoot: string, documentPath?: stri
     browser,
     process: child,
     output,
-    runtime: packaged ? "release/windows/win-unpacked/Ether.exe" : "production dist Electron",
+    identity,
+    runtime: "release/windows/win-unpacked/Ether.exe",
     startedAt
   };
 }
@@ -489,8 +500,7 @@ async function isFile(filePath: string) {
 }
 
 async function candidateIsCurrent() {
-  const required = process.env.ETHER_PERFORMANCE_REQUIRE_PACKAGED === "1";
-  return resolvePackagedCandidate(required, async () => {
+  return requirePackagedCandidate(async () => {
     if (!(await isFile(packagedExecutable)) || !(await isFile(packagedAsar))) {
       throw new Error(`The packaged executable or ASAR is unavailable at ${packagedExecutable}.`);
     }
@@ -513,23 +523,18 @@ function currentReleaseInventory(): Promise<ReleaseInventoryEntry[]> {
   return currentProductionInventory;
 }
 
-async function resolvePackagedCandidate(
-  required: boolean,
+async function requirePackagedCandidate(
   inspect: () => Promise<void>
-): Promise<boolean> {
+): Promise<void> {
   try {
     await inspect();
-    return true;
   } catch (error) {
-    if (required) {
-      throw new Error(
-        `ETHER_PERFORMANCE_REQUIRE_PACKAGED=1 refused a missing or stale packaged candidate: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error }
-      );
-    }
-    return false;
+    throw new Error(
+      `Packaged performance refused a missing or stale packaged candidate: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error }
+    );
   }
 }
 

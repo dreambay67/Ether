@@ -31,6 +31,8 @@ async function runFixture() {
   const configuredSavePaths = argumentValues("--save-path=");
   const saveQueue = configuredSavePaths.length === 0 ? [campaignPath, renamedPath, copyPath] : configuredSavePaths;
   const initialDocument = argumentValue("--open-document=");
+  const outputFolder = argumentValue("--output-folder=");
+  if (outputFolder !== null) await mkdir(outputFolder, { recursive: true });
   const referenceFixture = process.argv.includes("--reference-capabilities");
   const autosaveGate = argumentValue("--autosave-gate=");
   const saveAsGate = argumentValue("--save-as-gate=");
@@ -82,6 +84,7 @@ async function runFixture() {
       },
       locateReference: async () => null,
       searchReferenceFolder: async () => null,
+      ...(outputFolder === null ? {} : { chooseOutputFolder: async () => outputFolder }),
       confirmPortable: async () => !process.argv.includes("--portable-cancel")
     }
   });
