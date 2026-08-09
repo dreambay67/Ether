@@ -66,7 +66,7 @@ test("captures the manual from visible blank-document actions without provider w
     const titleEditor = prompt.locator(".ether-node-inline-editor input");
     await titleEditor.fill("Campaign brief");
     await input.pressKey("Enter", "Commit the Prompt title", "Enter saves the title as one graph transaction.");
-    await input.leftClick(prompt.getByRole("button", { name: "Campaign brief", exact: true }), "Restore Prompt selection", "The renamed Prompt owns canvas focus.");
+    await input.leftClick(prompt.getByRole("button", { name: "Edit Prompt body", exact: true }), "Focus Prompt content", "The renamed Prompt's primary content control owns keyboard focus.");
     await input.pressKey("Enter", "Edit Prompt content", "Enter opens the primary content editor on the card.");
     const contentEditor = prompt.locator(".ether-node-inline-editor textarea");
     await contentEditor.fill("Design a quiet coastal campaign in crisp morning light.");
