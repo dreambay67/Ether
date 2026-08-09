@@ -14,6 +14,11 @@ import {
   RECOVERY_SHELL_RECENT_ARGUMENT,
   resolveRecoveryShellIdentity
 } from "../../../apps/desktop/src/main/recoveryShellIdentity.js";
+import {
+  RECOVERY_SIMULATION_CAPABILITIES,
+  RECOVERY_SIMULATION_ARGUMENT,
+  resolveRecoverySimulation
+} from "../../../apps/desktop/src/main/recoverySimulation.js";
 import { assertPackagedJourneyArgs, assertRecoveryShellRecentAdmission, packagedJourneyConfig } from "../recovery/journeyDriver.js";
 import { removeRecoveryShellAutomaticDestinations } from "../recovery/windowsShellDestinations.js";
 
@@ -672,6 +677,38 @@ describe("A02 Windows integration harness contracts", () => {
     expect(() => assertRecoveryShellRecentAdmission({ ...permitted, mode: "source-electron" }, approvals)).toThrow(/restricted/u);
     expect(() => assertRecoveryShellRecentAdmission({ ...permitted, cleanupProfile: true }, approvals)).toThrow(/restricted/u);
     expect(() => assertRecoveryShellRecentAdmission(permitted, {})).toThrow(/restricted/u);
+  });
+
+  it("enables packaged recovery simulation only with the matching disposable-profile identity", () => {
+    const token = "0123456789abcdef0123456789abcdef";
+    const recoveryShell = {
+      appUserModelId: `com.dreambay.ether.recovery.${token}`,
+      recentEnabled: false,
+      taskbarName: "Ether Recovery 01234567",
+      token
+    };
+    expect(resolveRecoverySimulation({
+      argv: [`${RECOVERY_SIMULATION_ARGUMENT}${token}`],
+      recoveryShell
+    })).toBe(true);
+    expect(resolveRecoverySimulation({ argv: [], recoveryShell: null })).toBe(false);
+    expect(() => resolveRecoverySimulation({
+      argv: [`${RECOVERY_SIMULATION_ARGUMENT}${token}`],
+      recoveryShell: null
+    })).toThrow(/disposable recovery profile/u);
+    expect(() => resolveRecoverySimulation({
+      argv: [`${RECOVERY_SIMULATION_ARGUMENT}${"f".repeat(32)}`],
+      recoveryShell
+    })).toThrow(/does not match/u);
+    expect(() => resolveRecoverySimulation({
+      argv: [`${RECOVERY_SIMULATION_ARGUMENT}${token}`, `${RECOVERY_SIMULATION_ARGUMENT}${token}`],
+      recoveryShell
+    })).toThrow(/exactly one/u);
+    expect(() => assertPackagedJourneyArgs([`${RECOVERY_SIMULATION_ARGUMENT}${token}`])).not.toThrow();
+    expect(RECOVERY_SIMULATION_CAPABILITIES.map((capability) => capability.operation)).toEqual([
+      "generate-image",
+      "edit-image"
+    ]);
   });
 
   it("deletes only named disposable roots below a driver-created test root", async () => {

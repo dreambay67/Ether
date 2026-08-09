@@ -940,6 +940,9 @@ describe("Ether 4.0 schema", () => {
   it("round-trips the immutable execution plan and rejects malformed capabilities", () => {
     expect(ProviderCapabilitySchema.parse(providerCapability)).toEqual(providerCapability);
     expect(ExecutionScopeSchema.parse({ kind: "downstream", rootNodeId: "node-1", includeRoot: false })).toEqual({ kind: "downstream", rootNodeId: "node-1", includeRoot: false });
+    expect(ExecutionScopeSchema.parse({ kind: "batch", batchNodeId: "batch-1" })).toEqual({ kind: "batch", batchNodeId: "batch-1" });
+    expect(ExecutionScopeSchema.safeParse({ kind: "batch", batchNodeId: "" }).success).toBe(false);
+    expect(ExecutionScopeSchema.safeParse({ kind: "batch", nodeId: "batch-1" }).success).toBe(false);
 
     const plan = {
       id: "plan-1",

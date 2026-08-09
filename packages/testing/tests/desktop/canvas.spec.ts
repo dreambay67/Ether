@@ -152,20 +152,27 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await compiledSteps.scrollIntoViewIfNeeded();
   await compiledSteps.click();
   await expect(page.getByLabel("Selected plan")).toContainText("Subject: selected canvas direction");
+  await expect(page.getByLabel("Selected plan")).toContainText("Plan ID · selected-plan");
+  await expect(page.getByLabel("Selected plan")).toContainText("Content hash · sha256:v1:");
   const selectedScope = await page.evaluate(() => {
     const commands = (window as typeof window & { __canvasTransactions: Array<{ name?: string; payload?: { scope?: unknown } }> }).__canvasTransactions;
     return commands.find((command) => command.name === "run.preview")?.payload?.scope;
   });
   expect(selectedScope).toMatchObject({ kind: "selected" });
+  await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
+  await expect(page.getByLabel("Selected run prompt").getByRole("button", { name: "Preview selected run" })).toBeVisible();
+  await expect(page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" })).toHaveCount(0);
+  await page.getByLabel("Selected run prompt").getByRole("button", { name: "Preview selected run" }).click();
+  await expect(page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" })).toBeVisible();
   await page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" }).click();
   await expect(page.getByTestId("canvas-status")).toContainText("Selected run started: selected-job");
   await page.getByRole("button", { name: "Undo graph transaction" }).click(); await page.getByRole("button", { name: "Redo graph transaction" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(19);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(21);
   const duplicateSelection = page.getByRole("button", { name: "Duplicate", exact: true });
   await expect(duplicateSelection).toBeEnabled();
   await duplicateSelection.click();
-  await expect(page.locator(".ether-node")).toHaveCount(7);
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(20);
+  await expect(page.locator(".ether-node")).toHaveCount(8);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(22);
 });
 
 test("keeps node creation disabled while a new document with the same graph id hydrates", async ({ page }) => {

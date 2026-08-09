@@ -17,6 +17,7 @@ export const ExecutionScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("selected"), nodeIds: z.array(z.string().min(1)).min(1) }).strict(),
   z.object({ kind: z.literal("branch"), rootNodeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("downstream"), rootNodeId: z.string().min(1), includeRoot: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("batch"), batchNodeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("graph") }).strict(),
   z.object({ kind: z.literal("recipe"), recipeInstanceId: z.string().min(1) }).strict()
 ]);

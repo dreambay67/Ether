@@ -58,6 +58,7 @@ import {
   startContainedLifecycle
 } from "./lifecycle.js";
 import { resolveRecoveryShellIdentity } from "./recoveryShellIdentity.js";
+import { RECOVERY_SIMULATION_CAPABILITIES, resolveRecoverySimulation } from "./recoverySimulation.js";
 import { createRecoveryAssociationDiagnostics } from "./recoveryAssociationDiagnostics.js";
 import { canvasCommandForAccelerator } from "./canvasAccelerator.js";
 import {
@@ -96,6 +97,10 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     argv: launchArgv,
     isPackaged: app.isPackaged,
     userData: app.getPath("userData")
+  });
+  const simulationMode = options.simulationMode === true || resolveRecoverySimulation({
+    argv: launchArgv,
+    recoveryShell
   });
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -169,7 +174,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     safeStorage
   });
   const initialSettings = await settings.load();
-  const providerService = options.simulationMode === true
+  const providerService = simulationMode
     ? null
     : options.providerService ?? createProviderService({
         codex: createCodexRuntimeService(),
@@ -183,7 +188,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     appVersion,
     dialogs,
     diagnosticSink: diagnosticLogger,
-    provider: options.simulationMode === true
+    provider: simulationMode
       ? new FakeImageProvider()
       : providerService?.codex.generation ?? new UnavailableImageProvider({
           id: "ether-provider-unavailable",
@@ -192,13 +197,15 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
           capabilities: ["image.generate"],
           notes: ["Task 9 production lifecycle does not install a generation provider."]
         }, "No production image provider is configured."),
-    simulationMode: options.simulationMode === true,
+    simulationMode,
     ...(providerService ? { executionProviders: {
       image: providerService.codex.generation,
       worker: providerService.codex.assistant,
       evaluation: providerService.codex.evaluation
     } } : {}),
-    ...(providerService ? {
+    ...(simulationMode ? {
+      providerCapabilities: RECOVERY_SIMULATION_CAPABILITIES
+    } : providerService ? {
       providerCapabilities: providerService.capabilities,
       providerResolver: ({ binding }) => providerService.resolveExecutionProviders(binding)
     } : {}),

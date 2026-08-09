@@ -150,6 +150,7 @@ export function resolveExecutionScope(
 
   const targetIds = scopeTargetIds(scope);
   for (const nodeId of targetIds) requireNode(topology, nodeId);
+  if (scope.kind === "batch") requireBatchNode(topology, scope.batchNodeId);
 
   const rootNodeId = rootForScope(scope);
   if (rootNodeId !== null) requireNode(topology, rootNodeId);
@@ -181,6 +182,11 @@ export function resolveExecutionScope(
           .filter((nodeId) => scope.includeRoot !== false || nodeId !== scope.rootNodeId)
           .filter((nodeId) => allRunnable.has(nodeId))
       );
+      break;
+    case "batch":
+      // Batch is a resolver boundary, not a plan step. Its downstream branch is
+      // planned while its upstream inputs remain cached input boundaries.
+      selected = new Set(downstreamNodeIds.filter((nodeId) => allRunnable.has(nodeId)));
       break;
     case "refresh-upstream":
       selected = new Set(
@@ -334,6 +340,8 @@ function scopeTargetIds(scope: PlannerExecutionScope): string[] {
     case "branch":
     case "downstream":
       return [scope.rootNodeId];
+    case "batch":
+      return [scope.batchNodeId];
     case "refresh-upstream":
       return [targetForScope(scope)];
     case "graph":
@@ -349,6 +357,8 @@ function rootForScope(scope: PlannerExecutionScope): string | null {
     case "branch":
     case "downstream":
       return scope.rootNodeId;
+    case "batch":
+      return scope.batchNodeId;
     case "refresh-upstream":
       return targetForScope(scope);
     case "node":
@@ -361,6 +371,16 @@ function rootForScope(scope: PlannerExecutionScope): string | null {
 function requireNode(topology: PlannerTopology, nodeId: string): void {
   if (!topology.nodeById.has(nodeId)) {
     throw new ScopeResolutionError("UNKNOWN_SCOPE_NODE", `Execution scope references unknown node ${nodeId}.`);
+  }
+}
+
+function requireBatchNode(topology: PlannerTopology, nodeId: string): void {
+  const node = topology.nodeById.get(nodeId);
+  if (node?.config.kind !== "flow.batch") {
+    throw new ScopeResolutionError(
+      "INVALID_SCOPE",
+      `Batch execution scope requires a flow.batch node; ${nodeId} is ${node?.definitionId ?? "unknown"}.`
+    );
   }
 }
 

@@ -11,7 +11,7 @@ import { useTransactionCommands, type GraphRevisionSeed } from "./commands/useTr
 import { configFromPrimaryDraft, primaryEditorFor, type CanvasEditorField } from "./commands/directEditing";
 import { useGraphCommands } from "./commands/useGraphCommands";
 import type { InspectorContext } from "./inspector/types";
-import { runPlanPresentation, type RunPlanPresentation } from "./inspector/runPlanPresentation";
+import { runPlanContextFingerprint, runPlanPresentation, type RunPlanPresentation } from "./inspector/runPlanPresentation";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { centeredCanvasPosition, openCanvasPosition } from "./placement";
 import { addNodesToModuleOperations, createModuleOperations, moduleIsLocked, removeNodesFromModuleOperations } from "./modules/moduleModel";
@@ -204,7 +204,8 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   }, [selectedIds.length, setSelectedIds]);
   const nodeStatuses = useNodeRuntimeStatuses(document.documentId, graph.id);
   const selectionFingerprint = selectedIds.join("\u001f");
-  const selectionIdentity = `${document.documentId}\u001f${graph.id}\u001f${graph.updatedAt}\u001f${selectionFingerprint}`;
+  const graphRevisionId = revisionSeed?.graphId === graph.id ? revisionSeed.graphRevisionId : document.graphRevisionId;
+  const selectionIdentity = `${document.documentId}\u001f${graph.id}\u001f${graphRevisionId}\u001f${runPlanContextFingerprint(graph)}\u001f${selectionFingerprint}`;
   const selectionIdentityRef = useRef(selectionIdentity);
   const selectionPreviewRequest = useRef(0);
   selectionIdentityRef.current = selectionIdentity;
@@ -332,7 +333,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
         if (selectionPreviewRequest.current !== requestId || selectionIdentityRef.current !== operationIdentity) return;
         const plan = response.payload?.plan as Partial<ExecutionPlan> | undefined;
         if (!plan || typeof plan.id !== "string" || typeof plan.contentHash !== "string" || typeof plan.estimatedCalls !== "number") throw new Error("Ether could not prepare the selected-node plan.");
-        setPreparedSelection({ id: plan.id, contentHash: plan.contentHash, identity: operationIdentity, ...runPlanPresentation(plan) });
+        setPreparedSelection({ identity: operationIdentity, ...runPlanPresentation(plan), id: plan.id, contentHash: plan.contentHash });
         report(`Selected plan ready: ${plan.estimatedCalls} provider call${plan.estimatedCalls === 1 ? "" : "s"}. Review, then start it.`);
         return;
       }

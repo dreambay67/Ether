@@ -222,6 +222,7 @@ export function compilePlan(input: CompilePlanInput): ExecutionPlan {
     input.scope.kind === "graph" ||
       input.scope.kind === "branch" ||
       input.scope.kind === "downstream" ||
+      input.scope.kind === "batch" ||
       input.scope.kind === "refresh-upstream"
   );
   const batchNodes = topology.nodes.filter((node) => {
@@ -945,7 +946,8 @@ function allocationBindingsFor(
         allocationId: allocation.id,
         targetNodeId: allocation.targetNodeId
       }),
-      allocation.profileId
+      allocation.profileId,
+      target.config.kind === "generation.image" ? ["generate-image"] : ["llm", "interpret"]
     );
     if (target.config.kind === "generation.image") {
       assertGenerationAllocationCompatible(target, binding);
@@ -1192,11 +1194,11 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
   switch (config.kind) {
     case "prompt.worker": {
       const providerId = config.providerId ?? input.capability.providerId;
-      return makeProviderBinding(input, providerId, config.model, config, config.profileId);
+      return makeProviderBinding(input, providerId, config.model, config, config.profileId, ["llm", "interpret"]);
     }
     case "generation.image": {
       const selection = resolveImageProviderAlias(config.providerId, config.profileId);
-      return makeProviderBinding(input, selection.providerId, undefined, config, config.profileId);
+      return makeProviderBinding(input, selection.providerId, undefined, config, config.profileId, ["generate-image"]);
     }
     case "edit.image": {
       if (config.workspace?.capability.mode === "unsupported") {
@@ -1207,7 +1209,7 @@ function nodeProviderBinding(input: CompilePlanInput, node: PlannerNode): Provid
         );
       }
       const selection = resolveImageProviderAlias(config.providerId, config.profileId);
-      const binding = makeProviderBinding(input, selection.providerId, undefined, config, config.profileId);
+      const binding = makeProviderBinding(input, selection.providerId, undefined, config, config.profileId, ["edit-image"]);
       const capability = binding.capabilitySnapshot;
       if (capability.operation !== "edit-image" || !capability.inputChannels.includes("image") || !capability.outputChannels.includes("image")) {
         throw new PlanCompilationError(
@@ -1270,19 +1272,23 @@ function makeProviderBinding(
   providerId: string,
   requestedModelId: string | undefined,
   settings: unknown,
-  requestedProfileId?: string
+  requestedProfileId?: string,
+  requiredOperations: readonly ProviderCapability["operation"][] = []
 ): ProviderBinding {
   const capabilities = [...(input.providerCapabilities ?? []), input.capability];
-  const capability = requestedProfileId === undefined
-    ? capabilities.find((candidate) => candidate.providerId === providerId)
-    : capabilities.find((candidate) =>
-        candidate.providerId === providerId && candidate.profileId === requestedProfileId
-      );
+  const capability = capabilities.find((candidate) =>
+    candidate.providerId === providerId &&
+    (requestedProfileId === undefined || candidate.profileId === requestedProfileId) &&
+    (requiredOperations.length === 0 || requiredOperations.includes(candidate.operation))
+  );
   if (capability === undefined) {
+    const operationDetail = requiredOperations.length === 0
+      ? ""
+      : ` for operation ${requiredOperations.join(" or ")}`;
     throw new PlanCompilationError(
       "PROVIDER_CAPABILITY_UNAVAILABLE",
-      `No provider capability snapshot is available for ${providerId}${requestedProfileId === undefined ? "" : `/${requestedProfileId}`}.`,
-      { providerId, profileId: requestedProfileId }
+      `No provider capability snapshot is available for ${providerId}${requestedProfileId === undefined ? "" : `/${requestedProfileId}`}${operationDetail}.`,
+      { providerId, profileId: requestedProfileId, requiredOperations }
     );
   }
   if (
@@ -1327,7 +1333,7 @@ function makeEvaluationProviderBinding(
       { modelId: config.model, requiredOperation: "evaluate" }
     );
   }
-  return makeProviderBinding(input, evaluation.providerId, config.model, config, evaluation.profileId);
+  return makeProviderBinding(input, evaluation.providerId, config.model, config, evaluation.profileId, ["evaluate"]);
 }
 
 function compatibilityProvider(capability: ProviderCapability, settings: unknown): PlanStep["provider"] {

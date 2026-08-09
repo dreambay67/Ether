@@ -38,6 +38,24 @@ const capability: ProviderCapability = {
   limitations: []
 };
 
+const workerCapability: ProviderCapability = {
+  providerId: capability.providerId,
+  profileId: "fake-worker-default",
+  operation: "llm",
+  inputChannels: ["text", "image", "audio", "video", "data"],
+  outputChannels: ["text", "data"],
+  aspectRatios: [],
+  resolutions: [],
+  maxReferences: 8,
+  maxOutputsPerCall: 4,
+  maxParallelism: 2,
+  supportsCancellation: true,
+  supportsSeed: false,
+  provenance: "conformance-verified",
+  limitations: [],
+  reasoningEfforts: ["medium"]
+};
+
 function node(id: string, config: Record<string, unknown>) {
   return {
     id,
@@ -147,7 +165,7 @@ function compile(
     graphRevisionId: "graph-revision-1",
     scope,
     capability,
-    providerCapabilities,
+    providerCapabilities: [workerCapability, ...(providerCapabilities ?? [])],
     capabilities: ["codex.vision"],
     createdAt: timestamp
   });
@@ -160,8 +178,8 @@ describe("Ether execution planner", () => {
       .filter((step) => step.subject?.kind === "node")
       .map((step) => step.nodeId);
 
-    expect(plannedNodeIds).toEqual(["worker", "generator", "compare", "filter", "collection"]);
-    expect(plannedNodeIds).not.toEqual(expect.arrayContaining(["prompt", "note", "variables", "batch", "join", "references"]));
+    expect(plannedNodeIds).toEqual(["worker", "generator", "compare", "filter", "collection", "join"]);
+    expect(plannedNodeIds).not.toEqual(expect.arrayContaining(["prompt", "note", "variables", "batch", "references"]));
     expect(plan.steps.find((step) => step.nodeId === "compare")).toEqual(
       expect.objectContaining({
         executor: "human-checkpoint",
@@ -259,6 +277,61 @@ describe("Ether execution planner", () => {
     ]);
   });
 
+  it("resolves a Batch scope as its downstream execution boundary and preserves its immutable scope", () => {
+    const graph = representativeGraph();
+    const scope = { kind: "batch", batchNodeId: "batch" } as const;
+
+    expect(resolveScope(graph, scope)).toEqual(["generator", "compare", "filter", "collection"]);
+
+    const first = compile(graph, scope);
+    const second = compile(graph, scope);
+    const stepsByNodeId = new Map(first.steps.map((step) => [step.nodeId, step]));
+    const generator = stepsByNodeId.get("generator")!;
+    const compare = stepsByNodeId.get("compare")!;
+
+    expect(first.scope).toEqual(scope);
+    expect(first.steps.filter((step) => step.subject?.kind === "node").map((step) => step.nodeId)).toEqual([
+      "generator",
+      "compare",
+      "filter",
+      "collection"
+    ]);
+    expect(generator.compiledContext).toEqual(expect.objectContaining({
+      sourceEdgeIds: ["batch-generator"],
+      resolverInputs: [expect.objectContaining({ nodeId: "batch", edgeId: "batch-generator" })]
+    }));
+    expect(compare.dependencyStepIds).toEqual([generator.id]);
+    expect(first.contentHash).toBe(second.contentHash);
+    expect(hashPlan(first)).toBe(first.contentHash);
+    const changedGraph = {
+      ...graph,
+      nodes: graph.nodes.map((candidate) => candidate.id === "batch" && candidate.config.kind === "flow.batch"
+        ? {
+            ...candidate,
+            config: {
+              ...candidate.config,
+              dimensions: candidate.config.dimensions.map((dimension, index) => index === 0
+                ? { ...dimension, values: [...dimension.values, "gold"] }
+                : dimension)
+            }
+          }
+        : candidate)
+    };
+    expect(compile(changedGraph, scope).contentHash).not.toBe(first.contentHash);
+    expect(compile(graph, { kind: "branch", rootNodeId: "batch" }).contentHash).not.toBe(first.contentHash);
+  });
+
+  it("rejects unknown and non-Batch Batch scope nodes", () => {
+    const graph = representativeGraph();
+
+    expect(() => resolveScope(graph, { kind: "batch", batchNodeId: "missing" })).toThrow(
+      /unknown node missing/i
+    );
+    expect(() => resolveScope(graph, { kind: "batch", batchNodeId: "worker" })).toThrow(
+      /requires a flow\.batch node/i
+    );
+  });
+
   it("binds canonical logical Codex image defaults to the runtime provider capability", () => {
     const graph = representativeGraph();
     const edit = node("edit", {
@@ -292,6 +365,29 @@ describe("Ether execution planner", () => {
     expect(plan.steps.find((step) => step.nodeId === "generator")?.parameters).toMatchObject({
       providerId: "codex-chatgpt-image-2", profileId: "image-default"
     });
+  });
+
+  it("selects the required operation when one provider profile exposes generation and editing", () => {
+    const graph = representativeGraph();
+    graph.nodes.push(node("edit", {
+      kind: "edit.image",
+      providerId: capability.providerId,
+      profileId: capability.profileId,
+      strength: 0.75,
+      outputCount: 1
+    }));
+    const editCapability: ProviderCapability = {
+      ...capability,
+      operation: "edit-image",
+      inputChannels: ["text", "image", "mask", "data"]
+    };
+
+    const plan = compile(graph, { kind: "graph" }, [capability, editCapability]);
+
+    expect(plan.steps.find((step) => step.nodeId === "generator")?.providerBinding?.capabilitySnapshot.operation)
+      .toBe("generate-image");
+    expect(plan.steps.find((step) => step.nodeId === "edit")?.providerBinding?.capabilitySnapshot.operation)
+      .toBe("edit-image");
   });
 
   it("expands Cartesian batch work deterministically with exclusions and bounded parallelism", () => {

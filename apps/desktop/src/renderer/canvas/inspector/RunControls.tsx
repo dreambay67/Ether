@@ -13,19 +13,18 @@ type RunScopeKind = "node" | "branch" | "downstream" | "batch";
 type Bridge = { command(command: unknown): Promise<{ payload?: { plan?: Partial<ExecutionPlan>; permitId?: string; job?: { id?: string } } }> };
 const appBridge = () => (window.ether as unknown as { application?: Bridge }).application;
 
-export function RunControls({ node, graphId, documentId, disabled, hasDownstream, report }: { node: EtherNode; graphId: string; documentId: string; disabled: boolean; hasDownstream: boolean; report(message: string): void }) {
+export function RunControls({ node, graphId, graphRevisionId, graphContextFingerprint, documentId, disabled, hasDownstream, report }: { node: EtherNode; graphId: string; graphRevisionId: string; graphContextFingerprint: string; documentId: string; disabled: boolean; hasDownstream: boolean; report(message: string): void }) {
   const executor = getNodeDefinition(node.definitionId).executor;
   const defaultScope: RunScopeKind = executor === "batch" ? "batch" : "node";
   const [scopeKind, setScopeKind] = useState<RunScopeKind>(defaultScope);
   const [preparedPlan, setPreparedPlan] = useState<PreparedPlan | null>(null);
   const [busy, setBusy] = useState(false);
-  const nodeConfigFingerprint = JSON.stringify(node.config);
-  const identity = `${documentId}\u001f${graphId}\u001f${node.id}\u001f${nodeConfigFingerprint}\u001f${scopeKind}`;
+  const identity = `${documentId}\u001f${graphId}\u001f${graphRevisionId}\u001f${graphContextFingerprint}\u001f${node.id}\u001f${scopeKind}`;
   const identityRef = useRef(identity);
   const previewRequest = useRef(0);
   identityRef.current = identity;
   useEffect(() => { previewRequest.current += 1; setPreparedPlan(null); setBusy(false); }, [identity]);
-  useEffect(() => { setScopeKind(defaultScope); }, [defaultScope, documentId, graphId, node.id, nodeConfigFingerprint]);
+  useEffect(() => { setScopeKind(defaultScope); }, [defaultScope, documentId, graphId, node.id]);
   useEffect(() => { if (!hasDownstream && scopeKind !== "node" && scopeKind !== "batch") setScopeKind(defaultScope); }, [defaultScope, hasDownstream, scopeKind]);
   const action = ({
     "codex-llm": ["Generate Output", "Build the real Codex worker plan for this node."],
@@ -46,7 +45,7 @@ export function RunControls({ node, graphId, documentId, disabled, hasDownstream
     switch (scopeKind) {
       case "branch": return { kind: "branch", rootNodeId: node.id };
       case "downstream": return { kind: "downstream", rootNodeId: node.id, includeRoot: false };
-      case "batch": return { kind: "branch", rootNodeId: node.id };
+      case "batch": return { kind: "batch", batchNodeId: node.id };
       case "node": return { kind: "node", nodeId: node.id };
     }
   };
@@ -69,7 +68,7 @@ export function RunControls({ node, graphId, documentId, disabled, hasDownstream
         report(plan && typeof plan.estimatedCalls === "number" ? `Output plan is ready: ${plan.estimatedCalls} provider call${plan.estimatedCalls === 1 ? "" : "s"}.` : "The output plan is ready for Run workspace confirmation.");
         return null;
       }
-      const prepared = { id: plan.id, contentHash: plan.contentHash, identity: requestIdentity, ...runPlanPresentation(plan) };
+      const prepared = { identity: requestIdentity, ...runPlanPresentation(plan), id: plan.id, contentHash: plan.contentHash };
       setPreparedPlan(prepared);
       report(`Plan ready: ${prepared.estimatedCalls} provider call${prepared.estimatedCalls === 1 ? "" : "s"}. Review it, then start the exact plan.`);
       return prepared;
