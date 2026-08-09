@@ -113,6 +113,7 @@ export type LocalMediaFacet = {
 export type CollectionFacet = {
   apply(input: {
     collectionId: string;
+    collectionTitle: string;
     mode: "add" | "replace";
     makePrimary: boolean;
     payloads: PayloadEnvelope[];

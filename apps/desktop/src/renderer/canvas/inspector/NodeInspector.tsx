@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react";
 import { getNodeDefinition } from "@ether/graph-kernel";
-import type { Artifact, CanvasDrawingConfig, EditImageConfig, EditMaskGeometry, EditWorkspaceState, EtherEdge, EtherNode, GenerationImageConfig, GraphOperation, NodeOutputVersion, PromptTextConfig, PromptWorkerConfig, ProviderCapability } from "@ether/schema";
+import { referenceSetMembers, type Artifact, type CanvasDrawingConfig, type EditImageConfig, type EditMaskGeometry, type EditWorkspaceState, type EtherEdge, type EtherNode, type GenerationImageConfig, type GraphOperation, type NodeOutputVersion, type PromptTextConfig, type PromptWorkerConfig, type ProviderCapability } from "@ether/schema";
 import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
 import { StrokeCanvas, buildDrawingMaskSvg, buildDrawingSvg, drawingToMaskGeometry } from "../drawing/StrokeCanvas";
 import { channelLabel } from "../ports/channelRegistry";
@@ -448,6 +448,16 @@ function MaskFields({ context }: { context: InspectorNodeContext }) {
   const [sourceId, setSourceId] = useState("");
   const incoming = useMemo(() => graph.edges.filter((edge) => edge.enabled && edge.to.kind === "node" && edge.to.nodeId === node.id), [graph.edges, node.id]);
   const imageEdges = useMemo(() => incoming.filter((edge) => edge.from.kind === "node" && edge.to.channel === "image"), [incoming]);
+  const referenceArtifactIds = useMemo(() => {
+    const upstreamNodes = new Map(graph.nodes.map((candidate) => [candidate.id, candidate]));
+    return [...new Set(imageEdges.flatMap((edge) => {
+      if (edge.from.kind !== "node") return [];
+      const source = upstreamNodes.get(edge.from.nodeId);
+      if (source?.config.kind !== "reference.set" || !source.config.enabledChannels.includes("image")) return [];
+      return referenceSetMembers(source.config)
+        .flatMap((member) => member.kind === "embedded-artifact" && member.enabled ? [member.artifactId] : []);
+    }))];
+  }, [graph.nodes, imageEdges]);
 
   useEffect(() => {
     if (node.config.kind !== "edit.mask") return;
@@ -462,11 +472,13 @@ function MaskFields({ context }: { context: InspectorNodeContext }) {
       const selectedOutputIds = [...new Set(imageEdges.flatMap((edge) => edge.from.kind === "node" ? selectedOutputVersions(edge, upstreamOutputs.get(edge.from.nodeId) ?? []) : []))];
       const artifactResponse = await app()?.query(documentQuery("artifact.search", document.documentId, {
         text: "", channels: ["image"], collectionIds: [], tags: [], minimumRating: null,
-        providerId: null, modelId: null, runId: null, graphId: null, outputVersionIds: selectedOutputIds,
-        createdAfter: null, createdBefore: null, limit: Math.max(1, selectedOutputIds.length)
+        providerId: null, modelId: null, runId: null, graphId: null,
+        outputVersionIds: referenceArtifactIds.length > 0 ? [] : selectedOutputIds,
+        createdAfter: null, createdBefore: null, limit: referenceArtifactIds.length > 0 ? 500 : Math.max(1, selectedOutputIds.length)
       }));
       if (!current) return;
-      const nextArtifacts = ((artifactResponse?.payload?.artifacts as Artifact[] | undefined) ?? []).filter((artifact) => artifact.mediaType.startsWith("image/") && selectedOutputIds.includes(artifact.source.outputVersionId));
+      const selectedArtifactIds = new Set(referenceArtifactIds);
+      const nextArtifacts = ((artifactResponse?.payload?.artifacts as Artifact[] | undefined) ?? []).filter((artifact) => artifact.mediaType.startsWith("image/") && (selectedArtifactIds.has(artifact.id) || selectedOutputIds.includes(artifact.source.outputVersionId)));
       setArtifacts(nextArtifacts);
       setSourceId((selected) => {
         if (nextArtifacts.some((artifact) => artifact.id === selected)) return selected;
@@ -475,7 +487,7 @@ function MaskFields({ context }: { context: InspectorNodeContext }) {
       });
     })().catch((error: unknown) => { if (current) report(error instanceof Error ? error.message : "The Mask workspace could not load its source catalog."); });
     return () => { current = false; };
-  }, [document.documentId, imageEdges, node.config, node.id, report]);
+  }, [document.documentId, imageEdges, node.config, node.id, referenceArtifactIds, report]);
 
   if (node.config.kind !== "edit.mask") return null;
   const config = node.config;

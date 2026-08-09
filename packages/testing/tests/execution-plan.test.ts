@@ -192,6 +192,25 @@ describe("Ether execution planner", () => {
     ]);
   });
 
+  it("seals an Output Collection node's visible title into its execution plan", () => {
+    const graph = representativeGraph();
+    const collection = graph.nodes.find((candidate) => candidate.id === "collection");
+    if (collection === undefined || collection.config.kind !== "output.collection") {
+      throw new Error("Expected Output Collection node.");
+    }
+    collection.title = "First selects";
+
+    const plan = compile(graph, { kind: "node", nodeId: "collection" });
+    expect(plan.steps[0]?.parameters).toMatchObject({
+      collectionId: "final",
+      collectionTitle: "First selects"
+    });
+
+    collection.title = "Renamed selects";
+    expect(compile(graph, { kind: "node", nodeId: "collection" }).contentHash)
+      .not.toBe(plan.contentHash);
+  });
+
   it("normalizes historical Google aliases into the immutable Gemini binding and JPEG request", () => {
     const graph = representativeGraph();
     const generator = graph.nodes.find((candidate) => candidate.id === "generator")!;

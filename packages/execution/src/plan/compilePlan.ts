@@ -800,7 +800,15 @@ function makeNodeStep(input: {
     consequence: edge.consequence
   }));
   const interpolatedConfig = interpolatedNodeConfig(input.target.config, input.variables);
-  const parameters = normalizedNodeParameters(interpolatedConfig, providerBinding);
+  const parameters = input.target.config.kind === "output.collection"
+    ? jsonObject({
+        ...normalizedNodeParameters(interpolatedConfig, providerBinding),
+        // Collection IDs are configured separately from the user-facing node
+        // title. Seal the latter into the plan so first execution can create a
+        // durable collection without consulting mutable graph state.
+        collectionTitle: input.target.title
+      })
+    : normalizedNodeParameters(interpolatedConfig, providerBinding);
   const joinConfig = input.target.config.kind === "flow.join"
     ? {
         expectedSourceEdgeIds: input.incoming.map((edge) => edge.edge.id).sort(),

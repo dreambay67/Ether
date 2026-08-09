@@ -174,12 +174,47 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
             : []
         )
         : [];
-      const dynamic = await store.read(({ outputs }) => bindings.flatMap((binding) => {
+      const dynamic = await store.read(({ execution, outputs }) => bindings.flatMap((binding) => {
         const sourceStepId = typeof binding.sourceStepId === "string" ? binding.sourceStepId : null;
         const sourceNodeId = typeof binding.sourceNodeId === "string" ? binding.sourceNodeId : null;
         const sourceChannel = PayloadChannelSchema.safeParse(binding.sourceChannel);
         const selector = OutputSelectorSchema.safeParse(binding.selector);
         if (sourceStepId === null || sourceNodeId === null || !sourceChannel.success || !selector.success) return [];
+        const sourceStep = claim.plan.steps.find((candidate) => candidate.id === sourceStepId);
+        if (sourceStep?.executor === "human-checkpoint") {
+          // Compare records its selected existing output versions on the durable
+          // checkpoint rather than minting duplicate artifact payloads. Those
+          // selections are the Compare step's runtime output for downstream
+          // lanes, including Collection and Export.
+          const checkpoint = callMethod<Array<{
+            state: string;
+            stepId: string;
+            selectedOutputVersionIds: string[];
+          }>>(execution, "listReviewCheckpoints", [claim.job.id])
+            .find((candidate) => candidate.stepId === sourceStepId && candidate.state === "completed");
+          if (checkpoint === undefined) return [];
+          return checkpoint.selectedOutputVersionIds.flatMap((outputVersionId) => {
+            const version = callMethod<import("@ether/schema").NodeOutputVersion | undefined>(
+              outputs,
+              "getVersion",
+              [outputVersionId]
+            );
+            if (version === undefined) {
+              throw new ExecutorFailure(
+                "REVIEW_SELECTION_OUTPUT_MISSING",
+                `Compare selected output version ${outputVersionId}, but it is no longer available.`
+              );
+            }
+            return version.outputPayloadIds
+              .map((payloadId) => callMethod<PayloadEnvelope | undefined>(outputs, "getPayload", [payloadId]))
+              .filter((payload): payload is PayloadEnvelope => payload !== undefined && payload.channel === sourceChannel.data)
+              .map((payload) => ({
+                payload,
+                role: typeof binding.role === "string" ? binding.role : payload.role,
+                edgeId: typeof binding.edgeId === "string" ? binding.edgeId : undefined
+              }));
+          });
+        }
         const versions = callMethod<import("@ether/schema").NodeOutputVersion[]>(outputs, "listByNode", [sourceNodeId])
           .filter((version) => version.runId === claim.job.id && version.stepId === sourceStepId);
         const payloads = versions

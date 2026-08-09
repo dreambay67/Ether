@@ -6,12 +6,18 @@ export class CollectionExecutor implements StepExecutor {
   async execute(context: ExecutorContext): Promise<ExecutorResult> {
     const collection = requireFacet(context.providers.collection, "collection persistence");
     const collectionId = context.step.parameters.collectionId;
+    const collectionTitle = context.step.parameters.collectionTitle;
     const mode = context.step.parameters.membershipMode;
     const makePrimary = context.step.parameters.makePrimary;
-    if (typeof collectionId !== "string" || (mode !== "add" && mode !== "replace") || typeof makePrimary !== "boolean") {
-      throw new ExecutorFailure("COLLECTION_CONFIGURATION_INVALID", "Collection requires a valid collection ID and membership mode.");
+    if (
+      typeof collectionId !== "string" ||
+      typeof collectionTitle !== "string" ||
+      (mode !== "add" && mode !== "replace") ||
+      typeof makePrimary !== "boolean"
+    ) {
+      throw new ExecutorFailure("COLLECTION_CONFIGURATION_INVALID", "Collection requires a valid ID, title, and membership mode.");
     }
-    const result = await collection.apply({ collectionId, mode, makePrimary, payloads: context.inputs });
+    const result = await collection.apply({ collectionId, collectionTitle, mode, makePrimary, payloads: context.inputs });
     return {
       kind: "complete",
       outputs: [{

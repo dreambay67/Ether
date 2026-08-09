@@ -1653,7 +1653,7 @@ export class EtherApplication implements EtherApplicationService {
    */
   private applicationOwnedExecutionFacets(): Pick<ExecutionProviderFacets, "collection" | "export"> {
     const collection: CollectionFacet = {
-      apply: async ({ collectionId, mode, makePrimary, payloads }) => {
+      apply: async ({ collectionId, collectionTitle, mode, makePrimary, payloads }) => {
         const artifactIds = payloadArtifactIds(payloads);
         if (artifactIds.length === 0) {
           throw new ApplicationServiceError(
@@ -1672,6 +1672,15 @@ export class EtherApplication implements EtherApplicationService {
         return store.transaction(({ collections, execution }) => {
           const duplicate = execution.getCommandResult(commandId, "execution.collection");
           if (duplicate !== undefined) return duplicate as { collectionId: string; memberCount: number };
+          const created = collections.get(collectionId) === undefined;
+          if (created) {
+            collections.create({
+              id: collectionId,
+              title: collectionTitle,
+              description: "",
+              primary: false
+            });
+          }
           if (mode === "replace") {
             collections.removeMembers(collectionId, collections.memberships(collectionId).map((member) => member.artifactId));
           }
@@ -1681,12 +1690,14 @@ export class EtherApplication implements EtherApplicationService {
             role: "general" as const,
             source: { commandId }
           })));
-          if (makePrimary) collections.setPrimary(collectionId);
+          const needsPrimary = makePrimary && !collections.get(collectionId)!.primary;
+          if (needsPrimary) collections.setPrimary(collectionId);
           const result = { collectionId, memberCount: collections.memberships(collectionId).length };
-          return execution.completeCommand(commandId, "execution.collection", result, [{
-            name: "collection.changed",
-            payload: { collectionId, change: "membership" }
-          }]) as { collectionId: string; memberCount: number };
+          return execution.completeCommand(commandId, "execution.collection", result, [
+            ...(created ? [{ name: "collection.changed" as const, payload: { collectionId, change: "created" as const } }] : []),
+            { name: "collection.changed" as const, payload: { collectionId, change: "membership" as const } },
+            ...(needsPrimary ? [{ name: "collection.changed" as const, payload: { collectionId, change: "primary" as const } }] : [])
+          ]) as { collectionId: string; memberCount: number };
         });
       }
     };

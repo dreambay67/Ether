@@ -19,11 +19,12 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
         { id: "drawing", definitionId: "canvas.drawing", title: "Sketch", position: { x: 40, y: 280 }, size: { width: 300, height: 210 }, config: { kind: "canvas.drawing", width: 640, height: 420, background: "#07111b", strokes: [] }, presentation: { collapsed: false, accent: "default", previewMode: "content" } },
         { id: "edit", definitionId: "edit.image", title: "Product edit", position: { x: 420, y: 280 }, size: { width: 300, height: 190 }, config: { kind: "edit.image", providerId: "edit-guidance", profileId: "guidance", strength: .7, outputCount: 1 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
         { id: "mask", definitionId: "edit.mask", title: "Standalone mask", position: { x: 760, y: 520 }, size: { width: 300, height: 190 }, config: { kind: "edit.mask", mode: "manual", feather: 0 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
-        { id: "source", definitionId: "generation.image", title: "Source generator", position: { x: 780, y: 280 }, size: { width: 280, height: 190 }, config: { kind: "generation.image", providerId: "image-provider", profileId: "studio", aspectRatio: "3:2", resolution: { width: 900, height: 600 }, outputCount: 2 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
+        { id: "source", definitionId: "generation.image", title: "Source generator", position: { x: 780, y: 280 }, size: { width: 280, height: 190 }, config: { kind: "generation.image", providerId: "image-provider", profileId: "studio", aspectRatio: "3:2", resolution: { width: 900, height: 600 }, outputCount: 2 }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } },
+        { id: "reference-source", definitionId: "reference.set", title: "Embedded source", position: { x: 1080, y: 280 }, size: { width: 280, height: 190 }, config: { kind: "reference.set", artifactIds: ["source-image"], enabledChannels: ["image"], ordering: "manual" }, presentation: { collapsed: false, accent: "default", previewMode: "summary" } }
       ],
       edges: [
         { id: "source-image-lane", from: { kind: "node", nodeId: "source", channel: "image" }, to: { kind: "node", nodeId: "edit", channel: "image" }, role: "product", order: 0, selector: { kind: "all" }, adapter: { kind: "auto" }, enabled: true },
-        { id: "source-mask-lane", from: { kind: "node", nodeId: "source", channel: "image" }, to: { kind: "node", nodeId: "mask", channel: "image" }, role: "general", order: 1, selector: { kind: "all" }, adapter: { kind: "auto" }, enabled: true },
+        { id: "reference-mask-lane", from: { kind: "node", nodeId: "reference-source", channel: "image" }, to: { kind: "node", nodeId: "mask", channel: "image" }, role: "general", order: 1, selector: { kind: "all" }, adapter: { kind: "auto" }, enabled: true },
         { id: "drawing-mask-lane", from: { kind: "node", nodeId: "drawing", channel: "image" }, to: { kind: "node", nodeId: "edit", channel: "mask" }, role: "general", order: 1, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true },
         { id: "cloud-text-lane", from: { kind: "node", nodeId: "cloud", channel: "text" }, to: { kind: "node", nodeId: "edit", channel: "text" }, role: "general", order: 2, selector: { kind: "latest" }, adapter: { kind: "auto" }, enabled: true }
       ], groups: [], modules: [], viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
@@ -307,7 +308,15 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
   await page.locator('[data-node-id="mask"] .ether-node-primary').dispatchEvent("click");
   await expect(page.getByTestId("mask-workspace")).toBeVisible();
   await expect(page.getByTestId("mask-input-summary")).toContainText("1 Image");
-  await expect(page.getByLabel("Mask source image").locator("option")).toHaveCount(2);
+  await expect(page.getByTestId("mask-no-source")).toHaveCount(0);
+  await expect(page.getByTestId("mask-workspace")).toContainText("Studio source A");
+  await expect(page.getByLabel("Mask source image")).toHaveValue("source-image");
+  await expect(page.getByLabel("Mask source image").locator("option")).toHaveCount(1);
+  const referenceSourceSearch = await page.evaluate(() => {
+    const queries = (window as typeof window & { __drawingQueries: Array<{ name: string; payload?: { outputVersionIds?: string[] } }> }).__drawingQueries;
+    return [...queries].reverse().find((query) => query.name === "artifact.search")?.payload?.outputVersionIds;
+  });
+  expect(referenceSourceSearch).toEqual([]);
   const standaloneMask = page.getByTestId("mask-canvas-overlay");
   await standaloneMask.scrollIntoViewIfNeeded();
   const standaloneMaskBox = await standaloneMask.boundingBox();
