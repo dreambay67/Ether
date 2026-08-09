@@ -217,6 +217,95 @@ describe("Ether 4.0 Codex plugin", () => {
     expect(repairedGraph.edges.some((edge) => edge.id === reviewCollectionEdgeId)).toBe(false);
     expect(repairedGraph.edges.filter((edge) => [reviewNodeId, collectionNodeId].includes(edge.from.kind === "node" ? edge.from.nodeId : "") || [reviewNodeId, collectionNodeId].includes(edge.to.kind === "node" ? edge.to.nodeId : ""))).toHaveLength(4);
   });
+
+  it("repairs a locked module by explicitly unlocking before it is dissolved", async () => {
+    const fixture = await createFixture();
+    const document = await call(fixture, "ether.document.inspect");
+    const graphCatalog = await call(fixture, "ether.graph.catalog");
+    const targetGraphId = requiredString(record(array(graphCatalog.graphs)[0]).id);
+    const graph = await call(fixture, "ether.graph.inspect", { graphId: targetGraphId });
+    expect(requiredString(record(graph.graph).id)).toBe(targetGraphId);
+    const baseDocumentRevisionId = requiredString(record(document.dirtyState).documentRevisionId);
+    const baseGraphRevisionId = requiredString(graph.graphRevisionId);
+    const moduleGraphId = "locked-module-graph";
+    const module = lockedModule("locked-module", moduleGraphId);
+    const moduleGraph = moduleChildGraph(moduleGraphId);
+    const create = GraphTransactionSchema.parse({
+      id: "plugin-create-locked-module",
+      baseDocumentRevisionId,
+      baseGraphRevisions: { [targetGraphId]: baseGraphRevisionId },
+      title: "Create locked module",
+      actor: "codex",
+      layoutPolicy: "preserve",
+      operations: [{ type: "createModule", graphId: targetGraphId, module, subtree: { rootGraphId: moduleGraphId, graphs: [moduleGraph] } }]
+    });
+    const createPreview = await call(fixture, "ether.graph.transaction.preview", { transaction: create });
+    fixture.acceptEditPermit("host-edit-approved");
+    const created = await call(fixture, "ether.graph.transaction.apply", {
+      proposalId: requiredString(record(createPreview.proposal).proposalId),
+      baseDocumentRevisionId,
+      editPermitId: "host-edit-approved"
+    });
+    await expect(call(fixture, "ether.graph.inspect", { graphId: targetGraphId })).resolves.toMatchObject({
+      graph: { modules: [expect.objectContaining({ id: module.id, locked: true })] }
+    });
+
+    const createdResult = record(created.result);
+    const createdRevision = requiredString(createdResult.documentRevisionId);
+    const createdGraphRevisions = record(createdResult.graphRevisions);
+    const movedWhileLocked = await callResult(fixture, "ether.graph.transaction.preview", {
+      transaction: {
+        id: "plugin-move-locked-module",
+        baseDocumentRevisionId: createdRevision,
+        baseGraphRevisions: { [targetGraphId]: requiredString(createdGraphRevisions[targetGraphId]) },
+        title: "Move locked module",
+        actor: "codex",
+        layoutPolicy: "preserve",
+        operations: [{ type: "updateModule", graphId: targetGraphId, moduleId: module.id, module: { ...module, position: { x: 440, y: 120 } } }]
+      }
+    });
+    expect(movedWhileLocked).toMatchObject({ isError: true, structuredContent: { error: { code: "MODULE_LOCKED" } } });
+
+    const unlock = GraphTransactionSchema.parse({
+      id: "plugin-unlock-module-repair",
+      baseDocumentRevisionId: createdRevision,
+      baseGraphRevisions: { [targetGraphId]: requiredString(createdGraphRevisions[targetGraphId]) },
+      title: "Unlock module for repair",
+      actor: "codex",
+      layoutPolicy: "preserve",
+      operations: [{ type: "updateModule", graphId: targetGraphId, moduleId: module.id, module: { ...module, locked: false } }]
+    });
+    const unlockPreview = await call(fixture, "ether.graph.transaction.preview", { transaction: unlock });
+    const unlocked = await call(fixture, "ether.graph.transaction.apply", {
+      proposalId: requiredString(record(unlockPreview.proposal).proposalId),
+      baseDocumentRevisionId: createdRevision,
+      editPermitId: "host-edit-approved"
+    });
+
+    const unlockedResult = record(unlocked.result);
+    const dissolve = GraphTransactionSchema.parse({
+      id: "plugin-dissolve-module-repair",
+      baseDocumentRevisionId: requiredString(unlockedResult.documentRevisionId),
+      baseGraphRevisions: {
+        [targetGraphId]: requiredString(record(unlockedResult.graphRevisions)[targetGraphId]),
+        [moduleGraphId]: "module-graph-revision-before-dissolve"
+      },
+      title: "Dissolve repaired module",
+      actor: "codex",
+      layoutPolicy: "preserve",
+      operations: [{ type: "removeModule", graphId: targetGraphId, moduleId: module.id }]
+    });
+    const dissolvePreview = await call(fixture, "ether.graph.transaction.preview", { transaction: dissolve });
+    await expect(call(fixture, "ether.graph.transaction.apply", {
+      proposalId: requiredString(record(dissolvePreview.proposal).proposalId),
+      baseDocumentRevisionId: dissolve.baseDocumentRevisionId,
+      editPermitId: "host-edit-approved"
+    })).resolves.toMatchObject({ state: "applied" });
+    await expect(call(fixture, "ether.graph.inspect", { graphId: targetGraphId })).resolves.toMatchObject({
+      graph: { modules: [] }
+    });
+    expect(fixture.executed).toEqual(["graph.applyTransaction", "graph.applyTransaction", "graph.applyTransaction"]);
+  });
 });
 
 function contractViolations(content: string): string[] {
@@ -254,10 +343,10 @@ async function createFixture(): Promise<Fixture> {
   }));
   let documentRevisionId = `document-revision-${nonce}-41`;
   let graphRevisionId = `graph-revision-${nonce}-17`;
-  let rootGraph = emptyGraph(graphId);
+  let graphs = [emptyGraph(graphId)];
   const editPermits = new Set<string>();
   const resolvePreview = (transaction: GraphTransaction) => previewGraphTransaction({
-    graphs: [rootGraph],
+    graphs,
     transaction,
     idFactory: ({ kind, name }) => `${kind}-${name}-resolved`
   });
@@ -266,7 +355,7 @@ async function createFixture(): Promise<Fixture> {
     applyGraphTransaction: async ({ editPermitId, transaction }) => {
       if (!editPermits.has(editPermitId)) throw new EtherMcpError("PERMIT_REVOKED", "security", "The Edit Permit is unavailable.");
       executed.push("graph.applyTransaction");
-      rootGraph = resolvePreview(transaction).graphs.find((graph) => graph.id === graphId)!;
+      graphs = resolvePreview(transaction).graphs;
       documentRevisionId = nextRevision(documentRevisionId);
       graphRevisionId = nextRevision(graphRevisionId);
       return { documentRevisionId, graphRevisions: { [graphId]: graphRevisionId } };
@@ -300,7 +389,7 @@ async function createFixture(): Promise<Fixture> {
     },
     query: async (request) => response(request, queryPayload(
       request.name,
-      rootGraph,
+      graphs,
       documentId,
       documentRevisionId,
       graphRevisionId,
@@ -336,12 +425,13 @@ function emptyGraph(graphId: string): EtherGraph {
 
 function queryPayload(
   name: ApplicationQuery["name"],
-  graph: EtherGraph,
+  graphs: readonly EtherGraph[],
   documentId: string,
   documentRevisionId: string,
   graphRevisionId: string,
   references: readonly Record<string, unknown>[]
 ): Record<string, unknown> {
+  const graph = graphs.find((candidate) => candidate.kind === "root")!;
   if (name === "document.summary") return {
     header: {
       documentId,
@@ -355,13 +445,13 @@ function queryPayload(
       featureFlags: {}
     },
     mode: "writable",
-    graphCount: 1,
+    graphCount: graphs.length,
     artifactCount: 0
   };
   if (name === "document.dirtyState") return { dirty: false, documentRevisionId };
-  if (name === "graph.catalog") return { graphs: [{ id: graph.id, title: graph.title, kind: graph.kind }] };
+  if (name === "graph.catalog") return { graphs: graphs.map((candidate) => ({ id: candidate.id, title: candidate.title, kind: candidate.kind })) };
   if (name === "graph.snapshot") return { graph, documentRevisionId, graphRevisionId };
-  if (name === "graph.validation") return { valid: validateFullGraphState([graph]).length === 0, issues: validateFullGraphState([graph]) };
+  if (name === "graph.validation") return { valid: validateFullGraphState(graphs).length === 0, issues: validateFullGraphState(graphs) };
   if (name === "reference.list") return { references };
   if (name === "recovery.status") return { state: "healthy", reportId: null, message: null };
   if (name === "storage.status") return { documentBytes: 4096, blobBytes: 0, reclaimableBytes: 0 };
@@ -425,4 +515,36 @@ function hydrateTemplate(value: unknown, replacements: Record<string, string>): 
 function nextRevision(value: string): string {
   const match = /^(.*-)(\d+)$/.exec(value);
   return match === null ? `${value}-next` : `${match[1]}${Number(match[2]) + 1}`;
+}
+
+function lockedModule(id: string, graphId: string) {
+  return {
+    id,
+    title: "Locked module",
+    description: "A protected module created by the plugin.",
+    accent: "#37e6ea",
+    locked: true,
+    graphId,
+    position: { x: 320, y: 80 },
+    size: { width: 260, height: 180 },
+    interface: { inputs: [], outputs: [], parameters: [] },
+    collapsed: false
+  };
+}
+
+function moduleChildGraph(id: string): EtherGraph {
+  return {
+    ...emptyGraph(id),
+    kind: "module",
+    title: "Locked module interior",
+    nodes: [{
+      id: "locked-module-note",
+      definitionId: "canvas.note",
+      title: "Repair note",
+      position: { x: 40, y: 40 },
+      size: { width: 220, height: 140 },
+      config: { kind: "canvas.note", body: "Unlock before structural repair.", style: "note" },
+      presentation: { collapsed: false, accent: "default", previewMode: "content" }
+    }]
+  };
 }

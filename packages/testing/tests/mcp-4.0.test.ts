@@ -18,6 +18,7 @@ import type {
   EtherGraph,
   GraphTransaction
 } from "@ether/schema";
+import { GraphTransactionSchema } from "@ether/schema";
 
 import { DesktopApplicationService, type NativeDialogPort } from "../../../apps/desktop/src/main/services/applicationService";
 import { createDesktopMcpBridgeHost } from "../../../apps/desktop/src/main/services/mcpApplicationBridge";
@@ -142,6 +143,65 @@ describe("Ether 4.0 official MCP SDK integration", () => {
     await expect(first).resolves.toMatchObject({ structuredContent: { state: "applied" } });
     expect(fixture.applied).toHaveLength(1);
     expect(JSON.stringify(fixture.applied[0])).not.toContain("$temp:");
+  });
+
+  it("returns a rebaseable BASE_REVISION_CONFLICT and lets the rebased proposal apply", async () => {
+    const fixture = await createFixture();
+    const editPermitId = fixture.grantEdit();
+    const transaction = temporaryTransaction("doc-revision-1", "graph-revision-1");
+    const preview = await call(fixture.client, "ether.graph.transaction.preview", { transaction });
+    const proposalId = requiredString(record(preview.proposal).proposalId);
+
+    const conflict = await callResult(fixture.client, "ether.graph.transaction.apply", {
+      proposalId,
+      baseDocumentRevisionId: "doc-revision-stale",
+      editPermitId
+    });
+    expect(conflict).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "BASE_REVISION_CONFLICT",
+          category: "graph",
+          userAction: "Inspect the current graph revisions, rebase the transaction, and preview it again.",
+          details: {
+            proposalId,
+            namedBaseRevision: "doc-revision-stale",
+            expectedBaseRevision: "doc-revision-1",
+            currentBaseRevision: "doc-revision-1",
+            rebaseable: true
+          }
+        }
+      }
+    });
+
+    await expect(call(fixture.client, "ether.graph.transaction.apply", {
+      proposalId,
+      baseDocumentRevisionId: "doc-revision-1",
+      editPermitId
+    })).resolves.toMatchObject({ state: "applied" });
+  });
+
+  it("creates every registry definition in one MCP transaction without provider execution", async () => {
+    const fixture = await createFixture();
+    const editPermitId = fixture.grantEdit();
+
+    const transaction = registryTransaction("doc-revision-1", "graph-revision-1");
+    const preview = await call(fixture.client, "ether.graph.transaction.preview", { transaction });
+    const proposal = record(preview.proposal);
+    expect(record(proposal.tempIds)).toHaveProperty("$temp:node:registry-16", "node-registry-16-resolved");
+    expect(proposal).toMatchObject({
+      summary: { operationCount: nodeDefinitions.length, addedNodes: nodeDefinitions.length, addedEdges: 0 }
+    });
+
+    await expect(call(fixture.client, "ether.graph.transaction.apply", {
+      proposalId: requiredString(proposal.proposalId),
+      baseDocumentRevisionId: transaction.baseDocumentRevisionId,
+      editPermitId
+    })).resolves.toMatchObject({ state: "applied" });
+    expect(fixture.applied).toHaveLength(1);
+    expect(fixture.applied[0]?.operations.map((operation) => operation.type === "addNode" ? operation.node.definitionId : null)).toEqual(nodeDefinitions.map((definition) => definition.id));
+    expect(fixture.applied[0]?.operations.every((operation) => operation.type === "addNode" && operation.node.config.kind === operation.node.definitionId)).toBe(true);
   });
 
   it("keeps permits host-owned, consumes Run Permit once for start, and allows control of its own job", async () => {
@@ -440,6 +500,30 @@ function temporaryTransaction(documentRevisionId: string, graphRevisionId: strin
   };
 }
 
+function registryTransaction(documentRevisionId: string, graphRevisionId: string): GraphTransaction {
+  return GraphTransactionSchema.parse({
+    id: "transaction-registry-all-nodes",
+    baseDocumentRevisionId: documentRevisionId,
+    baseGraphRevisions: { "graph-root": graphRevisionId },
+    title: "Create every canonical node from the registry",
+    actor: "codex",
+    layoutPolicy: "preserve",
+    operations: nodeDefinitions.map((definition, index) => ({
+      type: "addNode" as const,
+      graphId: "graph-root",
+      node: {
+        id: `$temp:node:registry-${index}`,
+        definitionId: definition.id,
+        title: definition.title,
+        position: { x: (index % 4) * 280, y: Math.floor(index / 4) * 190 },
+        size: { width: definition.presentation.width, height: definition.presentation.height },
+        config: definition.defaultConfig(),
+        presentation: { collapsed: false, accent: "default", previewMode: definition.presentation.previewMode }
+      }
+    }))
+  });
+}
+
 function graph(id: string): EtherGraph {
   return { id, title: "Root", kind: "root", createdAt: timestamp, updatedAt: timestamp, nodes: [], edges: [], groups: [], modules: [], viewState };
 }
@@ -513,4 +597,9 @@ async function callResult(client: Client, name: string, args: Record<string, unk
 function record(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("Expected an object.");
   return value as Record<string, unknown>;
+}
+
+function requiredString(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) throw new TypeError("Expected a non-empty string.");
+  return value;
 }

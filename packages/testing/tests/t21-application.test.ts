@@ -8,6 +8,7 @@ import type { ExecutionProviderFacets } from "@ether/execution";
 import { previewGraphTransaction } from "@ether/graph-kernel";
 import { FakeImageProvider } from "@ether/providers";
 import { EtherGraphSchema, GraphTransactionSchema, type EtherGraph, type GraphTransaction } from "@ether/schema";
+import { nodeDefinitions } from "../../graph-kernel/src/registry.js";
 import { PermitInspectionSchema } from "../../mcp-server/src/bridgeProtocol.js";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -79,6 +80,53 @@ describe("T21 application and plugin recovery boundaries", () => {
     expect(JSON.stringify(transaction)).not.toContain("pathGrantId");
     expect(JSON.stringify(transaction)).not.toContain("output.export");
   });
+
+  it("keeps registry-built canvas and plugin transactions equivalent through application undo and redo", async () => {
+    const root = await temporaryRoot();
+    const application = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      dispatchMode: "manual"
+    });
+    await application.createDocument({ path: path.join(root, "registry-equivalence.ether"), title: "Registry equivalence", initialGraph: blankGraph() });
+    try {
+      const document = await application.queryDocument();
+      const canvasTransaction = registryAddTransaction({
+        id: "canvas-registry-add",
+        actor: "user",
+        documentRevisionId: document.documentRevisionId,
+        graphRevisionId: document.graphRevisions.root!
+      });
+      const pluginTransaction = { ...canvasTransaction, id: "plugin-registry-add", actor: "codex" as const };
+      const [canvasPreview, pluginPreview] = [
+        previewGraphTransaction({ graphs: [blankGraph()], transaction: canvasTransaction }),
+        previewGraphTransaction({ graphs: [blankGraph()], transaction: pluginTransaction })
+      ];
+
+      expect(pluginPreview.forwardOperations).toEqual(canvasPreview.forwardOperations);
+      expect(pluginPreview.graphs).toEqual(canvasPreview.graphs);
+      expect(pluginPreview.graphs[0]?.nodes.map((node) => node.definitionId)).toEqual(nodeDefinitions.map((definition) => definition.id));
+
+      await application.applyGraphTransaction({ commandId: "apply-plugin-registry-add", transaction: pluginTransaction });
+      await expect(application.queryGraph("root")).resolves.toMatchObject({
+        nodes: nodeDefinitions.map((definition) => expect.objectContaining({
+          definitionId: definition.id,
+          config: definition.defaultConfig(),
+          size: { width: definition.presentation.width, height: definition.presentation.height }
+        }))
+      });
+
+      await application.applyHistory("undo-plugin-registry-add", "graph.undo");
+      await expect(application.queryGraph("root")).resolves.toMatchObject({ nodes: [] });
+      await application.applyHistory("redo-plugin-registry-add", "graph.redo");
+      await expect(application.queryGraph("root")).resolves.toMatchObject({
+        nodes: nodeDefinitions.map((definition) => expect.objectContaining({ definitionId: definition.id }))
+      });
+    } finally {
+      await application.closeDocument();
+    }
+  });
 });
 
 async function temporaryRoot(): Promise<string> {
@@ -99,6 +147,35 @@ function blankGraph(): EtherGraph {
     groups: [],
     modules: [],
     viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
+  });
+}
+
+function registryAddTransaction(input: {
+  id: string;
+  actor: GraphTransaction["actor"];
+  documentRevisionId: string;
+  graphRevisionId: string;
+}): GraphTransaction {
+  return GraphTransactionSchema.parse({
+    id: input.id,
+    baseDocumentRevisionId: input.documentRevisionId,
+    baseGraphRevisions: { root: input.graphRevisionId },
+    title: "Create every canonical node from the registry",
+    actor: input.actor,
+    layoutPolicy: "preserve",
+    operations: nodeDefinitions.map((definition, index) => ({
+      type: "addNode" as const,
+      graphId: "root",
+      node: {
+        id: `registry-${index}`,
+        definitionId: definition.id,
+        title: definition.title,
+        position: { x: (index % 4) * 280, y: Math.floor(index / 4) * 190 },
+        size: { width: definition.presentation.width, height: definition.presentation.height },
+        config: definition.defaultConfig(),
+        presentation: { collapsed: false, accent: "default", previewMode: definition.presentation.previewMode }
+      }
+    }))
   });
 }
 
