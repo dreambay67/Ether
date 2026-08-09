@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "journeyId": "connection-inspector-recovery",
   "mode": "packaged",
-  "startedAt": "2026-08-03T18:00:41.681Z",
-  "finishedAt": "2026-08-03T18:00:54.802Z",
-  "outcome": "failed",
+  "startedAt": "2026-08-03T23:52:03.162Z",
+  "finishedAt": "2026-08-03T23:52:16.244Z",
+  "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
     "appData": "isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "399dc03d5ddcb4a1ca16121f1a0872cd7c203c32",
+    "gitCommit": "3113bef52d8896a7693ba202c531b1dc261f455a",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b"
+        "sha256": "f6db33c815f5fe98a721ebd24e95cf303aecf3c53a11ee69174389dcdd4f07fa"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "06ee589f20adef6c16c704d3e3b4ad92d9ecf2bc7a73d3019b0c5590d80d69b3"
+        "sha256": "73e9ad34a48305e1e56d5636a0b99b2f37f889705ff030cf7020e0e3d8140a78"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add review.evaluate from Node Library",
       "expected": "The blank document creates review.evaluate through the canonical registry.",
       "actual": "Left click at (108, 639).",
-      "durationMs": 80
+      "durationMs": 441
     },
     {
       "sequence": 2,
@@ -45,7 +45,7 @@
       "label": "Add flow.batch from Node Library",
       "expected": "The blank document creates flow.batch through the canonical registry.",
       "actual": "Left click at (108, 669).",
-      "durationMs": 64
+      "durationMs": 74
     },
     {
       "sequence": 3,
@@ -53,7 +53,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the canonical registry.",
       "actual": "Left click at (108, 557).",
-      "durationMs": 45
+      "durationMs": 65
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The blank document creates prompt.worker through the canonical registry.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 64
+      "durationMs": 69
     },
     {
       "sequence": 5,
@@ -69,7 +69,7 @@
       "label": "Hide Reference Desk",
       "expected": "The graph gets a clear practical authoring viewport.",
       "actual": "Left click at (1581, 151).",
-      "durationMs": 48
+      "durationMs": 58
     },
     {
       "sequence": 6,
@@ -77,7 +77,7 @@
       "label": "Hide Build tools",
       "expected": "The graph gets a clear practical authoring viewport.",
       "actual": "Left click at (244, 183).",
-      "durationMs": 32
+      "durationMs": 60
     },
     {
       "sequence": 7,
@@ -85,7 +85,7 @@
       "label": "Hide Project lens",
       "expected": "The graph gets a clear practical authoring viewport.",
       "actual": "Left click at (1580, 183).",
-      "durationMs": 28
+      "durationMs": 130
     },
     {
       "sequence": 8,
@@ -93,7 +93,7 @@
       "label": "Fit the blank-authored connection graph",
       "expected": "All four authored cards and their channel rails fit in the visible canvas.",
       "actual": "Pressed Home.",
-      "durationMs": 8
+      "durationMs": 10
     },
     {
       "sequence": 9,
@@ -101,7 +101,7 @@
       "label": "Begin Text lane",
       "expected": "Only compatible receiver handles are emphasized for the Text channel.",
       "actual": "Left click at (939, 633).",
-      "durationMs": 95
+      "durationMs": 238
     },
     {
       "sequence": 10,
@@ -109,7 +109,7 @@
       "label": "Capture compatible channel intent",
       "expected": "A deliberate source click reveals the compatible receiver rail before persistence.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 977,
+      "durationMs": 202,
       "screenshotPath": "screenshots/01-compatible-six-channel-intent.png"
     },
     {
@@ -118,7 +118,300 @@
       "label": "Complete Text lane",
       "expected": "The Text lane persists through the ordinary connection interaction.",
       "actual": "Left click at (336, 408).",
-      "durationMs": 220
+      "durationMs": 287
+    },
+    {
+      "sequence": 12,
+      "kind": "observation",
+      "label": "First lane completion state",
+      "expected": "The saved graph and rendered path both report the completed Text lane.",
+      "actual": "{\"status\":\"Connect nodes saved\",\"sourceConnected\":\"true\",\"targetConnected\":\"true\",\"renderedEdges\":1}",
+      "durationMs": 0
+    },
+    {
+      "sequence": 13,
+      "kind": "left-click",
+      "label": "Begin Image lane",
+      "expected": "Only compatible receiver handles are emphasized for the Image channel.",
+      "actual": "Left click at (939, 662).",
+      "durationMs": 251
+    },
+    {
+      "sequence": 14,
+      "kind": "left-click",
+      "label": "Complete Image lane",
+      "expected": "The Image lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (336, 437).",
+      "durationMs": 284
+    },
+    {
+      "sequence": 15,
+      "kind": "left-click",
+      "label": "Begin Mask lane",
+      "expected": "Only compatible receiver handles are emphasized for the Mask channel.",
+      "actual": "Left click at (939, 690).",
+      "durationMs": 253
+    },
+    {
+      "sequence": 16,
+      "kind": "left-click",
+      "label": "Complete Mask lane",
+      "expected": "The Mask lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (336, 465).",
+      "durationMs": 294
+    },
+    {
+      "sequence": 17,
+      "kind": "left-click",
+      "label": "Begin Data lane",
+      "expected": "Only compatible receiver handles are emphasized for the Data channel.",
+      "actual": "Left click at (939, 719).",
+      "durationMs": 249
+    },
+    {
+      "sequence": 18,
+      "kind": "left-click",
+      "label": "Complete Data lane",
+      "expected": "The Data lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (336, 494).",
+      "durationMs": 244
+    },
+    {
+      "sequence": 19,
+      "kind": "left-click",
+      "label": "Begin Video lane",
+      "expected": "Only compatible receiver handles are emphasized for the Video channel.",
+      "actual": "Left click at (939, 748).",
+      "durationMs": 260
+    },
+    {
+      "sequence": 20,
+      "kind": "left-click",
+      "label": "Complete Video lane",
+      "expected": "The Video lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (336, 523).",
+      "durationMs": 278
+    },
+    {
+      "sequence": 21,
+      "kind": "left-click",
+      "label": "Begin Audio lane",
+      "expected": "Only compatible receiver handles are emphasized for the Audio channel.",
+      "actual": "Left click at (939, 776).",
+      "durationMs": 161
+    },
+    {
+      "sequence": 22,
+      "kind": "left-click",
+      "label": "Complete Audio lane",
+      "expected": "The Audio lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (336, 551).",
+      "durationMs": 302
+    },
+    {
+      "sequence": 23,
+      "kind": "left-click",
+      "label": "Open the in-place role grid",
+      "expected": "All 15 semantic roles are available directly on the lane.",
+      "actual": "Left click at (637, 521).",
+      "durationMs": 52
+    },
+    {
+      "sequence": 24,
+      "kind": "left-click",
+      "label": "Name the Text lane Subject",
+      "expected": "The non-General role becomes a visible lane badge.",
+      "actual": "Left click at (738, 566).",
+      "durationMs": 70
+    },
+    {
+      "sequence": 25,
+      "kind": "screenshot",
+      "label": "Capture six persisted lanes",
+      "expected": "Six channel-specific paths coexist between the same node pair and one carries a visible Subject role.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 182,
+      "screenshotPath": "screenshots/02-six-channel-lanes-and-role.png"
+    },
+    {
+      "sequence": 26,
+      "kind": "left-click",
+      "label": "Select Evaluate before edge deletion",
+      "expected": "The source node remains the graph selection while an edge-only context action runs.",
+      "actual": "Left click at (800, 644).",
+      "durationMs": 53
+    },
+    {
+      "sequence": 27,
+      "kind": "right-click",
+      "label": "Delete only the Text lane",
+      "expected": "Right-click removes the targeted edge without deleting or deselecting either node.",
+      "actual": "Right click at (593, 521).",
+      "durationMs": 75
+    },
+    {
+      "sequence": 28,
+      "kind": "left-click",
+      "label": "Begin Data-to-Text adapter lane",
+      "expected": "The receiver Text handle is available through Ether's local data-to-text adapter.",
+      "actual": "Left click at (939, 494).",
+      "durationMs": 233
+    },
+    {
+      "sequence": 29,
+      "kind": "left-click",
+      "label": "Complete adapter lane",
+      "expected": "The adapter-backed lane persists before any run or provider call.",
+      "actual": "Left click at (986, 408).",
+      "durationMs": 283
+    },
+    {
+      "sequence": 30,
+      "kind": "left-click",
+      "label": "Select the adapter lane",
+      "expected": "A visible lane control selects the exact connection for the Project lens.",
+      "actual": "Left click at (962, 451).",
+      "durationMs": 54
+    },
+    {
+      "sequence": 31,
+      "kind": "left-click",
+      "label": "Show Project lens",
+      "expected": "Ordinary connection controls appear without covering the completed authoring interaction.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 60
+    },
+    {
+      "sequence": 32,
+      "kind": "left-click",
+      "label": "Focus output selection",
+      "expected": "The lane's output policy is editable in the ordinary Inspector.",
+      "actual": "Left click at (1461, 657).",
+      "durationMs": 60
+    },
+    {
+      "sequence": 33,
+      "kind": "keyboard-command",
+      "label": "Choose latest output",
+      "expected": "The selector changes from Latest approved to Latest output through the focused control.",
+      "actual": "Pressed ArrowDown.",
+      "durationMs": 7
+    },
+    {
+      "sequence": 34,
+      "kind": "keyboard-command",
+      "label": "Commit output selection",
+      "expected": "The changed selector persists as a graph transaction.",
+      "actual": "Pressed Enter.",
+      "durationMs": 36
+    },
+    {
+      "sequence": 35,
+      "kind": "screenshot",
+      "label": "Capture adapter consequence Inspector",
+      "expected": "The ordinary Inspector names the local adapter, receiver field, assembly, preservation, channels, role, and selector while diagnostics stay collapsed.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 211,
+      "screenshotPath": "screenshots/03-adapter-consequence-inspector.png"
+    },
+    {
+      "sequence": 36,
+      "kind": "left-click",
+      "label": "Open connection diagnostics deliberately",
+      "expected": "Expert adapter and capability details appear only after an explicit disclosure.",
+      "actual": "Left click at (1461, 907).",
+      "durationMs": 34
+    },
+    {
+      "sequence": 37,
+      "kind": "screenshot",
+      "label": "Capture expert connection diagnostics",
+      "expected": "The deliberate Advanced view exposes the resolved adapter and capability requirement without starting work.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 205,
+      "screenshotPath": "screenshots/04-connection-diagnostics.png"
+    },
+    {
+      "sequence": 38,
+      "kind": "left-click",
+      "label": "Hide Project lens",
+      "expected": "The canvas regains clear pointer access for the next Inspector target.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 51
+    },
+    {
+      "sequence": 39,
+      "kind": "left-click",
+      "label": "Select the Batch node",
+      "expected": "The progressive node Inspector opens from a real canvas selection.",
+      "actual": "Left click at (475, 419).",
+      "durationMs": 56
+    },
+    {
+      "sequence": 40,
+      "kind": "left-click",
+      "label": "Show Batch Inspector",
+      "expected": "Registry-backed ordinary controls are visible for the selected canonical node.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 68
+    },
+    {
+      "sequence": 41,
+      "kind": "left-click",
+      "label": "Add a structured Batch dimension",
+      "expected": "The Inspector adds a named structured item rather than exposing raw JSON.",
+      "actual": "Left click at (1461, 568).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 42,
+      "kind": "left-click",
+      "label": "Add a structured Batch exclusion",
+      "expected": "The Inspector adds a key/value exclusion editor through an ordinary control.",
+      "actual": "Left click at (1461, 886).",
+      "durationMs": 60
+    },
+    {
+      "sequence": 43,
+      "kind": "left-click",
+      "label": "Save structured Batch settings",
+      "expected": "The registry-backed draft commits through one durable graph transaction.",
+      "actual": "Left click at (1406, 567).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 44,
+      "kind": "screenshot",
+      "label": "Capture ordinary progressive Inspector",
+      "expected": "Concise channels and structured Batch controls are visible while technical provenance remains collapsed.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 203,
+      "screenshotPath": "screenshots/05-progressive-batch-inspector.png"
+    },
+    {
+      "sequence": 45,
+      "kind": "left-click",
+      "label": "Open node diagnostics deliberately",
+      "expected": "Stable IDs and provenance appear only in the expert disclosure.",
+      "actual": "Left click at (1461, 870).",
+      "durationMs": 30
+    },
+    {
+      "sequence": 46,
+      "kind": "screenshot",
+      "label": "Capture deliberate node diagnostics",
+      "expected": "The expert section expands without path leakage or replacing ordinary authoring controls.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 187,
+      "screenshotPath": "screenshots/06-progressive-batch-advanced.png"
+    },
+    {
+      "sequence": 47,
+      "kind": "observation",
+      "label": "T10-T12 practical slice",
+      "expected": "Six channels, roles, edge deletion, adapters, consequences, and progressive controls work from a blank package.",
+      "actual": "Six same-pair lanes were authored; one was role-edited and edge-only deleted; a local adapter lane exposed its consequence; structured Batch settings saved without raw JSON.",
+      "durationMs": 0
     }
   ],
   "errors": []

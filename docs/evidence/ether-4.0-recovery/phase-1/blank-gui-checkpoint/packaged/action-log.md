@@ -2,74 +2,74 @@
 
 - Mode: packaged
 - Outcome: passed
-- Git commit: 2ac1d37fde3d21e27f544131db8053c4f628681a
+- Git commit: 3113bef52d8896a7693ba202c531b1dc261f455a
 - Profile: fresh-isolated; APPDATA, LOCALAPPDATA, and userData isolated
 - Viewport: 1600×1000; scale 1
-- Started: 2026-08-03T21:40:12.084Z
-- Finished: 2026-08-03T21:40:20.741Z
+- Started: 2026-08-03T23:52:28.246Z
+- Finished: 2026-08-03T23:52:37.933Z
 
 ## Build identity
 
-- release/windows/win-unpacked/Ether.exe: d50505a3a122a01a1cd58a15ab9c41fc5edeb450662fc895ce36b2b3f3c66646
-- release/windows/win-unpacked/resources/app.asar: f3bbeeca22c5d40e0f13abff55f353ec566a0a255c97cf232526b33e262408f6
+- release/windows/win-unpacked/Ether.exe: f6db33c815f5fe98a721ebd24e95cf303aecf3c53a11ee69174389dcdd4f07fa
+- release/windows/win-unpacked/resources/app.asar: 73e9ad34a48305e1e56d5636a0b99b2f37f889705ff030cf7020e0e3d8140a78
 
 ## Actions
 
 | # | Input | Action | Expected | Actual | ms | Screenshot |
 | --- | --- | --- | --- | --- | ---: | --- |
 | 1 | observation | Registry-backed blank library | All 17 canonical node types are discoverable before graph mutation. | Found 17 registry rows in canonical order. | 0 |  |
-| 2 | screenshot | Capture the blank registry-backed library | A fresh blank document visibly exposes the searchable Node Library. | Captured after the documented preceding action. | 133 | screenshots/01-blank-library.png |
-| 3 | left-click | Add prompt.text from Node Library | The registry factory creates prompt.text with canonical defaults. | Left click at (108, 498). | 45 |  |
-| 4 | left-click | Add prompt.worker from Node Library | The registry factory creates prompt.worker with canonical defaults. | Left click at (108, 633). | 28 |  |
-| 5 | left-drag | Move Worker with ordinary left drag | The Worker moves once and preserves its graph identity. | Left drag (542, 434) to (542, 824). | 396 |  |
-| 6 | left-marquee | Marquee-select Prompt | A left-drag marquee selects the intersected Prompt. | Left drag (674, 526) to (930, 702). | 135 |  |
-| 7 | shift-marquee | Add Worker with Shift marquee | Shift marquee preserves Prompt and adds Worker. | Shift+left drag (414, 688) to (670, 864). | 139 |  |
-| 8 | screenshot | Capture movement and additive marquee | The separated nodes show one reliable movement and two-node additive selection state. | Captured after the documented preceding action. | 151 | screenshots/02-marquee-and-movement.png |
-| 9 | keyboard-command | Duplicate selected nodes | Ctrl+D duplicates the two selected nodes with a visible offset. | Pressed Control+D. | 35 |  |
-| 10 | keyboard-command | Copy graph selection | Ctrl+C records the selected graph subgraph. | Pressed Control+C. | 13 |  |
-| 11 | keyboard-command | Paste graph selection | Ctrl+V pastes the selected subgraph with fresh graph identities. | Pressed Control+V. | 32 |  |
-| 12 | keyboard-command | Delete pasted graph selection | Delete removes the current graph selection. | Pressed Delete. | 27 |  |
-| 13 | keyboard-command | Undo graph delete | Ctrl+Z restores the deleted graph selection. | Pressed Control+Z. | 21 |  |
-| 14 | keyboard-command | Redo graph delete | Ctrl+Y reapplies the graph deletion. | Pressed Control+Y. | 28 |  |
-| 15 | keyboard-command | Select every current node | Ctrl+A selects every node when the canvas owns focus. | Pressed Control+A. | 15 |  |
+| 2 | screenshot | Capture the blank registry-backed library | A fresh blank document visibly exposes the searchable Node Library. | Captured after the documented preceding action. | 136 | screenshots/01-blank-library.png |
+| 3 | left-click | Add prompt.text from Node Library | The registry factory creates prompt.text with canonical defaults. | Left click at (108, 498). | 69 |  |
+| 4 | left-click | Add prompt.worker from Node Library | The registry factory creates prompt.worker with canonical defaults. | Left click at (108, 633). | 328 |  |
+| 5 | left-drag | Move Worker with ordinary left drag | The Worker moves once and preserves its graph identity. | Left drag (542, 434) to (542, 824). | 175 |  |
+| 6 | left-marquee | Marquee-select Prompt | A left-drag marquee selects the intersected Prompt. | Left drag (674, 526) to (930, 702). | 121 |  |
+| 7 | shift-marquee | Add Worker with Shift marquee | Shift marquee preserves Prompt and adds Worker. | Shift+left drag (414, 688) to (670, 864). | 149 |  |
+| 8 | screenshot | Capture movement and additive marquee | The separated nodes show one reliable movement and two-node additive selection state. | Captured after the documented preceding action. | 143 | screenshots/02-marquee-and-movement.png |
+| 9 | keyboard-command | Duplicate selected nodes | Ctrl+D duplicates the two selected nodes with a visible offset. | Pressed Control+D. | 80 |  |
+| 10 | keyboard-command | Copy graph selection | Ctrl+C records the selected graph subgraph. | Pressed Control+C. | 10 |  |
+| 11 | keyboard-command | Paste graph selection | Ctrl+V pastes the selected subgraph with fresh graph identities. | Pressed Control+V. | 57 |  |
+| 12 | keyboard-command | Delete pasted graph selection | Delete removes the current graph selection. | Pressed Delete. | 30 |  |
+| 13 | keyboard-command | Undo graph delete | Ctrl+Z restores the deleted graph selection. | Pressed Control+Z. | 35 |  |
+| 14 | keyboard-command | Redo graph delete | Ctrl+Y reapplies the graph deletion. | Pressed Control+Y. | 41 |  |
+| 15 | keyboard-command | Select every current node | Ctrl+A selects every node when the canvas owns focus. | Pressed Control+A. | 19 |  |
 | 16 | observation | Primary graph shortcuts | Duplicate, clipboard, delete, undo, redo, and select-all change the durable graph. | Node counts: 2 -> 4 -> 6 -> 4 -> 6 -> 4; four selected. | 0 |  |
-| 17 | keyboard-command | Rename the primary selected node | F2 opens one controlled title editor. | Pressed F2. | 17 |  |
-| 18 | keyboard-command | Commit the direct title edit | Enter commits the renamed title as one graph transaction. | Pressed Enter. | 28 |  |
-| 19 | left-click | Restore canvas-owned node focus | The renamed Prompt is the primary selected graph object. | Left click at (802, 599). | 28 |  |
-| 20 | keyboard-command | Open primary content editing | Enter edits the selected Prompt primary content rather than moving the node. | Pressed Enter. | 13 |  |
-| 21 | screenshot | Capture controlled direct editing | The selected Prompt visibly owns the only bounded on-canvas editor. | Captured after the documented preceding action. | 203 | screenshots/03-direct-editing.png |
-| 22 | keyboard-command | Commit primary content edit | Ctrl+Enter commits text while the editor owns focus. | Pressed Control+Enter. | 29 |  |
-| 23 | left-click | Restore Prompt command focus | The directly edited Prompt remains the primary graph selection. | Left click at (802, 599). | 17 |  |
-| 24 | keyboard-command | Select the preview graph scope | The preview scope includes the blank-authored Workers without starting provider work. | Pressed Control+A. | 11 |  |
-| 25 | keyboard-command | Preview the selected run | Ctrl+Enter reaches provider capability validation without starting provider work. | Pressed Control+Enter. | 13 |  |
+| 17 | keyboard-command | Rename the primary selected node | F2 opens one controlled title editor. | Pressed F2. | 18 |  |
+| 18 | keyboard-command | Commit the direct title edit | Enter commits the renamed title as one graph transaction. | Pressed Enter. | 27 |  |
+| 19 | left-click | Restore canvas-owned node focus | The renamed Prompt is the primary selected graph object. | Left click at (802, 599). | 44 |  |
+| 20 | keyboard-command | Open primary content editing | Enter edits the selected Prompt primary content rather than moving the node. | Pressed Enter. | 19 |  |
+| 21 | screenshot | Capture controlled direct editing | The selected Prompt visibly owns the only bounded on-canvas editor. | Captured after the documented preceding action. | 207 | screenshots/03-direct-editing.png |
+| 22 | keyboard-command | Commit primary content edit | Ctrl+Enter commits text while the editor owns focus. | Pressed Control+Enter. | 43 |  |
+| 23 | left-click | Restore Prompt command focus | The directly edited Prompt remains the primary graph selection. | Left click at (802, 599). | 32 |  |
+| 24 | keyboard-command | Select the preview graph scope | The preview scope includes the blank-authored Workers without starting provider work. | Pressed Control+A. | 13 |  |
+| 25 | keyboard-command | Preview the selected run | Ctrl+Enter reaches provider capability validation without starting provider work. | Pressed Control+Enter. | 12 |  |
 | 26 | observation | Provider-free run preview | The shortcut is wired while an unconfigured blank profile remains provider-safe. | Preview stopped at the visible capability guard; no provider work started. | 0 |  |
-| 27 | left-click | Add reference.set from Node Library | The registry factory creates reference.set with canonical defaults. | Left click at (108, 749). | 36 |  |
-| 28 | left-click | Add generation.image from Node Library | The registry factory creates generation.image with canonical defaults. | Left click at (108, 814). | 35 |  |
-| 29 | left-click | Add edit.image from Node Library | The registry factory creates edit.image with canonical defaults. | Left click at (108, 674). | 47 |  |
-| 30 | left-click | Add edit.mask from Node Library | The registry factory creates edit.mask with canonical defaults. | Left click at (108, 750). | 43 |  |
-| 31 | left-click | Add edit.transform from Node Library | The registry factory creates edit.transform with canonical defaults. | Left click at (108, 814). | 45 |  |
-| 32 | left-click | Add review.compare from Node Library | The registry factory creates review.compare with canonical defaults. | Left click at (108, 674). | 46 |  |
-| 33 | left-click | Add review.evaluate from Node Library | The registry factory creates review.evaluate with canonical defaults. | Left click at (108, 750). | 41 |  |
-| 34 | left-click | Add review.filter from Node Library | The registry factory creates review.filter with canonical defaults. | Left click at (108, 814). | 52 |  |
-| 35 | left-click | Add flow.variables from Node Library | The registry factory creates flow.variables with canonical defaults. | Left click at (108, 674). | 49 |  |
-| 36 | left-click | Add flow.batch from Node Library | The registry factory creates flow.batch with canonical defaults. | Left click at (108, 750). | 48 |  |
-| 37 | left-click | Add flow.join from Node Library | The registry factory creates flow.join with canonical defaults. | Left click at (108, 814). | 47 |  |
-| 38 | left-click | Add output.collection from Node Library | The registry factory creates output.collection with canonical defaults. | Left click at (108, 674). | 45 |  |
-| 39 | left-click | Add output.export from Node Library | The registry factory creates output.export with canonical defaults. | Left click at (108, 750). | 51 |  |
-| 40 | left-click | Add canvas.note from Node Library | The registry factory creates canvas.note with canonical defaults. | Left click at (108, 814). | 51 |  |
-| 41 | left-click | Add canvas.drawing from Node Library | The registry factory creates canvas.drawing with canonical defaults. | Left click at (108, 774). | 49 |  |
-| 42 | left-click | Hide Reference Desk | The ordinary panel control clears more room for the authored graph. | Left click at (1581, 151). | 39 |  |
-| 43 | left-click | Hide Build tools | The ordinary panel control clears more room for the authored graph. | Left click at (244, 183). | 23 |  |
-| 44 | left-click | Hide Project lens | The ordinary panel control clears more room for the authored graph. | Left click at (1580, 183). | 19 |  |
+| 27 | left-click | Add reference.set from Node Library | The registry factory creates reference.set with canonical defaults. | Left click at (108, 749). | 56 |  |
+| 28 | left-click | Add generation.image from Node Library | The registry factory creates generation.image with canonical defaults. | Left click at (108, 814). | 70 |  |
+| 29 | left-click | Add edit.image from Node Library | The registry factory creates edit.image with canonical defaults. | Left click at (108, 674). | 84 |  |
+| 30 | left-click | Add edit.mask from Node Library | The registry factory creates edit.mask with canonical defaults. | Left click at (108, 750). | 73 |  |
+| 31 | left-click | Add edit.transform from Node Library | The registry factory creates edit.transform with canonical defaults. | Left click at (108, 814). | 71 |  |
+| 32 | left-click | Add review.compare from Node Library | The registry factory creates review.compare with canonical defaults. | Left click at (108, 674). | 71 |  |
+| 33 | left-click | Add review.evaluate from Node Library | The registry factory creates review.evaluate with canonical defaults. | Left click at (108, 750). | 74 |  |
+| 34 | left-click | Add review.filter from Node Library | The registry factory creates review.filter with canonical defaults. | Left click at (108, 814). | 69 |  |
+| 35 | left-click | Add flow.variables from Node Library | The registry factory creates flow.variables with canonical defaults. | Left click at (108, 674). | 78 |  |
+| 36 | left-click | Add flow.batch from Node Library | The registry factory creates flow.batch with canonical defaults. | Left click at (108, 750). | 77 |  |
+| 37 | left-click | Add flow.join from Node Library | The registry factory creates flow.join with canonical defaults. | Left click at (108, 814). | 58 |  |
+| 38 | left-click | Add output.collection from Node Library | The registry factory creates output.collection with canonical defaults. | Left click at (108, 674). | 75 |  |
+| 39 | left-click | Add output.export from Node Library | The registry factory creates output.export with canonical defaults. | Left click at (108, 750). | 77 |  |
+| 40 | left-click | Add canvas.note from Node Library | The registry factory creates canvas.note with canonical defaults. | Left click at (108, 814). | 73 |  |
+| 41 | left-click | Add canvas.drawing from Node Library | The registry factory creates canvas.drawing with canonical defaults. | Left click at (108, 774). | 76 |  |
+| 42 | left-click | Hide Reference Desk | The ordinary panel control clears more room for the authored graph. | Left click at (1581, 151). | 81 |  |
+| 43 | left-click | Hide Build tools | The ordinary panel control clears more room for the authored graph. | Left click at (244, 183). | 52 |  |
+| 44 | left-click | Hide Project lens | The ordinary panel control clears more room for the authored graph. | Left click at (1580, 183). | 51 |  |
 | 45 | left-click | Return focus to the canvas | Canvas focus owns the final fit command. | Left click at (800, 906). | 27 |  |
-| 46 | keyboard-command | Fit the authored graph | Home fits all authored node types into the viewport. | Pressed Home. | 4 |  |
+| 46 | keyboard-command | Fit the authored graph | Home fits all authored node types into the viewport. | Pressed Home. | 3 |  |
 | 47 | observation | All canonical cards authored | Every canonical type can be created from the blank document without a graph fixture. | 17 distinct node definitions are visible on the durable canvas. | 0 |  |
-| 48 | screenshot | Capture all canonical node types | The fitted blank-authored graph visibly contains all 17 canonical node types. | Captured after the documented preceding action. | 248 | screenshots/04-all-17-node-types.png |
-| 49 | keyboard-command | Open the canvas command palette | Ctrl+K exposes the same graph command registry used by shortcuts and toolbar. | Pressed Control+K. | 32 |  |
-| 50 | screenshot | Capture the unified command surface | The palette visibly lists graph commands, shortcuts, availability, and disabled reasons. | Captured after the documented preceding action. | 231 | screenshots/05-command-palette.png |
+| 48 | screenshot | Capture all canonical node types | The fitted blank-authored graph visibly contains all 17 canonical node types. | Captured after the documented preceding action. | 228 | screenshots/04-all-17-node-types.png |
+| 49 | keyboard-command | Open the canvas command palette | Ctrl+K exposes the same graph command registry used by shortcuts and toolbar. | Pressed Control+K. | 57 |  |
+| 50 | screenshot | Capture the unified command surface | The palette visibly lists graph commands, shortcuts, availability, and disabled reasons. | Captured after the documented preceding action. | 249 | screenshots/05-command-palette.png |
 
 ## Captured errors
 
 | Source | Message |
 | --- | --- |
-| none | No captured errors |
+| main-process | [46364:0804/015237.040:ERROR:content\browser\network_service_instance_impl.cc:721] Network service crashed or was terminated, restarting service. |
