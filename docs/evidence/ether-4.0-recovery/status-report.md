@@ -1,6 +1,6 @@
 # Ether 4.0 recovery gate status report
 
-Generated from ledger schema ether-4.0-recovery-ledger@1 at candidate commit `2dd2fd54e60e421386f9bba92b8d331fbd46b748` and canonical app.asar hash `f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875`.
+Generated from ledger schema ether-4.0-recovery-ledger@1 at candidate commit `9acd1bb81b7f21f6fd36af71158041a2e8ca00f2` and canonical app.asar hash `c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb`.
 
 This is a gate validator report. It does not approve a phase gate or release.
 
@@ -51,7 +51,7 @@ T01 baseline triage: historical checked items remain PRESENT-UNPROVEN; explicit 
 
 Historical checked items are retained in `priorEvidence` only and remain PRESENT-UNPROVEN until candidate evidence is rerun. Every requirement carries required evidence classes, owners, release-blocker state, and (for M requirements) J01-J10 owner routes.
 
-Validator gate result: FAIL (524 errors).
+Validator gate result: FAIL (522 errors).
 
 ## Validator findings
 
@@ -276,20 +276,18 @@ Validator gate result: FAIL (524 errors).
 - AC-A19-007 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
 - AC-A19-008 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
 - RX-001 lacks terminal gate evidence (PRESENT-UNPROVEN).
-- RX-002 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-002 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-002 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 9acd1bb81b7f21f6fd36af71158041a2e8ca00f2.
+- RX-002 evidence package hash is stale; expected c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb.
 - RX-002 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
 - RX-003 lacks terminal gate evidence (FAIL).
-- RX-003 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-003 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
 - RX-004 lacks terminal gate evidence (MISSING).
 - RX-005 lacks terminal gate evidence (MISSING).
 - RX-006 lacks terminal gate evidence (FAIL).
 - RX-007 lacks terminal gate evidence (MISSING).
 - RX-008 lacks terminal gate evidence (MISSING).
 - RX-009 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
-- RX-010 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-010 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-010 evidence commit 38235da49e31afc5e04f1868fde4b2614d68fd40 is stale; expected 9acd1bb81b7f21f6fd36af71158041a2e8ca00f2.
+- RX-010 evidence package hash is stale; expected c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb.
 - RX-010 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
 - RX-011 lacks terminal gate evidence (FAIL).
 - RX-012 lacks terminal gate evidence (PRESENT-UNPROVEN).
@@ -302,17 +300,17 @@ Validator gate result: FAIL (524 errors).
 - RX-019 lacks terminal gate evidence (MISSING).
 - RX-020 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
 - RX-021 lacks terminal gate evidence (PRESENT-UNPROVEN).
-- RX-021 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-021 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-021 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 9acd1bb81b7f21f6fd36af71158041a2e8ca00f2.
+- RX-021 evidence package hash is stale; expected c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb.
 - RX-022 lacks terminal gate evidence (PRESENT-UNPROVEN).
-- RX-022 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-022 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-022 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 9acd1bb81b7f21f6fd36af71158041a2e8ca00f2.
+- RX-022 evidence package hash is stale; expected c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb.
 - RX-023 lacks terminal gate evidence (PRESENT-UNPROVEN).
-- RX-023 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-023 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-023 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 9acd1bb81b7f21f6fd36af71158041a2e8ca00f2.
+- RX-023 evidence package hash is stale; expected c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb.
 - RX-024 lacks terminal gate evidence (PRESENT-UNPROVEN).
-- RX-024 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 2dd2fd54e60e421386f9bba92b8d331fbd46b748.
-- RX-024 evidence package hash is stale; expected f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875.
+- RX-024 evidence commit 399dc03d5ddcb4a1ca16121f1a0872cd7c203c32 is stale; expected 9acd1bb81b7f21f6fd36af71158041a2e8ca00f2.
+- RX-024 evidence package hash is stale; expected c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb.
 - RX-025 requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.
 - RX-026 lacks terminal gate evidence (PRESENT-UNPROVEN).
 - RX-027 lacks terminal gate evidence (PRESENT-UNPROVEN).

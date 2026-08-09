@@ -8,11 +8,11 @@
     "recovery": "docs/product/ether-4.0-recovery-acceptance.md"
   },
   "candidate": {
-    "commit": "2dd2fd54e60e421386f9bba92b8d331fbd46b748",
-    "packageHash": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875",
+    "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+    "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
     "packageArtifact": "release/windows/win-unpacked/resources/app.asar",
-    "installerHash": "0c64425960a92ae9508964828e0ee8095550011286aac35a7ae5377eb31954ea",
-    "validatedAt": "2026-08-09T23:56:12.5913513+02:00"
+    "installerHash": "6583d153f780da81009d1b4d3dca503becf415e980bf59b6e2589b362f205fa6",
+    "validatedAt": "2026-08-10T00:36:40.6293246+02:00"
   },
   "statusModel": [
     "OPEN",
@@ -2373,7 +2373,14 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [{
+        "classes": ["P"],
+        "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+        "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
+        "actionLog": "docs/evidence/ether-4.0-recovery/phase-3/t14-worker-review/t14-worker-review/packaged/action-log.md",
+        "captureCommand": "pnpm.cmd run test:t14-worker-review:packaged",
+        "notes": "The final packaged Worker route starts a reviewed Generate Output plan and verifies that Worker B retains its separately authored instruction after Worker A and Worker B output versions are produced. Automated evidence remains open."
+      }],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.",
@@ -2481,7 +2488,14 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [{
+        "classes": ["P"],
+        "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+        "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
+        "actionLog": "docs/evidence/ether-4.0-recovery/phase-3/t14-worker-review/t14-worker-review/packaged/action-log.md",
+        "captureCommand": "pnpm.cmd run test:t14-worker-review:packaged",
+        "notes": "The final packaged Worker route runs Worker A with inspect-first handling, exposes its durable Unreviewed output and provenance, and requires the visible Approve action before downstream use. Automated evidence remains open."
+      }],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.",
@@ -3539,7 +3553,14 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [{
+        "classes": ["P"],
+        "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+        "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
+        "actionLog": "docs/evidence/ether-4.0-recovery/phase-3/t16-t19-visible/t16-t19-visible-packaged/packaged/action-log.md",
+        "captureCommand": "pnpm.cmd run test:t16-t19-visible:packaged",
+        "notes": "The final packaged Batch Matrix displays the two authored morning/evening cells before any image run. Its action log also records one Electron network-service crash/restart; automated exact-count and crash-free evidence remain open."
+      }],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.",
@@ -3567,7 +3588,14 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [{
+        "classes": ["P"],
+        "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+        "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
+        "actionLog": "docs/evidence/ether-4.0-recovery/phase-3/t16-t19-visible/t16-t19-visible-packaged/packaged/action-log.md",
+        "captureCommand": "pnpm.cmd run test:t16-t19-visible:packaged",
+        "notes": "The final packaged Batch Matrix visibly reports the sequential execution policy before any image run. Its action log also records one Electron network-service crash/restart; automated and crash-free evidence remain open."
+      }],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.",
@@ -3750,7 +3778,14 @@
       ],
       "releaseBlocker": true,
       "ownerRoutes": [],
-      "evidence": [],
+      "evidence": [{
+        "classes": ["P"],
+        "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+        "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
+        "actionLog": "docs/evidence/ether-4.0-recovery/phase-3/t16-t19-visible/t16-t19-visible-packaged/packaged/action-log.md",
+        "captureCommand": "pnpm.cmd run test:t16-t19-visible:packaged",
+        "notes": "The final packaged Batch Matrix visibly excludes one selected cell while retaining the two-cell grid. Its action log also records one Electron network-service crash/restart; automated and crash-free evidence remain open."
+      }],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "Baseline triage found no qualifying candidate evidence. Existing source may be partial; implementation presence does not advance status.",
@@ -6340,17 +6375,17 @@
           "classes": [
             "P"
           ],
-          "commit": "38235da49e31afc5e04f1868fde4b2614d68fd40",
-          "packageHash": "bc79aa9e6826cee71d0e2aa3e4f330766bbaf0f9e5f3561700fcd45cc333a6c2",
+          "commit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+          "packageHash": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb",
           "actionLog": "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md",
           "captureCommand": "pnpm.cmd run test:gui-checkpoint:packaged",
-          "notes": "The packaged action log clicks every canonical library row and records 17 distinct definition IDs on the resulting durable canvas. Automated placement/default assertions and final-candidate refresh remain open."
+          "notes": "The final packaged blank-document action log clicks every canonical library row and records 17 distinct definition IDs on the durable canvas. Automated placement/default evidence remains open."
         }
       ],
       "priorEvidence": null,
       "baselineCommit": "537607ebc2ad4bdec476fbb987a38fadf268b125",
       "classificationReason": "The rejected authoring surface does not expose a complete registry-driven library, so clicking every canonical item cannot currently be completed.",
-      "notes": "The accepted intermediate checkpoint supplies P candidate evidence at product commit 38235da. Baseline status remains nonterminal until A is reconciled and the evidence is refreshed against the eventual candidate."
+      "notes": "The final packaged blank-document checkpoint supplies P candidate evidence at product commit 9acd1bb. The row remains nonterminal until A is reconciled."
     },
     {
       "id": "RX-004",

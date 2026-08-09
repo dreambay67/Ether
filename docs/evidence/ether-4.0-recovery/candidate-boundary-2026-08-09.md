@@ -2,6 +2,35 @@
 
 This record consolidates the practical package boundary without making a release-readiness claim. It preserves failed and partial journeys as diagnostic evidence; none of the rows below may be promoted to verified or owner-accepted solely from this summary.
 
+## Final candidate reconciliation — 2026-08-10
+
+This section supersedes the package identity for the final candidate only. The historical package records and partial or failed outcomes below remain preserved as evidence of their own boundaries; they are not rewritten as final-candidate proof.
+
+### Final package identity
+
+- Candidate product and harness commit: `9acd1bb81b7f21f6fd36af71158041a2e8ca00f2`.
+- `release/windows/win-unpacked/Ether.exe`: `041d80aff7402348bd5aeae718f4784d4aa545efc597ae2b21b56e7918997023`.
+- Canonical `release/windows/win-unpacked/resources/app.asar`: `c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb`.
+- Installer `release/windows/Ether-4.0.0-Setup.exe`: `6583d153f780da81009d1b4d3dca503becf415e980bf59b6e2589b362f205fa6`.
+- Final package audit: 9/9 passed, recorded in [the final candidate package audit](phase-6/t28-final-package-audit-9acd.md).
+
+The final installer was recorded as a package artifact for reconciliation. This record does not claim that it was launched or that the original review task's installed-app and owner-acceptance gates were completed.
+
+### Final packaged journey reconciliation
+
+| Journey or boundary | Final-candidate result | Scope and remaining status |
+| --- | --- | --- |
+| Blank GUI checkpoint | PASS | The packaged blank-document checkpoint passed. It remains evidence only for its recorded action coverage and does not itself close J02/J03 or any manual route. |
+| Module authoring | PASS | The packaged Module journey passed. Manual-owner requirements remain `PRESENT-UNPROVEN`. |
+| T13 run safety | PASS | The packaged fake-local run-safety slice passed; it does not substitute for a real-provider result or owner route. |
+| T14 Worker review | PASS | The packaged fake-local Worker slice passed; it does not substitute for a real-provider result or owner route. |
+| T16–T19 visible slice | PASS with captured infrastructure warning | The packaged fake-local visible slice completed, while its log captured one Electron network-service crash/restart with no user-visible journey failure. It is not evidence of a real provider, native folder selection, filesystem export, crash-free operation, or owner acceptance. |
+| Connection Inspector | DEFERRED / `PRESENT-UNPROVEN` | The second final attempt reached the structured Batch Inspector, then hit a stale-disclosure failure. It is not recorded as a passing connection journey. |
+| T15 Reference Set | `PRESENT-UNPROVEN` | The product default was fixed and the final package visibly showed Image enabled. The later attempt timed out before the lane and sealed-preview steps, so it does not establish the full Reference Set journey. |
+| Document lifecycle | `PRESENT-UNPROVEN` | The packaged attempt timed out with Ether still alive and the blank document showing `Saved`; it is not a passed lifecycle/recovery journey. |
+
+No real provider or image-generation call was launched during this final-candidate boundary. Accordingly, no `R` evidence is claimed here, and no ledger status is changed by this reconciliation.
+
 ## Package identity
 
 - Packaged product commit recorded by the current-package journeys: `2dd2fd54e60e421386f9bba92b8d331fbd46b748`.

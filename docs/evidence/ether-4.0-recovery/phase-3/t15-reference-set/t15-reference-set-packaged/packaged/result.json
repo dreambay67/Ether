@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t15-reference-set-packaged",
   "mode": "packaged",
-  "startedAt": "2026-08-09T11:15:17.799Z",
-  "finishedAt": "2026-08-09T11:15:33.982Z",
+  "startedAt": "2026-08-09T22:12:23.759Z",
+  "finishedAt": "2026-08-09T22:12:41.352Z",
   "outcome": "failed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "87efa2da9cc28f60a43356c66ae0836e3f77c78a",
+    "gitCommit": "76d4867148b8f1b2ca845021af34a4593e3f9db4",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "3a6e5a193cb1e0e42672a3789a950b72907c87bb3b6a20bfd330de2dd9744169"
+        "sha256": "2d90842c3b03c131567522e8cd9b63b31064cb97fa52d4c1b31bb1d7e19337ec"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "6b375f8eecd9206b11ac4e5120b8eb3653c641f0903554331c296bad7579f44f"
+        "sha256": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add reference.set from Node Library",
       "expected": "The blank document creates reference.set through the canonical registry.",
       "actual": "Left click at (108, 690).",
-      "durationMs": 91
+      "durationMs": 62
     },
     {
       "sequence": 2,
@@ -45,7 +45,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The blank document creates prompt.worker through the canonical registry.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 61
+      "durationMs": 63
     },
     {
       "sequence": 3,
@@ -53,7 +53,7 @@
       "label": "Select Reference Set",
       "expected": "The blank document exposes source controls only after the Reference Set exists.",
       "actual": "Left click at (802, 598).",
-      "durationMs": 50
+      "durationMs": 72
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Link the first local reference",
       "expected": "The exact local source is selected through Ether's owned native file picker.",
       "actual": "Left click at (1397, 839).",
-      "durationMs": 41
+      "durationMs": 52
     },
     {
       "sequence": 5,
@@ -77,7 +77,7 @@
       "label": "Embed the second local reference",
       "expected": "The exact local source is selected through Ether's owned native file picker.",
       "actual": "Left click at (1482, 839).",
-      "durationMs": 29
+      "durationMs": 33
     },
     {
       "sequence": 7,
@@ -93,7 +93,7 @@
       "label": "Link the third local reference",
       "expected": "The exact local source is selected through Ether's owned native file picker.",
       "actual": "Left click at (1397, 839).",
-      "durationMs": 23
+      "durationMs": 47
     },
     {
       "sequence": 9,
@@ -109,7 +109,7 @@
       "label": "Select excluded Style reference",
       "expected": "The Reference Desk selection carries explicit inclusion and role metadata.",
       "actual": "Left click at (37, 241).",
-      "durationMs": 29
+      "durationMs": 46
     },
     {
       "sequence": 11,
@@ -117,7 +117,103 @@
       "label": "Add the excluded Style reference",
       "expected": "Add updates membership explicitly and never replaces the existing source set.",
       "actual": "Left click at (1463, 284).",
-      "durationMs": 77
+      "durationMs": 40
+    },
+    {
+      "sequence": 12,
+      "kind": "left-click",
+      "label": "Select first reference for Replace",
+      "expected": "The Reference Desk selection carries explicit inclusion and role metadata.",
+      "actual": "Left click at (37, 241).",
+      "durationMs": 62
+    },
+    {
+      "sequence": 13,
+      "kind": "left-click",
+      "label": "Select embedded Subject reference for Replace",
+      "expected": "The Reference Desk selection carries explicit inclusion and role metadata.",
+      "actual": "Left click at (37, 241).",
+      "durationMs": 38
+    },
+    {
+      "sequence": 14,
+      "kind": "left-click",
+      "label": "Replace with the explicit two-reference set",
+      "expected": "Replace removes the unselected third reference only after the explicit action.",
+      "actual": "Left click at (1537, 284).",
+      "durationMs": 31
+    },
+    {
+      "sequence": 15,
+      "kind": "left-click",
+      "label": "Select third reference for explicit Add",
+      "expected": "The Reference Desk selection carries explicit inclusion and role metadata.",
+      "actual": "Left click at (37, 241).",
+      "durationMs": 32
+    },
+    {
+      "sequence": 16,
+      "kind": "left-click",
+      "label": "Add the third reference after Replace",
+      "expected": "Add restores the third reference at the end of manual membership order.",
+      "actual": "Left click at (1463, 284).",
+      "durationMs": 37
+    },
+    {
+      "sequence": 17,
+      "kind": "left-click",
+      "label": "Begin Reference Set image input to Worker",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (913, 613).",
+      "durationMs": 244
+    },
+    {
+      "sequence": 18,
+      "kind": "left-click",
+      "label": "Complete Reference Set image input to Worker",
+      "expected": "The Reference Set image lane persists through ordinary canvas input.",
+      "actual": "Left click at (431, 433).",
+      "durationMs": 306
+    },
+    {
+      "sequence": 19,
+      "kind": "left-click",
+      "label": "Open the Reference Set lane roles",
+      "expected": "The downstream Worker receives a deliberate semantic role, separate from member-level overrides.",
+      "actual": "Left click at (672, 523).",
+      "durationMs": 108
+    },
+    {
+      "sequence": 20,
+      "kind": "left-click",
+      "label": "Set the Reference Set lane role to Style",
+      "expected": "The persisted image lane visibly carries the Style role.",
+      "actual": "Left click at (592, 631).",
+      "durationMs": 65
+    },
+    {
+      "sequence": 21,
+      "kind": "left-click",
+      "label": "Select Worker for provider-safe preview",
+      "expected": "The Worker receives the enabled Reference Set image members without running a provider.",
+      "actual": "Left click at (542, 419).",
+      "durationMs": 62
+    },
+    {
+      "sequence": 22,
+      "kind": "left-click",
+      "label": "Save the offline Worker route",
+      "expected": "The preview is limited to the recovery-only deterministic Worker capability.",
+      "actual": "Left click at (1442, 638).",
+      "durationMs": 63
+    },
+    {
+      "sequence": 23,
+      "kind": "left-click",
+      "label": "Preview the immutable Reference Set Worker input",
+      "expected": "Preview seals the currently enabled members and does not start a provider call.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 104
     }
   ],
   "errors": []
