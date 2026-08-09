@@ -70,7 +70,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   }, [handleLayoutVersion, internalNodeIds, updateNodeInternals]);
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isTextEditingTarget(event.target)) return;
+      if (event.defaultPrevented || isTextEditingTarget(event.target) || isNativeEnterTarget(event)) return;
       const commandId = commandIdForKeyboard(event);
       const command = commandId === null ? undefined : commands.find((item) => item.id === commandId);
       if (command === undefined) return;
@@ -510,4 +510,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
 
 function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable || target.closest("[contenteditable='true']") !== null);
+}
+
+function isNativeEnterTarget(event: KeyboardEvent) {
+  return event.key === "Enter"
+    && event.target instanceof Element
+    && event.target.closest("button, summary, a[href], [role='button'], [role='option'], [role='menuitem']") !== null;
 }

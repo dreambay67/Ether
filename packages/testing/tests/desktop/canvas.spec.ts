@@ -263,7 +263,8 @@ test("keeps node creation disabled while a new document with the same graph id h
   await page.evaluate(() => (window as typeof window & { __hydrationRace: { resolveSecondSnapshot(): void } }).__hydrationRace.resolveSecondSnapshot());
   await expect(page.getByTestId("ether-canvas-surface")).toHaveAttribute("data-graph-node-count", "0");
   await expect(addPrompt).toBeEnabled();
-  await addPrompt.click();
+  await addPrompt.focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByTestId("ether-canvas-surface")).toHaveAttribute("data-graph-node-count", "1");
   const applied = await page.evaluate(() => (window as typeof window & { __hydrationRace: { transactions: Array<{ documentId?: string; payload?: { transaction?: { baseGraphRevisions?: Record<string, string> } } }> } }).__hydrationRace.transactions[0]);
   expect(applied?.documentId).toBe("document-b");
