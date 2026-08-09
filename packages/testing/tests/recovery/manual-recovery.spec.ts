@@ -110,7 +110,7 @@ test("captures the manual from visible blank-document actions without provider w
     await addDefinition(page, input, "reference.set");
     const referenceSet = page.locator(".ether-node[data-node-definition='reference.set']");
     await input.leftClick(referenceSet.locator(".ether-node-title"), "Select Reference Set", "Reference controls and the empty source desk share the visible Build workspace.");
-    await expect(page.getByRole("region", { name: "Reference Desk" })).toContainText("No references yet");
+    await expect(page.getByTestId("pane-artifacts").getByRole("region", { name: "Reference Desk" })).toContainText("No references yet");
     await input.screenshot("06-reference-setup.png", evidence, "Capture reference setup", "Reference Set setup and the honest empty Reference Desk are visible without importing or injecting a source.");
 
     await input.leftClick(page.getByRole("button", { name: "Run", exact: true }), "Open Run workspace", "Run reveals Batch Matrix and Job Center around the same durable graph.");
