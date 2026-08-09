@@ -119,14 +119,6 @@ function validateAcceptanceOutputs(
     if (step.kind !== "success") continue;
     const requirement = requirements.get(step.requirementId);
     for (const output of step.outputs) {
-      if (requirement !== undefined && !requirement.outputChannels.includes(output.channel)) {
-        diagnostics.push({
-          code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_REQUIREMENT_INVALID",
-          message: `Acceptance output ${output.fixtureId} requests ${output.channel}, which is not declared by requirement ${requirement.id}.`,
-          graphId: output.graphRef,
-          entityId: output.nodeRef
-        });
-      }
       const blueprint = blueprints.get(output.graphRef);
       const node = blueprint?.nodes.find((candidate) => candidate.id === output.nodeRef);
       if (node === undefined) {
@@ -139,6 +131,25 @@ function validateAcceptanceOutputs(
         continue;
       }
       const definition = nodeRegistry.get(node.definitionId as EtherNode["definitionId"]);
+      const isEvaluationPassthrough = requirement !== undefined &&
+        node.id === requirement.id &&
+        definition?.id === "review.evaluate" &&
+        output.channel !== "text" &&
+        output.channel !== "data" &&
+        definition.contract.inputs.some((port) => port.channel === output.channel) &&
+        definition.contract.outputs.some((port) => port.channel === output.channel);
+      if (
+        requirement !== undefined &&
+        !requirement.outputChannels.includes(output.channel) &&
+        !isEvaluationPassthrough
+      ) {
+        diagnostics.push({
+          code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_REQUIREMENT_INVALID",
+          message: `Acceptance output ${output.fixtureId} requests ${output.channel}, which is not declared by requirement ${requirement.id}.`,
+          graphId: output.graphRef,
+          entityId: output.nodeRef
+        });
+      }
       if (
         definition !== undefined
         && !definition.contract.outputs.some((port) => port.channel === output.channel)

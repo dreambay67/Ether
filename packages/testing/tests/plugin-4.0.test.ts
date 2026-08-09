@@ -15,7 +15,6 @@ import type {
 } from "@ether/schema";
 import { EtherGraphSchema, GraphTransactionSchema } from "@ether/schema";
 import { previewGraphTransaction, validateFullGraphState } from "../../graph-kernel/src/index.js";
-import { nodeDefinitions } from "../../graph-kernel/src/registry.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {

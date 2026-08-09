@@ -383,6 +383,53 @@ describe("registry-backed recipe semantics", () => {
     }));
   });
 
+  it("allows only Evaluate media passthrough fixtures beyond a provider requirement's output channels", () => {
+    const evaluationRecipe = structuredClone(semanticRecipeFixture());
+    evaluationRecipe.capabilityRequirements = [{
+      id: "evaluate", operation: "evaluate", inputChannels: ["image"], outputChannels: ["data"],
+      minimumReferences: 1, minimumOutputs: 1, supportsCancellation: true, supportsSeed: false
+    }];
+    evaluationRecipe.graph.nodes = [{
+      id: "evaluate", definitionId: "review.evaluate", title: "Evaluate", position: { x: 0, y: 0 }, size: { width: 220, height: 140 },
+      config: { kind: "review.evaluate", instruction: "Evaluate the image.", rubric: [], profile: "balanced", model: "gpt-5", reasoningEffort: "medium" },
+      presentation
+    }];
+    evaluationRecipe.graph.edges = [];
+    evaluationRecipe.layout.focusNodeRef = "evaluate";
+    evaluationRecipe.acceptanceScenario.steps = [{
+      kind: "success", requirementId: "evaluate", latencyMs: 0,
+      outputs: [{ graphRef: "recipe-root", nodeRef: "evaluate", channel: "image", fixtureId: "evaluated-image", mediaType: "image/png" }]
+    }];
+
+    expect(validateRecipeManifest(evaluationRecipe)).toEqual(expect.objectContaining({ valid: true, diagnostics: [] }));
+
+    const invalidProviderOutput = structuredClone(evaluationRecipe);
+    const step = invalidProviderOutput.acceptanceScenario.steps[0]!;
+    if (step.kind !== "success") throw new Error("Fixture must contain a success step.");
+    step.outputs[0] = { ...step.outputs[0]!, channel: "text", fixtureId: "provider-text", mediaType: "text/plain" };
+    expect(validateRecipeManifest(invalidProviderOutput)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({
+        code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_REQUIREMENT_INVALID",
+        entityId: "evaluate"
+      })])
+    }));
+
+    const invalidDefinition = structuredClone(evaluationRecipe);
+    invalidDefinition.graph.nodes[0] = {
+      ...invalidDefinition.graph.nodes[0]!,
+      definitionId: "review.filter",
+      config: { kind: "review.filter", match: "all", rules: [], routes: [] }
+    };
+    expect(validateRecipeManifest(invalidDefinition)).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: expect.arrayContaining([expect.objectContaining({
+        code: "RECIPE_SCENARIO_OUTPUT_CHANNEL_REQUIREMENT_INVALID",
+        entityId: "evaluate"
+      })])
+    }));
+  });
+
   it("leaves acceptance output node resolution to the graph-kernel semantic validator", () => {
     const missingOutputNode = structuredClone(semanticRecipeFixture());
     const missingStep = missingOutputNode.acceptanceScenario.steps[0]!;

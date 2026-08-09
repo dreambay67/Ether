@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 
 import { EtherApplication } from "@ether/application";
-import { importBlob } from "@ether/document";
 import { ExecutorRegistry, type ExecutionProviderFacets } from "@ether/execution";
 import { nodeDefinitions } from "@ether/graph-kernel";
 import { CODEX_PROVIDER_ID, CodexCliImageProvider, FakeImageProvider, type GenerationProvider } from "@ether/providers";
@@ -13,7 +12,6 @@ import {
   EtherGraphSchema,
   type EtherGraph,
   type GraphTransaction,
-  type NodeOutputVersion,
   type PayloadEnvelope,
   type ProviderCapability
 } from "@ether/schema";

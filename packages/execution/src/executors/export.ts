@@ -18,6 +18,17 @@ export class ExportExecutor implements StepExecutor {
     ) {
       throw new ExecutorFailure("EXPORT_CONFIGURATION_INVALID", "Export requires a path grant, format, collision policy, and metadata setting.");
     }
+    if (context.inputs.length === 0 && hasOnlyFilterRouteBindings(context)) {
+      return {
+        kind: "complete",
+        outputs: [{
+          channel: "data",
+          role: "general",
+          content: { kind: "object", value: { exported: 0, skipped: 0, paths: [] }, schemaId: "ether.export-result.v1" },
+          metadata: { filterRouteClosed: true, pathGrantId }
+        }]
+      };
+    }
     const result = await exporter.export({
       pathGrantId,
       namingTemplate,
@@ -37,4 +48,15 @@ export class ExportExecutor implements StepExecutor {
       }]
     };
   }
+}
+
+function hasOnlyFilterRouteBindings(context: import("./types.js").ExecutorContext): boolean {
+  const bindings = context.step.compiledContext.inputBindings;
+  return Array.isArray(bindings) && bindings.length > 0 && bindings.every((binding) =>
+    binding !== null &&
+    typeof binding === "object" &&
+    !Array.isArray(binding) &&
+    (((binding as Record<string, unknown>).filterRoute === "matched") ||
+      ((binding as Record<string, unknown>).filterRoute === "unmatched"))
+  );
 }

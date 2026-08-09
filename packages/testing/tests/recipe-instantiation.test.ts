@@ -246,4 +246,50 @@ describe("recipe instantiation", () => {
     expect(join).toMatchObject({ config: { kind: "flow.join", strategy: "ordered", requireComplete: true } });
     expect(recipe.graph.edges.some((edge) => edge.to.kind === "node" && edge.to.nodeId === join?.id && edge.from.kind === "node" && edge.from.nodeId === "image")).toBe(true);
   });
+
+  it("rejoins batched character and campaign candidates before their one review node", () => {
+    for (const id of ["character-consistency-sheet", "product-campaign-set"]) {
+      const recipe = BUILTIN_RECIPES.find((item) => item.id === id)!;
+      const join = recipe.graph.nodes.find((node) => node.definitionId === "flow.join");
+      const compare = recipe.graph.nodes.find((node) => node.definitionId === "review.compare");
+
+      expect(recipe.graph.nodes).toHaveLength(7);
+      expect(recipe.expectedWork).toMatchObject({ minimumCalls: 4, maximumCalls: 4, minimumWorkItems: 7, maximumWorkItems: 7 });
+      expect(recipe.checkpoints).toEqual([expect.objectContaining({ nodeRef: compare?.id })]);
+      expect(join).toMatchObject({ config: { kind: "flow.join", strategy: "ordered", requireComplete: true } });
+      expect(recipe.graph.edges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ from: expect.objectContaining({ nodeId: "image" }), to: expect.objectContaining({ nodeId: join?.id }) }),
+        expect.objectContaining({ from: expect.objectContaining({ nodeId: join?.id }), to: expect.objectContaining({ nodeId: compare?.id }) })
+      ]));
+      expect(recipe.graph.edges.filter((edge) =>
+        edge.to.kind === "node" && (edge.to.nodeId === join?.id || edge.to.nodeId === compare?.id)
+      ).map((edge) => edge.selector)).toEqual([{ kind: "all" }, { kind: "all" }]);
+    }
+  });
+
+  it("keeps every evaluated image in the explicit Filter route pool", () => {
+    for (const id of ["evaluate-and-route", "curate-collect-export"]) {
+      const recipe = BUILTIN_RECIPES.find((item) => item.id === id)!;
+      const routedEdges = recipe.graph.edges.filter((edge) =>
+        edge.from.kind === "node" &&
+        (edge.from.nodeId === "evaluate" || edge.from.nodeId === "filter")
+      );
+
+      expect(routedEdges.length).toBeGreaterThanOrEqual(3);
+      expect(routedEdges.every((edge) =>
+        edge.from.channel === "image" && edge.to.kind === "node" && edge.to.channel === "image"
+      )).toBe(true);
+      expect(routedEdges.every((edge) => edge.selector.kind === "all")).toBe(true);
+    }
+
+    const curate = BUILTIN_RECIPES.find((item) => item.id === "curate-collect-export")!;
+    expect(curate.graph.edges.some((edge) =>
+      edge.from.kind === "node" && edge.from.nodeId === "filter" &&
+      edge.to.kind === "node" && edge.to.nodeId === "export"
+    )).toBe(true);
+    expect(curate.graph.edges.some((edge) =>
+      edge.from.kind === "node" && edge.from.nodeId === "collection" &&
+      edge.to.kind === "node" && edge.to.nodeId === "export"
+    )).toBe(false);
+  });
 });

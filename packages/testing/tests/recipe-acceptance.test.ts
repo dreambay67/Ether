@@ -62,7 +62,7 @@ describe("recipe fake-provider acceptance", () => {
     const broken = runFakeRecipeAcceptanceScenario(recipe, { approveCheckpoints: true, disabledEdgeIds: [routeToCollection.id] });
     expect(broken.passed).toBe(false);
     expect(broken.collectionIds).toEqual([]);
-    expect(broken.exportNodeIds).toEqual([]);
+    expect(broken.exportNodeIds).toEqual(["export"]);
     expect(broken.blockedNodeIds).toContain("collection");
   });
 });

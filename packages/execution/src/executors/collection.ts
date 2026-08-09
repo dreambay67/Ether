@@ -17,6 +17,17 @@ export class CollectionExecutor implements StepExecutor {
     ) {
       throw new ExecutorFailure("COLLECTION_CONFIGURATION_INVALID", "Collection requires a valid ID, title, and membership mode.");
     }
+    if (context.inputs.length === 0 && hasOnlyFilterRouteBindings(context)) {
+      return {
+        kind: "complete",
+        outputs: [{
+          channel: "data",
+          role: "general",
+          content: { kind: "object", value: { collectionId, memberCount: 0 }, schemaId: "ether.collection-result.v1" },
+          metadata: { collectionId, filterRouteClosed: true }
+        }]
+      };
+    }
     const result = await collection.apply({ collectionId, collectionTitle, mode, makePrimary, payloads: context.inputs });
     return {
       kind: "complete",
@@ -28,4 +39,15 @@ export class CollectionExecutor implements StepExecutor {
       }]
     };
   }
+}
+
+function hasOnlyFilterRouteBindings(context: import("./types.js").ExecutorContext): boolean {
+  const bindings = context.step.compiledContext.inputBindings;
+  return Array.isArray(bindings) && bindings.length > 0 && bindings.every((binding) =>
+    binding !== null &&
+    typeof binding === "object" &&
+    !Array.isArray(binding) &&
+    (((binding as Record<string, unknown>).filterRoute === "matched") ||
+      ((binding as Record<string, unknown>).filterRoute === "unmatched"))
+  );
 }

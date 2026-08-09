@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { EtherApplication } from "../../application/src/application.js";
 import { importBlob } from "@ether/document";
-import { nodeDefinitions } from "@ether/graph-kernel";
 import { FakeImageProvider } from "@ether/providers";
 import type { EtherGraph, NodeOutputVersion, PayloadEnvelope } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,14 +12,13 @@ const timestamp = "2026-08-03T12:00:00.000Z";
 const roots: string[] = [];
 
 function blankGraph(): EtherGraph {
-  const note = nodeDefinitions.find((definition) => definition.id === "canvas.note")!;
   return {
     id: "root",
     title: "T19",
     kind: "root",
     createdAt: timestamp,
     updatedAt: timestamp,
-    nodes: [{ id: "node", definitionId: "canvas.note", title: "Node", position: { x: 0, y: 0 }, size: { width: 240, height: 180 }, config: note.defaultConfig(), presentation: { collapsed: false, accent: "default", previewMode: "content" } }],
+    nodes: [{ id: "node", definitionId: "canvas.note", title: "Node", position: { x: 0, y: 0 }, size: { width: 240, height: 180 }, config: { kind: "canvas.note", body: "", style: "note" }, presentation: { collapsed: false, accent: "default", previewMode: "content" } }],
     edges: [],
     groups: [],
     modules: [],
@@ -232,8 +230,7 @@ describe("T19 durable collection and export workflows", () => {
         };
       }).scheduler;
       let releaseEndingLoop: (() => void) | undefined;
-      let endingLoop!: Promise<void>;
-      endingLoop = new Promise<void>((resolve) => {
+      const endingLoop = new Promise<void>((resolve) => {
         releaseEndingLoop = resolve;
       }).finally(() => {
         if (scheduler.active.get(job.id)?.promise === endingLoop) scheduler.active.delete(job.id);

@@ -249,7 +249,147 @@ describe("recipe application boundary", () => {
           })
         ]));
       }
+      if (recipe.id === "character-consistency-sheet" || recipe.id === "product-campaign-set") {
+        const join = preview.payload.plan.steps.find((step) => step.executor === "join");
+        const compare = preview.payload.plan.steps.find((step) => step.executor === "human-checkpoint");
+        expect(join).toMatchObject({
+          compiledContext: expect.objectContaining({ join: expect.objectContaining({ strategy: "ordered", requireComplete: true }) })
+        });
+        expect(preview.payload.plan.steps.filter((step) => step.executor === "human-checkpoint")).toHaveLength(1);
+        expect(compare).toMatchObject({ dependencyStepIds: [join?.id] });
+        expect(join?.workItemIds).toHaveLength(1);
+        expect(compare?.workItemIds).toHaveLength(1);
+      }
       await app.closeDocument();
     }
+  }, 30_000);
+
+  it("pools every batched character view into one ordered durable Compare checkpoint", async () => {
+    const recipe = BUILTIN_RECIPES.find((item) => item.id === "character-consistency-sheet")!;
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-recipe-joined-review-"));
+    roots.push(root);
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      dispatchMode: "manual"
+    });
+    openApps.push(app);
+    const created = await app.createDocument({
+      path: path.join(root, "joined-review.ether"),
+      title: recipe.title,
+      initialGraph: graph()
+    });
+    const artifact = await seedReferenceArtifact(app, root);
+    await app.execute({
+      kind: "command", id: "instantiate-joined-review", correlationId: "joined-review-instantiate", documentId: created.documentId,
+      name: "recipe.instantiate", payload: {
+        recipeId: recipe.id,
+        version: recipe.version,
+        targetGraphId: "root",
+        parameters: valuesFor(recipe)
+      }
+    });
+    const referenceNode = (await app.queryGraph("root")).nodes.find((node) => node.definitionId === "reference.set");
+    if (referenceNode === undefined) throw new Error("Character recipe did not insert a reference set.");
+    await seedReferenceOutput(app, artifact, referenceNode.id);
+
+    const plan = await app.previewRun({ commandId: "joined-review-preview", graphId: "root", scope: { kind: "graph" } });
+    const permit = await app.grantRunPermit({ commandId: "joined-review-permit", planId: plan.id, contentHash: plan.contentHash });
+    const job = await app.startRun({ commandId: "joined-review-start", planId: plan.id, contentHash: plan.contentHash, runPermitId: permit.id });
+    const settled = await app.runPending(job.id);
+    expect(settled, JSON.stringify(await app.queryAttempts(job.id))).toMatchObject({ status: "waiting-review" });
+
+    const checkpoints = await app.boundaryStore().read(({ execution }) => execution.listReviewCheckpoints(job.id));
+    expect(checkpoints).toHaveLength(1);
+    expect(checkpoints[0]!.candidateOutputVersionIds).toHaveLength(4);
+    const candidates = await app.boundaryStore().read(({ artifacts, execution, outputs }) => {
+      const workById = new Map(execution.listWorkItems(job.id).map((work) => [work.id, work.plannedWorkItemId]));
+      const plannedById = new Map(plan.workItems.map((work) => [work.id, work.ordinal]));
+      return checkpoints[0]!.candidateOutputVersionIds.map((versionId) => {
+        const candidate = outputs.getVersion(versionId)!;
+        return {
+          artifactCount: artifacts.listByOutputVersion(candidate.id).length,
+          ordinal: plannedById.get(workById.get(candidate.workItemId!)!)
+        };
+      });
+    });
+    expect(candidates.map((candidate) => candidate.ordinal)).toEqual([0, 1, 2, 3]);
+    expect(candidates.map((candidate) => candidate.artifactCount)).toEqual([1, 1, 1, 1]);
+  }, 30_000);
+
+  it("keeps Evaluate-and-Route Compare candidates bound to the source artifact output", async () => {
+    const recipe = BUILTIN_RECIPES.find((item) => item.id === "evaluate-and-route")!;
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-recipe-evaluate-reference-"));
+    roots.push(root);
+    const referenceBlueprint = recipe.graph.nodes.find((node) => node.definitionId === "reference.set");
+    const compareBlueprint = recipe.graph.nodes.find((node) => node.definitionId === "review.compare");
+    const referenceEdge = recipe.graph.edges.find((edge) => edge.id === "inputs-compare");
+    if (
+      referenceBlueprint === undefined ||
+      referenceBlueprint.config.kind !== "reference.set" ||
+      compareBlueprint === undefined ||
+      referenceEdge === undefined
+    ) {
+      throw new Error("Evaluate-and-Route must retain its Reference Set to Compare path.");
+    }
+    const evaluateAndRouteCompareGraph: EtherGraph = {
+      ...graph(),
+      title: `${recipe.title} Compare`,
+      nodes: [
+        { ...referenceBlueprint, config: { ...referenceBlueprint.config, artifactIds: ["artifact-source-1"] } } as unknown as EtherGraph["nodes"][number],
+        compareBlueprint as unknown as EtherGraph["nodes"][number]
+      ],
+      edges: [referenceEdge]
+    };
+    const app = new EtherApplication({
+      appDataRoot: root,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      dispatchMode: "manual"
+    });
+    openApps.push(app);
+    await app.createDocument({
+      path: path.join(root, "evaluate-reference.ether"),
+      title: recipe.title,
+      initialGraph: evaluateAndRouteCompareGraph
+    });
+    const artifact = await seedReferenceArtifact(app, root);
+    const sourceOutputVersionId = `output-reference-${artifact.id}`;
+    const referenceNode = (await app.queryGraph("root")).nodes.find((node) => node.definitionId === "reference.set");
+    if (referenceNode === undefined) throw new Error("Evaluate-and-Route did not insert a reference set.");
+    await seedReferenceOutput(app, artifact, referenceNode.id);
+
+    const plan = await app.previewRun({ commandId: "evaluate-reference-preview", graphId: "root", scope: { kind: "graph" } });
+    const compare = plan.steps.find((step) => step.executor === "human-checkpoint");
+    if (compare === undefined) throw new Error("Evaluate-and-Route did not compile Compare.");
+    const [referenceInput] = compare.compiledContext.referenceInputs as Array<Record<string, unknown>>;
+    expect(referenceInput, JSON.stringify(referenceInput)).toMatchObject({
+      memberKind: "embedded-artifact",
+      artifactId: artifact.id,
+      artifactSourceOutputVersionId: sourceOutputVersionId
+    });
+
+    const permit = await app.grantRunPermit({ commandId: "evaluate-reference-permit", planId: plan.id, contentHash: plan.contentHash });
+    const job = await app.startRun({ commandId: "evaluate-reference-start", planId: plan.id, contentHash: plan.contentHash, runPermitId: permit.id });
+    expect(await app.runPending(job.id)).toMatchObject({ status: "waiting-review" });
+
+    const checkpoint = await app.boundaryStore().read(({ execution }) => execution.listReviewCheckpoints(job.id)[0]!);
+    expect(checkpoint.candidateOutputVersionIds).toEqual([sourceOutputVersionId]);
+    const materialized = await app.boundaryStore().read(({ artifacts, outputs }) => {
+      const version = outputs.getVersion(String(referenceInput?.id));
+      const payload = version === undefined ? undefined : outputs.getPayload(version.outputPayloadIds[0]!);
+      return {
+        artifactIds: artifacts.listByOutputVersion(checkpoint.candidateOutputVersionIds[0]!).map((candidate) => candidate.id),
+        metadata: payload?.metadata,
+        selectedOutputVersionIds: version?.selectedOutputVersionIds
+      };
+    });
+    expect(materialized).toMatchObject({
+      artifactIds: [artifact.id],
+      metadata: { referenceArtifactSourceOutputVersionId: sourceOutputVersionId },
+      selectedOutputVersionIds: [sourceOutputVersionId]
+    });
+    expect((await app.searchArtifacts({ text: "" })).map((candidate) => candidate.id)).toContain(artifact.id);
   }, 30_000);
 });

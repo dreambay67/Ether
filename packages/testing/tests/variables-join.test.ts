@@ -6,7 +6,9 @@ import {
   variableValueType
 } from "../../graph-kernel/src/variables.js";
 import { JoinExecutor } from "../../execution/src/executors/join.js";
+import { ReviewExecutor } from "../../execution/src/executors/review.js";
 import { compilePlan } from "../../execution/src/plan/compilePlan.js";
+import { documentStorePersistence, type DocumentStoreLike } from "../../execution/src/scheduler/persistence.js";
 import type {
   EtherGraph,
   PayloadEnvelope,
@@ -47,13 +49,20 @@ function payload(id: string, sourceNodeId: string, lineageKey: string, edgeId?: 
   };
 }
 
-function joinContext(strategy: "ordered" | "zip" | "merge", requireComplete: boolean, inputs: PayloadEnvelope[], expectedSourceEdgeIds: string[]): Parameters<JoinExecutor["execute"]>[0] {
+function joinContext(
+  strategy: "ordered" | "zip" | "merge",
+  requireComplete: boolean,
+  inputs: PayloadEnvelope[],
+  expectedSourceEdgeIds: string[],
+  dependencyStepIds: string[] = [],
+  dependencyWorkItemIds?: string[]
+): Parameters<JoinExecutor["execute"]>[0] {
   const step = {
     id: "step-join",
     nodeId: "join",
     subject: { kind: "node", nodeId: "join" },
     executor: "join",
-    dependencyStepIds: [],
+    dependencyStepIds,
     inputPayloadIds: inputs.map((input) => input.id),
     workItemIds: ["work-join"],
     compiledPrompt: "",
@@ -67,13 +76,60 @@ function joinContext(strategy: "ordered" | "zip" | "merge", requireComplete: boo
   return {
     claim: {} as never,
     step,
-    plannedWorkItem: { id: "work-join", stepId: step.id, ordinal: 0, inputs: [], parameters: [] },
+    plannedWorkItem: {
+      id: "work-join",
+      stepId: step.id,
+      ordinal: 0,
+      inputs: [],
+      parameters: [],
+      ...(dependencyWorkItemIds === undefined ? {} : { dependencyWorkItemIds })
+    },
     inputs,
     providerInputs: [],
     signal: new AbortController().signal,
     stagingDirectory: "C:/tmp",
     providers: {}
   };
+}
+
+function reviewContext(inputs: PayloadEnvelope[]): Parameters<ReviewExecutor["execute"]>[0] {
+  const step = {
+    id: "step-review",
+    nodeId: "review",
+    subject: { kind: "node", nodeId: "review" },
+    executor: "human-checkpoint",
+    dependencyStepIds: ["step-join"],
+    inputPayloadIds: inputs.map((input) => input.id),
+    workItemIds: ["work-review"],
+    compiledPrompt: "",
+    compiledContext: { inputBindings: [] },
+    parameters: { kind: "flow.compare", selectionMode: "one", minimumSelections: 1 },
+    selectors: [],
+    executorConfig: { kind: "flow.compare", selectionMode: "one", minimumSelections: 1 },
+    provider: { providerId: "local", profileId: "local", modelId: "local", settings: {}, capabilitySnapshot: capability() },
+    providerBinding: null
+  } satisfies PlanStep;
+  return {
+    claim: {} as never,
+    step,
+    plannedWorkItem: { id: "work-review", stepId: step.id, ordinal: 0, inputs: [], parameters: [] },
+    inputs,
+    providerInputs: [],
+    signal: new AbortController().signal,
+    stagingDirectory: "C:/tmp",
+    providers: {}
+  };
+}
+
+function joinDraftPayloads(outputs: Extract<Awaited<ReturnType<JoinExecutor["execute"]>>, { kind: "complete" }>["outputs"]): PayloadEnvelope[] {
+  return outputs.map((output, index) => ({
+    id: `joined-payload-${index}`,
+    channel: output.channel,
+    role: output.role,
+    content: output.content,
+    source: { nodeId: "join", outputVersionId: `joined-version-${index}`, lineageKey: `joined-${index}` },
+    metadata: output.metadata ?? {}
+  }));
 }
 
 function capability(): ProviderCapability {
@@ -119,9 +175,160 @@ describe("deterministic join", () => {
     expect(optional.outputs.map((output) => output.content)).toEqual([
       { kind: "text", value: "a1" }, { kind: "text", value: "b1" }, { kind: "text", value: "a2" }
     ]);
-    expect(optional.outputs.every((output) => output.metadata.joinComplete === false)).toBe(true);
+    expect(optional.outputs.every((output) => output.metadata?.joinComplete === false)).toBe(true);
     await expect(executor.execute(joinContext("zip", true, inputs, ["edge-a", "edge-b"]))).rejects.toThrow(/equal payload counts/);
     await expect(executor.execute(joinContext("ordered", true, [inputs[0]!], ["edge-a", "edge-b"]))).rejects.toThrow(/missing edge-b/);
+  });
+
+  it("keeps global latest selection for an expanded legacy Join work item", async () => {
+    const sourcePayloads = [
+      payload("older", "source", "source-older", "source-join"),
+      payload("newer", "source", "source-newer", "source-join")
+    ];
+    const sourceVersions = sourcePayloads.map((sourcePayload, index) => ({
+      id: sourcePayload.source.outputVersionId,
+      nodeId: "source",
+      graphId: "graph",
+      graphRevisionId: "graph-r1",
+      inputPayloadIds: [],
+      selectedOutputVersionIds: [],
+      compiledContextHash: "sha256:v1:test",
+      producer: { kind: "local", executor: "deterministic" },
+      outputPayloadIds: [sourcePayload.id],
+      parentOutputVersionId: null,
+      approval: { state: "unreviewed" },
+      runId: "job",
+      stepId: "step-source",
+      workItemId: "work-source",
+      attemptId: "attempt-source",
+      timing: { startedAt: "2026-08-09T00:00:00.000Z", completedAt: `2026-08-09T00:00:0${index + 1}.000Z` },
+      failure: null,
+      createdAt: `2026-08-09T00:00:0${index + 1}.000Z`
+    }));
+    const store = {
+      documentId: "doc",
+      path: "C:/tmp/legacy-join.ether",
+      read: async <T>(operation: Parameters<DocumentStoreLike["read"]>[0]): Promise<T> => operation({
+        artifacts: {},
+        execution: {},
+        outputs: {
+          getPayload: (id: string) => sourcePayloads.find((sourcePayload) => sourcePayload.id === id),
+          listByNode: (nodeId: string) => nodeId === "source" ? sourceVersions : []
+        }
+      }) as T,
+      transaction: async <T>(operation: Parameters<DocumentStoreLike["transaction"]>[0]): Promise<T> => operation({ execution: {}, outputs: {} }) as T
+    } satisfies DocumentStoreLike;
+    const legacyJoin = joinContext("ordered", true, [], ["source-join"], ["step-source"], ["planned-source"]);
+    const joinStep = {
+      ...legacyJoin.step,
+      inputPayloadIds: ["logical-source-join"],
+      compiledContext: {
+        ...legacyJoin.step.compiledContext,
+        inputBindings: [{
+          edgeId: "source-join",
+          role: "general",
+          selector: { kind: "latest" },
+          sourceChannel: "text",
+          sourceNodeId: "source",
+          sourceStepId: "step-source"
+        }]
+      }
+    } satisfies PlanStep;
+    const resolved = await documentStorePersistence(store).resolvePlanInputs!({
+      claim: {
+        job: { id: "job" },
+        plan: {
+          steps: [{ id: "step-source", executor: "deterministic" }, joinStep],
+          workItems: [
+            { id: "planned-source", stepId: "step-source", ordinal: 0, inputs: [], parameters: [] },
+            legacyJoin.plannedWorkItem
+          ]
+        }
+      } as never,
+      step: joinStep,
+      plannedWorkItem: legacyJoin.plannedWorkItem,
+      stagingDirectory: "C:/tmp/legacy-join"
+    });
+
+    expect(resolved.map((sourcePayload) => sourcePayload.id)).toEqual(["newer"]);
+  });
+
+  it("marks new batched Join boundaries so Compare keeps original artifact-producing candidates", async () => {
+    const inputs = [0, 1, 2, 3].map((ordinal) =>
+      payload(`candidate-${ordinal}`, "generate", `lineage-${ordinal}`, `edge-${ordinal}`)
+    );
+    const join = new JoinExecutor();
+    const review = new ReviewExecutor();
+    const boundary = await join.execute(
+      joinContext(
+        "ordered",
+        true,
+        inputs,
+        inputs.map((_, ordinal) => `edge-${ordinal}`),
+        ["step-generate"],
+        inputs.map((_, ordinal) => `work-generate-${ordinal}`)
+      )
+    );
+    expect(boundary.kind).toBe("complete");
+    if (boundary.kind !== "complete") return;
+    expect(boundary.outputs.map((output) => output.metadata)).toEqual(inputs.map((input) => expect.objectContaining({
+      joinBatchBoundary: true,
+      joinInputOutputVersionId: input.source.outputVersionId
+    })));
+
+    const reviewedBoundary = await review.execute(reviewContext(joinDraftPayloads(boundary.outputs)));
+    expect(reviewedBoundary).toMatchObject({
+      kind: "waiting-review",
+      checkpoint: { candidateOutputVersionIds: inputs.map((input) => input.source.outputVersionId) }
+    });
+
+    const ordinary = await join.execute(
+      joinContext("ordered", true, inputs.slice(0, 2), ["edge-0", "edge-1"], ["step-left", "step-right"], ["work-left", "work-right"])
+    );
+    expect(ordinary.kind).toBe("complete");
+    if (ordinary.kind !== "complete") return;
+    expect(ordinary.outputs.every((output) => output.metadata?.joinBatchBoundary === undefined)).toBe(true);
+    const reviewedOrdinary = await review.execute(reviewContext(joinDraftPayloads(ordinary.outputs)));
+    expect(reviewedOrdinary).toMatchObject({
+      kind: "waiting-review",
+      checkpoint: { candidateOutputVersionIds: ["joined-version-0", "joined-version-1"] }
+    });
+  });
+
+  it("unwraps only newly marked embedded-artifact Reference Set inputs for Compare", async () => {
+    const review = new ReviewExecutor();
+    const legacyEmbeddedArtifact = {
+      ...payload("legacy-reference", "references", "legacy-reference"),
+      metadata: { referenceMemberKind: "embedded-artifact" }
+    };
+    const sealedEmbeddedArtifact = {
+      ...payload("sealed-reference", "references", "sealed-reference"),
+      metadata: {
+        referenceMemberKind: "embedded-artifact",
+        referenceArtifactSourceOutputVersionId: "original-artifact-output"
+      }
+    };
+    const linkedReference = {
+      ...payload("linked-reference", "references", "linked-reference"),
+      metadata: { referenceArtifactSourceOutputVersionId: "not-an-embedded-artifact-output" }
+    };
+
+    const result = await review.execute(reviewContext([
+      legacyEmbeddedArtifact,
+      sealedEmbeddedArtifact,
+      linkedReference
+    ]));
+
+    expect(result).toMatchObject({
+      kind: "waiting-review",
+      checkpoint: {
+        candidateOutputVersionIds: [
+          legacyEmbeddedArtifact.source.outputVersionId,
+          "original-artifact-output",
+          linkedReference.source.outputVersionId
+        ]
+      }
+    });
   });
 });
 

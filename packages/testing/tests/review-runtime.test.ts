@@ -28,7 +28,7 @@ describe("review execution runtime", () => {
         id: "evaluate-step", nodeId: "evaluate", executor: "codex-evaluation", dependencyStepIds: [], inputPayloadIds: [source.id], workItemIds: ["review-work"],
         compiledPrompt: "Score composition.", compiledContext: {}, selectors: [], parameters: { rubric: [], model: "fake-evaluation-v1", reasoningEffort: "medium" }, provider: null,
         providerBinding: null
-      } as ExecutorContext["step"],
+      } as unknown as ExecutorContext["step"],
       plannedWorkItem: { id: "review-work", stepId: "evaluate-step", ordinal: 0, inputs: [], parameters: [] },
       inputs: [source], providerInputs: [], signal: new AbortController().signal, stagingDirectory: "C:/staged",
       providers: {
@@ -55,7 +55,7 @@ describe("review execution runtime", () => {
         id: "filter-step", nodeId: "filter", executor: "deterministic-filter", dependencyStepIds: [], inputPayloadIds: evaluatorPayloads.map((payload) => payload.id), workItemIds: ["review-work"],
         compiledPrompt: "", compiledContext: {}, selectors: [], provider: null, providerBinding: null,
         parameters: { match: "all", rules: [{ id: "quality", field: "score", operator: "gte", value: 4 }], routes: [{ id: "accepted", outcome: "matched" }] }
-      } as ExecutorContext["step"],
+      } as unknown as ExecutorContext["step"],
       plannedWorkItem: { id: "review-work", stepId: "filter-step", ordinal: 1, inputs: [], parameters: [] },
       inputs: evaluatorPayloads.filter((payload) => payload.channel === "data" || payload.channel === "image"), providerInputs: [], signal: new AbortController().signal, stagingDirectory: "C:/staged", providers: {}
     });

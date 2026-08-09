@@ -2295,6 +2295,7 @@ type ReferenceInputBinding =
   | (ReferenceInputBindingBase & {
     memberKind: "embedded-artifact";
     artifactId: string;
+    artifactSourceOutputVersionId: string;
     contentKey: string;
     byteLength: number;
   });
@@ -2418,6 +2419,7 @@ function referenceInputBindings(
           mediaType: artifact.mediaType,
           memberKind: "embedded-artifact",
           artifactId: artifact.id,
+          artifactSourceOutputVersionId: artifact.source.outputVersionId,
           contentKey: artifact.contentKey,
           byteLength: artifact.byteLength
         }

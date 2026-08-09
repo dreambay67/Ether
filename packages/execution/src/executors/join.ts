@@ -22,6 +22,7 @@ export class JoinExecutor implements StepExecutor {
 
   async execute(context: ExecutorContext): Promise<ExecutorResult> {
     const settings = joinSettings(context);
+    const batchBoundary = isNewlyPlannedBatchBoundary(context);
     const indexed = context.inputs.map((input, index) => ({
       input,
       index,
@@ -65,25 +66,31 @@ export class JoinExecutor implements StepExecutor {
           if (item !== undefined) zipped.push(item);
         }
       }
-      return joinOutputs(zipped, settings, context.inputs.length, isComplete);
+      return joinOutputs(zipped, settings, context.inputs.length, isComplete, batchBoundary);
     }
     if (settings.strategy === "merge") {
       const merged = indexed.slice().sort((left, right) =>
         left.input.source.lineageKey.localeCompare(right.input.source.lineageKey) || left.index - right.index
       );
       const isComplete = sourceKeys.every((key) => (groups.get(key)?.length ?? 0) > 0);
-      return joinOutputs(merged, settings, context.inputs.length, isComplete);
+      return joinOutputs(merged, settings, context.inputs.length, isComplete, batchBoundary);
     }
     const ordered = indexed.slice().sort((left, right) => {
       const sourceOrder = sourceKeys.indexOf(left.sourceKey) - sourceKeys.indexOf(right.sourceKey);
       return sourceOrder || left.index - right.index;
     });
     const isComplete = sourceKeys.every((key) => (groups.get(key)?.length ?? 0) > 0);
-    return joinOutputs(ordered, settings, context.inputs.length, isComplete);
+    return joinOutputs(ordered, settings, context.inputs.length, isComplete, batchBoundary);
   }
 }
 
-function joinOutputs(indexed: readonly IndexedInput[], settings: JoinSettings, inputCount: number, isComplete: boolean): ExecutorResult {
+function joinOutputs(
+  indexed: readonly IndexedInput[],
+  settings: JoinSettings,
+  inputCount: number,
+  isComplete: boolean,
+  batchBoundary: boolean
+): ExecutorResult {
   return {
     kind: "complete",
     outputs: indexed.map(({ input, sourceKey }, index) => ({
@@ -97,10 +104,27 @@ function joinOutputs(indexed: readonly IndexedInput[], settings: JoinSettings, i
         joinSource: sourceKey,
         joinInputCount: inputCount,
         joinComplete: isComplete,
-        joinInputLineageKey: input.source.lineageKey
+        joinInputLineageKey: input.source.lineageKey,
+        ...(batchBoundary
+          ? {
+              joinBatchBoundary: true,
+              joinInputOutputVersionId: input.source.outputVersionId
+            }
+          : {})
       }
     }))
   };
+}
+
+/**
+ * New plans seal every fan-in work item onto the singleton Join work item.
+ * Older capsules lack that list, so retaining the marker guard preserves their
+ * established wrapper-output review behavior.
+ */
+function isNewlyPlannedBatchBoundary(context: ExecutorContext): boolean {
+  const dependencyWorkItemIds = context.plannedWorkItem.dependencyWorkItemIds;
+  return Array.isArray(dependencyWorkItemIds)
+    && new Set(dependencyWorkItemIds).size > new Set(context.step.dependencyStepIds).size;
 }
 
 function joinSettings(context: ExecutorContext): JoinSettings {

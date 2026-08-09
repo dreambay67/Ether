@@ -97,6 +97,8 @@ type ReferenceInputBinding = {
   displayName: string;
   mediaType: string;
   memberKind: "linked-reference" | "embedded-reference" | "embedded-artifact";
+  /** Present only for newly sealed embedded-artifact Reference Set bindings. */
+  artifactSourceOutputVersionId?: string;
 };
 
 export type PlanCompilationErrorCode =
@@ -797,7 +799,27 @@ function makeNodeStep(input: {
     adapterId: edge.adapter?.adapterId ?? null,
     sourcePayloadIds: edge.sourcePayloadIds,
     targetPayloadIds: edge.targetPayloadIds,
-    consequence: edge.consequence
+    consequence: edge.consequence,
+    // Filter routes are sealed into newly previewed plans instead of inferred
+    // later from a mutable graph.  The existing negative lane convention is
+    // the unmatched route; every other role is the matched route.
+    ...(edge.source.config.kind === "review.filter"
+      ? {
+          filterRoute: edge.edge.role === "negative" ? "unmatched" : "matched",
+          // A node/downstream scope can consume a previously completed Filter
+          // without including its runnable step. Seal its identity so runtime
+          // routing can distinguish that cached boundary from a malformed plan.
+          ...(edge.sourceStepId === null
+            ? {
+                filterSource: {
+                  nodeId: edge.source.id,
+                  definitionId: "review.filter",
+                  executor: "deterministic-filter"
+                }
+              }
+            : {})
+        }
+      : {})
   }));
   const interpolatedConfig = interpolatedNodeConfig(input.target.config, input.variables);
   const parameters = input.target.config.kind === "output.collection"
@@ -1093,6 +1115,8 @@ function batchContextForNode(
   const seenDimensionIds = new Set<string>();
   for (const batchNode of batchNodes) {
     if (batchNode.id === nodeId || !canReach(topology, batchNode.id, nodeId)) continue;
+    if (topology.nodeById.get(nodeId)?.config.kind === "flow.join") continue;
+    if (!canReachWithoutJoin(topology, batchNode.id, nodeId)) continue;
     if (batchNode.config.kind !== "flow.batch") continue;
     requestedParallelism = Math.max(
       requestedParallelism ?? 1,
@@ -1351,6 +1375,22 @@ function makeProviderBinding(
     settings: settings as JsonObject,
     capabilitySnapshot: capability
   };
+}
+
+/** A Join consumes the full upstream batch pool and starts a new cardinality domain. */
+function canReachWithoutJoin(topology: PlannerTopology, sourceId: string, targetId: string): boolean {
+  const seen = new Set<string>();
+  const visit = (nodeId: string): boolean => {
+    if (nodeId === targetId) return true;
+    if (seen.has(nodeId)) return false;
+    seen.add(nodeId);
+    const node = topology.nodeById.get(nodeId);
+    if (node?.config.kind === "flow.join") return false;
+    return (topology.outgoing.get(nodeId) ?? []).some((edge) =>
+      edge.to.kind === "node" && visit(edge.to.nodeId)
+    );
+  };
+  return visit(sourceId);
 }
 
 function makeEvaluationProviderBinding(

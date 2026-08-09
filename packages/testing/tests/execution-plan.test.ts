@@ -152,6 +152,66 @@ function representativeGraph(): EtherGraph {
   };
 }
 
+function batchJoinGraph(reexpandAfterJoin = false): EtherGraph {
+  const nodes = [
+    node("batch-a", {
+      kind: "flow.batch",
+      dimensions: [{ id: "view", name: "View", values: ["front", "left", "right", "detail"] }],
+      parallelism: 4
+    }),
+    node("image-a", {
+      kind: "generation.image",
+      providerId: capability.providerId,
+      profileId: capability.profileId,
+      aspectRatio: "1:1",
+      resolution: { width: 64, height: 64 },
+      outputCount: 1
+    }),
+    node("join", { kind: "flow.join", strategy: "ordered", requireComplete: true }),
+    node("compare", { kind: "review.compare", selectionMode: "many", minimumSelections: 2 }),
+    node("collection", { kind: "output.collection", collectionId: "selects", membershipMode: "add", makePrimary: true })
+  ];
+  const edges = [
+    lane("batch-image", "batch-a", "data", "image-a", "data", "general", 0),
+    { ...lane("image-join", "image-a", "image", "join", "image", "general", 0), selector: { kind: "all" as const } },
+    lane("join-compare", "join", "image", "compare", "image", "general", 0),
+    lane("compare-collection", "compare", "image", "collection", "image", "general", 0)
+  ];
+  if (reexpandAfterJoin) {
+    nodes.splice(3, 0,
+      node("batch-b", {
+        kind: "flow.batch",
+        dimensions: [{ id: "tone", name: "Tone", values: ["cool", "warm"] }],
+        parallelism: 2
+      }),
+      node("image-b", {
+        kind: "generation.image",
+        providerId: capability.providerId,
+        profileId: capability.profileId,
+        aspectRatio: "1:1",
+        resolution: { width: 64, height: 64 },
+        outputCount: 1
+      })
+    );
+    edges.splice(2, 0,
+      lane("join-batch", "join", "image", "batch-b", "image", "general", 0),
+      lane("batch-image-b", "batch-b", "data", "image-b", "data", "general", 0)
+    );
+  }
+  return {
+    id: "batch-join-root",
+    title: "Batch Join",
+    kind: "root",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    nodes: nodes as EtherGraph["nodes"],
+    edges,
+    groups: [],
+    modules: [],
+    viewState
+  };
+}
+
 function compile(
   graph = representativeGraph(),
   scope: Parameters<typeof compilePlan>[0]["scope"] = { kind: "graph" },
@@ -392,7 +452,7 @@ describe("Ether execution planner", () => {
           }
         : candidate)
     };
-    expect(compile(changedGraph, scope).contentHash).not.toBe(first.contentHash);
+    expect(compile(changedGraph as EtherGraph, scope).contentHash).not.toBe(first.contentHash);
     expect(compile(graph, { kind: "branch", rootNodeId: "batch" }).contentHash).not.toBe(first.contentHash);
   });
 
@@ -510,6 +570,43 @@ describe("Ether execution planner", () => {
     );
     expect(compile().batchSummary).toEqual({ dimensions: 2, exclusions: 1, workItemCount: 3 });
     expect(compile().effectiveParallelism).toBe(1);
+  });
+
+  it("uses Join as a singleton batch boundary and retains all upstream dependencies", () => {
+    const first = compile(batchJoinGraph());
+    const second = compile(batchJoinGraph());
+    const image = first.steps.find((step) => step.nodeId === "image-a")!;
+    const join = first.steps.find((step) => step.nodeId === "join")!;
+    const compare = first.steps.find((step) => step.nodeId === "compare")!;
+    const collection = first.steps.find((step) => step.nodeId === "collection")!;
+
+    expect([image, join, compare, collection].map((step) => step.workItemIds)).toEqual([
+      expect.any(Array), expect.any(Array), expect.any(Array), expect.any(Array)
+    ]);
+    expect(image.workItemIds).toHaveLength(4);
+    expect(join.workItemIds).toHaveLength(1);
+    expect(compare.workItemIds).toHaveLength(1);
+    expect(collection.workItemIds).toHaveLength(1);
+    expect(first.workItems).toHaveLength(7);
+    expect(first.estimatedCalls).toBe(4);
+    expect(first.workItems.find((item) => item.id === join.workItemIds[0])?.dependencyWorkItemIds)
+      .toEqual([...image.workItemIds].sort());
+    expect(first.workItems.find((item) => item.id === compare.workItemIds[0])?.dependencyWorkItemIds)
+      .toEqual(join.workItemIds);
+    expect(first.contentHash).toBe(second.contentHash);
+  });
+
+  it("keeps direct batch review expanded and lets a new downstream Batch re-expand", () => {
+    const direct = batchJoinGraph();
+    direct.edges = direct.edges.filter((edge) => edge.id !== "image-join" && edge.id !== "join-compare");
+    direct.nodes = direct.nodes.filter((candidate) => candidate.id !== "join");
+    direct.edges.push(lane("image-compare", "image-a", "image", "compare", "image", "general", 0));
+    expect(compile(direct).steps.find((step) => step.nodeId === "compare")?.workItemIds).toHaveLength(4);
+
+    const reexpanded = compile(batchJoinGraph(true));
+    expect(reexpanded.steps.find((step) => step.nodeId === "image-a")?.workItemIds).toHaveLength(4);
+    expect(reexpanded.steps.find((step) => step.nodeId === "join")?.workItemIds).toHaveLength(1);
+    expect(reexpanded.steps.find((step) => step.nodeId === "image-b")?.workItemIds).toHaveLength(2);
   });
 
   it("persists exact Prompt Worker and Image Generator allocations across the fixed 4/4 provider capacities", () => {

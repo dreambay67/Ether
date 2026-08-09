@@ -31,6 +31,7 @@ export function RunControls({ node, graphId, graphRevisionId, graphContextFinger
     "image-provider": ["Generate Image", "Build the real provider-backed image plan for this node."],
     "edit-provider": ["Generate Edit", "Build the real provider-backed edit plan for this node."],
     "codex-evaluation": ["Evaluate Outputs", "Build the real Codex evaluation plan for this node."],
+    "human-checkpoint": ["Run Compare", "Build the human checkpoint plan for this node and its selected downstream branch."],
     mask: ["Run Mask", "Build the deterministic mask plan for this node."],
     transform: ["Run Transform", "Build the deterministic transform plan for this node."],
     deterministic: ["Run Node", "Build the deterministic execution plan for this node."],

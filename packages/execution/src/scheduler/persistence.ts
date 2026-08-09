@@ -16,6 +16,8 @@ import {
 import { resolveOutputSelector } from "@ether/graph-kernel";
 import {
   ConnectionRoleSchema,
+  type ExecutionAttempt,
+  type ExecutionWorkItem,
   OutputSelectorSchema,
   PayloadChannelSchema,
   type Artifact,
@@ -56,6 +58,8 @@ type ReferenceInputBinding =
   | (ReferenceInputBindingBase & {
     memberKind: "embedded-artifact";
     artifactId: string;
+    /** New plans bind the durable output which originally produced the artifact. */
+    artifactSourceOutputVersionId?: string;
     contentKey: string;
     byteLength: number;
   });
@@ -162,11 +166,6 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
       }));
     },
     resolvePlanInputs: async ({ claim, step, plannedWorkItem, stagingDirectory }) => {
-      const staticIds = [
-        ...plannedWorkItem.inputs.map((input) => input.payloadId),
-        ...step.inputPayloadIds,
-        ...(step.resolvedInputBindings ?? []).map((binding) => binding.payloadId)
-      ];
       const bindings: Array<Record<string, unknown>> = Array.isArray(step.compiledContext.inputBindings)
         ? step.compiledContext.inputBindings.flatMap((binding) =>
           binding !== null && typeof binding === "object" && !Array.isArray(binding)
@@ -174,13 +173,37 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
             : []
         )
         : [];
+      const staticFilterRoutes = filterRoutesForStaticPayloads(step.id, bindings);
+      const staticIds = [
+        ...plannedWorkItem.inputs.map((input) => input.payloadId),
+        ...step.inputPayloadIds,
+        ...(step.resolvedInputBindings ?? []).map((binding) => binding.payloadId)
+      ];
       const dynamic = await store.read(({ execution, outputs }) => bindings.flatMap((binding) => {
+        const filterRoute = parseFilterRoute(step.id, binding);
         const sourceStepId = typeof binding.sourceStepId === "string" ? binding.sourceStepId : null;
         const sourceNodeId = typeof binding.sourceNodeId === "string" ? binding.sourceNodeId : null;
         const sourceChannel = PayloadChannelSchema.safeParse(binding.sourceChannel);
         const selector = OutputSelectorSchema.safeParse(binding.selector);
-        if (sourceStepId === null || sourceNodeId === null || !sourceChannel.success || !selector.success) return [];
-        const sourceStep = claim.plan.steps.find((candidate) => candidate.id === sourceStepId);
+        if (sourceNodeId === null || !sourceChannel.success || !selector.success) {
+          if (filterRoute !== undefined) {
+            throw invalidFilterRoutePlan(step.id, "the input binding has no valid deterministic Filter source contract");
+          }
+          return [];
+        }
+        const sourceStep = sourceStepId === null
+          ? undefined
+          : claim.plan.steps.find((candidate) => candidate.id === sourceStepId);
+        if (filterRoute !== undefined) {
+          if (sourceStepId === null) {
+            assertCachedFilterSource(step.id, binding, sourceNodeId);
+          } else if (sourceStep?.executor !== "deterministic-filter") {
+            throw invalidFilterRoutePlan(step.id, `filterRoute ${filterRoute} does not originate from deterministic Filter step ${sourceStepId}`);
+          }
+        }
+        if (sourceStepId === null) {
+          return [];
+        }
         if (sourceStep?.executor === "human-checkpoint") {
           // Compare records its selected existing output versions on the durable
           // checkpoint rather than minting duplicate artifact payloads. Those
@@ -221,13 +244,30 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
           .flatMap((version) => version.outputPayloadIds)
           .map((payloadId) => callMethod<PayloadEnvelope | undefined>(outputs, "getPayload", [payloadId]))
           .filter((payload): payload is PayloadEnvelope => payload !== undefined);
-        const selected = resolveOutputSelector({
-          selector: selector.data,
-          nodeId: sourceNodeId,
-          channel: sourceChannel.data,
-          versions,
-          payloads
-        });
+        // A newly compiled singleton Join seals an entire upstream batch into
+        // one work item. It needs per-dependency selection and plan-ordinal
+        // ordering to preserve that pool. Expanded Join work items in older
+        // immutable capsules retain the ordinary, global edge-selector
+        // contract (for example, `latest` remains one newest version).
+        const batchBoundaryJoin = isSingletonBatchBoundaryJoin(step, plannedWorkItem);
+        const selected = batchBoundaryJoin
+          ? resolveJoinInputVersions({
+              claim,
+              channel: sourceChannel.data,
+              execution,
+              payloads,
+              plannedWorkItem,
+              selector: selector.data,
+              sourceStepId,
+              versions
+            })
+          : resolveOutputSelector({
+              selector: selector.data,
+              nodeId: sourceNodeId,
+              channel: sourceChannel.data,
+              versions,
+              payloads
+            });
         if (selected.diagnostics.length > 0) {
           const diagnostic = selected.diagnostics[0]!;
           throw new ExecutorFailure(
@@ -236,11 +276,15 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
           );
         }
         const selectedVersions = new Set(selected.versionIds);
-        return versions
+        const orderedVersions = batchBoundaryJoin
+          ? orderJoinInputVersions({ claim, execution, plannedWorkItem, sourceStepId, versions })
+          : versions;
+        return orderedVersions
           .filter((version) => selectedVersions.has(version.id))
           .flatMap((version) => version.outputPayloadIds)
           .map((payloadId) => payloads.find((payload) => payload.id === payloadId))
           .filter((payload): payload is PayloadEnvelope => payload !== undefined && payload.channel === sourceChannel.data)
+          .filter((payload) => filterRoute === undefined || payload.metadata.filterMatched === (filterRoute === "matched"))
           .map((payload) => ({
             payload,
             role: typeof binding.role === "string" ? binding.role : payload.role,
@@ -252,7 +296,9 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
         stagingDirectory
       );
       const dynamicById = new Map(dynamic.map((entry) => [entry.payload.id, entry]));
-      const runtimeInputs = resolved.map((payload) => {
+      const runtimeInputs = resolved
+        .filter((payload) => matchesStaticFilterRoute(payload, staticFilterRoutes))
+        .map((payload) => {
         const binding = dynamicById.get(payload.id);
         return binding === undefined ? payload : {
           ...payload,
@@ -278,6 +324,215 @@ export function documentStorePersistence(store: DocumentStoreLike, appDataRoot?:
     }
   };
   return persistence;
+}
+
+type FilterRoute = "matched" | "unmatched";
+type StaticFilterRoutes = ReadonlyMap<string, readonly FilterRoute[]>;
+
+/**
+ * Filter route markers are a new immutable plan contract. In their absence,
+ * historical capsules keep the prior selector-only behavior.
+ */
+function parseFilterRoute(stepId: string, binding: Record<string, unknown>): FilterRoute | undefined {
+  if (!Object.prototype.hasOwnProperty.call(binding, "filterRoute")) return undefined;
+  const route = binding.filterRoute;
+  if (route === "matched" || route === "unmatched") return route;
+  throw invalidFilterRoutePlan(stepId, "filterRoute must be matched or unmatched");
+}
+
+function filterRoutesForStaticPayloads(
+  stepId: string,
+  bindings: readonly Record<string, unknown>[]
+): StaticFilterRoutes {
+  const routes = new Map<string, FilterRoute[]>();
+  for (const binding of bindings) {
+    const route = parseFilterRoute(stepId, binding);
+    if (route === undefined) continue;
+    for (const payloadId of filterRouteSourcePayloadIds(stepId, binding)) {
+      const existing = routes.get(payloadId) ?? [];
+      if (!existing.includes(route)) routes.set(payloadId, [...existing, route]);
+    }
+  }
+  return routes;
+}
+
+function filterRouteSourcePayloadIds(stepId: string, binding: Record<string, unknown>): string[] {
+  const payloadIds = binding.sourcePayloadIds;
+  // A live Filter input resolves from its step output at execution time, so
+  // older capsules need not carry a static source list. A cached boundary is
+  // different: without those sealed IDs it cannot be routed truthfully.
+  if (payloadIds === undefined && binding.sourceStepId !== null) return [];
+  if (!Array.isArray(payloadIds) || !payloadIds.every((id) => typeof id === "string" && id.length > 0)) {
+    throw invalidFilterRoutePlan(stepId, "filterRoute must seal its source payload IDs");
+  }
+  return payloadIds;
+}
+
+function assertCachedFilterSource(
+  stepId: string,
+  binding: Record<string, unknown>,
+  sourceNodeId: string
+): void {
+  const source = binding.filterSource;
+  if (
+    binding.sourceStepId !== null ||
+    source === null ||
+    typeof source !== "object" ||
+    Array.isArray(source) ||
+    (source as Record<string, unknown>).nodeId !== sourceNodeId ||
+    (source as Record<string, unknown>).definitionId !== "review.filter" ||
+    (source as Record<string, unknown>).executor !== "deterministic-filter"
+  ) {
+    throw invalidFilterRoutePlan(
+      stepId,
+      "a cached Filter route must seal its review.filter/deterministic-filter source identity"
+    );
+  }
+}
+
+function matchesStaticFilterRoute(payload: PayloadEnvelope, routes: StaticFilterRoutes): boolean {
+  const expectedRoutes = routes.get(payload.id);
+  if (expectedRoutes === undefined) return true;
+  return expectedRoutes.some((route) => payload.metadata.filterMatched === (route === "matched"));
+}
+
+function invalidFilterRoutePlan(stepId: string, detail: string): ExecutorFailure {
+  return new ExecutorFailure(
+    "FILTER_ROUTE_PLAN_CONTRACT_INVALID",
+    `Step ${stepId} has an invalid Filter route binding: ${detail}.`
+  );
+}
+
+function isSingletonBatchBoundaryJoin(
+  step: Pick<ExecutorClaim["plan"]["steps"][number], "executor" | "dependencyStepIds">,
+  plannedWorkItem: import("@ether/schema").PlannedWorkItem
+): boolean {
+  return step.executor === "join" &&
+    (plannedWorkItem.dependencyWorkItemIds?.length ?? 0) > step.dependencyStepIds.length;
+}
+
+function resolveJoinInputVersions(input: {
+  claim: ExecutorClaim;
+  channel: PayloadEnvelope["channel"];
+  execution: unknown;
+  payloads: readonly PayloadEnvelope[];
+  plannedWorkItem: import("@ether/schema").PlannedWorkItem;
+  selector: { kind: "latest-approved" | "latest" | "all" | "pinned"; outputVersionId?: string };
+  sourceStepId: string;
+  versions: readonly NodeOutputVersion[];
+}): { versionIds: string[]; diagnostics: Array<{ code: string; message: string }> } {
+  const state = joinSourceState(input);
+  if (state.acceptedWorkItemIds.size !== state.expectedCount) {
+    return { versionIds: [], diagnostics: [{ code: "JOIN_INPUT_INCOMPLETE", message: "Join is waiting for every dependency work item to be accepted." }] };
+  }
+  const versions = orderJoinInputVersions(input, state).filter((version) =>
+    version.outputPayloadIds.some((payloadId) => {
+      const payload = input.payloads.find((candidate) => candidate.id === payloadId);
+      return payload?.channel === input.channel;
+    })
+  );
+  if (input.selector.kind === "pinned") {
+    const pinned = versions.find((version) => version.id === input.selector.outputVersionId);
+    return pinned === undefined
+      ? { versionIds: [], diagnostics: [{ code: "PINNED_VERSION_NOT_FOUND", message: "Pinned output version is not an eligible Join dependency." }] }
+      : { versionIds: [pinned.id], diagnostics: [] };
+  }
+  const byWorkItem = new Map([...state.acceptedWorkItemIds].map((id) => [id, [] as NodeOutputVersion[]]));
+  for (const version of versions) {
+    if (version.workItemId === null) continue;
+    byWorkItem.set(version.workItemId, [...(byWorkItem.get(version.workItemId) ?? []), version]);
+  }
+  if ([...byWorkItem.values()].some((candidates) => candidates.length === 0)) {
+    return { versionIds: [], diagnostics: [{ code: "JOIN_INPUT_INCOMPLETE", message: "Join requires a matching output from every dependency work item." }] };
+  }
+  if (input.selector.kind === "all") return { versionIds: versions.map((version) => version.id), diagnostics: [] };
+  const selected = [...byWorkItem.values()].flatMap((candidates) => {
+    const eligible = input.selector.kind === "latest-approved"
+      ? candidates.filter((version) => version.approval.state === "approved")
+      : candidates;
+    return eligible.at(-1) === undefined ? [] : [eligible.at(-1)!];
+  });
+  return selected.length === state.expectedCount
+    ? { versionIds: selected.map((version) => version.id), diagnostics: [] }
+    : { versionIds: [], diagnostics: [{ code: "NO_APPROVED_OUTPUT", message: "Join requires one eligible output from every dependency work item." }] };
+}
+
+/**
+ * A Join is a cardinality reset, so its runtime pool is deliberately derived
+ * from the exact dependency work items sealed into its singleton planned item.
+ * This keeps retries and concurrent completions from changing candidate order.
+ */
+function orderJoinInputVersions(input: {
+  claim: ExecutorClaim;
+  execution: unknown;
+  plannedWorkItem: import("@ether/schema").PlannedWorkItem;
+  sourceStepId: string;
+  versions: readonly NodeOutputVersion[];
+}, state = joinSourceState(input)): NodeOutputVersion[] {
+  return input.versions
+    .filter((version) =>
+      version.workItemId !== null &&
+      state.acceptedWorkItemIds.has(version.workItemId) &&
+      version.attemptId !== null &&
+      state.acceptedAttemptIds.has(version.attemptId) &&
+      state.acceptedOutputVersionIds.has(version.id)
+    )
+    .slice()
+    .sort((left, right) => {
+      const leftPlanned = left.workItemId === null ? undefined : state.durableToPlanned.get(left.workItemId);
+      const rightPlanned = right.workItemId === null ? undefined : state.durableToPlanned.get(right.workItemId);
+      const sourceOrder = (state.plannedOrdinal.get(leftPlanned ?? "") ?? Number.MAX_SAFE_INTEGER) -
+        (state.plannedOrdinal.get(rightPlanned ?? "") ?? Number.MAX_SAFE_INTEGER);
+      if (sourceOrder !== 0) return sourceOrder;
+      const retryOrder = (state.attemptOrdinal.get(left.attemptId ?? "") ?? Number.MAX_SAFE_INTEGER) -
+        (state.attemptOrdinal.get(right.attemptId ?? "") ?? Number.MAX_SAFE_INTEGER);
+      if (retryOrder !== 0) return retryOrder;
+      const outputPosition = (state.outputOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) -
+        (state.outputOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER);
+      return outputPosition || left.id.localeCompare(right.id);
+    });
+}
+
+function joinSourceState(input: {
+  claim: ExecutorClaim;
+  execution: unknown;
+  plannedWorkItem: import("@ether/schema").PlannedWorkItem;
+  sourceStepId: string;
+}) {
+  const dependencyIds = new Set(input.plannedWorkItem.dependencyWorkItemIds ?? []);
+  const sourcePlanned = input.claim.plan.workItems.filter((item) =>
+    dependencyIds.has(item.id) && item.stepId === input.sourceStepId
+  );
+  const plannedOrdinal = new Map(sourcePlanned.map((item) => [item.id, item.ordinal]));
+  const workItems = callMethod<ExecutionWorkItem[]>(input.execution, "listWorkItems", [input.claim.job.id]);
+  const durableToPlanned = new Map(workItems.map((work) => [work.id, work.plannedWorkItemId]));
+  const acceptedWorkItemIds = new Set(workItems
+    .filter((work) => work.status === "accepted" && plannedOrdinal.has(work.plannedWorkItemId))
+    .map((work) => work.id));
+  const attempts = callMethod<ExecutionAttempt[]>(input.execution, "listAttempts", [input.claim.job.id]);
+  const outputOrder = new Map<string, number>();
+  const attemptOrdinal = new Map<string, number>();
+  const acceptedAttemptIds = new Set<string>();
+  const acceptedOutputVersionIds = new Set<string>();
+  for (const attempt of attempts) {
+    if (attempt.status !== "accepted" || !acceptedWorkItemIds.has(attempt.workItemId)) continue;
+    acceptedAttemptIds.add(attempt.id);
+    attemptOrdinal.set(attempt.id, attempt.ordinal);
+    attempt.outputVersionIds.forEach((id, index) => {
+      acceptedOutputVersionIds.add(id);
+      outputOrder.set(id, index);
+    });
+  }
+  return {
+    acceptedAttemptIds,
+    acceptedOutputVersionIds,
+    acceptedWorkItemIds,
+    attemptOrdinal,
+    durableToPlanned,
+    expectedCount: sourcePlanned.length,
+    outputOrder,
+    plannedOrdinal
+  };
 }
 
 async function acceptLocalMediaOutput(
@@ -432,7 +687,9 @@ async function materializePlanReferences(
         artifact.contentKey !== binding.contentKey ||
         artifact.byteLength !== binding.byteLength ||
         artifact.mediaType !== binding.mediaType ||
-        artifact.channel !== binding.channel
+        artifact.channel !== binding.channel ||
+        (binding.artifactSourceOutputVersionId !== undefined &&
+          artifact.source.outputVersionId !== binding.artifactSourceOutputVersionId)
       ) {
         throw new ExecutorFailure(
           "REFERENCE_ARTIFACT_SNAPSHOT_STALE",
@@ -526,7 +783,12 @@ async function persistReferenceMaterial(
           referenceFingerprintSampleSha256: material.fingerprint.sampleSha256
         }),
         ...(binding.memberKind === "embedded-artifact"
-          ? { referenceArtifactId: binding.artifactId }
+          ? {
+              referenceArtifactId: binding.artifactId,
+              ...(binding.artifactSourceOutputVersionId === undefined
+                ? {}
+                : { referenceArtifactSourceOutputVersionId: binding.artifactSourceOutputVersionId })
+            }
           : { referenceId: binding.referenceId })
       }
     };
@@ -536,7 +798,9 @@ async function persistReferenceMaterial(
       graphId: claim.plan.graphId,
       graphRevisionId: claim.plan.graphRevisionId,
       inputPayloadIds: [],
-      selectedOutputVersionIds: [],
+      selectedOutputVersionIds: binding.memberKind === "embedded-artifact" && binding.artifactSourceOutputVersionId !== undefined
+        ? [binding.artifactSourceOutputVersionId]
+        : [],
       compiledContextHash: claim.plan.contentHash,
       producer: { kind: "local", executor: "asset-resolution" },
       outputPayloadIds: [payload.id],
@@ -613,10 +877,12 @@ function parseReferenceInputBinding(stepId: string, value: unknown): ReferenceIn
     };
   }
   if (record.memberKind === "embedded-artifact") {
+    const artifactSourceOutputVersionId = optionalReferenceString(stepId, record.artifactSourceOutputVersionId);
     return {
       ...base,
       memberKind: "embedded-artifact",
       artifactId: requiredReferenceString(stepId, record.artifactId),
+      ...(artifactSourceOutputVersionId === undefined ? {} : { artifactSourceOutputVersionId }),
       contentKey: contentKey(stepId, record.contentKey),
       byteLength: nonnegativeReferenceInteger(stepId, record.byteLength)
     };
@@ -626,6 +892,12 @@ function parseReferenceInputBinding(stepId: string, value: unknown): ReferenceIn
 
 function requiredReferenceString(stepId: string, value: unknown): string {
   return typeof value === "string" && value.length > 0 ? value : invalidReferencePlan(stepId);
+}
+
+/** Optional only to retain executable plan capsules sealed before source binding existed. */
+function optionalReferenceString(stepId: string, value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  return requiredReferenceString(stepId, value);
 }
 
 function nonnegativeReferenceInteger(stepId: string, value: unknown): number {
