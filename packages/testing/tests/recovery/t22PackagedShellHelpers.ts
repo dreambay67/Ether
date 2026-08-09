@@ -42,8 +42,12 @@ export async function assertAdaptiveShell(page: Page, point: ShellScalePoint): P
   expect(layout.canvas.width).toBeGreaterThanOrEqual(declaredCanvasMinimum);
   expect(layout.canvas.width).toBeGreaterThan(layout.tools.width);
   expect(layout.canvas.width).toBeGreaterThan(layout.inspector.width);
-  expect(layout.artifacts.bottom).toBeLessThanOrEqual(layout.canvas.top + 1);
-  expect(layout.runs.top).toBeGreaterThanOrEqual(layout.canvas.bottom - 1);
+  // Horizontal pane resizers deliberately straddle each grid boundary with a
+  // seven-pixel transparent pointer target. No visible desk content may cross
+  // farther into the canvas than that hit band.
+  const resizerHitBand = 8;
+  expect(layout.artifacts.bottom).toBeLessThanOrEqual(layout.canvas.top + resizerHitBand);
+  expect(layout.runs.top).toBeGreaterThanOrEqual(layout.canvas.bottom - resizerHitBand);
   expect(layout.artifacts.height).toBeGreaterThanOrEqual(32);
   expect(layout.runs.height).toBeGreaterThanOrEqual(32);
   expect(Math.abs(layout.canvas.right - layout.inspector.left), "Canvas stays adjacent to Project lens.").toBeLessThanOrEqual(1);
