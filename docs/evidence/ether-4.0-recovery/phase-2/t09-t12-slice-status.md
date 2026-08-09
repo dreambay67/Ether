@@ -1,51 +1,57 @@
 # T09-T12 GUI recovery slice status
 
-Date: 2026-08-03
+Date: 2026-08-09
 
-Status: product implementation candidate complete through T12; Phase 2 gate remains open because the packaged J04/J05 interaction routes are not proven. This is not a release claim.
+Status: the T09-T12 product slice and its blank-document packaged J04/J05 journeys pass on one exact package. The Phase 2 gate remains open pending acceptance-ledger reconciliation and the separately owned installed-app review. This is not a release-readiness claim.
 
 ## Exact candidate identity
 
-- Connection/Inspector implementation: `9d18a30e5e7736dd34f4cf50f9f42eb9ffce181e`.
-- Click-to-connect compatibility correction and final packaged product commit: `399dc03d5ddcb4a1ca16121f1a0872cd7c203c32`.
-- Installer SHA-256: `bbf94ee8b60027910ce1a6cbad55f2f787a0fa11b72699c27f01d25e0774da3d`.
-- Packaged `Ether.exe` SHA-256: `c587338edcecaddae697bb19c44c6d54fa5b48394ec3a4f181165c70f0374b8b`.
-- Packaged `app.asar` SHA-256: `06ee589f20adef6c16c704d3e3b4ad92d9ecf2bc7a73d3019b0c5590d80d69b3`.
-- Release package audit: 9/9 passed, including independent packaged-byte inventory and staged runtime/MCP closure.
+- Product commit: `bae08cceaf90112c3f69b3d1711793cbff74de12` (`fix(canvas): make module authoring durable`).
+- Installer SHA-256: `434ce088b26465ff180d16d229163e00c238d000afb9bc8e691a8ca52cde9662`.
+- Packaged `Ether.exe` SHA-256: `f7a671203536844320f62777e9294d0ef09cbc2309ce0470a65ceeb87aceaea4`.
+- Packaged `app.asar` SHA-256: `41ef1bc200b963ec648131c122e2e6bf21032e856846b9867788bcb9748a835d`.
+- Package command: `pnpm.cmd desktop:package:win`.
 
-The earlier package at `9d18a30` was a pre-correction build and is not the named Phase 2 candidate. The hashes above identify the corrected `399dc03` package only.
+The older `399dc03`, `065a582`, and `3113bef` packages are diagnostic or intermediate boundaries, not this Phase 2 candidate.
 
 ## Implemented product slice
 
-- T09: one durable Module system is locked by default and exposes creation from selection, title, description, accent, collapse, enter/exit, explicit unlock/relock, movement protection, membership transfer, dissolve, and undo.
-- T10: the six-channel rails derive from the canonical registry; unconnected handles rest hidden; hover/focus/click or drag intent reveals compatible targets; exact duplicate lanes are rejected while role/selector variants remain legal; roles, endpoints, selectors, selected-lane Inspector, and edge-only context deletion share graph transactions.
-- T11: canonical validation resolves named receiver consequences and local/semantic adapters; unavailable capability conversions fail before persistence/run; adapter steps appear in prepared-plan summaries; exhaustive connection-matrix and execution-plan tests cover the cheap semantic breadth.
-- T12: registry metadata renders ordinary controls for every canonical Inspector field, with purpose-built Prompt/Worker/provider/drawing/edit/reference workspaces and structured rubric/rule/route/variable/dimension/exclusion controls. Channels and routes are concise; diagnostics/provenance start collapsed; no raw JSON editor is used.
+- T09: one durable Module system is locked by default and supports creation from selection, title, description, accent, collapse, enter/exit, explicit unlock/relock, movement protection, membership transfer, dissolve, and undo. Root-graph discovery no longer depends on revision-map order, metadata-only updates do not churn child revisions, Module navigation resists stale root synchronization, and membership counts refresh after changes.
+- T10: six registry-backed channel rails support compatible click/drag intent, same-pair multi-lanes, roles, selectors, endpoint edits, selected-lane inspection, and edge-only deletion.
+- T11: named connection consequences and local/semantic adapters are visible in authoring and prepared-plan summaries; unsupported conversions fail before persistence or run.
+- T12: all 17 registry definitions have ordinary Inspector controls, with deliberate structured editors and collapsed expert diagnostics instead of raw JSON.
 
-## Focused automated results
-
-- Renderer/testing TypeScript: passed.
-- Scoped renderer/kernel/recovery ESLint: passed.
-- Unit suite: 23 files, 294/294 passed at the implementation boundary.
-- Renderer channel/Inspector model: 6/6 passed after adapter-plan presentation coverage.
-- Source canvas journey: 2/2 passed, including click-to-connect compatible-target intent and durable edge creation, lane role/selector/endpoint edits, adapter consequence display, and edge-only right-click deletion preserving node selection.
-- Recovery journey driver: 11/11 passed after adding a recorded real right-click action.
-- Windows release package audit: 9/9 passed against the exact candidate above.
-
-The older broad `inspectors.spec.ts` route failed twice at its pre-existing `node-status-queued` fixture expectation and was deferred without further iteration. The all-17 source spatial sweep also stopped after two panel-interception failures; exhaustive registry-field coverage remains green and J02 packaged capture stays assigned to T27.
-
-## Practical route accounting
+## Practical packaged evidence
 
 ### J05 Module
 
-The packaged blank-authored Module journey at product commit `065a582` lost canvas selection before Create Module (`selectedNodes: 0`, two durable nodes present). Its failed action log/result are retained under `phase-2/module-authoring/packaged/`. The source/unit Module paths pass, but J05 remains PRESENT-UNPROVEN and no Phase 2 gate claim is made.
+- Result: passed, 36 recorded actions, 0 captured errors.
+- Start state: ordinary blank document; Prompt and Worker created through the Node Library.
+- Demonstrated: locked creation; protected movement; F2 rename; description and Violet highlight; unlock/move; collapse/expand; Enter navigation; interior title and two members; member removal and Shift-additive reassignment; relock; dissolve; Ctrl+Z restoration.
+- Evidence: `phase-2/module-authoring/packaged/`.
 
-### J04 Connections
+### J04 Connections and progressive Inspector
 
-The exact `399dc03` package exposed and captured correct compatible target intent from a blank document. The retained screenshot and action log are under `phase-2/connection-inspector-authoring/packaged/`. Two packaged attempts then failed at the same first target-completion boundary: the target handle was visibly marked compatible, but zero edge paths persisted and no console/page/main-process error was captured. Explicit handle hover did not change the outcome. Per the owner two-failure rule, the route was not rerun.
+- Result: passed, 47 recorded actions, 0 captured errors.
+- Start state: ordinary blank document; no seeded graph.
+- Demonstrated: compatible six-channel intent; six same-pair lanes; Subject role; edge-only deletion; adapter consequence; collapsed diagnostics; structured Batch controls and deliberate advanced detail.
+- Evidence: `phase-2/connection-inspector-authoring/packaged/`.
 
-This record supplies narrow packaged/visual candidate evidence for compatible handle intent (`RX-021`). It does not claim packaged multi-lane, role, deletion, adapter, or Inspector proof. `RX-022` through `RX-024`, J04, and the Phase 2 gate remain PRESENT-UNPROVEN pending the later T27 journey/fix. Source interaction and automated semantic evidence are retained without being mislabeled as packaged success.
+Both journeys identify product commit `bae08cc` and the same packaged executable hash.
+
+## Focused validation
+
+- Desktop Electron, preload, and renderer TypeScript: passed.
+- Scoped changed-file ESLint: passed.
+- Source-Electron blank-document Module journey: 1/1 passed.
+- Packaged Module journey: 1/1 passed.
+- Packaged connection/Inspector journey: 1/1 passed.
+- Focused canvas browser regression: 2/2 passed.
+- Graph-kernel Module selection: 14/14 matched tests passed.
+- Desktop autosave/module metadata regression: 1/1 matched test passed; child graph revision remained unchanged and stale root metadata failed with `REVISION_CONFLICT`.
+
+The broad testing-package TypeScript command still reports unrelated pre-existing errors in `shell-layout.spec.ts`, `review-runtime.test.ts`, `t19-application.test.ts`, and `variables-join.test.ts`. Those files were not changed by T09 and their focused runtime suites were not substituted with a false green claim.
 
 ## Continuation decision
 
-The two packaged harness gaps do not block independent run-safety and canonical-node work. T13 begins from the corrected package/product boundary while T27 retains final J02/J04/J05 candidate proof. No provider or image-generation call was made.
+T09-T12 packaged behavior is no longer the authoring blocker. Acceptance rows assigned to T09-T12 still require truthful candidate reconciliation, and the original review task retains installed-app gate authority. Independent product work proceeds to T13's immutable Run Preview and Job Center vertical slice. No provider, image-generation, Explorer-association, registry-mutation, or native shell route was invoked.
