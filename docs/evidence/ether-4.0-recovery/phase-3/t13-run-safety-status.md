@@ -1,42 +1,53 @@
 # T13 run-safety slice status
 
-Date: 2026-08-03
+Date: 2026-08-09
 
-Status: product implementation candidate complete for the T13 source boundary. Packaged and owner-facing run proof remains open. This is not a Phase 3 or release claim.
+Status: product implementation and packaged blank-document candidate evidence complete for the T13 boundary. This is not a Phase 3 or release claim.
 
-## Exact product identity
+## Exact product and package identity
 
-- Product commit: `72c175a28bfcf4484745b4e223c19480aea789d7`.
-- Package identity: unavailable. No new installer was produced by this slice.
-- The two quarantined Explorer-association experiments remain untouched outside the candidate branch.
+- Product commit: `2e2d71bf447f6c35f5cbe8f112965368cbff5884`.
+- Windows installer: `release/windows/Ether-4.0.0-Setup.exe`.
+- Installer SHA-256: `ae6a1eefef3581cdeaff794abebb0855745dd3aae6a46c021d80a594c970b72a`.
+- Packaged executable SHA-256: `3b4dac9e451cabe78e44c5b328587388e383b81f72c1d67aa97dc95daaed5bc8`.
+- Packaged app archive SHA-256: `2f729c84d8b16bc1b923b78819f0d99219dbbabd4e4cdc7b2ce597367ba652ae`.
+- The two owner-quarantined Explorer-association experiments remain untouched outside the candidate branch.
 
 ## Implemented product slice
 
-- Public execution scopes now include Node, Selected, Branch, and Downstream; the Batch Inspector deliberately previews the branch rooted at its Batch resolver.
-- Downstream scope is preserved in the immutable plan instead of being rewritten to an opaque selected-node scope.
-- Node and selected-run surfaces share a concise immutable preview: exact scope, boundary node IDs, steps, work items, provider calls, concurrency, providers, adapters, warnings, resolved inputs, and compiled prompt text.
-- Blocking warnings disarm Start. Every Start still requires a permit matching the reviewed plan ID and content hash.
-- Prepared plans are bound to the visible document, graph, node/selection, configuration, and scope. Context changes invalidate in-flight previews; malformed or failed refreshes disarm stale plans.
-- Job Center reuses the same immutable preview model. Node badges refresh on plan, job, work-item, and attempt events; waiting-review is distinct from needs-attention; completed badges retain the existing ten-second expiry.
+- Public execution scopes include Node, Selected, Branch, Downstream, and an explicit Batch scope whose downstream execution boundary retains its Batch identity in the immutable plan.
+- Prepared plans show their plan ID, content hash, exact scope and node boundary, steps, work items, provider calls, concurrency, Batch expansion, providers, sanitized settings, adapters, warnings, resolved inputs, and compiled prompt text.
+- Start remains disarmed until an exact plan has been reviewed and a one-use permit matching its plan ID and content hash is issued.
+- Prepared plans are bound to graph revision and full run-context identity. Relevant graph or runtime-context changes invalidate an in-flight preview.
+- Provider binding now selects the required operation when one provider/profile exposes multiple capabilities; generation and editing can share the same verified profile without selecting the wrong snapshot.
+- The packaged recovery simulation is available only to a disposable driver-owned recovery profile with the exact matching token. It uses Ether's offline fake provider and cannot enable itself during an ordinary launch.
+- Job Center retains the durable plan identity, work items, attempts, and completion record produced by the explicitly permitted run.
 
-## Focused results
+## Practical packaged journey
 
-- Desktop renderer TypeScript: passed.
-- Testing TypeScript: passed.
-- Scoped ESLint: passed.
-- Schema, planner, and renderer presentation suites: 3 files, 31/31 passed.
-- Source canvas before the richer preview assertion: 2/2 passed.
-- The enriched selected-run route visibly reached Selected scope, one step, one work item, one provider call, concurrency two, boundary ID, and provider identity. Its deliberate compiled-step summary was then clipped by an older overlay grid rule on two attempts. The isolated one-column/scroll correction is committed but was not rerun under the two-attempt rule.
-- The broad Inspector fixture initially omitted typed response names and never hydrated. After that fixture correction, the single independent review run reached a later stale `Style to Image` expectation; it also observed an unrelated Reference Desk fixture error. No T13-specific Inspector assertion failure was reproduced.
-- The single Windows package operation did not produce an installer. A short command wrapper left the actual package process active; a later command correctly refused the overlap. The background operation subsequently exited and cleaned its lock/staging/output. No third package launch was made.
+- Started from a fresh isolated blank document with zero seeded nodes.
+- Created Prompt, Image Generator, Image Editor, and Batch through the Node Library; edited the Prompt on canvas; created three channel lanes; selected the offline fake profile; and saved a two-value Batch through visible controls.
+- Reviewed Batch, Node, Branch, Downstream, and Selected plans. The observed call counts were 4, 2, 4, 2, and 4 respectively for the authored graph.
+- Started only the final reviewed two-call Image Generator plan. Job Center completed with two accepted work items and two attempts.
+- Packaged result: 1/1 passed in 12.2 seconds. The committed journey records 41 actions, four screenshots, and no captured renderer or main-process errors.
+- Evidence: `phase-3/run-safety/t13-run-safety/packaged/`.
+
+## Focused automated results
+
+- Schema: 17/17 passed.
+- Execution planner: 12/12 passed.
+- Recovery simulation and Windows launch contracts: 29/29 passed.
+- Renderer TypeScript and desktop build: passed.
+- Canvas and Inspector focused browser coverage passed before the packaged journey; the packaged journey then exercised the real desktop IPC path.
+- Full testing TypeScript remains deferred on the unchanged baseline failures in `desktop/shell-layout.spec.ts`, `review-runtime.test.ts`, `t19-application.test.ts`, and `variables-join.test.ts`.
 
 ## Acceptance accounting
 
-- T13 source implementation is present and focused automated coverage is green.
-- `RX-027` remains `PRESENT-UNPROVEN`: packaged and visual duration/actionability proof is still required.
-- `RX-028` remains `MISSING`, `RX-029` remains `FAIL`, and `RX-030` remains `PRESENT-UNPROVEN`.
-- J01, J06, J07, and J08 remain open. No real provider or image-generation call was made.
+- T13 has qualifying automated and packaged candidate evidence for immutable scope preview, exact permit/start, offline execution, and Job Center durability.
+- `RX-027` remains `PRESENT-UNPROVEN`: this journey proves packaged completion in Job Center, but it does not provide the separate visual-duration proof that a completed node badge remains visible for ten seconds or the actionable failed-node state.
+- `RX-028` remains `MISSING`, `RX-029` remains `FAIL`, and `RX-030` remains `PRESENT-UNPROVEN`; those belong to later recipe, manual-capture, and final owner-review gates.
+- No real provider or image-generation call was made.
 
 ## Continuation decision
 
-The absent package and deferred browser-detail proof do not block independent T14 product work. T14 must wire the existing intelligence context/profile/output contracts into production Worker execution before any J06 claim; current unit-only intelligence contracts are not sufficient evidence.
+No T13 P0/P1 defect blocks independent product work. Continue directly into the provider-safe T14 Worker GUI journey, then T15 references and the remaining Phase 3 slices. The installed-app audit and release decision remain owned by the original review task.

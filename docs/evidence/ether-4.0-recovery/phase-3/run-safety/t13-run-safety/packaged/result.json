@@ -1,0 +1,368 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t13-run-safety",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T10:15:42.492Z",
+  "finishedAt": "2026-08-09T10:15:53.787Z",
+  "outcome": "passed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "2e2d71bf447f6c35f5cbe8f112965368cbff5884",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "3b4dac9e451cabe78e44c5b328587388e383b81f72c1d67aa97dc95daaed5bc8"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "2f729c84d8b16bc1b923b78819f0d99219dbbabd4e4cdc7b2ce597367ba652ae"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Add prompt.text from Node Library",
+      "expected": "The blank document creates prompt.text through the canonical registry.",
+      "actual": "Left click at (108, 498).",
+      "durationMs": 88
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Add generation.image from Node Library",
+      "expected": "The blank document creates generation.image through the canonical registry.",
+      "actual": "Left click at (108, 799).",
+      "durationMs": 76
+    },
+    {
+      "sequence": 3,
+      "kind": "left-click",
+      "label": "Add edit.image from Node Library",
+      "expected": "The blank document creates edit.image through the canonical registry.",
+      "actual": "Left click at (108, 662).",
+      "durationMs": 79
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Add flow.batch from Node Library",
+      "expected": "The blank document creates flow.batch through the canonical registry.",
+      "actual": "Left click at (108, 662).",
+      "durationMs": 75
+    },
+    {
+      "sequence": 5,
+      "kind": "left-click",
+      "label": "Hide Reference Desk",
+      "expected": "The authored run graph gets a clear practical viewport.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 50
+    },
+    {
+      "sequence": 6,
+      "kind": "left-click",
+      "label": "Hide Build tools",
+      "expected": "The authored run graph gets a clear practical viewport.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 39
+    },
+    {
+      "sequence": 7,
+      "kind": "keyboard-command",
+      "label": "Fit the run-safety graph",
+      "expected": "All four blank-authored cards and their channel rails fit visibly.",
+      "actual": "Pressed Home.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 8,
+      "kind": "left-click",
+      "label": "Select Prompt for direct editing",
+      "expected": "The blank Prompt becomes the canvas editing target.",
+      "actual": "Left click at (688, 644).",
+      "durationMs": 36
+    },
+    {
+      "sequence": 9,
+      "kind": "keyboard-command",
+      "label": "Edit Prompt body",
+      "expected": "The primary on-canvas editor opens without entering a provider workflow.",
+      "actual": "Pressed Enter.",
+      "durationMs": 33
+    },
+    {
+      "sequence": 10,
+      "kind": "keyboard-command",
+      "label": "Commit Prompt body",
+      "expected": "The exact authored text becomes durable graph input.",
+      "actual": "Pressed Control+Enter.",
+      "durationMs": 62
+    },
+    {
+      "sequence": 11,
+      "kind": "left-click",
+      "label": "Begin Prompt text to Image Generator",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (826, 633).",
+      "durationMs": 30
+    },
+    {
+      "sequence": 12,
+      "kind": "left-click",
+      "label": "Complete Prompt text to Image Generator",
+      "expected": "The exact channel lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (224, 408).",
+      "durationMs": 287
+    },
+    {
+      "sequence": 13,
+      "kind": "left-click",
+      "label": "Begin Generated image to Image Editor",
+      "expected": "The compatible Image input handle becomes the intended receiver.",
+      "actual": "Left click at (501, 437).",
+      "durationMs": 44
+    },
+    {
+      "sequence": 14,
+      "kind": "left-click",
+      "label": "Complete Generated image to Image Editor",
+      "expected": "The exact channel lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (549, 437).",
+      "durationMs": 273
+    },
+    {
+      "sequence": 15,
+      "kind": "left-click",
+      "label": "Begin Batch data to Image Generator",
+      "expected": "The compatible Data input handle becomes the intended receiver.",
+      "actual": "Left click at (1151, 494).",
+      "durationMs": 227
+    },
+    {
+      "sequence": 16,
+      "kind": "left-click",
+      "label": "Complete Batch data to Image Generator",
+      "expected": "The exact channel lane persists through the ordinary connection interaction.",
+      "actual": "Left click at (224, 494).",
+      "durationMs": 287
+    },
+    {
+      "sequence": 17,
+      "kind": "left-click",
+      "label": "Select Image Generator",
+      "expected": "The Project lens exposes only verified provider profiles.",
+      "actual": "Left click at (363, 419).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 18,
+      "kind": "left-click",
+      "label": "Save Image Generator fake-local profile",
+      "expected": "The offline deterministic capability becomes the durable binding for this recovery-only run.",
+      "actual": "Left click at (1439, 568).",
+      "durationMs": 68
+    },
+    {
+      "sequence": 19,
+      "kind": "left-click",
+      "label": "Select Image Editor",
+      "expected": "The Project lens exposes only verified provider profiles.",
+      "actual": "Left click at (688, 419).",
+      "durationMs": 59
+    },
+    {
+      "sequence": 20,
+      "kind": "left-click",
+      "label": "Save Image Editor fake-local profile",
+      "expected": "The offline deterministic capability becomes the durable binding for this recovery-only run.",
+      "actual": "Left click at (1439, 468).",
+      "durationMs": 91
+    },
+    {
+      "sequence": 21,
+      "kind": "left-click",
+      "label": "Select Batch",
+      "expected": "The progressive Inspector exposes the authored batch and its run scope.",
+      "actual": "Left click at (1013, 419).",
+      "durationMs": 68
+    },
+    {
+      "sequence": 22,
+      "kind": "left-click",
+      "label": "Save two Batch values",
+      "expected": "The exact two-item expansion is stored before preview.",
+      "actual": "Left click at (1406, 774).",
+      "durationMs": 95
+    },
+    {
+      "sequence": 23,
+      "kind": "screenshot",
+      "label": "Capture the blank-authored run graph",
+      "expected": "Prompt, Batch, Image Generator, Image Editor, and three visible lanes were created only through ordinary UI input.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 211,
+      "screenshotPath": "screenshots/01-blank-authored-run-graph.png"
+    },
+    {
+      "sequence": 24,
+      "kind": "left-click",
+      "label": "Preview explicit Batch scope",
+      "expected": "The immutable Batch scope expands dimensions and downstream work without starting it.",
+      "actual": "Left click at (1513, 682).",
+      "durationMs": 82
+    },
+    {
+      "sequence": 25,
+      "kind": "left-click",
+      "label": "Expand compiled Batch steps",
+      "expected": "Exact compiled inputs and provider bindings are reviewable before any permit exists.",
+      "actual": "Left click at (1461, 591).",
+      "durationMs": 30
+    },
+    {
+      "sequence": 26,
+      "kind": "screenshot",
+      "label": "Capture immutable Batch preview",
+      "expected": "The prepared plan exposes scope, identity, provider settings, call count, concurrency, batch expansion, boundary, and compiled inputs.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 167,
+      "screenshotPath": "screenshots/02-immutable-batch-preview.png"
+    },
+    {
+      "sequence": 27,
+      "kind": "left-click",
+      "label": "Select Image Generator",
+      "expected": "The same authored graph exposes node, branch, and downstream scope choices.",
+      "actual": "Left click at (363, 419).",
+      "durationMs": 41
+    },
+    {
+      "sequence": 28,
+      "kind": "left-click",
+      "label": "Preview Node scope",
+      "expected": "Node only predicts two generator calls because the upstream Batch has two values.",
+      "actual": "Left click at (1407, 723).",
+      "durationMs": 94
+    },
+    {
+      "sequence": 29,
+      "kind": "left-click",
+      "label": "Preview Branch scope",
+      "expected": "Branch includes the selected generator and downstream editor for both Batch values.",
+      "actual": "Left click at (1407, 723).",
+      "durationMs": 87
+    },
+    {
+      "sequence": 30,
+      "kind": "left-click",
+      "label": "Preview Downstream scope",
+      "expected": "Downstream excludes the root generator and predicts one editor call for each Batch value.",
+      "actual": "Left click at (1407, 723).",
+      "durationMs": 45
+    },
+    {
+      "sequence": 31,
+      "kind": "keyboard-command",
+      "label": "Select the authored induced graph",
+      "expected": "All four UI-authored nodes become the Selected execution boundary.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 14
+    },
+    {
+      "sequence": 32,
+      "kind": "keyboard-command",
+      "label": "Preview Selected scope",
+      "expected": "The first shortcut press prepares the exact selected-node plan and does not run it.",
+      "actual": "Pressed Control+Enter.",
+      "durationMs": 49
+    },
+    {
+      "sequence": 33,
+      "kind": "screenshot",
+      "label": "Capture Selected scope after Node, Branch, and Downstream previews",
+      "expected": "The blank-authored induced selection has its own inspect-first plan and remains unstarted.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 123,
+      "screenshotPath": "screenshots/03-scope-comparison.png"
+    },
+    {
+      "sequence": 34,
+      "kind": "left-click",
+      "label": "Dismiss Selected preview",
+      "expected": "The provider-safe comparison closes without starting the selected plan.",
+      "actual": "Left click at (1289, 856).",
+      "durationMs": 28
+    },
+    {
+      "sequence": 35,
+      "kind": "left-click",
+      "label": "Return to Image Generator",
+      "expected": "One small two-call fake-local job is isolated for the practical Job Center proof.",
+      "actual": "Left click at (363, 419).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 36,
+      "kind": "left-click",
+      "label": "Prepare two fake-local calls",
+      "expected": "The exact two-call Batch-expanded plan is reviewed before permission is granted.",
+      "actual": "Left click at (1407, 723).",
+      "durationMs": 63
+    },
+    {
+      "sequence": 37,
+      "kind": "left-click",
+      "label": "Permit and start the reviewed plan",
+      "expected": "Only the displayed fake-local plan receives a one-use permit and starts.",
+      "actual": "Left click at (1403, 682).",
+      "durationMs": 67
+    },
+    {
+      "sequence": 38,
+      "kind": "left-click",
+      "label": "Open Run workspace",
+      "expected": "Job Center hydrates the durable job created by the reviewed plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 102
+    },
+    {
+      "sequence": 39,
+      "kind": "left-click",
+      "label": "Inspect authorized Job plan",
+      "expected": "Job Center shows the same immutable identity and exact plan after completion.",
+      "actual": "Left click at (1021, 910).",
+      "durationMs": 397
+    },
+    {
+      "sequence": 40,
+      "kind": "screenshot",
+      "label": "Capture durable completed Job",
+      "expected": "The fake-local result is accepted and its immutable plan, attempt, timeline, and completion remain visible in Job Center.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 286,
+      "screenshotPath": "screenshots/04-job-center-result.png"
+    },
+    {
+      "sequence": 41,
+      "kind": "observation",
+      "label": "T13 practical slice",
+      "expected": "All five run scopes are inspect-first and one explicitly permitted offline job is durable.",
+      "actual": "Batch, Node, Branch, Downstream, and Selected previews were reviewed with their exact Batch-expanded call counts; only the final two-call fake-local Node plan started and completed with two accepted work items and two attempts.",
+      "durationMs": 0
+    }
+  ],
+  "errors": []
+}
