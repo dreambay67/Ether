@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GraphTransaction, JsonValue, RecipeManifest, RecipeParameter, RecipeParameterValue } from "@ether/schema";
+import type { ApplicationQuery, Artifact, GraphTransaction, JsonValue, RecipeManifest, RecipeParameter, RecipeParameterValue } from "@ether/schema";
 
 export type RecipeSetupRequest = {
   recipeId: string;
@@ -31,6 +31,7 @@ export type RecipeSetup = {
 type RecipePreview = { transaction: GraphTransaction; warnings: readonly string[] };
 
 type TemplateGalleryProps = {
+  documentId: string;
   recipes: readonly RecipeManifest[];
   readOnly?: boolean;
   onLoadSetup(recipeId: string, version: string): Promise<RecipeSetup>;
@@ -39,6 +40,60 @@ type TemplateGalleryProps = {
   onRequestPathGrant?(): Promise<{ grantId: string; displayName: string } | null>;
   onInserted?(): void;
 };
+
+type ArtifactChoices = Readonly<Record<string, readonly Artifact[]>>;
+
+function artifactDisplayName(artifact: Artifact): string {
+  return typeof artifact.metadata.title === "string" && artifact.metadata.title.trim().length > 0
+    ? artifact.metadata.title
+    : artifact.id;
+}
+
+function artifactIds(value: JsonValue | undefined): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function artifactParameterReady(
+  parameter: Extract<RecipeParameter, { type: "artifact" }>,
+  value: JsonValue | undefined,
+  choices: readonly Artifact[]
+): boolean {
+  return parameterReady(parameter, value)
+    && artifactIds(value).every((id) => choices.some((artifact) => artifact.id === id));
+}
+
+async function loadArtifactChoices(documentId: string, parameters: readonly RecipeParameter[]): Promise<ArtifactChoices> {
+  const artifactParameters = parameters.filter((parameter): parameter is Extract<RecipeParameter, { type: "artifact" }> => parameter.type === "artifact");
+  const entries = await Promise.all(artifactParameters.map(async (parameter) => {
+    const response = await window.ether.application.query({
+      kind: "query",
+      id: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+      documentId,
+      name: "artifact.search",
+      payload: {
+        text: "",
+        channels: parameter.channels,
+        collectionIds: [],
+        tags: [],
+        minimumRating: null,
+        providerId: null,
+        modelId: null,
+        runId: null,
+        graphId: null,
+        createdAfter: null,
+        createdBefore: null,
+        cursor: null,
+        limit: 500
+      }
+    } as ApplicationQuery);
+    if (response.name !== "artifact.search") {
+      throw new Error("Ether returned an unexpected artifact search response.");
+    }
+    return [parameter.id, response.payload.artifacts.filter((artifact) => parameter.channels.includes(artifact.channel))] as const;
+  }));
+  return Object.fromEntries(entries);
+}
 
 function defaultValue(parameter: RecipeParameter): JsonValue {
   switch (parameter.type) {
@@ -88,11 +143,12 @@ function capabilityStateLabel(state: RecipeCapabilitySetup["state"]): string {
   }
 }
 
-export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe, onRequestPathGrant, onInserted }: TemplateGalleryProps) {
+export function TemplateGallery({ documentId, recipes, readOnly = false, onLoadSetup, onPreviewRecipe, onInstantiateRecipe, onRequestPathGrant, onInserted }: TemplateGalleryProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [parameters, setParameters] = useState<readonly RecipeParameter[]>([]);
   const [capabilities, setCapabilities] = useState<readonly RecipeCapabilitySetup[]>([]);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
+  const [artifactChoices, setArtifactChoices] = useState<ArtifactChoices>({});
   const [pathGrantDisplayName, setPathGrantDisplayName] = useState<string | null>(null);
   const [busy, setBusy] = useState<"setup" | "preview" | "insert" | null>(null);
   const [status, setStatus] = useState("Choose a recipe to inspect its setup.");
@@ -103,7 +159,9 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
   const ready = selected !== null
     && busy === null
     && parameters.length > 0
-    && parameters.every((parameter) => parameterReady(parameter, values[parameter.id]))
+    && parameters.every((parameter) => parameter.type === "artifact"
+      ? artifactParameterReady(parameter, values[parameter.id], artifactChoices[parameter.id] ?? [])
+      : parameterReady(parameter, values[parameter.id]))
     && capabilities.every((capability) => capability.state !== "missing")
     && pathGrantReady;
 
@@ -113,9 +171,22 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
       setParameters([]);
       setCapabilities([]);
       setValues({});
+      setArtifactChoices({});
       setPathGrantDisplayName(null);
     }
   }, [recipes, selectedKey]);
+
+  useEffect(() => {
+    setupRequest.current += 1;
+    setSelectedKey(null);
+    setParameters([]);
+    setCapabilities([]);
+    setValues({});
+    setArtifactChoices({});
+    setPathGrantDisplayName(null);
+    setBusy(null);
+    setStatus("Choose a recipe to inspect its setup.");
+  }, [documentId]);
 
   const choose = async (recipe: RecipeManifest) => {
     const requestId = ++setupRequest.current;
@@ -123,6 +194,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
     setParameters([]);
     setCapabilities([]);
     setValues({});
+    setArtifactChoices({});
     setPathGrantDisplayName(null);
     setBusy("setup");
     setStatus(`Loading ${recipe.title} setup…`);
@@ -133,15 +205,10 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
       setCapabilities(setup.capabilities);
       const initialValues = valuesFor(setup.parameters);
       const grantParameter = setup.parameters.find((parameter): parameter is Extract<RecipeParameter, { type: "string" }> => parameter.id === "exportPathGrantId" && parameter.type === "string");
-      if (grantParameter !== undefined && onRequestPathGrant !== undefined) {
-        const grant = await onRequestPathGrant();
-        if (requestId !== setupRequest.current) return;
-        if (grant !== null) {
-          initialValues[grantParameter.id] = grant.grantId;
-          setPathGrantDisplayName(grant.displayName);
-        }
-      }
+      const choices = await loadArtifactChoices(documentId, setup.parameters);
+      if (requestId !== setupRequest.current) return;
       setValues(initialValues);
+      setArtifactChoices(choices);
       const missing = setup.capabilities.filter((capability) => capability.state === "missing").length;
       const substitutions = setup.capabilities.filter((capability) => capability.state === "substitution").length;
       setStatus(missing > 0
@@ -156,6 +223,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
       setParameters([]);
       setCapabilities([]);
       setValues({});
+      setArtifactChoices({});
       setStatus(`Blocked: ${errorMessage(error)}`);
     } finally {
       if (requestId === setupRequest.current) setBusy(null);
@@ -228,7 +296,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
               {parameter.type === "string" ? (
                 parameter.id === "exportPathGrantId" ? (
                   <div className="recipe-path-grant-field">
-                    <button type="button" onClick={() => void (onRequestPathGrant === undefined
+                    <button type="button" aria-label="Choose export folder" onClick={() => void (onRequestPathGrant === undefined
                       ? Promise.resolve(null)
                       : onRequestPathGrant()).then((grant) => {
                         if (grant === null || grant === undefined) return;
@@ -248,14 +316,35 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
                 <select value={parameter.options.find((option) => Object.is(option.value, values[parameter.id]))?.id ?? ""} onChange={(event) => setValues((current) => ({ ...current, [parameter.id]: parameter.options.find((option) => option.id === event.target.value)?.value ?? "" }))}>
                   {parameter.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
                 </select>
-              ) : (
-                <input
-                  type="text"
-                  value={Array.isArray(values[parameter.id]) ? (values[parameter.id] as JsonValue[]).filter((item): item is string => typeof item === "string").join(", ") : ""}
-                  placeholder={parameter.maximumItems === 1 ? "Artifact ID" : "Artifact IDs, comma separated"}
-                  onChange={(event) => setValues((current) => ({ ...current, [parameter.id]: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) }))}
-                />
-              )}
+              ) : (() => {
+                const choices = artifactChoices[parameter.id] ?? [];
+                const selectedIds = artifactIds(values[parameter.id]);
+                return <>
+                  <select
+                    aria-label={`${parameter.title} artifact choices`}
+                    multiple={parameter.maximumItems > 1}
+                    size={parameter.maximumItems > 1 ? Math.min(Math.max(choices.length, 1), 6) : undefined}
+                    value={parameter.maximumItems === 1 ? selectedIds[0] ?? "" : selectedIds}
+                    onChange={(event) => {
+                      const available = new Set(choices.map((artifact) => artifact.id));
+                      const next = Array.from(event.currentTarget.selectedOptions)
+                        .map((option) => option.value)
+                        .filter((id) => available.has(id))
+                        .slice(0, parameter.maximumItems);
+                      setValues((current) => ({ ...current, [parameter.id]: next }));
+                    }}
+                  >
+                    {parameter.maximumItems === 1 ? <option value="">Choose an artifact…</option> : null}
+                    {choices.map((artifact) => <option key={artifact.id} value={artifact.id}>{artifactDisplayName(artifact)} · {artifact.mediaType}</option>)}
+                  </select>
+                  {choices.length === 0 ? (
+                    <em data-testid={`recipe-artifact-empty-${parameter.id}`}>No {parameter.channels.join(" or ")} artifacts are available in this document.</em>
+                  ) : (
+                    <small>{selectedIds.length}/{parameter.maximumItems} selected from this document · {parameter.channels.join(" or ")}</small>
+                  )}
+                </>;
+              })()
+              }
             </label>
           ))}
           <section className="recipe-provider-readiness" aria-label="Provider readiness">

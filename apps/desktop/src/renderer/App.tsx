@@ -483,6 +483,7 @@ export function App() {
             </header>
             {applicationAvailable ? recipeCatalogError === null ? (
               <Suspense fallback={<p className="recipe-gallery-error">Loading Recipe Gallery…</p>}><TemplateGallery
+                documentId={document.documentId}
                 recipes={recipes}
                 readOnly={document.mode === "read-only"}
                 onLoadSetup={loadRecipeSetup}

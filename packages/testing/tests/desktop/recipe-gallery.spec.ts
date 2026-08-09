@@ -19,7 +19,22 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
       expectedWork: { minimumCalls: 1, maximumCalls: 1, minimumWorkItems: 1, maximumWorkItems: 1 },
       layout: { focusNodeRef: "prompt" }
     });
-    const recipes = [recipe("prompt-to-image", "Prompt to Image"), recipe("provider-blocked", "Provider Blocked")];
+    const recipes = [
+      recipe("prompt-to-image", "Prompt to Image"),
+      recipe("provider-blocked", "Provider Blocked"),
+      recipe("reference-guided", "Reference-Guided Image"),
+      recipe("reference-without-artifacts", "Reference Without Artifacts"),
+      recipe("curate-export", "Curate and Export")
+    ];
+    const artifact = {
+      id: "artifact-source-1", contentKey: "a".repeat(64), channel: "image", mediaType: "image/png", byteLength: 128,
+      source: { outputVersionId: "artifact-output-1", payloadId: "artifact-payload-1" }, createdAt: "2026-07-23T00:00:00.000Z",
+      metadata: { title: "Current document reference.png" }
+    };
+    const recipeCommands: Array<{ name: string; payload: { recipeId?: string; parameters?: Array<{ parameterId: string; value: unknown }> } }> = [];
+    let folderGrantCalls = 0;
+    (window as typeof window & { __recipeGalleryCommands: typeof recipeCommands; __recipeGalleryFolderGrantCalls: () => number }).__recipeGalleryCommands = recipeCommands;
+    (window as typeof window & { __recipeGalleryCommands: typeof recipeCommands; __recipeGalleryFolderGrantCalls: () => number }).__recipeGalleryFolderGrantCalls = () => folderGrantCalls;
     const descriptor = {
       documentId: "recipe-document", displayName: "Recipes", named: true, mode: "writable", readOnlyReason: null,
       commands: { save: true, saveAs: true, saveCopy: true, compact: true, makePortable: true }, saveState: "saved",
@@ -39,11 +54,31 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
       graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) },
       application: {
         onEvent: () => () => undefined,
-        query: async (query: { name: string; payload?: { recipeId?: string } }) => {
-          if (query.name === "recipe.catalog") return { payload: { recipes } };
+        query: async (query: { name: string; payload?: { recipeId?: string; channels?: string[] } }) => {
+          if (query.name === "node.catalog") return { name: query.name, payload: { nodes: [] } };
+          if (query.name === "recipe.catalog") return { name: query.name, payload: { recipes } };
           if (query.name === "recipe.setupSchema") {
             await new Promise((resolve) => setTimeout(resolve, query.payload?.recipeId === "provider-blocked" ? 80 : 5));
-            return { payload: {
+            if (query.payload?.recipeId === "reference-guided" || query.payload?.recipeId === "reference-without-artifacts") {
+              return { name: query.name, payload: {
+                parameters: [{
+                  id: "referenceArtifact", title: "Reference artifact", description: "Choose an artifact already embedded in this document.",
+                  type: "artifact", channels: query.payload.recipeId === "reference-guided" ? ["image"] : ["video"],
+                  required: true, minimumItems: 1, maximumItems: 1
+                }],
+                capabilities: []
+              } };
+            }
+            if (query.payload?.recipeId === "curate-export") {
+              return { name: query.name, payload: {
+                parameters: [{
+                  id: "exportPathGrantId", title: "Export folder", description: "Choose a document-scoped export destination.",
+                  type: "string", required: true, defaultValue: "__ether_export_grant_required__", minLength: 1, maxLength: 256
+                }],
+                capabilities: []
+              } };
+            }
+            return { name: query.name, payload: {
                 parameters: [{ id: "brief", title: "Creative brief", description: "The direction for this graph.", type: "string", required: true, defaultValue: "A precise editorial still life", minLength: 3, maxLength: 1200 }],
                 capabilities: [{
                   requirementId: "prompt", operation: "generate-image", inputChannels: ["text"], outputChannels: ["image"],
@@ -54,12 +89,18 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
                     { providerId: "codex", profileId: "image-default", priority: 0, available: false },
                     { providerId: "antigravity", profileId: "nano-banana-2", priority: 1, available: false }
                   ]
-                }]
-              } };
+              }]
+            } };
           }
-          return { payload: { graph, documentRevisionId: "revision-1", graphRevisionId: "graph-revision-1" } };
+          if (query.name === "artifact.search") return { name: query.name, payload: {
+            artifacts: query.payload?.channels?.includes("image") ? [artifact] : [],
+            total: query.payload?.channels?.includes("image") ? 1 : 0,
+            nextCursor: null
+          } };
+          return { name: query.name, payload: { graph, documentRevisionId: "revision-1", graphRevisionId: "graph-revision-1" } };
         },
-        command: async (command: { name: string; payload: { recipeId?: string } }) => {
+        command: async (command: { name: string; payload: { recipeId?: string; parameters?: Array<{ parameterId: string; value: unknown }> } }) => {
+          recipeCommands.push(command);
           if (command.name === "recipe.preview") {
             if (command.payload.recipeId === "provider-blocked") throw new Error("No enabled provider can satisfy prompt (generate-image).");
             return { payload: { transaction: preview, warnings: ["Preview targets the first root graph (Recipe canvas)."] } };
@@ -69,6 +110,10 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
         }
       },
       artifacts: { search: async () => [], generateFake: async () => [] }, references: { list: async () => [], act: async () => [] },
+      permissions: { grantFolder: async () => {
+        folderGrantCalls += 1;
+        return { grantId: "recipe-export-grant", displayName: "Recipe exports" };
+      } },
       runtime: { versions: async () => ({ electron: "43", node: "24" }) }
     } });
   });
@@ -93,13 +138,13 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
   await expect(page.getByTestId("recipe-gallery-status")).toContainText("Blocked: 1 provider requirement");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Provider missing");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("No enabled provider");
-  await expect(page.getByRole("button", { name: "Preview" })).toBeDisabled();
+  await expect(page.getByTestId("recipe-setup-sheet").getByRole("button", { name: "Preview" })).toBeDisabled();
 
   await page.getByTestId("recipe-card-prompt-to-image").click();
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Compatible provider");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("ether-fake-local");
   await expect(page.getByTestId("recipe-capability-prompt")).toContainText("Fallback · antigravity");
-  const previewButton = page.getByRole("button", { name: "Preview" });
+  const previewButton = page.getByTestId("recipe-setup-sheet").getByRole("button", { name: "Preview" });
   await expect(previewButton).toHaveCSS("background-color", "rgb(16, 29, 42)");
   await expect(previewButton).toHaveCSS("color", "rgb(233, 244, 248)");
   await previewButton.click();
@@ -112,4 +157,27 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
   await page.setViewportSize({ width: 900, height: 760 });
   await expect(insertedNode).toBeInViewport({ ratio: 0.999 });
   await expect(page.getByTestId("canvas-status")).toContainText("Focused the inserted recipe node");
+
+  await page.getByRole("button", { name: "Recipes" }).click();
+  await page.getByTestId("recipe-card-curate-export").click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __recipeGalleryFolderGrantCalls: () => number }).__recipeGalleryFolderGrantCalls())).toBe(0);
+  await page.getByRole("button", { name: "Choose export folder" }).click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __recipeGalleryFolderGrantCalls: () => number }).__recipeGalleryFolderGrantCalls())).toBe(1);
+
+  await page.getByTestId("recipe-card-reference-without-artifacts").click();
+  await expect(page.getByTestId("recipe-artifact-empty-referenceArtifact")).toContainText("No video artifacts are available in this document");
+  await expect(page.getByTestId("recipe-setup-sheet").getByRole("button", { name: "Preview" })).toBeDisabled();
+
+  await page.getByTestId("recipe-card-reference-guided").click();
+  const artifactChoices = page.getByLabel("Reference artifact artifact choices");
+  await expect(artifactChoices).toContainText("Current document reference.png · image/png");
+  await expect(page.getByTestId("recipe-setup-sheet").getByRole("button", { name: "Preview" })).toBeDisabled();
+  await artifactChoices.selectOption("artifact-source-1");
+  await expect(page.getByTestId("recipe-setup-sheet").getByRole("button", { name: "Preview" })).toBeEnabled();
+  await page.getByTestId("recipe-setup-sheet").getByRole("button", { name: "Preview" }).click();
+  await expect(page.getByTestId("recipe-gallery-status")).toContainText("Preview ready");
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __recipeGalleryCommands: Array<{ name: string; payload: { recipeId?: string; parameters?: Array<{ parameterId: string; value: unknown }> } }> }).__recipeGalleryCommands.at(-1))).toEqual(expect.objectContaining({
+    name: "recipe.preview",
+    payload: expect.objectContaining({ recipeId: "reference-guided", parameters: [{ parameterId: "referenceArtifact", value: ["artifact-source-1"] }] })
+  }));
 });
