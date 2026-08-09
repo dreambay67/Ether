@@ -20,13 +20,14 @@ export function ModuleInspector({ context }: { context: InspectorModuleContext }
     accent: moduleAccent(module)
   });
   const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [membershipRevision, setMembershipRevision] = useState(0);
   useEffect(() => {
     let current = true;
     void bridge()?.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "graph.snapshot", documentId: document.documentId, payload: { graphId: module.graphId } })
       .then((response) => { const child = response.payload?.graph as EtherGraph | undefined; if (current) setMemberCount(child?.nodes.length ?? null); })
       .catch(() => { if (current) setMemberCount(null); });
     return () => { current = false; };
-  }, [document.documentId, module.graphId, graph.updatedAt]);
+  }, [document.documentId, graph.updatedAt, membershipRevision, module.graphId]);
 
   const update = async (next: EtherModule, title: string) => apply([
     { type: "updateModule", graphId: graph.id, moduleId: module.id, module: next } as GraphOperation
@@ -43,6 +44,11 @@ export function ModuleInspector({ context }: { context: InspectorModuleContext }
     }
   };
   const toggleCollapse = () => void update({ ...module, collapsed: !module.collapsed }, module.collapsed ? "Expand module" : "Collapse module");
+  const addSelectedMembers = async () => {
+    if (context.addSelectedToModule !== undefined && await context.addSelectedToModule(module.id, context.selectedNodeIds)) {
+      setMembershipRevision((current) => current + 1);
+    }
+  };
   const hideParameter = async (parameterId: string) => {
     const nextInterface = { ...module.interface, parameters: module.interface.parameters.filter((parameter) => parameter.id !== parameterId) };
     await apply([{ type: "updateModuleInterface", graphId: graph.id, moduleId: module.id, interface: nextInterface }], "Hide module parameter");
@@ -59,7 +65,7 @@ export function ModuleInspector({ context }: { context: InspectorModuleContext }
     </InspectorSection>
     <InspectorSection title="Workspace" help="Enter the internal graph to edit protected members. Collapse changes presentation only; ports and execution remain intact.">
       <div className="inspector-actions"><button type="button" onClick={() => context.enterModule?.(module.id)}>Enter module</button><button type="button" disabled={disabled} onClick={toggleCollapse}>{module.collapsed ? "Expand" : "Collapse"}</button></div>
-      {context.selectedNodeIds.length > 0 ? <><small>{context.selectedNodeIds.length} parent node{context.selectedNodeIds.length === 1 ? "" : "s"} selected for membership.</small><div className="inspector-actions"><button type="button" disabled={disabled || locked || context.addSelectedToModule === undefined} onClick={() => void context.addSelectedToModule?.(module.id, context.selectedNodeIds)}>Add selected to module</button></div>{locked ? <p className="inspector-unavailable">Unlock the module before changing membership from the parent canvas.</p> : null}</> : <small>Shift-click this module after selecting parent nodes to add them as members.</small>}
+      {context.selectedNodeIds.length > 0 ? <><small>{context.selectedNodeIds.length} parent node{context.selectedNodeIds.length === 1 ? "" : "s"} selected for membership.</small><div className="inspector-actions"><button type="button" disabled={disabled || locked || context.addSelectedToModule === undefined} onClick={() => void addSelectedMembers()}>Add selected to module</button></div>{locked ? <p className="inspector-unavailable">Unlock the module before changing membership from the parent canvas.</p> : null}</> : <small>Shift-click this module after selecting parent nodes to add them as members.</small>}
     </InspectorSection>
     <InspectorSection advanced title="Structure and dissolution" help="Dissolution restores members and rewrites boundary connections in one undoable transaction.">
       {module.interface.parameters.length === 0 ? <p>No parameters are exposed.</p> : <div className="inspector-role-list">{module.interface.parameters.map((parameter) => <span key={parameter.id}><strong>{parameter.name}</strong><small>{parameter.configPath.join(".")}</small><button type="button" disabled={disabled} onClick={() => void hideParameter(parameter.id)}>Hide</button></span>)}</div>}

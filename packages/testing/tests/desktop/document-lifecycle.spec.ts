@@ -2013,6 +2013,142 @@ describe("autosave and event ordering", () => {
     expect(coordinator.state()).toEqual({ dirty: false, saveState: "saved" });
   });
 
+  it("keeps module metadata edits scoped to their root graph across autosave", async () => {
+    const root = await tempRoot("ether-autosave-module-metadata-");
+    const service = new DesktopApplicationService({
+      appDataRoot: path.join(root, "appdata"),
+      appVersion: "4.0.0-test",
+      dialogs: dialogs(),
+      provider: new FakeImageProvider()
+    });
+    const initial = await service.bootstrap();
+    const application = (service as unknown as { application: EtherApplication }).application;
+    const store = (application as unknown as { store: DocumentStore }).store;
+    const rootGraph = await application.queryGraph(initial.graphId);
+    const moduleGraph = {
+      ...rootGraph,
+      id: "autosave-module-interior",
+      title: "Module interior",
+      kind: "module" as const,
+      nodes: [],
+      edges: [],
+      groups: [],
+      modules: []
+    };
+    const module = {
+      id: "autosave-module",
+      title: "Autosave module",
+      description: "A module whose metadata can be edited from the canvas.",
+      accent: "#37e6ea",
+      locked: true,
+      graphId: moduleGraph.id,
+      position: { x: 180, y: 90 },
+      size: { width: 260, height: 180 },
+      interface: { inputs: [], outputs: [], parameters: [] },
+      collapsed: false
+    };
+    const createModuleTransaction = {
+      id: "renderer-create-autosave-module",
+      baseDocumentRevisionId: initial.documentRevisionId,
+      baseGraphRevisions: { [initial.graphId]: initial.graphRevisionId },
+      title: "Create module for metadata edit",
+      actor: "user" as const,
+      layoutPolicy: "preserve" as const,
+      operations: [{
+        type: "createModule" as const,
+        graphId: initial.graphId,
+        module,
+        subtree: { rootGraphId: moduleGraph.id, graphs: [moduleGraph] }
+      }]
+    };
+    const rendererCommand = (
+      id: string,
+      transaction: Parameters<DesktopApplicationService["applyGraphTransaction"]>[1]
+    ) => ({
+      kind: "command" as const,
+      id,
+      correlationId: id,
+      documentId: initial.documentId,
+      name: "graph.applyTransaction" as const,
+      payload: { transaction }
+    });
+
+    try {
+      await service.executeApplicationCommand(
+        rendererCommand("renderer-create-autosave-module-command", createModuleTransaction)
+      );
+      const created = await application.queryDocument();
+      const childRevision = created.graphRevisions[moduleGraph.id];
+      expect(childRevision).toEqual(expect.any(String));
+      const createdModule = (await application.queryGraph(initial.graphId)).modules
+        .find((candidate) => candidate.id === module.id);
+      expect(createdModule).toBeDefined();
+
+      const coordinator = (service as unknown as { autosaveCoordinator: AutosaveCoordinator }).autosaveCoordinator;
+      coordinator.markDirty();
+      await coordinator.flush();
+      expect(await store.read(({ revisions }) => revisions.listMilestones())).toContainEqual(
+        expect.objectContaining({ kind: "autosave", name: "Autosave" })
+      );
+
+      const metadataTransaction = {
+        id: "renderer-module-metadata-after-autosave",
+        baseDocumentRevisionId: created.documentRevisionId,
+        baseGraphRevisions: { [initial.graphId]: created.graphRevisions[initial.graphId]! },
+        title: "Rename module from canvas",
+        actor: "user" as const,
+        layoutPolicy: "preserve" as const,
+        operations: [{
+          type: "updateModule" as const,
+          graphId: initial.graphId,
+          moduleId: module.id,
+          module: { ...createdModule!, title: "Renamed from canvas" }
+        }]
+      };
+
+      await expect(service.executeApplicationCommand(
+        rendererCommand("renderer-module-metadata-after-autosave-command", metadataTransaction)
+      )).resolves.toMatchObject({ kind: "response", name: "graph.applyTransaction" });
+      const afterMetadata = await application.queryDocument();
+      expect(afterMetadata.graphRevisions[moduleGraph.id]).toBe(childRevision);
+      expect((await application.queryGraph(initial.graphId)).modules)
+        .toContainEqual(expect.objectContaining({ id: module.id, title: "Renamed from canvas" }));
+
+      const staleMetadataTransaction = {
+        ...metadataTransaction,
+        id: "renderer-module-real-graph-conflict",
+        baseDocumentRevisionId: afterMetadata.documentRevisionId,
+        baseGraphRevisions: { [initial.graphId]: afterMetadata.graphRevisions[initial.graphId]! },
+        operations: [{
+          type: "updateModule" as const,
+          graphId: initial.graphId,
+          moduleId: module.id,
+          module: { ...createdModule!, title: "Stale metadata" }
+        }]
+      };
+      const supersedingTransaction = {
+        ...metadataTransaction,
+        id: "renderer-module-superseding-edit",
+        baseDocumentRevisionId: afterMetadata.documentRevisionId,
+        baseGraphRevisions: { [initial.graphId]: afterMetadata.graphRevisions[initial.graphId]! },
+        operations: [{
+          type: "updateModule" as const,
+          graphId: initial.graphId,
+          moduleId: module.id,
+          module: { ...createdModule!, title: "Superseding metadata" }
+        }]
+      };
+      await service.executeApplicationCommand(
+        rendererCommand("renderer-module-superseding-command", supersedingTransaction)
+      );
+      await expect(service.executeApplicationCommand(
+        rendererCommand("renderer-module-real-conflict-command", staleMetadataTransaction)
+      )).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
+    } finally {
+      await service.close();
+    }
+  });
+
   it("waits for an in-flight autosave before closing the active document", async () => {
     let release!: () => void;
     const saving = new Promise<void>((resolve) => { release = resolve; });

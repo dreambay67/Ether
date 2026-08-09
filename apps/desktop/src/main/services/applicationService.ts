@@ -821,6 +821,7 @@ export class DesktopApplicationService {
   private readonly concurrencyDomains = new ExecutionConcurrencyDomains();
   private application: EtherApplication | null = null;
   private current: DocumentDescriptor | null = null;
+  private rootGraphId: string | null = null;
   private currentPath: string | null = null;
   private untitled = false;
   private revision = 0;
@@ -1731,6 +1732,7 @@ export class DesktopApplicationService {
     if (closingDocumentId !== undefined) this.pathGrants.deactivateDocument(closingDocumentId);
     this.application = null;
     this.current = null;
+    this.rootGraphId = null;
     this.currentPath = null;
     this.untitled = false;
     this.latestMcpPlanPreview = null;
@@ -1836,8 +1838,14 @@ export class DesktopApplicationService {
     const application = this.requireApplication();
     const document = await application.queryDocument();
     const header = await application.queryDocumentHeader();
-    const graphId = Object.keys(document.graphRevisions)[0];
-    if (graphId === undefined) throw codedError("GRAPH_NOT_FOUND", "The document has no root graph.");
+    const revisionGraphIds = Object.keys(document.graphRevisions);
+    if (this.rootGraphId === null || document.graphRevisions[this.rootGraphId] === undefined) {
+      const graphs = await Promise.all(revisionGraphIds.map((graphId) => application.queryGraph(graphId)));
+      const roots = graphs.filter((graph) => graph.kind === "root");
+      if (roots.length !== 1) throw codedError("GRAPH_NOT_FOUND", `The document must have exactly one root graph; found ${roots.length}.`);
+      this.rootGraphId = roots[0]!.id;
+    }
+    const graphId = this.rootGraphId;
     this.revision += 1;
     const mode = document.mode;
     this.current = {

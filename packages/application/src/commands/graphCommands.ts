@@ -20,6 +20,10 @@ export async function applyGraphTransaction(
   const deletedGraphIds = state.graphs
     .map((graph) => graph.id)
     .filter((graphId) => !previewGraphIds.has(graphId));
+  const declaredGraphIds = new Set(Object.keys(transaction.baseGraphRevisions));
+  const graphSnapshots = preview.graphs.filter((graph) =>
+    declaredGraphIds.has(graph.id) || state.head.graphRevisions[graph.id] === undefined
+  );
   const result = await store.transaction(({ execution, revisions }) => {
     const duplicate = execution.getCommandResult(commandId, "graph.applyTransaction");
     if (duplicate !== undefined) return revisionResult(duplicate);
@@ -29,7 +33,7 @@ export async function applyGraphTransaction(
       baseGraphRevisions: transaction.baseGraphRevisions,
       title: transaction.title,
       actor: transaction.actor,
-      graphSnapshots: preview.graphs,
+      graphSnapshots,
       deletedGraphIds,
       forwardOperations: preview.forwardOperations,
       inverseOperations: preview.inverseOperations

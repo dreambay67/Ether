@@ -857,6 +857,14 @@ describe("atomic graph transactions", () => {
     });
     expect(created.inverseReplay).toEqual([root]);
 
+    const metadataUpdated = previewGraphTransaction({
+      graphs: created.graphs,
+      transaction: { id: "update-module-metadata", baseDocumentRevisionId: "doc-2", baseGraphRevisions: { root: "r2" }, title: "Update metadata", actor: "user", layoutPolicy: "preserve", operations: [{ type: "updateModule", graphId: "root", moduleId: "module", module: { ...module, title: "Named module" } }] }
+    });
+    expect(metadataUpdated.graphs.find((item) => item.id === "root")?.modules[0]?.title).toBe("Named module");
+    expect(metadataUpdated.graphs.find((item) => item.id === "inner")).toEqual(inner);
+    expect(metadataUpdated.inverseReplay).toEqual(created.graphs);
+
     const updatedInner = { ...inner, title: "Updated inner" };
     expect(() => previewGraphTransaction({
       graphs: created.graphs,

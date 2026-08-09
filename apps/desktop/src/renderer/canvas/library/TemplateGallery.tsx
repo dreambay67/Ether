@@ -98,7 +98,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
   const [status, setStatus] = useState("Choose a recipe to inspect its setup.");
   const setupRequest = useRef(0);
   const selected = useMemo(() => recipes.find((recipe) => `${recipe.id}@${recipe.version}` === selectedKey) ?? null, [recipes, selectedKey]);
-  const pathGrantParameter = parameters.find((parameter) => parameter.id === "exportPathGrantId");
+  const pathGrantParameter = parameters.find((parameter): parameter is Extract<RecipeParameter, { type: "string" }> => parameter.id === "exportPathGrantId" && parameter.type === "string");
   const pathGrantReady = pathGrantParameter === undefined || values[pathGrantParameter.id] !== pathGrantParameter.defaultValue;
   const ready = selected !== null
     && busy === null
@@ -132,7 +132,7 @@ export function TemplateGallery({ recipes, readOnly = false, onLoadSetup, onPrev
       setParameters(setup.parameters);
       setCapabilities(setup.capabilities);
       const initialValues = valuesFor(setup.parameters);
-      const grantParameter = setup.parameters.find((parameter) => parameter.id === "exportPathGrantId");
+      const grantParameter = setup.parameters.find((parameter): parameter is Extract<RecipeParameter, { type: "string" }> => parameter.id === "exportPathGrantId" && parameter.type === "string");
       if (grantParameter !== undefined && onRequestPathGrant !== undefined) {
         const grant = await onRequestPathGrant();
         if (requestId !== setupRequest.current) return;

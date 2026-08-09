@@ -200,7 +200,7 @@ function requireAffectedBaseRevisions(graphs: readonly EtherGraph[], operations:
   const affected = new Set<string>();
   for (const operation of operations) {
     if (byId.has(operation.graphId)) affected.add(operation.graphId);
-    if (operation.type === "removeModule" || operation.type === "updateModule") {
+    if (operation.type === "removeModule" || (operation.type === "updateModule" && operation.subtree !== undefined)) {
       const parent = byId.get(operation.graphId);
       const module = parent?.modules.find((candidate) => candidate.id === operation.moduleId);
       if (module !== undefined) moduleSubtree(graphs, module.graphId).forEach((graph) => affected.add(graph.id));

@@ -2,8 +2,9 @@ import type { EtherGraph } from "@ether/schema";
 import { RunPlanDetails } from "./inspector/RunPlanDetails";
 import type { RunPlanPresentation } from "./inspector/runPlanPresentation";
 
-export function CanvasSidePanels({ graph, selectedIds, status, runPrompt, runLabel, runPlan, runBusy, onRunSelected, onDismissRun, onLeave, onExposeParameter, onRemoveFromModule, onConvertGroup }: {
+export function CanvasSidePanels({ graph, title, selectedIds, status, runPrompt, runLabel, runPlan, runBusy, onRunSelected, onDismissRun, onLeave, onExposeParameter, onRemoveFromModule, onConvertGroup }: {
   graph: EtherGraph;
+  title?: string;
   selectedIds: string[];
   status: string;
   runPrompt: boolean;
@@ -20,7 +21,7 @@ export function CanvasSidePanels({ graph, selectedIds, status, runPrompt, runLab
   const legacyGroup = graph.groups[0];
   return <>
     <aside className="canvas-legend" aria-label="Canvas legend">
-      <strong>{graph.title}</strong><span>{graph.nodes.length} nodes - {graph.edges.length} lanes</span><small>Left drag selects - right drag pans</small>
+      <strong>{title ?? graph.title}</strong><span>{graph.nodes.length} nodes - {graph.edges.length} lanes</span><small>Left drag selects - right drag pans</small>
       {onLeave ? <button type="button" onClick={onLeave}>Leave module</button> : null}
       {onExposeParameter && selectedIds.length === 1 ? <button type="button" onClick={() => onExposeParameter(selectedIds[0]!)}>Expose selected parameter</button> : null}
       {onRemoveFromModule && selectedIds.length > 0 ? <button type="button" onClick={() => onRemoveFromModule(selectedIds)}>Move selected to parent</button> : null}

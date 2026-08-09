@@ -59,6 +59,7 @@ export function useTransactionCommands({ document, graph, revisionSeed, onGraph,
         const refreshed = bridge.query === undefined ? await window.ether.graph.snapshot(document.documentId) : await bridge.query({ kind: "query", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), name: "graph.snapshot", documentId: document.documentId, payload: { graphId: graph.id } });
         const nextGraph = "graph" in refreshed ? refreshed.graph : refreshed.payload?.graph;
         if (nextGraph === undefined) throw new Error("The committed graph could not be refreshed.");
+        if (nextGraph.id !== graph.id) throw new Error(`The committed graph refresh returned ${nextGraph.id} instead of ${graph.id}.`);
         onGraph(nextGraph); revisions.current.pending = false; onStatus(`${title} saved`); return true;
       }
       const result = await window.ether.graph.applyTransaction(document.documentId, transaction);

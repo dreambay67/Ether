@@ -9,6 +9,7 @@ import {
   blankAuthoringJourney,
   launchRecoveryJourney,
   packagedJourneyConfig,
+  sourceElectronJourneyConfig,
   type JourneyPoint,
   type RealPageInput
 } from "../../recovery/journeyDriver.js";
@@ -16,15 +17,20 @@ import {
 const workspaceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const thisSource = fileURLToPath(import.meta.url);
 const journeyId = "module-authoring-recovery";
+const sourceElectronDiagnostic = process.env.ETHER_RECOVERY_SOURCE_ELECTRON === "1";
 
 test.skip(process.platform !== "win32", "The module recovery journey runs against packaged Windows Ether.exe.");
 
 test("authors, protects, edits, navigates, reorganizes, and dissolves a Module from a blank packaged document", async () => {
   assertAuthoringJourneySourceSafety(await readFile(thisSource, "utf8"), "module authoring recovery spec");
   const session = await launchRecoveryJourney({
-    ...packagedJourneyConfig(workspaceRoot, journeyId),
-    evidenceMode: "committed",
-    committedEvidencePath: ["phase-2", "module-authoring"],
+    ...(sourceElectronDiagnostic ? sourceElectronJourneyConfig(workspaceRoot, journeyId) : packagedJourneyConfig(workspaceRoot, journeyId)),
+    evidenceMode: sourceElectronDiagnostic ? "ephemeral" : "committed",
+    ...(sourceElectronDiagnostic ? {} : { committedEvidencePath: ["phase-2", "module-authoring"] }),
+    ...(sourceElectronDiagnostic ? {
+      sourceEntrypoint: path.join(workspaceRoot, "packages", "testing", "fixtures", "desktop-main.mjs"),
+      sourceArgs: (profile: { root: string }) => [`--fixture-root=${profile.root}`]
+    } : {}),
     viewport: { width: 1600, height: 1000 },
     declaration: blankAuthoringJourney(journeyId)
   });
@@ -45,18 +51,6 @@ test("authors, protects, edits, navigates, reorganizes, and dissolves a Module f
     await input.leftClick(createModule, "Create Module from selection", "The visible command moves the selection into one locked, durable Module through the shared graph command.");
 
     const moduleCard = page.getByTestId("ether-module-node");
-    await page.waitForTimeout(500);
-    if (await moduleCard.count() === 0) {
-      const diagnostic = await page.evaluate(() => ({
-        activeElement: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName ?? "none",
-        status: document.querySelector<HTMLElement>("[data-testid='canvas-status']")?.innerText ?? "missing",
-        selectedNodes: document.querySelectorAll("[data-testid='ether-node'].is-selected").length,
-        renderedNodes: document.querySelectorAll("[data-testid='ether-node']").length,
-        graphNodeCount: document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']")?.dataset.graphNodeCount ?? "missing",
-        createModuleDisabled: document.querySelector<HTMLButtonElement>("button[aria-label='Create module']")?.disabled ?? true
-      }));
-      throw new Error(`Create Module diagnostic: ${JSON.stringify(diagnostic)}`);
-    }
     await expect(moduleCard).toHaveCount(1);
     await expect(moduleCard).toHaveAttribute("data-module-locked", "true");
     await expect(page.getByTestId("ether-node")).toHaveCount(0);
@@ -96,6 +90,7 @@ test("authors, protects, edits, navigates, reorganizes, and dissolves a Module f
     await input.leftClick(moduleCard.getByRole("button", { name: "Expand" }), "Expand the Module", "The full Module presentation returns with its durable metadata.");
 
     await input.leftClick(moduleCard.locator(".ether-module-title"), "Select Module for keyboard entry", "Canvas focus can enter the selected Module through the primary edit shortcut.");
+    await expect(moduleCard).toHaveClass(/is-selected/u);
     await canvas.focus();
     await input.pressKey("Enter", "Enter the Module", "Enter opens the Module's independently editable internal graph.");
     await expect(page.getByLabel("Canvas legend")).toContainText("Campaign engine");
@@ -111,6 +106,7 @@ test("authors, protects, edits, navigates, reorganizes, and dissolves a Module f
 
     const parentNode = page.getByTestId("ether-node").first();
     await input.leftClick(parentNode.locator(".ether-node-main"), "Select the parent node", "The moved member is selected for reassignment.");
+    await expect.poll(() => selectedNodeCount(page)).toBe(1);
     await page.keyboard.down("Shift");
     try {
       await input.leftClick(moduleCard.locator(".ether-module-title"), "Add the Module to the selection context", "Shift-click preserves the selected parent node while opening Module membership controls.");

@@ -69,7 +69,7 @@ function parseStructuredValue(raw: string, type: "object" | "array"): { ok: true
 
 function VariablesFields({ context }: { context: InspectorNodeContext }) {
   const { graph, apply, report, document } = context;
-  const node = context.node as Extract<EtherNode, { config: { kind: "flow.variables" } }>;
+  const node = context.node as EtherNode & { config: FlowVariablesConfig };
   const draft = useInspectorDraft<FlowVariablesConfig>(`${node.id}:variables`, node.config);
   const disabled = document.mode !== "writable";
   const [previewTemplate, setPreviewTemplate] = useState("");
