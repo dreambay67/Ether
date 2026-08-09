@@ -172,6 +172,8 @@ Across the fixer and final review, no more than 12 real image generations may be
 
 Every `M` requirement must name one or more J01-J10 owner routes in `ledger.json`. Owner evidence is valid only when it records the exact installed package hash, candidate commit, route version, result, and explicit product-owner decision. The final concise owner route must cover every outstanding `M` mapping; no generic sign-off can close unperformed journeys.
 
+For candidate reconciliation, `packageHash` canonically means the SHA-256 of `release/windows/win-unpacked/resources/app.asar`. The installer is a separate artifact: gate validation also requires the SHA-256 of `release/windows/Ether-4.0.0-Setup.exe` to match `candidate.installerHash`.
+
 ## 9. Gate Validator
 
 The recovery must add a deterministic validator that fails when:

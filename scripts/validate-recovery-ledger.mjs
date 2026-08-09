@@ -13,6 +13,8 @@ const VALID_EVIDENCE = new Set(['A', 'P', 'M', 'V', 'R']);
 const JOURNEY_IDS = new Set(Array.from({ length: 10 }, (_, index) => `J${String(index + 1).padStart(2, '0')}`));
 const SHA_RE = /^[0-9a-f]{40}$/i;
 const HASH_RE = /^[0-9a-f]{64}$/i;
+const CANONICAL_PACKAGE_ARTIFACT = 'release/windows/win-unpacked/resources/app.asar';
+const TERMINAL_STATUSES = new Set(['VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED']);
 const INJECTION_RE = /(?:state\s*injection|inject(?:ed|ing)?\s+state|pre[-\s]?seed(?:ed)?\s+graph|direct\s+(?:database|db)\s+edit|database\s+edit|seeded\s+graph)/i;
 const EXPECTED_RX_STATUS = {
   'RX-001': 'PRESENT-UNPROVEN', 'RX-002': 'FAIL', 'RX-003': 'FAIL', 'RX-004': 'MISSING', 'RX-005': 'MISSING', 'RX-006': 'FAIL', 'RX-007': 'MISSING', 'RX-008': 'MISSING', 'RX-009': 'FAIL', 'RX-010': 'FAIL', 'RX-011': 'FAIL', 'RX-012': 'PRESENT-UNPROVEN', 'RX-013': 'MISSING', 'RX-014': 'MISSING', 'RX-015': 'PRESENT-UNPROVEN', 'RX-016': 'MISSING', 'RX-017': 'FAIL', 'RX-018': 'FAIL', 'RX-019': 'MISSING', 'RX-020': 'FAIL', 'RX-021': 'PRESENT-UNPROVEN', 'RX-022': 'PRESENT-UNPROVEN', 'RX-023': 'PRESENT-UNPROVEN', 'RX-024': 'PRESENT-UNPROVEN', 'RX-025': 'PRESENT-UNPROVEN', 'RX-026': 'PRESENT-UNPROVEN', 'RX-027': 'PRESENT-UNPROVEN', 'RX-028': 'MISSING', 'RX-029': 'FAIL', 'RX-030': 'PRESENT-UNPROVEN',
@@ -86,7 +88,7 @@ function inspectActionLog(errors, actionLog, label, sourceRoot, required) {
   }
 }
 
-function validateObject(ledger, { mode = 'baseline', candidateCommit = null, candidateHash = null, sourceRoot = repo } = {}) {
+function validateObject(ledger, { mode = 'baseline', candidateCommit = null, candidateHash = null, candidateInstallerHash = null, sourceRoot = repo } = {}) {
   const errors = [];
   let sources;
   try { sources = parseSources(); } catch (error) { return { errors: [`Unable to parse source acceptance: ${error.message}`], counts: {} }; }
@@ -104,9 +106,14 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
   if (!['baseline', 'candidate', 'gate'].includes(mode)) push(errors, `Unknown validation mode ${mode}.`);
   if (mode !== 'baseline') {
     if (!SHA_RE.test(candidateCommit || '')) push(errors, `${mode} validation requires --candidate-commit=<40-char SHA-1>.`);
-    if (!HASH_RE.test(candidateHash || '')) push(errors, `${mode} validation requires --candidate-package-hash=<64-char SHA-256>.`);
+    if (!HASH_RE.test(candidateHash || '')) push(errors, `${mode} validation requires --candidate-package-hash=<64-char SHA-256 of ${CANONICAL_PACKAGE_ARTIFACT}>.`);
     if (ledger.candidate?.commit !== candidateCommit) push(errors, `ledger.candidate.commit does not match requested candidate commit ${candidateCommit || '<missing>'}.`);
     if (ledger.candidate?.packageHash !== candidateHash) push(errors, `ledger.candidate.packageHash does not match requested candidate package hash ${candidateHash || '<missing>'}.`);
+    if (ledger.candidate?.packageArtifact !== CANONICAL_PACKAGE_ARTIFACT) push(errors, `ledger.candidate.packageArtifact must be ${CANONICAL_PACKAGE_ARTIFACT}.`);
+  }
+  if (mode === 'gate') {
+    if (!HASH_RE.test(candidateInstallerHash || '')) push(errors, 'gate validation requires --candidate-installer-hash=<64-char SHA-256>.');
+    if (ledger.candidate?.installerHash !== candidateInstallerHash) push(errors, `ledger.candidate.installerHash does not match requested candidate installer hash ${candidateInstallerHash || '<missing>'}.`);
   }
   if (!Array.isArray(ledger.requirements)) push(errors, 'requirements must be an array.');
   if (!Array.isArray(ledger.journeys)) push(errors, 'journeys must be an array.');
@@ -136,7 +143,8 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
     if (typeof item.classificationReason !== 'string' || item.classificationReason.trim().length < 10) push(errors, `${item.id || '<unknown>'} must include a concrete classificationReason.`);
     if (SHA_RE.test(ledger.recoveryPlanBaselineCommit || '') && item.baselineCommit !== ledger.recoveryPlanBaselineCommit) push(errors, `${item.id || '<unknown>'} baselineCommit does not match recoveryPlanBaselineCommit.`);
     if (Array.isArray(item.requiredEvidence) && item.requiredEvidence.includes('M') && item.ownerRoutes.length === 0) push(errors, `${item.id || '<unknown>'} requires M evidence but has no J01-J10 owner route.`);
-    if (['VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED'].includes(item.status)) {
+    if (mode === 'candidate' && item.requiredEvidence.includes('M') && TERMINAL_STATUSES.has(item.status)) push(errors, `${item.id} requires M evidence and must remain nonterminal until the product owner records acceptance.`);
+    if (TERMINAL_STATUSES.has(item.status)) {
       const classes = new Set(item.evidence.flatMap((record) => Array.isArray(record.classes) ? record.classes : []));
       for (const requiredClass of item.requiredEvidence) if (!classes.has(requiredClass)) push(errors, `${item.id} is ${item.status} but lacks required ${requiredClass} evidence.`);
       if (item.status === 'OWNER-ACCEPTED' && !classes.has('M')) push(errors, `${item.id} is OWNER-ACCEPTED without M evidence.`);
@@ -148,10 +156,11 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
       if (!HASH_RE.test(record.packageHash || '')) push(errors, `${item.id} evidence must include a 64-character packageHash.`);
       const encoded = JSON.stringify({ actionLog: record.actionLog, captureCommand: record.captureCommand, notes: record.notes, fixture: record.fixture });
       if (INJECTION_RE.test(encoded)) push(errors, `${item.id} evidence contains a manual fixture/state-injection indicator.`);
-      if (mode !== 'baseline') inspectActionLog(errors, record.actionLog, `${item.id} evidence`, sourceRoot, false);
+      if (mode !== 'baseline') inspectActionLog(errors, record.actionLog, `${item.id} evidence`, sourceRoot, TERMINAL_STATUSES.has(item.status));
       if (mode !== 'baseline' && candidateCommit && record.commit !== candidateCommit) push(errors, `${item.id} evidence commit ${record.commit} is stale; expected ${candidateCommit}.`);
       if (mode !== 'baseline' && candidateHash && record.packageHash !== candidateHash) push(errors, `${item.id} evidence package hash is stale; expected ${candidateHash}.`);
     }
+    if (mode === 'gate' && item.requiredEvidence.includes('M')) validateOwnerAcceptance(errors, item, ledger, candidateInstallerHash);
   }
   const originalTexts = originals.sort((a, b) => (a.ordinal || 0) - (b.ordinal || 0));
   if (originalTexts.length === 220) {
@@ -201,10 +210,32 @@ function validateObject(ledger, { mode = 'baseline', candidateCommit = null, can
   const knownStatuses = Array.isArray(ledger.statusModel) ? ledger.statusModel : [...VALID_STATUSES];
   const counts = Object.fromEntries([...new Set(knownStatuses)].map((status) => [status, requirements.filter((item) => item.status === status).length]));
   if (mode === 'gate') {
-    const terminal = new Set(['VERIFIED-AUTO', 'VERIFIED-PACKAGED', 'OWNER-ACCEPTED']);
-    for (const item of requirements) if (item.releaseBlocker && !terminal.has(item.status)) push(errors, `${item.id} is an open release blocker (${item.status}).`);
+    for (const item of requirements) if (item.releaseBlocker && !TERMINAL_STATUSES.has(item.status)) push(errors, `${item.id} is an open release blocker (${item.status}).`);
   }
   return { errors, counts };
+}
+
+function validateOwnerAcceptance(errors, item, ledger, candidateInstallerHash) {
+  if (item.status !== 'OWNER-ACCEPTED') {
+    push(errors, `${item.id} requires M evidence and cannot pass the gate without OWNER-ACCEPTED status.`);
+    return;
+  }
+  const journeys = new Map((ledger.journeys || []).map((journey) => [journey.id, journey]));
+  const ownerRecords = item.evidence.filter((record) => Array.isArray(record?.classes) && record.classes.includes('M'));
+  if (ownerRecords.length === 0) {
+    push(errors, `${item.id} is OWNER-ACCEPTED without an M evidence record.`);
+    return;
+  }
+  const missingRoutes = item.ownerRoutes.filter((routeId) => !ownerRecords.some((record) => {
+    const journey = journeys.get(routeId);
+    return record.routeId === routeId
+      && typeof record.routeVersion === 'string' && record.routeVersion.trim().length > 0
+      && record.result === 'PASS'
+      && record.ownerDecision === 'ACCEPTED'
+      && HASH_RE.test(record.installerHash || '') && record.installerHash === candidateInstallerHash
+      && typeof journey?.actionLog === 'string' && journey.actionLog === record.actionLog;
+  }));
+  if (missingRoutes.length > 0) push(errors, `${item.id} lacks exact owner evidence for ${missingRoutes.join(', ')}: routeVersion, PASS result, ACCEPTED ownerDecision, candidate installerHash, and the matching J01-J10 action log are required.`);
 }
 
 function renderReport(ledger, result) {
@@ -257,17 +288,47 @@ function runSelfTest() {
   if (!wrongRxResult.errors.some((error) => /RX-002 status .*evidence-based baseline classification/.test(error))) throw new Error('Self-test did not reject wrong RX classification.');
   const candidateCommit = 'a'.repeat(40);
   const candidateHash = 'b'.repeat(64);
+  const candidateInstallerHash = 'c'.repeat(64);
+  const actionLog = 'docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md';
   const terminalCandidate = structuredClone(ledger);
-  terminalCandidate.candidate = { commit: candidateCommit, packageHash: candidateHash };
+  terminalCandidate.candidate = { commit: candidateCommit, packageHash: candidateHash, packageArtifact: CANONICAL_PACKAGE_ARTIFACT, installerHash: candidateInstallerHash };
   for (const item of terminalCandidate.requirements) {
-    item.status = 'VERIFIED-PACKAGED';
-    item.evidence = [{ classes: [...item.requiredEvidence], commit: candidateCommit, packageHash: candidateHash }];
+    const manual = item.requiredEvidence.includes('M');
+    item.status = manual ? 'OWNER-ACCEPTED' : 'VERIFIED-PACKAGED';
+    item.evidence = manual
+      ? item.ownerRoutes.map((routeId) => ({ classes: [...item.requiredEvidence], commit: candidateCommit, packageHash: candidateHash, actionLog, routeId, routeVersion: 'ether-4.0-owner-route@1', result: 'PASS', ownerDecision: 'ACCEPTED', installerHash: candidateInstallerHash }))
+      : [{ classes: [...item.requiredEvidence], commit: candidateCommit, packageHash: candidateHash, actionLog }];
   }
-  for (const journey of terminalCandidate.journeys) journey.actionLog = 'docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/action-log.md';
-  const candidateResult = validateObject(terminalCandidate, { mode: 'candidate', candidateCommit, candidateHash });
+  for (const journey of terminalCandidate.journeys) journey.actionLog = actionLog;
+  const candidateFixture = structuredClone(terminalCandidate);
+  for (const item of candidateFixture.requirements.filter((entry) => entry.requiredEvidence.includes('M'))) { item.status = 'PRESENT-UNPROVEN'; item.evidence = []; }
+  const candidateResult = validateObject(candidateFixture, { mode: 'candidate', candidateCommit, candidateHash });
   if (candidateResult.errors.length) throw new Error(`Self-test terminal candidate fixture failed: ${candidateResult.errors.join(' | ')}`);
-  const gateResult = validateObject(terminalCandidate, { mode: 'gate', candidateCommit, candidateHash });
+  const gateResult = validateObject(terminalCandidate, { mode: 'gate', candidateCommit, candidateHash, candidateInstallerHash });
   if (gateResult.errors.length) throw new Error(`Self-test terminal gate fixture failed: ${gateResult.errors.join(' | ')}`);
+  const unacceptedManual = structuredClone(terminalCandidate);
+  unacceptedManual.requirements.find((item) => item.requiredEvidence.includes('M')).status = 'VERIFIED-PACKAGED';
+  const unacceptedManualResult = validateObject(unacceptedManual, { mode: 'gate', candidateCommit, candidateHash, candidateInstallerHash });
+  if (!unacceptedManualResult.errors.some((error) => /cannot pass the gate without OWNER-ACCEPTED/.test(error))) throw new Error('Self-test did not reject unaccepted M evidence at the gate.');
+  const prematureManual = structuredClone(candidateFixture);
+  prematureManual.requirements.find((item) => item.requiredEvidence.includes('M')).status = 'VERIFIED-PACKAGED';
+  const prematureManualResult = validateObject(prematureManual, { mode: 'candidate', candidateCommit, candidateHash });
+  if (!prematureManualResult.errors.some((error) => /must remain nonterminal/.test(error))) throw new Error('Self-test did not preserve the product-owner boundary in candidate mode.');
+  const incompleteOwnerRoutes = structuredClone(terminalCandidate);
+  const multiRouteItem = incompleteOwnerRoutes.requirements.find((item) => item.requiredEvidence.includes('M') && item.ownerRoutes.length > 1);
+  multiRouteItem.evidence = multiRouteItem.evidence.slice(0, -1);
+  const incompleteOwnerRoutesResult = validateObject(incompleteOwnerRoutes, { mode: 'gate', candidateCommit, candidateHash, candidateInstallerHash });
+  if (!incompleteOwnerRoutesResult.errors.some((error) => /lacks exact owner evidence/.test(error))) throw new Error('Self-test did not reject incomplete owner-route coverage.');
+  const missingEvidenceLog = structuredClone(terminalCandidate);
+  delete missingEvidenceLog.requirements.find((item) => !item.requiredEvidence.includes('M')).evidence[0].actionLog;
+  const missingEvidenceLogResult = validateObject(missingEvidenceLog, { mode: 'candidate', candidateCommit, candidateHash });
+  if (!missingEvidenceLogResult.errors.some((error) => /evidence is missing an action log/.test(error))) throw new Error('Self-test did not reject terminal evidence without an action log.');
+  const nonexistentEvidenceLog = structuredClone(terminalCandidate);
+  nonexistentEvidenceLog.requirements.find((item) => !item.requiredEvidence.includes('M')).evidence[0].actionLog = 'docs/evidence/ether-4.0-recovery/does-not-exist.md';
+  const nonexistentEvidenceLogResult = validateObject(nonexistentEvidenceLog, { mode: 'gate', candidateCommit, candidateHash, candidateInstallerHash });
+  if (!nonexistentEvidenceLogResult.errors.some((error) => /action log does not exist/.test(error))) throw new Error('Self-test did not reject a nonexistent terminal evidence action log.');
+  const wrongInstaller = validateObject(terminalCandidate, { mode: 'gate', candidateCommit, candidateHash, candidateInstallerHash: 'd'.repeat(64) });
+  if (!wrongInstaller.errors.some((error) => /installerHash does not match/.test(error))) throw new Error('Self-test did not reject a mismatched candidate installer hash.');
   const incompleteRxMap = structuredClone(ledger);
   delete incompleteRxMap.classification.recoveryMap['RX-030'];
   const incompleteMapResult = validateObject(incompleteRxMap, { mode: 'baseline' });
@@ -288,7 +349,7 @@ function runSelfTest() {
   wrongCrashMap.evidenceMapOverrides['AC-A03-009'] = ['A', 'P'];
   const wrongCrashMapResult = validateObject(wrongCrashMap, { mode: 'baseline' });
   if (!wrongCrashMapResult.errors.some((error) => /AC-A03-009 evidence mapping is not/.test(error))) throw new Error('Self-test did not reject wrong deterministic crash evidence map.');
-  console.log('Recovery ledger self-test passed (baseline, duplicate, invalid-status, RX lifecycle, journey-contract, and crash-evidence-map fixtures).');
+  console.log('Recovery ledger self-test passed (baseline, candidate lifecycle, owner acceptance, action-log, installer, journey-contract, and crash-evidence-map fixtures).');
 }
 
 const args = process.argv.slice(2);
@@ -297,8 +358,9 @@ const modeArg = args.find((arg) => arg.startsWith('--mode='));
 const mode = modeArg ? modeArg.split('=')[1] : 'baseline';
 const candidateCommit = args.find((arg) => arg.startsWith('--candidate-commit='))?.split('=')[1] || null;
 const candidateHash = args.find((arg) => arg.startsWith('--candidate-package-hash='))?.split('=')[1] || null;
+const candidateInstallerHash = args.find((arg) => arg.startsWith('--candidate-installer-hash='))?.split('=')[1] || null;
 const ledger = loadLedger();
-const result = validateObject(ledger, { mode, candidateCommit, candidateHash });
+const result = validateObject(ledger, { mode, candidateCommit, candidateHash, candidateInstallerHash });
 console.log(`Recovery ledger validation (${mode}): ${result.errors.length ? 'FAIL' : 'PASS'}`);
 console.log(`Status counts: ${JSON.stringify(result.counts)}`);
 if (args.includes('--write-report')) fs.writeFileSync(reportPath, renderReport(ledger, result), 'utf8');
