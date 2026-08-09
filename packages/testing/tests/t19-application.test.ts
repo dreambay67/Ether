@@ -199,6 +199,64 @@ afterEach(async () => {
 });
 
 describe("T19 durable collection and export workflows", () => {
+  it("waits for a delayed waiting-review scheduler slot before resuming Compare", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "ether-t20-compare-resume-"));
+    roots.push(root);
+    const exportRoot = path.join(root, "exports");
+    const liveRoot = path.join(root, "live");
+    await mkdir(exportRoot);
+    await mkdir(liveRoot);
+    const app = await createApp(root, exportRoot, liveRoot, imageCompareCollectionGraph());
+    try {
+      const plan = await app.previewRun({
+        commandId: "compare-resume-preview",
+        graphId: "root",
+        scope: { kind: "graph" }
+      });
+      const permit = await app.grantRunPermit({
+        commandId: "compare-resume-permit",
+        planId: plan.id,
+        contentHash: plan.contentHash
+      });
+      const job = await app.startRun({
+        commandId: "compare-resume-start",
+        planId: plan.id,
+        contentHash: plan.contentHash,
+        runPermitId: permit.id
+      });
+      expect((await app.waitForJob(job.id)).status).toBe("waiting-review");
+      const checkpoint = await app.boundaryStore().read(({ execution }) => execution.listReviewCheckpoints(job.id)[0]!);
+      const scheduler = (app as unknown as {
+        scheduler: {
+          active: Map<string, { controller: AbortController; promise: Promise<void> }>;
+        };
+      }).scheduler;
+      let releaseEndingLoop: (() => void) | undefined;
+      let endingLoop!: Promise<void>;
+      endingLoop = new Promise<void>((resolve) => {
+        releaseEndingLoop = resolve;
+      }).finally(() => {
+        if (scheduler.active.get(job.id)?.promise === endingLoop) scheduler.active.delete(job.id);
+      });
+      scheduler.active.set(job.id, { controller: new AbortController(), promise: endingLoop });
+
+      let completionSettled = false;
+      const completion = app.completeCompare({
+        commandId: "compare-resume-complete",
+        checkpointId: checkpoint.id,
+        selectedOutputVersionIds: checkpoint.candidateOutputVersionIds.slice(0, 2)
+      }).finally(() => { completionSettled = true; });
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(completionSettled).toBe(false);
+      releaseEndingLoop!();
+      await completion;
+      expect((await app.waitForJob(job.id)).status).toBe("completed");
+    } finally {
+      await app.closeDocument();
+    }
+  });
+
   it("routes completed Compare selections into an Output Collection", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "ether-t20-compare-collection-"));
     roots.push(root);

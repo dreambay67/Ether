@@ -810,7 +810,7 @@ export class EtherApplication implements EtherApplicationService {
       return job.id;
     });
     await this.drainEvents();
-    this.resumeAfterReview(jobId);
+    await this.resumeAfterReview(jobId);
   }
 
   async previewRun(input: {
@@ -1863,8 +1863,14 @@ export class EtherApplication implements EtherApplicationService {
     });
   }
 
-  resumeAfterReview(jobId: string): void {
-    void this.requireScheduler().run(jobId);
+  async resumeAfterReview(jobId: string): Promise<void> {
+    // Compare completion can arrive while the scheduler still owns the run loop
+    // that observed `waiting-review` and is unwinding. Its promise settles only
+    // after `finally` releases the active slot, so wait before requesting the
+    // successor dispatch rather than relying on event-loop timing.
+    const scheduler = this.requireScheduler();
+    await scheduler.waitForJob(jobId);
+    void scheduler.run(jobId);
   }
 
   private liveOutputGrant(pathGrantId: string): LiveOutputDirectoryGrant {
