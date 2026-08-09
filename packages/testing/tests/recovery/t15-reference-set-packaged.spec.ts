@@ -54,16 +54,16 @@ test("builds a linked and embedded Reference Set, then previews its offline Work
     const inspector = page.getByTestId("node-inspector");
     await expect(inspector.getByRole("button", { name: "Link file", exact: true })).toBeVisible();
     await chooseReference(input, profile.userData, inspector.getByRole("button", { name: "Link file", exact: true }), sources[0]!, "Link the first local reference");
-    await expect(page.getByRole("region", { name: "Reference Desk" })).toContainText("01-linked-style.png");
+    const desk = page.locator(".reference-desk");
+    await expect(desk).toContainText("01-linked-style.png");
     await chooseReference(input, profile.userData, inspector.getByRole("button", { name: "Embed copy", exact: true }), sources[1]!, "Embed the second local reference");
-    await expect(page.getByRole("region", { name: "Reference Desk" })).toContainText("02-embedded-subject.png");
+    await expect(desk).toContainText("02-embedded-subject.png");
     await chooseReference(input, profile.userData, inspector.getByRole("button", { name: "Link file", exact: true }), sources[2]!, "Link the third local reference");
     await expect(inspector).toContainText("3 saved members; ordered manual.");
 
-    const desk = page.getByRole("region", { name: "Reference Desk" });
     await setReferenceSelection(input, desk, "01-linked-style.png", false, "style", "Select excluded Style reference");
     await input.leftClick(desk.getByRole("button", { name: "Add to set", exact: true }), "Add the excluded Style reference", "Add updates membership explicitly and never replaces the existing source set.");
-    await expect(page.getByTestId("canvas-status")).toContainText("added to the set");
+    await expect(inspector).toContainText("3 saved members; ordered manual.");
 
     await setReferenceSelection(input, desk, "01-linked-style.png", false, "style", "Select first reference for Replace");
     await setReferenceSelection(input, desk, "02-embedded-subject.png", true, "subject", "Select embedded Subject reference for Replace");

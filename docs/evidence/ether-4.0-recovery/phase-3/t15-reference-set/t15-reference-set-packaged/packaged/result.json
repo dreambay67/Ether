@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "journeyId": "t15-reference-set-packaged",
+  "mode": "packaged",
+  "startedAt": "2026-08-09T11:15:17.799Z",
+  "finishedAt": "2026-08-09T11:15:33.982Z",
+  "outcome": "failed",
+  "profile": {
+    "kind": "fresh-isolated",
+    "appData": "isolated",
+    "localAppData": "isolated",
+    "userData": "isolated"
+  },
+  "viewport": {
+    "width": 1600,
+    "height": 1000,
+    "deviceScaleFactor": 1
+  },
+  "identity": {
+    "gitCommit": "87efa2da9cc28f60a43356c66ae0836e3f77c78a",
+    "mode": "packaged",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "3a6e5a193cb1e0e42672a3789a950b72907c87bb3b6a20bfd330de2dd9744169"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "6b375f8eecd9206b11ac4e5120b8eb3653c641f0903554331c296bad7579f44f"
+      }
+    ]
+  },
+  "actions": [
+    {
+      "sequence": 1,
+      "kind": "left-click",
+      "label": "Add reference.set from Node Library",
+      "expected": "The blank document creates reference.set through the canonical registry.",
+      "actual": "Left click at (108, 690).",
+      "durationMs": 91
+    },
+    {
+      "sequence": 2,
+      "kind": "left-click",
+      "label": "Add prompt.worker from Node Library",
+      "expected": "The blank document creates prompt.worker through the canonical registry.",
+      "actual": "Left click at (108, 633).",
+      "durationMs": 61
+    },
+    {
+      "sequence": 3,
+      "kind": "left-click",
+      "label": "Select Reference Set",
+      "expected": "The blank document exposes source controls only after the Reference Set exists.",
+      "actual": "Left click at (802, 598).",
+      "durationMs": 50
+    },
+    {
+      "sequence": 4,
+      "kind": "left-click",
+      "label": "Link the first local reference",
+      "expected": "The exact local source is selected through Ether's owned native file picker.",
+      "actual": "Left click at (1397, 839).",
+      "durationMs": 41
+    },
+    {
+      "sequence": 5,
+      "kind": "observation",
+      "label": "Link the first local reference completed",
+      "expected": "The owned native Open dialog returned one local image path to Ether.",
+      "actual": "01-linked-style.png",
+      "durationMs": 0
+    },
+    {
+      "sequence": 6,
+      "kind": "left-click",
+      "label": "Embed the second local reference",
+      "expected": "The exact local source is selected through Ether's owned native file picker.",
+      "actual": "Left click at (1482, 839).",
+      "durationMs": 29
+    },
+    {
+      "sequence": 7,
+      "kind": "observation",
+      "label": "Embed the second local reference completed",
+      "expected": "The owned native Open dialog returned one local image path to Ether.",
+      "actual": "02-embedded-subject.png",
+      "durationMs": 0
+    },
+    {
+      "sequence": 8,
+      "kind": "left-click",
+      "label": "Link the third local reference",
+      "expected": "The exact local source is selected through Ether's owned native file picker.",
+      "actual": "Left click at (1397, 839).",
+      "durationMs": 23
+    },
+    {
+      "sequence": 9,
+      "kind": "observation",
+      "label": "Link the third local reference completed",
+      "expected": "The owned native Open dialog returned one local image path to Ether.",
+      "actual": "03-linked-lighting.png",
+      "durationMs": 0
+    },
+    {
+      "sequence": 10,
+      "kind": "left-click",
+      "label": "Select excluded Style reference",
+      "expected": "The Reference Desk selection carries explicit inclusion and role metadata.",
+      "actual": "Left click at (37, 241).",
+      "durationMs": 29
+    },
+    {
+      "sequence": 11,
+      "kind": "left-click",
+      "label": "Add the excluded Style reference",
+      "expected": "Add updates membership explicitly and never replaces the existing source set.",
+      "actual": "Left click at (1463, 284).",
+      "durationMs": 77
+    }
+  ],
+  "errors": []
+}
