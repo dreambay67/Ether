@@ -129,8 +129,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await expect(nodeInspector).toContainText("Channels & routes");
     await expect(nodeInspector).toContainText("Batch settings");
     await expect(nodeInspector.getByTestId("inspector-list-dimensions").locator(".inspector-list-item")).toHaveCount(1);
-    const nodeDiagnostics = nodeInspector.locator("details", { hasText: "Diagnostics & provenance" });
-    await expect(nodeDiagnostics).not.toHaveAttribute("open", "");
+    const nodeDiagnostics = nodeInspector.getByRole("button", { name: "Diagnostics & provenance", exact: true });
+    await expect(nodeDiagnostics).toHaveAttribute("aria-expanded", "false");
     await input.leftClick(nodeInspector.getByRole("button", { name: "Add dimension" }), "Add a structured Batch dimension", "The Inspector adds a named structured item rather than exposing raw JSON.");
     await input.leftClick(nodeInspector.getByRole("button", { name: "Add exclusion" }), "Add a structured Batch exclusion", "The Inspector adds a key/value exclusion editor through an ordinary control.");
     await expect(nodeInspector.getByTestId("inspector-list-dimensions").locator(".inspector-list-item")).toHaveCount(2);
@@ -138,7 +138,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await input.leftClick(nodeInspector.getByRole("button", { name: "Save batch" }), "Save structured Batch settings", "The registry-backed draft commits through one durable graph transaction.");
     await input.screenshot("05-progressive-batch-inspector.png", evidence, "Capture ordinary progressive Inspector", "Concise channels and structured Batch controls are visible while technical provenance remains collapsed.");
     expect((await nodeInspector.innerText()).includes(workspaceRoot)).toBe(false);
-    await input.leftClick(nodeDiagnostics.locator("summary"), "Open node diagnostics deliberately", "Stable IDs and provenance appear only in the expert disclosure.");
+    await input.leftClick(nodeDiagnostics, "Open node diagnostics deliberately", "Stable IDs and provenance appear only in the expert disclosure.");
+    await expect(nodeDiagnostics).toHaveAttribute("aria-expanded", "true");
     await input.screenshot("06-progressive-batch-advanced.png", evidence, "Capture deliberate node diagnostics", "The expert section expands without path leakage or replacing ordinary authoring controls.");
 
     input.observe("T10-T12 practical slice", "Six channels, roles, edge deletion, adapters, consequences, and progressive controls work from a blank package.", "Six same-pair lanes were authored; one was role-edited and edge-only deleted; a local adapter lane exposed its consequence; structured Batch settings saved without raw JSON.");
