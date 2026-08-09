@@ -227,6 +227,15 @@ describe("Ether 4.0 graph kernel registry", () => {
     }
   });
 
+  it("enables visual references for a newly created Reference Set", () => {
+    const referenceSet = nodeDefinitions.find((definition) => definition.id === "reference.set");
+
+    expect(referenceSet?.defaultConfig()).toMatchObject({
+      kind: "reference.set",
+      enabledChannels: ["image"]
+    });
+  });
+
   it("fails registry initialization for incomplete or invalid semantic definitions", () => {
     expect(() => createNodeRegistry(nodeDefinitions.slice(1))).toThrow(/Missing node definition/);
     expect(() => createNodeRegistry([...nodeDefinitions, nodeDefinitions[0]!])).toThrow(/Duplicate node definition/);
