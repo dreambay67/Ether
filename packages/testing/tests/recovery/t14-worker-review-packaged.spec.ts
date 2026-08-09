@@ -62,8 +62,8 @@ test("authors a review-gated Worker chain and runs its approved image branch fro
     const workerB = workers.nth(1);
     const generator = page.locator(".ether-node[data-node-definition='generation.image']");
 
-    await input.leftClick(prompt.locator(".ether-node-title"), "Select Prompt for direct editing", "The blank Prompt becomes the editing target.");
-    await input.pressKey("Enter", "Edit the authored Prompt", "The inline text editor opens through the canvas command.");
+    await input.leftClick(prompt.getByRole("button", { name: "Edit Prompt body", exact: true }), "Focus Prompt content", "The Prompt's primary content control owns keyboard focus.");
+    await input.pressKey("Enter", "Edit the authored Prompt", "Enter opens the primary inline text editor through the focused card control.");
     const promptEditor = page.locator(".ether-node-inline-editor textarea");
     await expect(promptEditor).toBeVisible();
     await promptEditor.fill("A quiet cobalt vessel on warm stone with precise side light.");

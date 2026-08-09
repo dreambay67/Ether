@@ -64,8 +64,8 @@ test("previews exact scopes and completes one fake-local job from a blank docume
     const editor = page.locator(".ether-node[data-node-definition='edit.image']");
     const batch = page.locator(".ether-node[data-node-definition='flow.batch']");
 
-    await input.leftClick(prompt.locator(".ether-node-title"), "Select Prompt for direct editing", "The blank Prompt becomes the canvas editing target.");
-    await input.pressKey("Enter", "Edit Prompt body", "The primary on-canvas editor opens without entering a provider workflow.");
+    await input.leftClick(prompt.getByRole("button", { name: "Edit Prompt body", exact: true }), "Focus Prompt content", "The Prompt's primary content control owns keyboard focus.");
+    await input.pressKey("Enter", "Edit Prompt body", "Enter opens the primary on-canvas editor without entering a provider workflow.");
     const promptEditor = page.locator(".ether-node-inline-editor textarea");
     await expect(promptEditor).toBeVisible();
     await promptEditor.fill("A quiet cobalt vessel on warm stone, precise side light");

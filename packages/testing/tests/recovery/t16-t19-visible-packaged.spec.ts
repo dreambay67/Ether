@@ -185,8 +185,8 @@ async function configureVariables(page: Page, input: RealPageInput, variables: L
 }
 
 async function authorPrompt(page: Page, input: RealPageInput, prompt: Locator) {
-  await input.leftClick(prompt.locator(".ether-node-title"), "Select Prompt for direct editing", "The canvas-owned direct editor receives the variable token as authored text.");
-  await input.pressKey("Enter", "Edit Prompt content", "The focused Prompt opens its direct content editor without switching to a hidden form.");
+  await input.leftClick(prompt.getByRole("button", { name: "Edit Prompt body", exact: true }), "Focus Prompt content", "The Prompt's primary content control owns keyboard focus for the variable token.");
+  await input.pressKey("Enter", "Edit Prompt content", "Enter opens the focused Prompt's direct content editor without switching to a hidden form.");
   const editor = prompt.locator(".ether-node-inline-editor textarea");
   await expect(editor).toBeVisible();
   await editor.fill(promptText);

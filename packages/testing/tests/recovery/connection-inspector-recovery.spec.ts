@@ -110,16 +110,16 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     const edgeInspector = page.getByTestId("edge-inspector");
     await expect(edgeInspector).toContainText("Adapter · local.data-to-text");
     await expect(edgeInspector).toContainText("Receiver field");
-    const connectionDiagnostics = edgeInspector.locator("details", { hasText: "Connection diagnostics" });
-    await expect(connectionDiagnostics).not.toHaveAttribute("open", "");
+    const connectionDiagnostics = edgeInspector.getByRole("button", { name: "Connection diagnostics", exact: true });
+    await expect(connectionDiagnostics).toHaveAttribute("aria-expanded", "false");
     await input.leftClick(edgeInspector.getByLabel("Output selection", { exact: true }), "Focus output selection", "The lane's output policy is editable in the ordinary Inspector.");
     await input.pressKey("ArrowDown", "Choose latest output", "The selector changes from Latest approved to Latest output through the focused control.");
     await input.pressKey("Enter", "Commit output selection", "The changed selector persists as a graph transaction.");
     await expect(edgeInspector.getByLabel("Output selection", { exact: true })).toHaveValue("latest");
     await input.screenshot("03-adapter-consequence-inspector.png", evidence, "Capture adapter consequence Inspector", "The ordinary Inspector names the local adapter, receiver field, assembly, preservation, channels, role, and selector while diagnostics stay collapsed.");
-    await input.leftClick(connectionDiagnostics.locator("summary"), "Open connection diagnostics deliberately", "Expert adapter and capability details appear only after an explicit disclosure.");
-    await expect(connectionDiagnostics).toHaveAttribute("open", "");
-    await expect(connectionDiagnostics).toContainText("Resolved: local.data-to-text");
+    await input.leftClick(connectionDiagnostics, "Open connection diagnostics deliberately", "Expert adapter and capability details appear only after an explicit disclosure.");
+    await expect(connectionDiagnostics).toHaveAttribute("aria-expanded", "true");
+    await expect(edgeInspector).toContainText("Resolved: local.data-to-text");
     await input.screenshot("04-connection-diagnostics.png", evidence, "Capture expert connection diagnostics", "The deliberate Advanced view exposes the resolved adapter and capability requirement without starting work.");
 
     await input.leftClick(page.getByRole("button", { name: "Hide Project lens", exact: true }), "Hide Project lens", "The canvas regains clear pointer access for the next Inspector target.");
