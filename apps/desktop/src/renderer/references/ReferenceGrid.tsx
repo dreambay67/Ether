@@ -44,12 +44,13 @@ export function resolveReferencePreview(documentId: string, reference: Reference
   const candidates = reference.state === "embedded"
     ? [reference.contentKey, reference.previewContentKey]
     : [reference.previewContentKey];
-  const contentKey = candidates.find((candidate): candidate is string => candidate !== null && contentKeyPattern.test(candidate));
-  if (contentKey === undefined) return { kind: "unavailable", reason: "missing-content" };
+  const hasContent = candidates.some((candidate) => candidate !== null && contentKeyPattern.test(candidate));
+  if (!hasContent) return { kind: "unavailable", reason: "missing-content" };
 
-  // The renderer only receives a validated content key. It never turns the
-  // redacted originalPath into a local-file URL or otherwise reaches the local FS.
-  return { kind, source: embeddedArtifactSource(documentId, contentKey, "original") };
+  // The main process resolves and authorizes the reference's ready blob. The
+  // renderer only carries the document-scoped reference id and never reaches
+  // the redacted originalPath or a content-addressed blob directly.
+  return { kind, source: embeddedArtifactSource(documentId, reference.id, "reference") };
 }
 
 const viewLayout: Record<ReferenceView, { columns: number; rowHeight: number; overscan: number }> = {
@@ -182,7 +183,7 @@ export function ReferencePreview({ documentId, reference, view }: { documentId: 
 
   useEffect(() => {
     setFailedSource(null);
-  }, [source]);
+  }, [source, reference.contentKey, reference.previewContentKey, reference.state]);
 
   if (resolution.kind === "unavailable" || failedSource === source) {
     return (

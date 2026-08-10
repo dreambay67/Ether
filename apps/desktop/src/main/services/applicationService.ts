@@ -1656,6 +1656,15 @@ export class DesktopApplicationService {
     return this.requireApplication().queryArtifactAssetDescriptor(artifactId, variant);
   }
 
+  async referenceAssetDescriptor(
+    documentId: string,
+    referenceId: string,
+    variant: "reference"
+  ) {
+    this.assertScope(documentId);
+    return this.requireApplication().queryReferenceAssetDescriptor(referenceId, variant);
+  }
+
   async readArtifactRange(
     documentId: string,
     artifactId: string,
@@ -1686,6 +1695,22 @@ export class DesktopApplicationService {
     this.assertScope(documentId);
     return this.requireApplication().streamArtifactAssetRange(
       artifactId,
+      variant,
+      start,
+      endExclusive
+    );
+  }
+
+  streamReferenceAssetRange(
+    documentId: string,
+    referenceId: string,
+    variant: "reference",
+    start: number,
+    endExclusive: number
+  ) {
+    this.assertScope(documentId);
+    return this.requireApplication().streamReferenceAssetRange(
+      referenceId,
       variant,
       start,
       endExclusive

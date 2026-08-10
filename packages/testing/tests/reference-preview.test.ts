@@ -28,7 +28,7 @@ describe("reference media preview resolution", () => {
 
     expect(resolution).toEqual({
       kind: "image",
-      source: `ether-asset://document-1/${previewKey}/original`
+      source: "ether-asset://document-1/reference-linked/reference"
     });
     expect(resolutionSource(resolution)).not.toMatch(/^file:/iu);
   });
@@ -44,11 +44,11 @@ describe("reference media preview resolution", () => {
 
     expect(resolveReferencePreview("document-1", embedded)).toEqual({
       kind: "image",
-      source: `ether-asset://document-1/${contentKey}/original`
+      source: "ether-asset://document-1/reference-linked/reference"
     });
     expect(resolveReferencePreview("document-1", { ...embedded, contentKey: null })).toEqual({
       kind: "image",
-      source: `ether-asset://document-1/${previewKey}/original`
+      source: "ether-asset://document-1/reference-linked/reference"
     });
   });
 

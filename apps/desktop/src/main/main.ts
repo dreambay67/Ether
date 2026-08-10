@@ -446,7 +446,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     "ether-asset",
     createEtherAssetProtocolHandler({
       authorize: async (documentId, artifactId, variant) => {
-        if (variant !== "original" && variant !== "thumbnail") return null;
+        if (variant !== "original" && variant !== "thumbnail" && variant !== "reference") return null;
         let active;
         try {
           active = service.snapshot();
@@ -455,17 +455,28 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
         }
         if (active.documentId !== documentId) return null;
         try {
-          const artifact = await service.artifactAssetDescriptor(documentId, artifactId, variant);
+          const asset = variant === "reference"
+            ? await service.referenceAssetDescriptor(documentId, artifactId, variant)
+            : await service.artifactAssetDescriptor(documentId, artifactId, variant);
           return {
-            byteLength: artifact.byteLength,
-            contentHash: artifact.contentKey,
-            mediaType: artifact.mediaType
+            byteLength: asset.byteLength,
+            contentHash: asset.contentKey,
+            mediaType: asset.mediaType
           };
         } catch {
           return null;
         }
       },
       streamRange: (documentId, artifactId, variant, start, endExclusive) => {
+        if (variant === "reference") {
+          return service.streamReferenceAssetRange(
+            documentId,
+            artifactId,
+            variant,
+            start,
+            endExclusive
+          );
+        }
         if (variant !== "original" && variant !== "thumbnail") {
           throw new Error("Unsupported artifact asset variant.");
         }

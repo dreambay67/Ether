@@ -1045,6 +1045,41 @@ export class EtherApplication implements EtherApplicationService {
     return deepFreezeSnapshot(await this.requireStore().read(({ references }) => references.list()));
   }
 
+  async queryReferenceAssetDescriptor(
+    referenceId: string,
+    variant: "reference"
+  ): Promise<{ byteLength: number; contentKey: string; mediaType: string }> {
+    if (variant !== "reference") {
+      throw new ApplicationServiceError("REFERENCE_ASSET_VARIANT_UNSUPPORTED", "Unsupported reference asset variant.");
+    }
+    const descriptor = await this.requireStore().read(({ blobs, references }) => {
+      const reference = references.get(referenceId);
+      if (reference === undefined) {
+        throw new ApplicationServiceError("REFERENCE_NOT_FOUND", `Unknown reference ${referenceId}.`);
+      }
+
+      const candidateContentKeys = reference.state === "embedded"
+        ? [reference.contentKey, reference.previewContentKey]
+        : [reference.previewContentKey];
+      for (const candidateContentKey of candidateContentKeys) {
+        if (candidateContentKey === null) continue;
+        const blob = blobs.get(candidateContentKey);
+        if (blob === undefined || blob.byteLength <= 0 || blob.mediaType !== reference.mediaType) continue;
+        return {
+          byteLength: blob.byteLength,
+          contentKey: blob.contentKey,
+          mediaType: blob.mediaType
+        };
+      }
+
+      throw new ApplicationServiceError(
+        "REFERENCE_ASSET_UNAVAILABLE",
+        `Reference ${referenceId} has no ready embedded media matching its declared media type.`
+      );
+    });
+    return deepFreezeSnapshot(descriptor);
+  }
+
   async relinkDocumentReference(input: { referenceId: string; sourcePath: string; pathGrantId: string }) {
     const reference = await relinkReference(
       this.requireWritableStore(),
@@ -1276,6 +1311,17 @@ export class EtherApplication implements EtherApplicationService {
   ): AsyncGenerator<Buffer, void, void> {
     const store = this.requireStore();
     const descriptor = await this.queryArtifactAssetDescriptor(artifactId, variant);
+    yield* streamBlobRange(store, descriptor.contentKey, start, endExclusive);
+  }
+
+  async *streamReferenceAssetRange(
+    referenceId: string,
+    variant: "reference",
+    start: number,
+    endExclusive: number
+  ): AsyncGenerator<Buffer, void, void> {
+    const store = this.requireStore();
+    const descriptor = await this.queryReferenceAssetDescriptor(referenceId, variant);
     yield* streamBlobRange(store, descriptor.contentKey, start, endExclusive);
   }
 
