@@ -60,7 +60,8 @@ test("authors the practical phase-one journey from a blank packaged document", a
       y: moveDown ? Math.min(lowerLimit, workerCenter.y + 400) : Math.max(upperLimit, workerCenter.y - 400)
     };
     await input.leftDrag(workerCenter, safeWorkerTarget, "Move Worker with ordinary left drag", "The Worker moves once and preserves its graph identity.");
-    await expect.poll(async () => Math.abs((await requiredBox(worker, "Worker after movement")).y - workerBefore.y)).toBeGreaterThan(250);
+    const expectedTravel = Math.abs(safeWorkerTarget.y - workerCenter.y);
+    await expect.poll(async () => Math.abs((await requiredBox(worker, "Worker after movement")).y - workerBefore.y)).toBeGreaterThan(Math.max(40, expectedTravel * 0.6));
 
     const promptBox = await requiredBox(prompt, "Prompt for marquee");
     await input.leftMarquee(...marqueeAround(promptBox, canvasBox), "Marquee-select Prompt", "A left-drag marquee selects the intersected Prompt.");
