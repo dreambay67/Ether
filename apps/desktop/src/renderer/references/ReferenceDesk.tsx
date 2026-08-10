@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { Columns3, Files, Grid2X2, Link2, List, PackagePlus, RefreshCcw, ScanSearch, Waves } from "lucide-react";
-import type { ConnectionRole, EtherGraph, FlowBatchConfig, GraphOperation, ReferenceSetMember } from "@ether/schema";
+import { referenceSetMembers, type ConnectionRole, type EtherGraph, type FlowBatchConfig, type GraphOperation, type ReferenceSetMember } from "@ether/schema";
 import type { ReferenceAction } from "../../shared/ipc/contracts";
 import { ReferenceGrid, type ReferenceSelection, type ReferenceView } from "./ReferenceGrid";
 import { useReferences, type ReferenceDeskItem } from "./useReferences";
@@ -34,12 +34,13 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
   const [batchTargetKey, setBatchTargetKey] = useState(batchTargets[0]?.key ?? "");
   const target = referenceSets.find((node) => node.id === targetId) ?? referenceSets[0];
   const batchTarget = batchTargets.find((candidate) => candidate.key === batchTargetKey) ?? batchTargets[0];
-  const savedMembers = target?.config.kind === "reference.set" ? target.config.members : [];
-  const savedMembershipKey = savedMembers.map((member) => `${member.referenceId}:${member.enabled ? 1 : 0}:${member.roleOverride ?? "general"}`).join("\u001f");
+  const savedMembers = target?.config.kind === "reference.set" ? referenceSetMembers(target.config) : [];
+  const linkedSavedMembers = savedMembers.filter((member): member is Extract<ReferenceSetMember, { kind: "linked-reference" }> => member.kind === "linked-reference");
+  const savedMembershipKey = savedMembers.map((member) => `${member.kind === "linked-reference" ? member.referenceId : member.artifactId}:${member.enabled ? 1 : 0}:${member.roleOverride ?? "general"}`).join("\u001f");
   const selectedReferences = references.filter((reference) => selection.has(reference.id));
 
   useEffect(() => {
-    setSelection(new Map(savedMembers.map((member) => [member.referenceId, {
+    setSelection(new Map(linkedSavedMembers.map((member) => [member.referenceId, {
       enabled: member.enabled,
       ...(member.roleOverride === undefined ? {} : { roleOverride: member.roleOverride })
     }])));
