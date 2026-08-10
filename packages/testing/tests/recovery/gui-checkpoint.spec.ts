@@ -72,8 +72,11 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await input.shiftMarquee(...marqueeAround(workerBox, canvasBox), "Add Worker with Shift marquee", "Shift marquee preserves Prompt and adds Worker.");
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text", "prompt.worker"]);
     const viewportBeforePan = await page.locator(".react-flow__viewport").getAttribute("style");
-    const panStart = { x: canvasBox.x + canvasBox.width - 80, y: canvasBox.y + canvasBox.height - 80 };
-    const panEnd = { x: panStart.x - 110, y: panStart.y - 45 };
+    const panStart = await unobstructedPanePoint(page);
+    const panEnd = {
+      x: panStart.x > canvasBox.x + canvasBox.width / 2 ? panStart.x - 110 : panStart.x + 110,
+      y: panStart.y > canvasBox.y + canvasBox.height / 2 ? panStart.y - 45 : panStart.y + 45
+    };
     await input.rightDragPan(panStart, panEnd, "Pan with ordinary right drag", "The canvas viewport moves while the two-node selection remains unchanged.");
     await expect.poll(() => page.locator(".react-flow__viewport").getAttribute("style")).not.toBe(viewportBeforePan);
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text", "prompt.worker"]);
@@ -192,6 +195,20 @@ function center(box: { x: number; y: number; width: number; height: number }): J
 
 function blankCanvasPoint(canvas: { x: number; y: number; width: number; height: number }): JourneyPoint {
   return { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height - 28 };
+}
+
+async function unobstructedPanePoint(page: Page): Promise<JourneyPoint> {
+  return page.locator(".react-flow__pane").evaluate((pane) => {
+    const bounds = pane.getBoundingClientRect();
+    for (const yRatio of [0.82, 0.68, 0.54, 0.4, 0.26]) {
+      for (const xRatio of [0.82, 0.68, 0.54, 0.4, 0.26]) {
+        const x = bounds.left + bounds.width * xRatio;
+        const y = bounds.top + bounds.height * yRatio;
+        if (document.elementFromPoint(x, y) === pane) return { x, y };
+      }
+    }
+    throw new Error("The canvas has no unobstructed pan point.");
+  });
 }
 
 function marqueeAround(box: { x: number; y: number; width: number; height: number }, canvas: { x: number; y: number; width: number; height: number }): [JourneyPoint, JourneyPoint] {
