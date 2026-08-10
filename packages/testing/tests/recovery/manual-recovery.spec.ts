@@ -106,8 +106,11 @@ test("captures the manual from visible blank-document actions without provider w
     await input.screenshot("05-locked-module.png", evidence, "Capture the locked Module", "The packaged canvas shows the protected Module beside the remaining workflow.");
 
     await input.leftClick(page.getByRole("button", { name: "Show Build tools", exact: true }), "Restore Build tools", "The Library returns for the next documented setup.");
+    await expect(page.getByRole("button", { name: "Hide Build tools", exact: true })).toBeVisible();
     await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Restore Project lens", "The Inspector returns for setup details.");
+    await expect(page.getByRole("button", { name: "Hide Project lens", exact: true })).toBeVisible();
     await input.leftClick(page.getByRole("button", { name: "Show Reference Desk", exact: true }), "Restore Reference Desk", "The source desk returns above the canvas.");
+    await expect(page.getByRole("button", { name: "Hide Reference Desk", exact: true })).toBeVisible();
     await addDefinition(page, input, "reference.set");
     const referenceSet = page.locator(".ether-node[data-node-definition='reference.set']");
     await input.leftClick(referenceSet.locator(".ether-node-title"), "Select Reference Set", "Reference controls and the empty source desk share the visible Build workspace.");
@@ -130,7 +133,8 @@ test("captures the manual from visible blank-document actions without provider w
     await input.leftClick(exportNode.locator(".ether-node-title"), "Select Export", "The Inspector exposes export setup before any folder grant or write.");
     const exportInspector = page.getByTestId("node-inspector");
     await expect(exportInspector).toContainText("Export settings");
-    await expect(exportInspector.getByLabel("Path grant ID")).toBeVisible();
+    await expect(exportInspector.getByRole("button", { name: "Choose export folder", exact: true })).toHaveText("Choose export folder…");
+    await expect(exportInspector).toContainText("Required before this node can write files.");
     await input.screenshot("09-export-setup.png", evidence, "Capture export setup", "Export names the required scoped folder grant, template, format, collision policy, and metadata choice before writing.");
 
     await addDefinition(page, input, "prompt.worker");
@@ -165,11 +169,18 @@ test("captures the manual from visible blank-document actions without provider w
 
 async function addDefinition(page: Page, input: RealPageInput, definition: string) {
   const authored = page.locator(`.ether-node[data-node-definition='${definition}']`);
-  const previousCount = await authored.count();
+  const previousDefinitionCount = await authored.count();
+  const canvas = page.getByTestId("ether-canvas-surface");
+  const previousGraphCount = Number(await canvas.getAttribute("data-graph-node-count"));
+  if (!Number.isSafeInteger(previousGraphCount)) throw new Error(`The canvas did not expose a numeric node count before adding ${definition}.`);
   const row = page.locator(`.node-library-item[data-node-definition='${definition}']`);
-  await row.scrollIntoViewIfNeeded();
   await input.leftClick(row.locator(".node-library-add"), `Add ${definition} from Node Library`, `The registry creates ${definition} with canonical defaults.`);
-  await expect(authored).toHaveCount(previousCount + 1);
+  await expect(canvas).toHaveAttribute("data-graph-node-count", String(previousGraphCount + 1));
+  if (await authored.count() === previousDefinitionCount) {
+    await canvas.focus();
+    await input.pressKey("Home", `Reveal ${definition} on the canvas`, "The newly saved node is brought into the rendered canvas before selection.");
+  }
+  await expect(authored).toHaveCount(previousDefinitionCount + 1);
 }
 
 function channelLabel(channel: typeof channels[number]) {

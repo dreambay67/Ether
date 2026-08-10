@@ -185,10 +185,13 @@ export function RegistryConfigFields({ context }: { context: InspectorNodeContex
   };
   return <InspectorSection title={`${definition.title} settings`} help={`These controls come from the canonical ${node.definitionId} Inspector definition.`}>{draft.conflict ? <DraftConflict onLatest={draft.useLatest} onRebase={draft.rebaseDraft} /> : null}{fields.map((field) => {
     const value = config[field];
-    if (node.config.kind === "output.export" && field === "pathGrantId") return <label className="inspector-path-grant" key={field}>Export folder
-      <button type="button" aria-label="Choose export folder" disabled={disabled || pathGrantBusy} onClick={() => void chooseExportFolder()}>{pathGrantBusy ? "Choosing folder…" : pathGrantDisplayName ?? (typeof value === "string" && value.length > 0 ? "Choose a different folder…" : "Choose export folder…")}</button>
-      <small>{typeof value === "string" && value.length > 0 ? `Opaque grant: ${pathGrantDisplayName ?? "selected folder"}.` : "Required before this node can write files."}</small>
-    </label>;
+    if (node.config.kind === "output.export" && field === "pathGrantId") {
+      const hasPathGrant = typeof value === "string" && value.length > 0 && value !== "unconfigured";
+      return <label className="inspector-path-grant" key={field}>Export folder
+        <button type="button" aria-label="Choose export folder" disabled={disabled || pathGrantBusy} onClick={() => void chooseExportFolder()}>{pathGrantBusy ? "Choosing folder…" : hasPathGrant ? pathGrantDisplayName ?? "Choose a different folder…" : "Choose export folder…"}</button>
+        <small>{hasPathGrant ? `Opaque grant: ${pathGrantDisplayName ?? "selected folder"}.` : "Required before this node can write files."}</small>
+      </label>;
+    }
     const options = registrySelectOptions[`${node.config.kind}.${field}`];
     if (options) return <label key={field}>{labelFor(field)}<select aria-label={labelFor(field)} disabled={disabled} value={String(value ?? "")} onChange={(event) => updateField(field, event.target.value)}>{options.map((option) => <option key={option} value={option}>{labelFor(option)}</option>)}</select></label>;
     if (typeof value === "boolean") return <label key={field} className="inspector-checkbox"><input aria-label={labelFor(field)} disabled={disabled} type="checkbox" checked={value} onChange={(event) => updateField(field, event.target.checked)} />{labelFor(field)}</label>;
