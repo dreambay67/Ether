@@ -118,7 +118,7 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await canvas.focus();
     await input.pressKey("Home", "Refit before Worker editing", "The edited cards return to a clear direct-editing workspace.");
-    await input.leftClick(worker.locator(".ether-node-title"), "Select Worker for direct editing", "The ordinary Worker card becomes the primary selection.");
+    await input.leftClick(worker.locator(".ether-node-primary"), "Select Worker instruction for direct editing", "The ordinary Worker instruction becomes the primary editable selection.");
     await input.pressKey("Enter", "Edit Worker instruction on canvas", "Enter opens the Worker's primary instruction directly on its card.");
     const workerEditor = worker.locator(".ether-node-inline-editor textarea");
     await expect(workerEditor).toBeVisible();
