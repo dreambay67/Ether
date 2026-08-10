@@ -2,7 +2,8 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": false,
-    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,

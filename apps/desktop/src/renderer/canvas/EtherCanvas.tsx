@@ -285,7 +285,8 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
         flow.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }),
         size
       ),
-      [...graph.nodes, ...graph.modules]
+      [...graph.nodes, ...graph.modules],
+      size
     );
   }, [catalog, flow, graph.modules, graph.nodes]);
   const addAtCenter = useCallback((definitionId: NodeDefinitionId) => {
@@ -537,20 +538,15 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   const fitGraph = useCallback(() => {
     const content = graphContentBounds(graph);
     if (content === null) return;
-    // Pane resizes re-center the viewport on their next animation frame. Apply Ether's
-    // model-backed fit after those adjustments settle instead of relying on React Flow's
-    // queued controlled-node fit path.
-    globalThis.requestAnimationFrame(() => {
-      globalThis.requestAnimationFrame(() => {
-        const surface = globalThis.document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
-        const frame = surface?.getBoundingClientRect();
-        if (frame === undefined || frame.width <= 0 || frame.height <= 0) return;
-        const next = getViewportForBounds(content, frame.width, frame.height, 0.1, 1.25, {
-          top: "86px", right: "42px", bottom: "42px", left: "42px"
-        });
-        void flow.setViewport(next, { duration: 240 });
-      });
+    const surface = globalThis.document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
+    const frame = surface?.getBoundingClientRect();
+    if (frame === undefined || frame.width <= 0 || frame.height <= 0) return;
+    const next = getViewportForBounds(content, frame.width, frame.height, 0.1, 1.25, {
+      top: "86px", right: "42px", bottom: "42px", left: "42px"
     });
+    // Chromium throttles animation frames and viewport transitions for background windows.
+    // Home must still fit the graph immediately and deterministically.
+    void flow.setViewport(next, { duration: 0 });
   }, [flow, graph]);
   const commands = useGraphCommands({
     graph, readOnly, selectedNodeIds: selectedIds, selectedEdgeId, selectedModuleId,
@@ -569,5 +565,5 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   });
   const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
   const moduleTitle = parentFrame?.graph.modules.find((module) => module.id === parentFrame.moduleId)?.title;
-  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onReferenceDrop={dropReferences} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={selectEdge} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); setSelectedIds(additive ? [...selectedIds] : []); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} title={moduleTitle} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} />{parameterPicker ? <aside className="canvas-parameter-picker" aria-label="Expose module parameter"><strong>Expose member parameter</strong><label>Parameter<select aria-label="Module parameter" value={parameterPicker.selectedId} onChange={(event) => setParameterPicker((current) => current === null ? null : { ...current, selectedId: event.target.value })}>{parameterPicker.candidates.map((parameter) => <option key={parameter.id} value={parameter.id}>{parameter.name} · {parameter.exposure.control === "select" ? "choice" : parameter.exposure.valueType}</option>)}</select></label><small>Only registry-declared scalar settings are available. Provider bindings, grants, artifacts, and managed workspaces stay private.</small><div><button type="button" onClick={confirmParameterExposure}>Expose parameter</button><button type="button" onClick={() => setParameterPicker(null)}>Cancel</button></div></aside> : null}</div>;
+  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => { const size = catalog.find((item) => item.definitionId === definitionId)?.presentation ?? { width: 220, height: 140 }; void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules], size)); }} onReferenceDrop={dropReferences} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={selectEdge} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); setSelectedIds(additive ? [...selectedIds] : []); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} title={moduleTitle} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} />{parameterPicker ? <aside className="canvas-parameter-picker" aria-label="Expose module parameter"><strong>Expose member parameter</strong><label>Parameter<select aria-label="Module parameter" value={parameterPicker.selectedId} onChange={(event) => setParameterPicker((current) => current === null ? null : { ...current, selectedId: event.target.value })}>{parameterPicker.candidates.map((parameter) => <option key={parameter.id} value={parameter.id}>{parameter.name} · {parameter.exposure.control === "select" ? "choice" : parameter.exposure.valueType}</option>)}</select></label><small>Only registry-declared scalar settings are available. Provider bindings, grants, artifacts, and managed workspaces stay private.</small><div><button type="button" onClick={confirmParameterExposure}>Expose parameter</button><button type="button" onClick={() => setParameterPicker(null)}>Cancel</button></div></aside> : null}</div>;
 });

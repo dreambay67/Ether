@@ -316,6 +316,8 @@ test("keeps inspector edits conflict-safe while exposing runtime, review, and pr
 
   await selectNode("compare");
   const compareInspector = page.getByTestId("node-inspector");
+  await expect(compareInspector.getByLabel("Selection mode", { exact: true })).toBeVisible();
+  await expect(compareInspector.getByLabel("Minimum selections", { exact: true })).toBeVisible();
   await expect(compareInspector.getByLabel("Run scope")).toBeVisible();
   await compareInspector.getByLabel("Run scope").selectOption("branch");
   await compareInspector.getByRole("button", { name: "Preview plan", exact: true }).click();

@@ -65,6 +65,12 @@ test("authors the practical phase-one journey from a blank packaged document", a
     const workerBox = await requiredBox(worker, "Worker for additive marquee");
     await input.shiftMarquee(...marqueeAround(workerBox, canvasBox), "Add Worker with Shift marquee", "Shift marquee preserves Prompt and adds Worker.");
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text", "prompt.worker"]);
+    const viewportBeforePan = await page.locator(".react-flow__viewport").getAttribute("style");
+    const panStart = { x: canvasBox.x + canvasBox.width - 80, y: canvasBox.y + canvasBox.height - 80 };
+    const panEnd = { x: panStart.x - 110, y: panStart.y - 45 };
+    await input.rightDragPan(panStart, panEnd, "Pan with ordinary right drag", "The canvas viewport moves while the two-node selection remains unchanged.");
+    await expect.poll(() => page.locator(".react-flow__viewport").getAttribute("style")).not.toBe(viewportBeforePan);
+    await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text", "prompt.worker"]);
     const runPrompt = page.getByRole("complementary", { name: "Selected run prompt" });
     await expect(runPrompt).toHaveCSS("display", "grid");
     await expect.poll(async () => (await requiredBox(runPrompt.getByRole("button", { name: "Preview selected run" }), "run preview button")).width).toBeGreaterThan(140);
@@ -101,6 +107,14 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await input.pressKey("Control+Enter", "Commit primary content edit", "Ctrl+Enter commits text while the editor owns focus.");
     await expect(primaryEditor).toBeHidden();
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
+    await input.leftClick(worker.locator(".ether-node-title"), "Select Worker for direct editing", "The ordinary Worker card becomes the primary selection.");
+    await input.pressKey("Enter", "Edit Worker instruction on canvas", "Enter opens the Worker's primary instruction directly on its card.");
+    const workerEditor = worker.locator(".ether-node-inline-editor textarea");
+    await expect(workerEditor).toBeVisible();
+    await workerEditor.fill("Refine the campaign direction without narrating the change");
+    await input.pressKey("Control+Enter", "Commit Worker instruction edit", "Ctrl+Enter saves the Worker's instruction as one graph transaction.");
+    await expect(workerEditor).toBeHidden();
+    await expect(worker.locator(".ether-node-primary")).toContainText("Refine the campaign direction");
     await input.leftClick(renamedTitle, "Restore Prompt command focus", "The directly edited Prompt remains the primary graph selection.");
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await input.pressKey("Control+A", "Select the preview graph scope", "The preview scope includes the blank-authored Workers without starting provider work.");

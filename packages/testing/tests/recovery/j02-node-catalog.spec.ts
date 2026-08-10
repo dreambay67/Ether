@@ -62,6 +62,7 @@ const editRoutes: Record<DefinitionId, EditRoute> = {
 test.skip(process.platform !== "win32", "J02 recovery acceptance operates Windows Electron only.");
 
 test("J02 creates, edits, saves, reopens, and verifies the 17-node catalog", async () => {
+  test.setTimeout(8 * 60_000);
   await assertAuthoringJourneySourceSafety(await readFile(thisSource, "utf8"), "J02 node catalog spec");
   const mode = journeyMode();
   const journeyRoot = await mkdtemp(path.join(os.tmpdir(), "ether-j02-node-catalog-"));
@@ -81,6 +82,7 @@ test("J02 creates, edits, saves, reopens, and verifies the 17-node catalog", asy
     await fitAuthoredCatalog(authored.page, authored.input);
     await editAllCanonicalNodes(authored.page, authored.input);
 
+    await focusBlankCanvas(authored.page, authored.input);
     await expect(authored.page.locator(".document-save-state span")).toHaveText("Saved", { timeout: 30_000 });
     await authored.input.pressKey(
       "Control+s",
@@ -104,6 +106,7 @@ test("J02 creates, edits, saves, reopens, and verifies the 17-node catalog", asy
     await expect(reopened.page.getByTestId("project-header")).toContainText("J02 node catalog.ether");
     await expect(reopened.page.getByTestId("ether-canvas-surface")).toHaveAttribute("data-graph-node-count", "17");
     await expectAllCanonicalNodes(reopened.page);
+    await fitAuthoredCatalog(reopened.page, reopened.input);
     await verifyRepresentativeEdits(reopened.page, reopened.input);
     await expect(reopened.page.locator(".document-save-state span")).toHaveText("Saved", { timeout: 30_000 });
     reopened.input.observe(
@@ -167,6 +170,51 @@ async function fitAuthoredCatalog(page: Page, input: RealPageInput): Promise<voi
   for (const definition of canonicalDefinitions) {
     await expect(page.locator(`.ether-node[data-node-definition='${definition}']`).first()).toBeVisible();
   }
+  const occluded = await page.evaluate((definitions) => {
+    const surface = document.querySelector<HTMLElement>("[data-testid='ether-canvas-surface']");
+    const surfaceBounds = surface?.getBoundingClientRect();
+    return definitions.flatMap((definition) => {
+      const node = document.querySelector<HTMLElement>(`.ether-node[data-node-definition='${definition}']`);
+      const title = node?.querySelector<HTMLElement>(".ether-node-title");
+      if (node === null || title === null || title === undefined) return [{ definition, hit: "missing" }];
+      const bounds = title.getBoundingClientRect();
+      const hit = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+      return hit !== null && node.contains(hit) ? [] : [{
+        definition,
+        hit: hit instanceof HTMLElement ? `${hit.tagName}.${hit.className}` : "none",
+        pane: hit instanceof HTMLElement ? hit.closest<HTMLElement>(".resizable-pane")?.className ?? null : null,
+        title: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+        surface: surfaceBounds === undefined ? null : {
+          left: surfaceBounds.left,
+          top: surfaceBounds.top,
+          right: surfaceBounds.right,
+          bottom: surfaceBounds.bottom
+        }
+      }];
+    });
+  }, canonicalDefinitions);
+  if (occluded.length > 0) throw new Error(`J02 fitted node titles are occluded: ${JSON.stringify(occluded)}`);
+}
+
+async function focusBlankCanvas(page: Page, input: RealPageInput): Promise<void> {
+  const pane = page.locator(".react-flow__pane");
+  const point = await pane.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    for (const yRatio of [0.92, 0.78, 0.64, 0.5, 0.36, 0.22, 0.08]) {
+      for (const xRatio of [0.92, 0.78, 0.64, 0.5, 0.36, 0.22, 0.08]) {
+        const x = bounds.left + bounds.width * xRatio;
+        const y = bounds.top + bounds.height * yRatio;
+        if (document.elementFromPoint(x, y) === element) return { x, y };
+      }
+    }
+    throw new Error("The fitted J02 catalog has no unobstructed canvas focus point.");
+  });
+  await input.leftClick(
+    point,
+    "Return focus to the J02 canvas before saving",
+    "Ctrl+S is issued from ordinary canvas focus rather than stealing the shortcut from an editable Inspector control."
+  );
+  await expect(page.locator(".ether-node.is-selected")).toHaveCount(0);
 }
 
 async function editAllCanonicalNodes(page: Page, input: RealPageInput): Promise<void> {
@@ -229,13 +277,24 @@ async function editAllCanonicalNodes(page: Page, input: RealPageInput): Promise<
 }
 
 async function openNodeInspector(page: Page, input: RealPageInput, definition: DefinitionId): Promise<Locator> {
+  const dismissRunPrompt = page.getByRole("button", { name: "Dismiss", exact: true });
+  if (await dismissRunPrompt.isVisible().catch(() => false)) {
+    await input.leftClick(
+      dismissRunPrompt,
+      "Dismiss the prior selected-node prompt",
+      "The transient selected-run prompt is dismissed before the next canonical node is selected."
+    );
+    await expect(dismissRunPrompt).not.toBeVisible();
+  }
   const node = page.locator(`.ether-node[data-node-definition='${definition}']`).first();
   await node.scrollIntoViewIfNeeded();
   await input.leftClick(
     node.locator(".ether-node-title"),
     `Open ${definition} ordinary Inspector`,
-    `Selecting the ${definition} card reveals its task-specific Inspector without raw configuration editing.`
+    `Selecting the visible ${definition} card surface reveals its task-specific Inspector without raw configuration editing.`
   );
+  await expect(node).toHaveClass(/is-selected/);
+  await expect(page.locator(".ether-node.is-selected")).toHaveAttribute("data-node-definition", definition);
   await expect(page.getByTestId("node-inspector")).toBeVisible({ timeout: 15_000 });
   return node;
 }
@@ -264,7 +323,13 @@ async function verifyRepresentativeEdits(page: Page, input: RealPageInput): Prom
     { definition: "edit.image", kind: "title", value: editRoutes["edit.image"].value },
     { definition: "edit.mask", kind: "field", field: "Mode", value: editRoutes["edit.mask"].value },
     { definition: "edit.transform", kind: "field", field: "Operation", value: editRoutes["edit.transform"].value },
+    { definition: "review.compare", kind: "field", field: "Selection mode", value: editRoutes["review.compare"].value },
+    { definition: "review.evaluate", kind: "field", field: "Instruction", value: editRoutes["review.evaluate"].value },
+    { definition: "review.filter", kind: "field", field: "Match", value: editRoutes["review.filter"].value },
     { definition: "flow.variables", kind: "variables", name: "subject", value: "coastal campaign" },
+    { definition: "flow.batch", kind: "field", field: "Parallelism", value: editRoutes["flow.batch"].value },
+    { definition: "flow.join", kind: "field", field: "Strategy", value: editRoutes["flow.join"].value },
+    { definition: "output.collection", kind: "field", field: "Membership mode", value: editRoutes["output.collection"].value },
     { definition: "output.export", kind: "field", field: "Format", value: editRoutes["output.export"].value },
     { definition: "canvas.note", kind: "field", field: "Body", value: editRoutes["canvas.note"].value },
     { definition: "canvas.drawing", kind: "field", field: "Drawing background", value: editRoutes["canvas.drawing"].value }

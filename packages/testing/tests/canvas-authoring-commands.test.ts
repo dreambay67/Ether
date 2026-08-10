@@ -135,6 +135,8 @@ describe("canvas authoring command map", () => {
     expect(openCanvasPosition(centered, [])).toEqual(centered);
     expect(openCanvasPosition(centered, [{ position: centered, size: { width: 220, height: 140 } }]))
       .toEqual({ x: 230, y: 150 });
+    expect(openCanvasPosition(centered, [{ position: centered, size: { width: 220, height: 260 } }], { width: 220, height: 260 }))
+      .toEqual({ x: 230, y: 30 });
   });
 
   it("keeps Quick Add inside every surface edge while staying near the pointer", () => {

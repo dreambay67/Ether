@@ -295,6 +295,12 @@ const evaluationCapability = {
   outputChannels: ["text", "data", "image"]
 } as const;
 
+function literalSchemaValue(schema: unknown): string {
+  const value = (schema as { value?: unknown }).value;
+  if (typeof value !== "string") throw new Error("Expected a string literal schema.");
+  return value;
+}
+
 describe("Ether 4.0 schema", () => {
   it("publishes runtime-importable package exports from built artifacts", () => {
     const packageJson = JSON.parse(
@@ -1892,18 +1898,18 @@ describe("Ether 4.0 schema", () => {
     expect(
       applicationContractRegistry.filter((entry) => entry.kind === "event").map((entry) => entry.name)
     ).toEqual(applicationEventNames);
-    expect(ApplicationCommandSchema.options.map((option) => option.shape.name.value)).toEqual(
+    expect(ApplicationCommandSchema.options.map((option) => literalSchemaValue(option.shape.name))).toEqual(
       applicationCommandNames
     );
-    expect(ApplicationQuerySchema.options.map((option) => option.shape.name.value)).toEqual(
+    expect(ApplicationQuerySchema.options.map((option) => literalSchemaValue(option.shape.name))).toEqual(
       applicationQueryNames
     );
-    expect(ApplicationEventSchema.options.map((option) => option.shape.name.value)).toEqual(
+    expect(ApplicationEventSchema.options.map((option) => literalSchemaValue(option.shape.name))).toEqual(
       applicationEventNames
     );
     expect([
-      ...ApplicationCommandResponseSchema.options.map((option) => option.shape.name.value),
-      ...ApplicationQueryResponseSchema.options.map((option) => option.shape.name.value)
+      ...ApplicationCommandResponseSchema.options.map((option) => literalSchemaValue(option.shape.name)),
+      ...ApplicationQueryResponseSchema.options.map((option) => literalSchemaValue(option.shape.name))
     ]).toEqual(applicationRequestNames);
     expect(new Set(applicationContractRegistry.map((entry) => `${entry.kind}:${entry.name}`)).size).toBe(
       applicationContractRegistry.length

@@ -41,6 +41,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const marqueeGesture = useRef<{ start: { x: number; y: number }; pointerId: number; moved: boolean } | null>(null);
   const altDragGesture = useRef<{ nodeId: string; nodeIds: string[]; origin: XYPosition } | null>(null);
   const marqueeWasActive = useRef(false);
+  const lastCanvasClick = useRef<{ at: number; x: number; y: number } | null>(null);
   const quickAddDismissedPointer = useRef<number | null>(null);
   const previousSurfaceSize = useRef<{ width: number; height: number } | null>(null);
   const interaction = useCanvasInteraction(selectedIds, onSelected);
@@ -62,6 +63,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     setMarqueeRect(null);
     marqueeGesture.current = null;
     marqueeWasActive.current = false;
+    lastCanvasClick.current = null;
     setClickConnectionIntent(null);
     setDragConnectionIntent(null);
     settleInteraction();
@@ -478,6 +480,19 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         if (event.button !== 0 || gesture === null || gesture.pointerId !== event.pointerId) return;
         updateMarqueeGesture(gesture.start, { x: event.clientX, y: event.clientY }, event.currentTarget);
         marqueeWasActive.current = gesture.moved;
+        if (gesture.moved) {
+          lastCanvasClick.current = null;
+        } else {
+          const now = Date.now();
+          const previous = lastCanvasClick.current;
+          if (previous !== null && now - previous.at <= 420 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 10) {
+            lastCanvasClick.current = null;
+            marqueeWasActive.current = true;
+            openQuickAdd(event.clientX, event.clientY);
+          } else {
+            lastCanvasClick.current = { at: now, x: event.clientX, y: event.clientY };
+          }
+        }
         marqueeGesture.current = null;
         setMarqueeRect(null);
         interaction.endMarquee();
@@ -485,6 +500,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       }}
       onPointerCancelCapture={(event) => {
         altDragGesture.current = null;
+        lastCanvasClick.current = null;
         quickAddDismissedPointer.current = null;
         if (marqueeGesture.current === null) return;
         marqueeGesture.current = null;
@@ -598,12 +614,12 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           if (event !== null && event !== undefined) onViewport(nextViewport);
         }}
         onPaneClick={(event) => {
-          if (quickAdd !== null) {
-            closeQuickAdd();
-            return;
-          }
           if (marqueeWasActive.current) {
             marqueeWasActive.current = false;
+            return;
+          }
+          if (quickAdd !== null) {
+            closeQuickAdd();
             return;
           }
           if ((event.target as HTMLElement).closest(".react-flow__node")) return;

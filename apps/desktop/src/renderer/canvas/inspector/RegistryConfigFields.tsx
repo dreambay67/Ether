@@ -8,7 +8,8 @@ import type { InspectorNodeContext } from "./types";
 import { useInspectorDraft } from "./useInspectorDraft";
 
 function labelFor(field: string) {
-  return field.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
+  const words = field.replace(/([A-Z])/g, " $1").toLocaleLowerCase();
+  return words.replace(/^./, (character) => character.toLocaleUpperCase());
 }
 
 export function persistedExportFolderDisplayName(value: unknown, fallback: string | null = null): string | null {

@@ -32,6 +32,35 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   const firstLibraryCopy = page.locator(".node-library-item-copy").first();
   await expect(firstLibraryCopy.getByText("Prompt", { exact: true })).toBeVisible();
   await expect.poll(async () => (await firstLibraryCopy.boundingBox())?.width ?? 0).toBeGreaterThan(80);
+  const librarySearch = page.getByRole("searchbox", { name: "Search node library" });
+  await librarySearch.fill("render");
+  await expect(page.locator(".node-library-item")).toHaveCount(1);
+  await expect(page.locator(".node-library-item")).toHaveAttribute("data-node-definition", "generation.image");
+  await librarySearch.clear();
+  const promptFavorite = page.getByRole("button", { name: "Add Prompt to favorites", exact: true });
+  await promptFavorite.click();
+  await expect(page.getByRole("region", { name: "Favorites", exact: true })).toContainText("Prompt");
+  await page.getByRole("button", { name: "Remove Prompt from favorites", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Favorites", exact: true })).toHaveCount(0);
+  const quickAddPoint = await page.locator(".react-flow__pane").evaluate((pane) => {
+    const bounds = pane.getBoundingClientRect();
+    for (const yRatio of [0.82, 0.68, 0.54, 0.4]) {
+      for (const xRatio of [0.82, 0.68, 0.54, 0.4, 0.26]) {
+        const x = bounds.left + bounds.width * xRatio;
+        const y = bounds.top + bounds.height * yRatio;
+        if (document.elementFromPoint(x, y) === pane) return { x, y };
+      }
+    }
+    throw new Error("The canvas has no unobstructed Quick Add point.");
+  });
+  await page.mouse.dblclick(quickAddPoint.x, quickAddPoint.y);
+  const quickAdd = page.getByRole("dialog", { name: "Quick add node" });
+  await expect(quickAdd).toBeVisible();
+  await quickAdd.getByRole("textbox", { name: "Find a node" }).fill("render");
+  await expect(quickAdd.getByRole("option")).toHaveCount(1);
+  await expect(quickAdd.getByRole("option")).toContainText("Image Generator");
+  await page.keyboard.press("Escape");
+  await expect(quickAdd).toBeHidden();
   await expect(page.locator(".ether-node")).toHaveCount(2);
   await expect(page.locator(".react-flow__node-group")).toHaveCount(0);
   await expect(page.getByLabel("Legacy group repair preview")).toContainText("Campaign");
