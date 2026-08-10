@@ -12,6 +12,7 @@ coverage/
 dist-electron/
 test-results/
 playwright-report/
+docs/evidence/**/failed-attempts/
 *.log
 *.tmp
 *.local
