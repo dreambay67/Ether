@@ -16,7 +16,7 @@ import {
   type ProviderExecutionContext,
   type ProviderGenerationResult
 } from "@ether/providers";
-import type { EtherGraph, ExecutionPlan, GraphTransaction } from "@ether/schema";
+import type { EtherGraph, ExecutionPlan, GraphTransaction, ProviderCapability } from "@ether/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 const roots: string[] = [];
@@ -269,6 +269,129 @@ describe("durable application execution", () => {
       });
       await expect(application.queryGraph(root.id)).resolves.toMatchObject({ nodes: [], modules: [expect.objectContaining({ id: module.id, locked: true })] });
       await expect(application.queryGraph(internal.id)).resolves.toMatchObject({ nodes: [expect.objectContaining({ id: node.id })] });
+    } finally {
+      if (documentOpen) await application.closeDocument();
+    }
+  });
+
+  it("previews a selected root Worker with a locked module subtree present", async () => {
+    const documentsRoot = await temp("ether-module-preview-doc-");
+    const appDataRoot = await temp("ether-module-preview-appdata-");
+    const documentPath = path.join(documentsRoot, "Module-preview.ether");
+    const workerModel = "module-worker-model";
+    const workerCapability: ProviderCapability = {
+      providerId: "module-worker-provider",
+      profileId: "worker-default",
+      operation: "llm",
+      inputChannels: ["text", "image", "data"],
+      outputChannels: ["text", "data"],
+      aspectRatios: [],
+      resolutions: [],
+      maxReferences: 4,
+      maxOutputsPerCall: 1,
+      modelId: workerModel,
+      reasoningEfforts: ["medium"],
+      supportsCancellation: true,
+      supportsSeed: false,
+      provenance: "runtime-discovered",
+      limitations: []
+    };
+    const workerNode = (id: string, instruction: string): EtherGraph["nodes"][number] => ({
+      id,
+      definitionId: "prompt.worker",
+      title: id,
+      position: { x: 0, y: 0 },
+      size: { width: 220, height: 140 },
+      config: {
+        kind: "prompt.worker",
+        behavior: "rewrite",
+        instruction,
+        profile: "balanced",
+        providerId: workerCapability.providerId,
+        profileId: workerCapability.profileId,
+        model: workerModel,
+        reasoningEffort: "medium",
+        variation: 0.1,
+        reviewPolicy: "inspect-first",
+        contextPolicy: { includeUpstream: true, includeDownstreamCapabilities: true, maxTokens: 2_000 },
+        memoryPolicy: { mode: "stateless" },
+        outputContract: { channel: "text", count: 1, selectionPolicy: "latest" }
+      },
+      presentation: { collapsed: false, accent: "default", previewMode: "content" }
+    });
+    const moduleWorker = workerNode("module-worker", "Rewrite the module brief.");
+    const root = { ...blankGraph(), nodes: [moduleWorker] };
+    const internal: EtherGraph = {
+      ...blankGraph(),
+      id: "graph-preview-module",
+      title: "Preview module",
+      kind: "module",
+      nodes: [{ ...moduleWorker, position: { x: 20, y: 20 } }]
+    };
+    const module = {
+      id: "preview-module",
+      title: "Preview module",
+      description: "",
+      accent: "#37e6ea",
+      locked: true,
+      graphId: internal.id,
+      position: { x: 100, y: 80 },
+      size: { width: 260, height: 180 },
+      interface: { inputs: [], outputs: [], parameters: [] },
+      collapsed: false
+    };
+    const application = new EtherApplication({
+      appDataRoot,
+      appVersion: "4.0.0-test",
+      provider: new FakeImageProvider(),
+      providerCapabilities: [workerCapability],
+      dispatchMode: "manual"
+    });
+    let documentOpen = false;
+    try {
+      const created = await application.createDocument({ path: documentPath, title: "Module preview", initialGraph: root });
+      documentOpen = true;
+      await application.applyGraphTransaction({
+        commandId: "application-create-module-preview",
+        transaction: {
+          id: "application-create-module-preview",
+          baseDocumentRevisionId: created.documentRevisionId,
+          baseGraphRevisions: created.graphRevisions,
+          title: "Create locked preview module",
+          actor: "user",
+          layoutPolicy: "preserve",
+          operations: [
+            { type: "createModule", graphId: root.id, module, subtree: { rootGraphId: internal.id, graphs: [internal] } },
+            { type: "removeNode", graphId: root.id, nodeId: moduleWorker.id }
+          ]
+        }
+      });
+      await expect(application.queryGraph(root.id)).resolves.toMatchObject({
+        nodes: [],
+        modules: [expect.objectContaining({ id: module.id, locked: true })]
+      });
+
+      const afterModule = await application.queryDocument();
+      const rootWorker = workerNode("root-worker", "Rewrite the root brief.");
+      await application.applyGraphTransaction({
+        commandId: "application-add-root-worker-preview",
+        transaction: {
+          id: "application-add-root-worker-preview",
+          baseDocumentRevisionId: afterModule.documentRevisionId,
+          baseGraphRevisions: afterModule.graphRevisions,
+          title: "Add root Worker",
+          actor: "user",
+          layoutPolicy: "preserve",
+          operations: [{ type: "addNode", graphId: root.id, node: rootWorker }]
+        }
+      });
+
+      const rootPlan = await application.previewRun({
+        commandId: "module-root-selected-preview",
+        graphId: root.id,
+        scope: { kind: "selected", nodeIds: [rootWorker.id] }
+      });
+      expect(rootPlan.steps).toEqual([expect.objectContaining({ nodeId: rootWorker.id })]);
     } finally {
       if (documentOpen) await application.closeDocument();
     }

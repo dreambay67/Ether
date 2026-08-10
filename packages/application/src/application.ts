@@ -49,7 +49,7 @@ import {
   type ExecutionProviderResolver
 } from "@ether/execution";
 import type { StructuredOutputSchema } from "@ether/intelligence";
-import { previewGraphTransaction } from "@ether/graph-kernel";
+import { moduleSubtree, previewGraphTransaction } from "@ether/graph-kernel";
 import { resolveImageProviderAlias, type GenerationProvider } from "@ether/providers";
 import {
   ApplicationCommandSchema,
@@ -828,32 +828,38 @@ export class EtherApplication implements EtherApplicationService {
       return deepFreezeSnapshot(ExecutionPlanSchema.parse(existing.plan));
     }
     const snapshot = await store.read(({ artifacts, blobs, graphs, outputs, references, revisions }) => {
-      const graph = graphs.get(input.graphId);
+      const allGraphs = graphs.list();
+      const graph = allGraphs.find((candidate) => candidate.id === input.graphId);
       if (graph === undefined) throw new ApplicationServiceError("GRAPH_NOT_FOUND", `Unknown graph ${input.graphId}.`);
-      const versions = graph.nodes.flatMap((node) => outputs.listByNode(node.id));
+      const graphSubtree = moduleSubtree(allGraphs, graph.id);
+      const versions = graphSubtree.flatMap((candidate) =>
+        candidate.nodes.flatMap((node) => outputs.listByNode(node.id))
+      );
       const payloads = versions.flatMap((version) => version.outputPayloadIds.flatMap((payloadId) => {
         const payload = outputs.getPayload(payloadId);
         return payload === undefined ? [] : [payload];
       }));
       return {
         graph,
+        graphs: graphSubtree,
         head: revisions.head(),
         versions,
         payloads,
-        referenceInputs: referenceInputBindings(
-          graph,
+        referenceInputs: graphSubtree.flatMap((candidate) => referenceInputBindings(
+          candidate,
           (referenceId) => references.get(referenceId),
           (artifactId) => artifacts.get(artifactId),
           (contentKey) => blobs.get(contentKey),
           planId
-        )
+        ))
       };
     });
     const capabilities = await planningCapabilities(
       snapshot.graph,
       this.options.provider,
       await this.boundaryConfiguredProviderCapabilities(),
-      input.scope
+      input.scope,
+      snapshot.graphs
     );
     const planCompilationStartedAt = performance.now();
     const plan = compilePlan({
@@ -861,6 +867,7 @@ export class EtherApplication implements EtherApplicationService {
       documentId: store.documentId,
       documentRevisionId: snapshot.head.documentRevisionId,
       graph: snapshot.graph,
+      graphs: snapshot.graphs,
       graphRevisionId: snapshot.head.graphRevisions[input.graphId]!,
       scope: input.scope,
       capability: capabilities.primary,
@@ -2194,7 +2201,8 @@ async function planningCapabilities(
   graph: EtherGraph,
   provider: GenerationProvider,
   configured: readonly ProviderCapability[] = [],
-  scope: ExecutionScope = { kind: "graph" }
+  scope: ExecutionScope = { kind: "graph" },
+  graphs: readonly EtherGraph[] = [graph]
 ): Promise<{ all: ProviderCapability[]; primary: ProviderCapability }> {
   const runtimeParallelism = new Map<string, number>();
   try {
@@ -2208,7 +2216,8 @@ async function planningCapabilities(
   } catch {
     // A provider diagnostic is advisory; planning remains available without a cap.
   }
-  const discovered = graph.nodes.flatMap((node): ProviderCapability[] => {
+  const graphNodes = graphs.flatMap((candidate) => candidate.nodes);
+  const discovered = graphNodes.flatMap((node): ProviderCapability[] => {
     if (
       node.config.kind !== "generation.image" ||
       resolveImageProviderAlias(node.config.providerId, node.config.profileId).providerId !== provider.descriptor.id
@@ -2261,14 +2270,14 @@ async function planningCapabilities(
   }));
   const scopedNodeIds = new Set(
     scope.kind === "recipe"
-      ? graph.nodes.map((node) => node.id)
-      : resolveScope(graph, scope)
+      ? graphNodes.map((node) => node.id)
+      : resolveScope(graph, scope, graphs)
   );
-  const needsWorker = graph.nodes.some((node) =>
+  const needsWorker = graphNodes.some((node) =>
     scopedNodeIds.has(node.id) &&
     node.config.kind === "prompt.worker"
   );
-  const needsEvaluation = graph.nodes.some((node) =>
+  const needsEvaluation = graphNodes.some((node) =>
     scopedNodeIds.has(node.id) && node.config.kind === "review.evaluate"
   );
   const reasoning = all.find((capability) => capability.operation === "llm" || capability.operation === "interpret");
