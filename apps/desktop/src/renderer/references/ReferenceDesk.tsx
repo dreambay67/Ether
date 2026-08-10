@@ -34,9 +34,8 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
   const [batchTargetKey, setBatchTargetKey] = useState(batchTargets[0]?.key ?? "");
   const target = referenceSets.find((node) => node.id === targetId) ?? referenceSets[0];
   const batchTarget = batchTargets.find((candidate) => candidate.key === batchTargetKey) ?? batchTargets[0];
-  const savedMembers = target?.config.kind === "reference.set" ? referenceSetMembers(target.config) : [];
-  const linkedSavedMembers = savedMembers.filter((member): member is Extract<ReferenceSetMember, { kind: "linked-reference" }> => member.kind === "linked-reference");
-  const savedMembershipKey = savedMembers.map((member) => `${member.kind === "linked-reference" ? member.referenceId : member.artifactId}:${member.enabled ? 1 : 0}:${member.roleOverride ?? "general"}`).join("\u001f");
+  const savedMembers = useMemo(() => target?.config.kind === "reference.set" ? referenceSetMembers(target.config) : [], [target]);
+  const linkedSavedMembers = useMemo(() => savedMembers.filter((member): member is Extract<ReferenceSetMember, { kind: "linked-reference" }> => member.kind === "linked-reference"), [savedMembers]);
   const selectedReferences = references.filter((reference) => selection.has(reference.id));
 
   useEffect(() => {
@@ -45,7 +44,7 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
       ...(member.roleOverride === undefined ? {} : { roleOverride: member.roleOverride })
     }])));
     setCompareOpen(false);
-  }, [target?.id, savedMembershipKey]);
+  }, [linkedSavedMembers, target?.id]);
 
   const choose = async (storage: "link" | "embed") => {
     if (!target) return;
