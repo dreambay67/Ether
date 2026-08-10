@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent as ReactDragEvent } from "react";
 import { getNodeDefinition } from "@ether/graph-kernel";
-import { referenceSetMembers, type Artifact, type CanvasDrawingConfig, type EditImageConfig, type EditMaskGeometry, type EditWorkspaceState, type EtherEdge, type EtherNode, type GenerationImageConfig, type GraphOperation, type NodeOutputVersion, type PromptTextConfig, type PromptWorkerConfig, type ProviderCapability } from "@ether/schema";
+import { referenceSetMembers, type Artifact, type CanvasDrawingConfig, type EditImageConfig, type EditMaskGeometry, type EditWorkspaceState, type EtherEdge, type EtherGraph, type EtherNode, type GenerationImageConfig, type GraphOperation, type NodeOutputVersion, type PromptTextConfig, type PromptWorkerConfig, type ProviderCapability } from "@ether/schema";
 import { embeddedArtifactSource } from "../../artifacts/embeddedArtifactSource";
 import { StrokeCanvas, buildDrawingMaskSvg, buildDrawingSvg, drawingToMaskGeometry } from "../drawing/StrokeCanvas";
 import { channelLabel } from "../ports/channelRegistry";
@@ -257,9 +257,21 @@ function geminiCostGuidance(capability: ProviderCapability, config: GenerationIm
 
 function DrawingFields({ context }: { context: InspectorNodeContext }) {
   const { node, graph, document, apply, report } = context;
-  const [publishChannel, setPublishChannel] = useState<"image" | "mask">("image");
-  if (node.config.kind !== "canvas.drawing") return null;
-  const drawing = node.config;
+  const drawing = node.config.kind === "canvas.drawing" ? node.config : null;
+  const [publishState, setPublishState] = useState<{ nodeId: string; channel: "image" | "mask" }>({ nodeId: node.id, channel: "image" });
+  const drawingWidth = drawing?.width;
+  const drawingHeight = drawing?.height;
+  const drawingBackground = drawing?.background;
+  const [draft, setDraft] = useState({ nodeId: node.id, width: drawingWidth === undefined ? "" : String(drawingWidth), height: drawingHeight === undefined ? "" : String(drawingHeight), background: drawingBackground ?? "" });
+  useEffect(() => {
+    setPublishState({ nodeId: node.id, channel: "image" });
+    setDraft({ nodeId: node.id, width: drawingWidth === undefined ? "" : String(drawingWidth), height: drawingHeight === undefined ? "" : String(drawingHeight), background: drawingBackground ?? "" });
+  }, [drawingBackground, drawingHeight, drawingWidth, node.config.kind, node.id]);
+  if (drawing === null) return null;
+  const drawingDraft = draft.nodeId === node.id
+    ? draft
+    : { nodeId: node.id, width: String(drawing.width), height: String(drawing.height), background: drawing.background };
+  const publishChannel = publishState.nodeId === node.id ? publishState.channel : "image";
   const updateDrawing = (next: CanvasDrawingConfig, title: string) => void apply([{ type: "updateNode", graphId: graph.id, nodeId: node.id, node: { ...node, config: next } as EtherNode }] as GraphOperation[], title);
   const updateStrokes = (strokes: CanvasDrawingConfig["strokes"]) => {
     const next = { ...node, config: { ...drawing, strokes } } as EtherNode;
@@ -292,7 +304,7 @@ function DrawingFields({ context }: { context: InspectorNodeContext }) {
       report(error instanceof Error ? error.message : "The drawing could not be published.");
     }
   };
-  return <InspectorSection title="Drawing" help="Draw, select, erase, and undo strokes. Publish the editable document as either an Image or a white-selected Mask artifact."><div className="inspector-drawing-size"><label>Width<input aria-label="Drawing width" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.width} onBlur={(event) => updateDrawing({ ...drawing, width: Math.max(1, Number(event.target.value) || drawing.width) }, "Resize drawing")}/></label><label>Height<input aria-label="Drawing height" type="number" min="1" disabled={document.mode !== "writable"} defaultValue={drawing.height} onBlur={(event) => updateDrawing({ ...drawing, height: Math.max(1, Number(event.target.value) || drawing.height) }, "Resize drawing")}/></label></div><label>Background<input aria-label="Drawing background" disabled={document.mode !== "writable"} defaultValue={drawing.background} onBlur={(event) => { const background = event.target.value.trim(); if (background) updateDrawing({ ...drawing, background }, "Change drawing background"); }} /></label><label>Output channel<select aria-label="Drawing output channel" value={publishChannel} onChange={(event) => setPublishChannel(event.target.value === "mask" ? "mask" : "image")} disabled={document.mode !== "writable"}><option value="image">Image</option><option value="mask">Mask</option></select></label><StrokeCanvas width={drawing.width} height={drawing.height} background={drawing.background} strokes={drawing.strokes} disabled={document.mode !== "writable"} onChange={updateStrokes} /><div className="inspector-actions"><button type="button" disabled={document.mode !== "writable"} onClick={() => void publish()}>Publish drawing</button></div></InspectorSection>;
+  return <InspectorSection title="Drawing" help="Draw, select, erase, and undo strokes. Publish the editable document as either an Image or a white-selected Mask artifact."><div className="inspector-drawing-size"><label>Width<input aria-label="Drawing width" type="number" min="1" disabled={document.mode !== "writable"} value={drawingDraft.width} onChange={(event) => setDraft((current) => ({ ...current, nodeId: node.id, width: event.target.value }))} onBlur={() => { const width = Math.max(1, Number(drawingDraft.width) || drawing.width); setDraft((current) => ({ ...current, nodeId: node.id, width: String(width) })); updateDrawing({ ...drawing, width }, "Resize drawing"); }}/></label><label>Height<input aria-label="Drawing height" type="number" min="1" disabled={document.mode !== "writable"} value={drawingDraft.height} onChange={(event) => setDraft((current) => ({ ...current, nodeId: node.id, height: event.target.value }))} onBlur={() => { const height = Math.max(1, Number(drawingDraft.height) || drawing.height); setDraft((current) => ({ ...current, nodeId: node.id, height: String(height) })); updateDrawing({ ...drawing, height }, "Resize drawing"); }}/></label></div><label>Background<input aria-label="Drawing background" disabled={document.mode !== "writable"} value={drawingDraft.background} onChange={(event) => setDraft((current) => ({ ...current, nodeId: node.id, background: event.target.value }))} onBlur={() => { const background = drawingDraft.background.trim(); if (background) { setDraft((current) => ({ ...current, nodeId: node.id, background })); updateDrawing({ ...drawing, background }, "Change drawing background"); } else setDraft((current) => ({ ...current, nodeId: node.id, background: drawing.background })); }} /></label><label>Output channel<select aria-label="Drawing output channel" value={publishChannel} onChange={(event) => setPublishState({ nodeId: node.id, channel: event.target.value === "mask" ? "mask" : "image" })} disabled={document.mode !== "writable"}><option value="image">Image</option><option value="mask">Mask</option></select></label><StrokeCanvas width={drawing.width} height={drawing.height} background={drawing.background} strokes={drawing.strokes} disabled={document.mode !== "writable"} onChange={updateStrokes} /><div className="inspector-actions"><button type="button" disabled={document.mode !== "writable"} onClick={() => void publish()}>Publish drawing</button></div></InspectorSection>;
 }
 
 function ImageEditFields({ context }: { context: InspectorNodeContext }) {
@@ -660,11 +672,48 @@ function NodeChannels({ context }: { context: InspectorNodeContext }) {
   const definition = getNodeDefinition(node.definitionId);
   const incoming = graph.edges.filter((edge) => edge.to.kind === "node" && edge.to.nodeId === node.id);
   const outgoing = graph.edges.filter((edge) => edge.from.kind === "node" && edge.from.nodeId === node.id);
+  const incomingRoutes = incomingRouteSummaries(graph, node.id);
   const valid = definition.configSchema.safeParse(node.config);
   return <InspectorSection title="Channels & routes" help="Inputs and outputs come from the canonical node contract. Lane roles and selectors stay visible at the receiving edge.">
     <div className="inspector-channel-summary"><div><strong>Inputs</strong><span>{definition.library.inputChannels.length ? definition.library.inputChannels.map(channelLabel).join(" · ") : "None"}</span><small>{incoming.length} connected lane{incoming.length === 1 ? "" : "s"}</small></div><div><strong>Outputs</strong><span>{definition.library.outputChannels.map(channelLabel).join(" · ")}</span><small>{outgoing.length} connected lane{outgoing.length === 1 ? "" : "s"}</small></div></div>
+    <div className="inspector-role-list" data-testid="incoming-routes"><strong>Incoming lanes</strong>{incomingRoutes.length ? incomingRoutes.map((route) => <span key={route.edgeId}><strong>{route.source}</strong> · {route.sourceChannel} → {route.targetChannel} · {route.role} · {route.selector}</span>) : <span>No incoming lanes.</span>}</div>
     {!valid.success ? <p className="inspector-unavailable" role="alert">Needs setup: {valid.error.issues[0]?.message ?? "The saved configuration is incomplete."}</p> : null}
   </InspectorSection>;
+}
+
+export type IncomingRouteSummary = {
+  edgeId: string;
+  source: string;
+  sourceChannel: string;
+  targetChannel: string;
+  role: string;
+  selector: string;
+};
+
+export function incomingRouteSummaries(graph: EtherGraph, nodeId: string): IncomingRouteSummary[] {
+  return graph.edges
+    .filter((edge) => edge.to.kind === "node" && edge.to.nodeId === nodeId)
+    .map((edge) => {
+      const source = edge.from;
+      const target = edge.to;
+      return {
+        edgeId: edge.id,
+        source: source.kind === "node"
+          ? graph.nodes.find((candidate) => candidate.id === source.nodeId)?.title ?? source.nodeId
+          : graph.modules.find((candidate) => candidate.id === source.moduleId)?.title ?? `Module ${source.portId}`,
+        sourceChannel: channelLabel(source.channel),
+        targetChannel: channelLabel(target.channel),
+        role: roleLabels[edge.role],
+        selector: selectorLabel(edge.selector)
+      };
+    });
+}
+
+function selectorLabel(selector: EtherEdge["selector"]): string {
+  if (selector.kind === "latest-approved") return "Latest approved";
+  if (selector.kind === "latest") return "Latest output";
+  if (selector.kind === "all") return "All variants";
+  return `Pinned · ${selector.outputVersionId.slice(0, 12)}`;
 }
 
 export function NodeInspector({ context }: { context: InspectorNodeContext }) {

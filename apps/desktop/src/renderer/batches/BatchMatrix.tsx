@@ -60,10 +60,13 @@ export function BatchMatrix({
     return <section className="batch-matrix"><header><div><span className="eyebrow">Planning</span><h2>Batch Matrix</h2></div></header><p className="batch-empty">Add a Batch node to preview dimensions and work.</p></section>;
   }
 
+  const hasConfiguredDimensions = totalCount > 0;
+  const visiblePlan = hasConfiguredDimensions ? plan : null;
   const visibleIncluded = cells.filter((cell) => !cell.excluded).length;
-  const included = plan?.batchSummary?.workItemCount;
-  const executableCount = included ?? Math.max(totalCount - (config.exclusions?.length ?? 0), 0);
-  const cappedWarning = plan?.warnings.find((warning) => warning.code === "BATCH_EXPANSION_CAPPED");
+  const included = visiblePlan?.batchSummary?.workItemCount;
+  const executableCount = hasConfiguredDimensions ? included ?? Math.max(totalCount - (config.exclusions?.length ?? 0), 0) : 0;
+  const cappedWarning = visiblePlan?.warnings.find((warning) => warning.code === "BATCH_EXPANSION_CAPPED");
+  const visibleMessage = hasConfiguredDimensions ? message : "Needs setup: add a non-empty value to every Batch dimension.";
   const save = async (change: BatchConfigChange, title: string, success: string) => {
     try {
       await update(change, title);
@@ -167,8 +170,8 @@ export function BatchMatrix({
           <p>Dimensions create the complete work list. Excluding a cell removes only that item.</p>
         </div>
         <div className="batch-summary">
-          <div><Rows3 size={16} aria-hidden="true" /><span>{config.dimensions.length} dimensions</span><strong>{included === undefined ? "Calculating…" : `${included} work items`}</strong></div>
-          <div><Gauge size={16} aria-hidden="true" /><span>Provider calls</span><strong>{plan?.estimatedCalls ?? "—"}</strong></div>
+          <div><Rows3 size={16} aria-hidden="true" /><span>{config.dimensions.length} dimensions</span><strong>{!hasConfiguredDimensions ? "Needs setup · 0 work items" : included === undefined ? "Calculating…" : `${included} work items`}</strong></div>
+          <div><Gauge size={16} aria-hidden="true" /><span>Provider calls</span><strong>{visiblePlan?.estimatedCalls ?? "—"}</strong></div>
           <div><span>Excluded</span><strong>{config.exclusions?.length ?? 0}</strong></div>
         </div>
         {cappedWarning ? <p className="batch-warning" role="alert">{cappedWarning.message}</p> : null}
@@ -293,7 +296,7 @@ export function BatchMatrix({
             <option value="8">Concurrent · 8 maximum</option>
           </select>
         </label>
-        {plan ? <p className="batch-cap">Requested {plan.requestedParallelism ?? config.parallelism}; effective {plan.effectiveParallelism ?? 1} after the global and provider limits.</p> : message ? <p className="batch-warning">{message}</p> : null}
+        {visiblePlan ? <p className="batch-cap">Requested {visiblePlan.requestedParallelism ?? config.parallelism}; effective {visiblePlan.effectiveParallelism ?? 1} after the global and provider limits.</p> : visibleMessage ? <p className="batch-warning">{visibleMessage}</p> : null}
         <div className="batch-provider-caps" aria-label="Provider concurrency limits">
           {providerCaps(capabilities, targets, allocations, executableCount).map((cap) => (
             <span key={cap.id}><strong>{cap.label}</strong> up to {cap.maximum} at once</span>

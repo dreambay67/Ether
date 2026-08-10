@@ -25,7 +25,16 @@ export function useBatchPreview({ documentId, graph, node, onUpdated }: { docume
 
   const matrix = useMemo(() => config ? expandDimensions(config) : { cells: [], totalCount: 0 }, [config]);
   const preview = useCallback(async () => {
-    if (!node || !config) return;
+    if (!node || !config) {
+      setPlan(null);
+      setMessage(null);
+      return;
+    }
+    if (matrix.totalCount === 0) {
+      setPlan(null);
+      setMessage("Needs setup: add a non-empty value to every Batch dimension.");
+      return;
+    }
     try {
       const response = await window.ether.application.command({
         kind: "command", id: crypto.randomUUID(), correlationId: crypto.randomUUID(), documentId,
@@ -38,7 +47,7 @@ export function useBatchPreview({ documentId, graph, node, onUpdated }: { docume
       setPlan(null);
       setMessage(cause instanceof Error ? cause.message : "Run Preview is not available for this matrix.");
     }
-  }, [config, documentId, graph.id, node]);
+  }, [config, documentId, graph.id, matrix.totalCount, node]);
 
   useEffect(() => { void preview(); }, [preview]);
   const refreshCapabilities = useCallback(async () => {
@@ -122,19 +131,24 @@ export function useBatchPreview({ documentId, graph, node, onUpdated }: { docume
   };
 }
 
-function expandDimensions(config: FlowBatchConfig): { cells: BatchCell[]; totalCount: number } {
+export function expandDimensions(config: FlowBatchConfig): { cells: BatchCell[]; totalCount: number } {
+  const dimensions = config.dimensions.map((dimension) => ({
+    ...dimension,
+    values: dimension.values.filter(isNonEmptyDimensionValue)
+  }));
+  if (dimensions.length === 0 || dimensions.some((dimension) => dimension.values.length === 0)) return { cells: [], totalCount: 0 };
   const excluded = new Set((config.exclusions ?? []).map((entry) => stableKey(entry.values)));
   const cells: BatchCell[] = [];
   const values: JsonObject = {};
   const visit = (dimensionIndex: number) => {
     if (cells.length >= MAX_VISIBLE_CELLS) return;
-    if (dimensionIndex === config.dimensions.length) {
+    if (dimensionIndex === dimensions.length) {
       const assignment = { ...values };
       const key = stableKey(assignment);
       cells.push({ key, values: assignment, excluded: excluded.has(key) });
       return;
     }
-    const dimension = config.dimensions[dimensionIndex]!;
+    const dimension = dimensions[dimensionIndex]!;
     for (const value of dimension.values) {
       values[dimension.id] = value as JsonValue;
       visit(dimensionIndex + 1);
@@ -143,8 +157,12 @@ function expandDimensions(config: FlowBatchConfig): { cells: BatchCell[]; totalC
     delete values[dimension.id];
   };
   visit(0);
-  const totalCount = config.dimensions.reduce((count, dimension) => count * dimension.values.length, 1);
+  const totalCount = dimensions.reduce((count, dimension) => count * dimension.values.length, 1);
   return { cells, totalCount };
+}
+
+function isNonEmptyDimensionValue(value: JsonValue): boolean {
+  return typeof value !== "string" || value.trim().length > 0;
 }
 
 export function stableKey(value: JsonObject) {

@@ -175,7 +175,7 @@ const defaults: Record<NodeDefinitionId, () => NodeConfig> = {
   "review.evaluate": () => ({ kind: "review.evaluate", instruction: "", rubric: [], profile: "balanced", model: "gpt-5", reasoningEffort: "medium" }),
   "review.filter": () => ({ kind: "review.filter", match: "all", rules: [], routes: [] }),
   "flow.variables": () => ({ kind: "flow.variables", variables: [] }),
-  "flow.batch": () => ({ kind: "flow.batch", dimensions: [{ id: "items", name: "Items", values: [""] }], parallelism: 1 }),
+  "flow.batch": () => ({ kind: "flow.batch", dimensions: [], parallelism: 1 }),
   "flow.join": () => ({ kind: "flow.join", strategy: "ordered", requireComplete: true }),
   "output.collection": () => ({ kind: "output.collection", collectionId: "default", membershipMode: "add", makePrimary: false }),
   "output.export": () => ({ kind: "output.export", pathGrantId: "unconfigured", namingTemplate: "{node}-{index}", format: "original", collisionPolicy: "rename", includeMetadata: true }),

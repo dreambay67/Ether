@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { getNodeDefinition } from "@ether/graph-kernel";
-import { canonicalNodeDefinitionIds, type EtherEdge, type EtherGraph, type EtherNode, type NodeDefinitionId } from "@ether/schema";
+import { canonicalNodeDefinitionIds, type EtherEdge, type EtherGraph, type EtherNode, type FlowBatchConfig, type NodeDefinitionId } from "@ether/schema";
 import { edgePreflightMessage } from "../../../apps/desktop/src/renderer/canvas/commands/useEdgeCommands";
 import { createRegistryListItem, purposeBuiltRegistryKinds, registryFieldControl } from "../../../apps/desktop/src/renderer/canvas/inspector/registryFieldModel";
 import { runPlanPresentation } from "../../../apps/desktop/src/renderer/canvas/inspector/runPlanPresentation";
+import { expandDimensions } from "../../../apps/desktop/src/renderer/batches/useBatchPreview";
+import { incomingRouteSummaries } from "../../../apps/desktop/src/renderer/canvas/inspector/NodeInspector";
 import { bundledBezierPath, edgeBundleKey, edgeLabelPlacement } from "../../../apps/desktop/src/renderer/canvas/edges/edgeGeometry";
 import {
   channelsFor,
@@ -104,6 +106,28 @@ describe("renderer channel registry", () => {
     expect(createRegistryListItem("review.filter", "rules", 0)).toMatchObject({ field: "score", operator: "gte" });
     expect(createRegistryListItem("flow.variables", "variables", 0)).toEqual({ name: "variable1", value: "" });
     expect(createRegistryListItem("flow.batch", "exclusions", 0)).toEqual({ values: {} });
+  });
+
+  it("keeps a new Batch at setup until it has non-empty dimension values", () => {
+    const defaultConfig = getNodeDefinition("flow.batch").defaultConfig() as FlowBatchConfig;
+    expect(defaultConfig.dimensions).toEqual([]);
+    expect(expandDimensions(defaultConfig)).toEqual({ cells: [], totalCount: 0 });
+    expect(expandDimensions({
+      ...defaultConfig,
+      dimensions: [{ id: "angle", name: "Angle", values: ["", "front", "  "] }]
+    })).toMatchObject({ totalCount: 1, cells: [{ values: { angle: "front" }, excluded: false }] });
+  });
+
+  it("projects receiving lanes into ordinary source, channel, role, and selector labels", () => {
+    const summaries = incomingRouteSummaries(fixture([edge("lane", "prompt", "worker", "text", "text")]), "worker");
+    expect(summaries).toEqual([{
+      edgeId: "lane",
+      source: "Prompt",
+      sourceChannel: "Text",
+      targetChannel: "Text",
+      role: "General",
+      selector: "Latest approved"
+    }]);
   });
 
   it("keeps adapter steps visible in prepared-plan summaries", () => {
