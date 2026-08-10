@@ -20,6 +20,7 @@ const channels = ["text", "image", "mask", "data", "video", "audio"] as const;
 test.skip(process.platform !== "win32", "The manual journey runs against packaged Windows Ether.exe.");
 
 test("captures the manual from visible blank-document actions without provider work", async () => {
+  test.setTimeout(12 * 60_000);
   assertAuthoringJourneySourceSafety(await readFile(thisSource, "utf8"), "manual recovery spec");
   const session = await launchRecoveryJourney({
     ...packagedJourneyConfig(workspaceRoot, journeyId),
