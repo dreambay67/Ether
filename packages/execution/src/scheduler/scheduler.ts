@@ -684,10 +684,10 @@ async function createThumbnail(bytes: Uint8Array, mediaType: string): Promise<Bu
 
 async function authorizeProviderSource(sourcePath: string, stagingDirectory: string): Promise<string> {
   const candidate = path.resolve(stagingDirectory, sourcePath);
-  assertContainedPath(stagingDirectory, candidate);
+  let canonicalRoot: string;
   let canonical: string;
   try {
-    canonical = await realpath(candidate);
+    [canonicalRoot, canonical] = await Promise.all([realpath(stagingDirectory), realpath(candidate)]);
   } catch (error) {
     throw new ExecutorFailure(
       "PROVIDER_OUTPUT_PATH_INVALID",
@@ -696,7 +696,7 @@ async function authorizeProviderSource(sourcePath: string, stagingDirectory: str
       { cause: error }
     );
   }
-  assertContainedPath(stagingDirectory, canonical);
+  assertContainedPath(canonicalRoot, canonical);
   if (!(await stat(canonical)).isFile()) {
     throw new ExecutorFailure("PROVIDER_OUTPUT_PATH_INVALID", "Provider artifact source is not a regular file.");
   }
@@ -705,10 +705,10 @@ async function authorizeProviderSource(sourcePath: string, stagingDirectory: str
 
 async function authorizeLocalMediaSource(sourcePath: string, stagingDirectory: string): Promise<string> {
   const candidate = path.resolve(stagingDirectory, sourcePath);
-  assertContainedPath(stagingDirectory, candidate);
+  let canonicalRoot: string;
   let canonical: string;
   try {
-    canonical = await realpath(candidate);
+    [canonicalRoot, canonical] = await Promise.all([realpath(stagingDirectory), realpath(candidate)]);
   } catch (error) {
     throw new ExecutorFailure(
       "LOCAL_MEDIA_OUTPUT_PATH_INVALID",
@@ -717,7 +717,7 @@ async function authorizeLocalMediaSource(sourcePath: string, stagingDirectory: s
       { cause: error }
     );
   }
-  assertContainedPath(stagingDirectory, canonical);
+  assertContainedPath(canonicalRoot, canonical);
   if (!(await stat(canonical)).isFile()) {
     throw new ExecutorFailure("LOCAL_MEDIA_OUTPUT_PATH_INVALID", "The deterministic local media output is not a regular file.");
   }
