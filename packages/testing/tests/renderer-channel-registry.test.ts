@@ -4,6 +4,7 @@ import { canonicalNodeDefinitionIds, type EtherEdge, type EtherGraph, type Ether
 import { edgePreflightMessage } from "../../../apps/desktop/src/renderer/canvas/commands/useEdgeCommands";
 import { createRegistryListItem, purposeBuiltRegistryKinds, registryFieldControl } from "../../../apps/desktop/src/renderer/canvas/inspector/registryFieldModel";
 import { runPlanPresentation } from "../../../apps/desktop/src/renderer/canvas/inspector/runPlanPresentation";
+import { bundledBezierPath, edgeBundleKey, edgeLabelPlacement } from "../../../apps/desktop/src/renderer/canvas/edges/edgeGeometry";
 import {
   channelsFor,
   CONNECTION_ROLES,
@@ -51,6 +52,34 @@ describe("renderer channel registry", () => {
     expect(edgePreflightMessage(graph, { ...existing, id: "duplicate" })).toMatch(/^DUPLICATE_LANE:/);
     expect(edgePreflightMessage(graph, { ...existing, id: "role-lane", role: "subject" })).toBeNull();
     expect(edgePreflightMessage(graph, { ...existing, id: "selector-lane", selector: { kind: "latest" } })).toBeNull();
+  });
+
+  it("fans same-endpoint lanes into readable paths and an endpoint-safe label gutter", () => {
+    const lanes = PAYLOAD_CHANNELS.map((channel) => ({
+      ...edge(`lane-${channel}`, "prompt", "worker", "text", "text"),
+      from: { kind: "node" as const, nodeId: "prompt", channel },
+      to: { kind: "node" as const, nodeId: "worker", channel }
+    }));
+    expect(new Set(lanes.map(edgeBundleKey))).toHaveLength(1);
+
+    const placements = lanes.map((_, index) => edgeLabelPlacement({
+      x: 180,
+      y: 280,
+      targetX: 240,
+      targetY: 280,
+      lane: { index, count: lanes.length },
+      sourceBounds: { x: 100, y: 220, width: 80, height: 180 },
+      targetBounds: { x: 240, y: 220, width: 80, height: 180 }
+    }));
+    expect(new Set(placements.map(({ x, y }) => `${x}:${y}`))).toHaveLength(lanes.length);
+    expect(placements.every(({ y }) => y < 220)).toBe(true);
+    expect(new Set(lanes.map((lane, index) => bundledBezierPath({
+      x: 180,
+      y: 280,
+      targetX: 240,
+      targetY: 280,
+      lane: { index, count: lanes.length }
+    })?.center.y))).toHaveLength(lanes.length);
   });
 
   it("allows local adapters but reports unavailable semantic capabilities before persistence", () => {

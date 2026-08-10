@@ -81,7 +81,7 @@ export function EdgeInspector({ context }: { context: InspectorEdgeContext }) {
   return <div className="ether-inspector" data-testid="edge-inspector">
     <InspectorSection title="Connection" help="A connection moves one of Ether's six channels and gives the receiver one explicit role.">
       <div className="inspector-route"><strong>{source}</strong><span>{channelLabel(edge.from.channel)} to {channelLabel(edge.to.channel)}</span><strong>{target}</strong></div>
-      <div className={`inspector-connection-state ${decision !== null && !decision.allowed ? "is-blocked" : "is-ready"}`} role="status">
+      <div className={`inspector-connection-state ${decision !== null && !decision.allowed ? "is-blocked" : "is-ready"}`} role="status" data-testid="edge-adapter-preview">
         <strong>{decision === null ? "Module route" : decision.allowed ? resolvedAdapter === null ? "Direct channel" : `Adapter · ${resolvedAdapter.adapterId}` : decision.code}</strong>
         <span>{decision === null ? "Module port validation is owned by the module interface." : decision.allowed ? consequence ? `${consequence.executorInputField} · ${consequence.assemblyStrategy}` : "The receiver accepts this lane." : decision.message}</span>
       </div>
@@ -93,7 +93,7 @@ export function EdgeInspector({ context }: { context: InspectorEdgeContext }) {
     <InspectorSection title="Effect" help="Ether names the exact receiver field and assembly behavior before a lane can participate in a run.">
       {consequence ? <dl className="inspector-consequence"><div><dt>Receiver field</dt><dd>{consequence.executorInputField}</dd></div><div><dt>Assembly</dt><dd>{consequence.assemblyStrategy}</dd></div><div><dt>Preservation</dt><dd>{consequence.preservationRule}</dd></div></dl> : <p className="inspector-unavailable">{decision !== null && !decision.allowed ? decision.message : "The module interface resolves this consequence inside its child graph."}</p>}
     </InspectorSection>
-    <InspectorSection advanced title="Connection diagnostics" help="Technical adapter, lane, and capability details stay collapsed until they are needed.">
+    <InspectorSection key={`${edge.id}:connection-diagnostics`} advanced title="Connection diagnostics" help="Technical adapter, lane, and capability details stay collapsed until they are needed.">
       <label>Adapter <Help label="Connection adapter" text="Automatic chooses the first currently available declared adapter. Explicit choices remain visible but disabled when their required capability is unavailable." /><select aria-label="Connection adapter" disabled={document.mode !== "writable" || edge.from.channel === edge.to.channel} value={adapterValue} onChange={(event) => setAdapter(event.target.value)}><option value="auto">Automatic</option>{adapters.map((adapter) => <option key={adapter.id} value={adapter.id} disabled={adapter.requiredCapability !== null}>{adapter.id}{adapter.requiredCapability ? ` · needs ${adapter.requiredCapability}` : " · local"}</option>)}</select></label>
       <p>Resolved: {resolvedAdapter?.adapterId ?? (edge.from.channel === edge.to.channel ? "direct" : "unavailable")}</p>
       <p>Capability: {resolvedAdapter?.requiredCapability ?? "none"}</p>
