@@ -233,14 +233,12 @@ async function stagedAssetBytes(input: PayloadEnvelope, stagingDirectory: string
   } catch (error) {
     throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", "The scheduler-owned media staging directory is unavailable.", false, { cause: error });
   }
-  const candidate = path.resolve(assetPath);
-  const relative = path.relative(root, candidate);
-  if (assetPath.length === 0 || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (assetPath.length === 0) {
     throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} is not an authorized staged asset.`);
   }
   let canonical: string;
   try {
-    canonical = await realpath(candidate);
+    canonical = await realpath(path.resolve(assetPath));
   } catch (error) {
     throw new ExecutorFailure("LOCAL_MEDIA_SOURCE_INVALID", `The ${label} staged asset is unavailable.`, false, { cause: error });
   }
