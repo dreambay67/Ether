@@ -676,6 +676,20 @@ function eventMessage<
     .strict();
 }
 
+type GlobalApplicationCommandName = typeof globalApplicationCommandNames[number];
+type ApplicationCommandForName<TName extends ApplicationCommandName> = {
+  kind: "command";
+  id: string;
+  correlationId: string;
+  name: TName;
+  payload: z.infer<typeof applicationCommandPayloadSchemas[TName]>;
+} & (TName extends GlobalApplicationCommandName ? object : { documentId: string });
+export type ApplicationCommand = { [TName in ApplicationCommandName]: ApplicationCommandForName<TName> }[ApplicationCommandName];
+
+type ApplicationCommandSchemaType = z.ZodType<ApplicationCommand> & {
+  options: readonly z.ZodDiscriminatedUnionOption<"name">[];
+};
+
 export const ApplicationCommandSchema = z.discriminatedUnion("name", [
   globalCommandMessage("document.new", applicationCommandPayloadSchemas["document.new"]),
   globalCommandMessage("document.open", applicationCommandPayloadSchemas["document.open"]),
@@ -746,8 +760,7 @@ export const ApplicationCommandSchema = z.discriminatedUnion("name", [
     "liveOutput.removeMirrorFiles",
     applicationCommandPayloadSchemas["liveOutput.removeMirrorFiles"]
   )
-]);
-export type ApplicationCommand = z.infer<typeof ApplicationCommandSchema>;
+]) as ApplicationCommandSchemaType;
 
 export const ApplicationQuerySchema = z.discriminatedUnion("name", [
   queryMessage("document.summary", applicationQueryPayloadSchemas["document.summary"]),

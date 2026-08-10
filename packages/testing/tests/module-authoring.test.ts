@@ -7,6 +7,7 @@ import {
   moduleIsLocked,
   removeNodesFromModuleOperations
 } from "../../../apps/desktop/src/renderer/canvas/modules/moduleModel";
+import { moduleParameterCandidates, updateModuleParameterNode } from "../../../apps/desktop/src/renderer/canvas/modules/moduleParameters";
 
 function node(id: string, x = 100): EtherGraph["nodes"][number] {
   return {
@@ -64,6 +65,33 @@ function module(id: string, graphId: string, locked = false): EtherModule {
 }
 
 describe("module authoring model", () => {
+  it("offers only registry-safe scalar controls and persists their control metadata", () => {
+    const prompt = node("prompt");
+    const candidates = moduleParameterCandidates(prompt);
+    expect(candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ configPath: ["body"], exposure: { valueType: "string", control: "text" } }),
+      expect.objectContaining({ configPath: ["assembly"], exposure: { valueType: "string", control: "select", options: ["append", "replace"] } })
+    ]));
+
+    const generation: EtherGraph["nodes"][number] = {
+      ...node("image"),
+      definitionId: "generation.image",
+      config: { kind: "generation.image", providerId: "provider-private", profileId: "profile-private", aspectRatio: "1:1", resolution: { width: 1024, height: 1024 }, outputCount: 1 },
+      presentation: { collapsed: false, accent: "default", previewMode: "summary" }
+    };
+    expect(moduleParameterCandidates(generation).map((candidate) => candidate.configPath[0])).not.toEqual(expect.arrayContaining(["providerId", "profileId"]));
+  });
+
+  it("validates exposed member changes before creating the member update operation", () => {
+    const prompt = node("prompt");
+    const assembly = moduleParameterCandidates(prompt).find((candidate) => candidate.configPath[0] === "assembly");
+    expect(assembly).toBeDefined();
+    if (!assembly) return;
+    const valid = updateModuleParameterNode(prompt, assembly, "replace");
+    expect(valid).toEqual(expect.objectContaining({ ok: true, node: expect.objectContaining({ config: expect.objectContaining({ assembly: "replace" }) }) }));
+    expect(updateModuleParameterNode(prompt, assembly, "not-an-assembly-mode")).toEqual(expect.objectContaining({ ok: false }));
+  });
+
   it("creates a locked module, preserves a boundary lane, and converts one legacy group atomically", () => {
     const root = graph("root", "root", [node("selected"), node("outside", 500)]);
     root.edges = [edge("lane", "selected", "outside")];

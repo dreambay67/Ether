@@ -1,5 +1,6 @@
 import type { DocumentDescriptor } from "../../../shared/ipc/contracts";
 import type { Artifact, EtherEdge, EtherGraph, EtherModule, EtherNode, GraphOperation } from "@ether/schema";
+import type { ModuleParameterValue } from "../modules/moduleParameters";
 import type { ImageEditCommit } from "../edit/EditWorkspace";
 
 export type InspectorApply = (operations: GraphOperation[], title: string) => Promise<boolean>;
@@ -17,6 +18,7 @@ export type InspectorContext = {
   enterModule?(moduleId: string): void;
   dissolveModule?(moduleId: string): Promise<boolean>;
   addSelectedToModule?(moduleId: string, nodeIds: readonly string[]): Promise<boolean>;
+  updateModuleParameter?(moduleId: string, parameterId: string, value: ModuleParameterValue): Promise<EtherGraph | null>;
   commitImageEdit?(payload: ImageEditCommit): Promise<Artifact>;
 };
 

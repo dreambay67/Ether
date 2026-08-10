@@ -137,13 +137,26 @@ export const ModulePortSchema = z
   .strict();
 export type ModulePort = z.infer<typeof ModulePortSchema>;
 
+export const ModuleParameterExposureSchema = z
+  .object({
+    valueType: z.enum(["string", "number", "boolean"]),
+    control: z.enum(["text", "number", "boolean", "select"]),
+    options: z.array(z.string().min(1)).min(1).optional()
+  })
+  .strict();
+export type ModuleParameterExposure = z.infer<typeof ModuleParameterExposureSchema>;
+
 export const ModuleParameterSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
     nodeId: z.string().min(1),
     configPath: z.array(z.string().min(1)),
-    required: z.boolean()
+    required: z.boolean(),
+    // These are optional so pre-interface documents remain readable. New exposed
+    // parameters always persist the control contract that was chosen from the
+    // canonical node registry.
+    exposure: ModuleParameterExposureSchema.optional()
   })
   .strict();
 export type ModuleParameter = z.infer<typeof ModuleParameterSchema>;

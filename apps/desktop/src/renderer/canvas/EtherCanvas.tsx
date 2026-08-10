@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { getViewportForBounds, ReactFlowProvider, useReactFlow, type Viewport } from "@xyflow/react";
-import type { EtherGraph, EtherNode, ExecutionJob, ExecutionPlan, GraphOperation, ModuleParameter, NodeDefinitionId, NodeLibraryItem, NodePosition, ReferenceSetConfig } from "@ether/schema";
+import type { EtherGraph, EtherNode, ExecutionJob, ExecutionPlan, GraphOperation, NodeDefinitionId, NodeLibraryItem, NodePosition, ReferenceSetConfig } from "@ether/schema";
 import type { DocumentDescriptor } from "../../shared/ipc/contracts";
 import { CanvasSidePanels } from "./CanvasSidePanels";
 import { CanvasSurface } from "./CanvasSurface";
@@ -15,6 +15,7 @@ import { runPlanContextFingerprint, runPlanPresentation, type RunPlanPresentatio
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
 import { centeredCanvasPosition, openCanvasPosition } from "./placement";
 import { addNodesToModuleOperations, createModuleOperations, moduleIsLocked, removeNodesFromModuleOperations } from "./modules/moduleModel";
+import { moduleParameterCandidates, updateModuleParameterNode, type ModuleParameterCandidate, type ModuleParameterValue } from "./modules/moduleParameters";
 import { importReferenceFilesSequentially, type CanvasReferenceDropHandler } from "./commands/useDropCommands";
 
 export type EtherCanvasHandle = { addNode(definitionId: NodeDefinitionId): void; addPrompt(): void; addImage(): void; focusNode(nodeId: string): void; };
@@ -26,6 +27,7 @@ type ApplicationQueryBridge = {
   onEvent?(listener: (event: { name?: string }) => void): () => void;
 };
 type PreparedSelectionPlan = { id: string; contentHash: string; identity: string } & RunPlanPresentation;
+type ModuleParameterPicker = { candidates: readonly ModuleParameterCandidate[]; selectedId: string };
 function graphContentBounds(graph: EtherGraph) {
   const items = [...graph.nodes, ...graph.modules];
   if (items.length === 0) return null;
@@ -195,6 +197,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
   const [activeEditor, setActiveEditor] = useState<{ nodeId: string; field: CanvasEditorField } | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [parameterPicker, setParameterPicker] = useState<ModuleParameterPicker | null>(null);
   const [preparedSelection, setPreparedSelection] = useState<PreparedSelectionPlan | null>(null);
   const [selectionBusy, setSelectionBusy] = useState(false);
   const selectEdge = useCallback((id: string | null) => {
@@ -310,12 +313,24 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   const exposeParameter = (nodeId: string) => {
     if (readOnly || parentFrame === undefined) return;
     const module = parentFrame.graph.modules.find((item) => item.id === parentFrame.moduleId); const node = graph.nodes.find((item) => item.id === nodeId); if (!module || !node) return;
-    const configPath = Object.keys(node.config).find((key) => key !== "kind"); if (!configPath) { report("This node has no configurable parameter to expose."); return; }
-    const parameter: ModuleParameter = { id: `parameter-${node.id}-${configPath}`, name: `${node.title} ${configPath}`, nodeId: node.id, configPath: [configPath], required: false };
-    if (module.interface.parameters.some((item) => item.id === parameter.id)) { report("That parameter is already exposed."); return; }
+    const candidates = moduleParameterCandidates(node).filter((parameter) => !module.interface.parameters.some((item) => item.id === parameter.id));
+    if (candidates.length === 0) { report("This member has no safe editable parameter left to expose."); return; }
+    setParameterPicker({ candidates, selectedId: candidates[0]!.id });
+  };
+  const confirmParameterExposure = () => {
+    if (parameterPicker === null || parentFrame === undefined) return;
+    const module = parentFrame.graph.modules.find((item) => item.id === parentFrame.moduleId);
+    const parameter = parameterPicker.candidates.find((item) => item.id === parameterPicker.selectedId);
+    if (!module || !parameter) { setParameterPicker(null); return; }
     const nextInterface = { ...module.interface, parameters: [...module.interface.parameters, parameter] };
     const operations: GraphOperation[] = [{ type: "updateModuleInterface", graphId: parentFrame.graph.id, moduleId: module.id, interface: nextInterface }];
-    void applyTransaction(operations, "Expose module parameter").then((saved) => { if (saved) onParentGraph({ ...parentFrame.graph, modules: parentFrame.graph.modules.map((item) => item.id === module.id ? { ...item, interface: nextInterface } : item) }); });
+    void applyTransaction(operations, "Expose module parameter").then((saved) => {
+      if (saved) {
+        onParentGraph({ ...parentFrame.graph, modules: parentFrame.graph.modules.map((item) => item.id === module.id ? { ...item, interface: nextInterface } : item) });
+        report(`${parameter.name} is now exposed on ${module.title}.`);
+      }
+      setParameterPicker(null);
+    });
   };
   const runSelected = async () => {
     const bridge = typedQueryBridge();
@@ -463,6 +478,30 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
       return false;
     }
   }, [applyTransaction, document.documentId, onParentGraph, parentFrame, readOnly, report, seedRevision, setSelectedIds]);
+  const updateModuleParameter = useCallback(async (moduleId: string, parameterId: string, value: ModuleParameterValue): Promise<EtherGraph | null> => {
+    if (readOnly) return null;
+    const module = graph.modules.find((candidate) => candidate.id === moduleId);
+    const parameter = module?.interface.parameters.find((candidate) => candidate.id === parameterId);
+    const bridge = typedQueryBridge();
+    if (!module || !parameter || !bridge) { report("This exposed parameter is no longer available."); return null; }
+    try {
+      const response = await bridge.query(queryRequest("graph.snapshot", document.documentId, { graphId: module.graphId }));
+      const child = response.payload?.graph as EtherGraph | undefined;
+      const documentRevisionId = response.payload?.documentRevisionId;
+      const graphRevisionId = response.payload?.graphRevisionId;
+      if (!child || typeof documentRevisionId !== "string" || typeof graphRevisionId !== "string") throw new Error("The module member graph revision was unavailable.");
+      const node = child.nodes.find((candidate) => candidate.id === parameter.nodeId);
+      if (!node) { report(`${parameter.name} no longer has a member node.`); return null; }
+      const updated = updateModuleParameterNode(node, parameter, value);
+      if (!updated.ok) { report(updated.message); return null; }
+      seedRevision({ graphId: child.id, documentRevisionId, graphRevisionId });
+      const saved = await applyTransaction([{ type: "updateNode", graphId: child.id, nodeId: node.id, node: updated.node }], `Update module parameter ${parameter.name}`);
+      return saved ? { ...child, nodes: child.nodes.map((candidate) => candidate.id === node.id ? updated.node : candidate) } : null;
+    } catch (error) {
+      report(error instanceof Error ? error.message : "The exposed module parameter could not be saved.");
+      return null;
+    }
+  }, [applyTransaction, document.documentId, graph.modules, readOnly, report, seedRevision]);
   const convertLegacyGroup = useCallback(async (groupId: string) => {
     const group = graph.groups.find((candidate) => candidate.id === groupId);
     if (!group || readOnly) return false;
@@ -486,7 +525,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     return saved;
   }, [applyTransaction, graph, readOnly, report, setSelectedIds]);
   useEffect(() => {
-    const base = { graph, document, selectedNodeIds: selectedIds, apply: applyTransaction, refreshGraph, report, enterModule: (moduleId: string) => void enter(moduleId), dissolveModule, addSelectedToModule };
+    const base = { graph, document, selectedNodeIds: selectedIds, apply: applyTransaction, refreshGraph, report, enterModule: (moduleId: string) => void enter(moduleId), dissolveModule, addSelectedToModule, updateModuleParameter };
     onInspectorChange?.(selectedModuleId
       ? { ...base, nodeId: null, edgeId: null, moduleId: selectedModuleId }
       : selectedEdgeId
@@ -494,7 +533,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
         : selectedIds.length === 1
           ? { ...base, nodeId: selectedIds[0]!, edgeId: null, moduleId: null }
           : null);
-  }, [addSelectedToModule, applyTransaction, dissolveModule, document, enter, graph, onInspectorChange, refreshGraph, report, selectedEdgeId, selectedIds, selectedModuleId]);
+  }, [addSelectedToModule, applyTransaction, dissolveModule, document, enter, graph, onInspectorChange, refreshGraph, report, selectedEdgeId, selectedIds, selectedModuleId, updateModuleParameter]);
   const fitGraph = useCallback(() => {
     const content = graphContentBounds(graph);
     if (content === null) return;
@@ -530,5 +569,5 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
   });
   const selectionCalls = preparedSelection?.estimatedCalls ?? 0;
   const moduleTitle = parentFrame?.graph.modules.find((module) => module.id === parentFrame.moduleId)?.title;
-  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onReferenceDrop={dropReferences} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={selectEdge} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); setSelectedIds(additive ? [...selectedIds] : []); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} title={moduleTitle} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} /></div>;
+  return <div className="ether-canvas"><CanvasToolbar commands={commands} paletteOpen={paletteOpen} onPaletteClose={() => setPaletteOpen(false)} /><CanvasSurface graph={graph} catalog={catalog} nodeStatuses={nodeStatuses} readOnly={readOnly} selectedIds={selectedIds} selectedEdgeId={selectedEdgeId} selectedModuleId={selectedModuleId} activeEditor={activeEditor} commands={commands} viewport={viewport} onAddNode={(definitionId, position) => void nodes.createNode(definitionId, openCanvasPosition(position, [...graph.nodes, ...graph.modules]))} onReferenceDrop={dropReferences} onMove={nodes.moveNodes} onMoveModule={nodes.moveModule} onResize={nodes.resizeNode} onDelete={nodes.removeNode} onEditRequest={beginEdit} onEditCommit={commitEdit} onEditCancel={() => setActiveEditor(null)} onConnect={edges.connect} onDeleteEdge={edges.deleteEdge} onRole={edges.setRole} onChannel={edges.setChannel} onModuleEnter={enter} onModuleToggle={toggleModule} onSelected={(ids) => { setSelectedEdgeId(null); setSelectedModuleId(null); setSelectedIds(ids); }} onEdgeSelected={selectEdge} onModuleSelected={(id, additive) => { setActiveEditor(null); setSelectedEdgeId(null); setSelectedIds(additive ? [...selectedIds] : []); setSelectedModuleId(id); }} onViewport={onViewport} onCommandUnavailable={report} /><CanvasSidePanels graph={graph} title={moduleTitle} selectedIds={selectedIds} status={status} runPrompt={selectedIds.length > 0 && selectedModuleId === null} runLabel={preparedSelection ? `Start ${selectionCalls} call${selectionCalls === 1 ? "" : "s"}` : "Preview selected run"} runPlan={preparedSelection} runBusy={selectionBusy} onRunSelected={() => void runSelected()} onDismissRun={() => setSelectedIds([])} onLeave={onLeaveModule ? leave : undefined} onExposeParameter={parentFrame ? exposeParameter : undefined} onRemoveFromModule={parentFrame ? (nodeIds) => void removeSelectedFromModule(nodeIds) : undefined} onConvertGroup={readOnly ? undefined : (groupId) => void convertLegacyGroup(groupId)} />{parameterPicker ? <aside className="canvas-parameter-picker" aria-label="Expose module parameter"><strong>Expose member parameter</strong><label>Parameter<select aria-label="Module parameter" value={parameterPicker.selectedId} onChange={(event) => setParameterPicker((current) => current === null ? null : { ...current, selectedId: event.target.value })}>{parameterPicker.candidates.map((parameter) => <option key={parameter.id} value={parameter.id}>{parameter.name} · {parameter.exposure.control === "select" ? "choice" : parameter.exposure.valueType}</option>)}</select></label><small>Only registry-declared scalar settings are available. Provider bindings, grants, artifacts, and managed workspaces stay private.</small><div><button type="button" onClick={confirmParameterExposure}>Expose parameter</button><button type="button" onClick={() => setParameterPicker(null)}>Cancel</button></div></aside> : null}</div>;
 });
