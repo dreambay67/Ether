@@ -6,9 +6,9 @@ import { cloneGraphSelection, commandIdForKeyboard, commandPreservesCanvasFocus,
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
 import { createNodeFromDefinition } from "../../../apps/desktop/src/renderer/canvas/commands/useNodeCommands";
 import { marqueeHitIds, marqueeRectangle, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
-import { filterNodeCatalog } from "../../../apps/desktop/src/renderer/canvas/library/NodeLibrary";
+import { filterNodeCatalog, quickAddPosition } from "../../../apps/desktop/src/renderer/canvas/library/NodeLibrary";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
-import { isBlankCanvas } from "../../../apps/desktop/src/renderer/canvas/CanvasSurface";
+import { canvasPointerActionFor, isBlankCanvas, shouldRouteWorkspaceShortcut } from "../../../apps/desktop/src/renderer/canvas/CanvasSurface";
 import { nodeReadinessLabel } from "../../../apps/desktop/src/renderer/canvas/EtherNode";
 import { canvasCommandForAccelerator } from "../../../apps/desktop/src/main/canvasAccelerator";
 
@@ -76,6 +76,19 @@ describe("canvas authoring command map", () => {
     expect(commandPreservesCanvasFocus("palette")).toBe(false);
   });
 
+  it("keeps workspace shortcuts out of text editors and native controls", () => {
+    expect(shouldRouteWorkspaceShortcut({ defaultPrevented: false, textEditing: true })).toBe(false);
+    expect(shouldRouteWorkspaceShortcut({ defaultPrevented: false, textEditing: false, nativeEnter: true })).toBe(false);
+    expect(shouldRouteWorkspaceShortcut({ defaultPrevented: true, textEditing: false })).toBe(false);
+    expect(shouldRouteWorkspaceShortcut({ defaultPrevented: false, textEditing: false })).toBe(true);
+  });
+
+  it("dismisses Quick Add before a blank-canvas click can start marquee selection", () => {
+    expect(canvasPointerActionFor({ canvasPaneTarget: true, quickAddOpen: true })).toBe("dismiss-quick-add");
+    expect(canvasPointerActionFor({ canvasPaneTarget: true, quickAddOpen: false })).toBe("begin-marquee");
+    expect(canvasPointerActionFor({ canvasPaneTarget: false, quickAddOpen: true })).toBe("ignore");
+  });
+
   it("toggles additive selection without duplicate IDs", () => {
     expect(toggleId(["a", "b"], "c")).toEqual(["a", "b", "c"]);
     expect(toggleId(["a", "b"], "a")).toEqual(["b"]);
@@ -122,6 +135,14 @@ describe("canvas authoring command map", () => {
     expect(openCanvasPosition(centered, [])).toEqual(centered);
     expect(openCanvasPosition(centered, [{ position: centered, size: { width: 220, height: 140 } }]))
       .toEqual({ x: 230, y: 150 });
+  });
+
+  it("keeps Quick Add inside every surface edge while staying near the pointer", () => {
+    const surface = { width: 1024, height: 768 };
+    const palette = { width: 430, height: 520 };
+    expect(quickAddPosition({ x: 0, y: 0 }, palette, surface)).toEqual({ left: 12, top: 12 });
+    expect(quickAddPosition({ x: 1024, y: 768 }, palette, surface)).toEqual({ left: 582, top: 236 });
+    expect(quickAddPosition({ x: 512, y: 384 }, palette, surface)).toEqual({ left: 502, top: 236 });
   });
 
   it("shows the blank workflow overlay only for a truly empty canvas", () => {

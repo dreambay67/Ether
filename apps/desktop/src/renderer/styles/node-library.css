@@ -369,8 +369,11 @@
 .quick-add-palette {
   position: absolute;
   z-index: 40;
+  display: flex;
+  box-sizing: border-box;
   width: min(430px, calc(100% - 24px));
   max-height: min(520px, calc(100% - 24px));
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid #416174;
   border-radius: 8px;
@@ -378,7 +381,6 @@
     linear-gradient(90deg, rgba(55, 230, 234, .06) 1px, transparent 1px) 0 0 / 22px 22px,
     linear-gradient(180deg, rgba(16, 29, 40, .99), rgba(8, 15, 23, .99));
   box-shadow: 0 24px 70px rgba(0, 0, 0, .62), 0 0 0 1px rgba(55, 230, 234, .08);
-  transform: translate(-10px, -10px);
 }
 .quick-add-palette > header {
   display: flex;
@@ -413,7 +415,7 @@
   font-size: 13px;
   font-weight: 600;
 }
-.quick-add-palette > div { max-height: 390px; padding: 0 8px 8px; overflow-y: auto; }
+.quick-add-palette > div { min-height: 0; flex: 1 1 auto; padding: 0 8px 8px; overflow-y: auto; }
 .quick-add-palette [role="option"] {
   display: grid;
   grid-template-columns: 25px minmax(0, 1fr) auto;

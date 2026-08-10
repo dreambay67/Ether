@@ -41,6 +41,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const marqueeGesture = useRef<{ start: { x: number; y: number }; pointerId: number; moved: boolean } | null>(null);
   const altDragGesture = useRef<{ nodeId: string; nodeIds: string[]; origin: XYPosition } | null>(null);
   const marqueeWasActive = useRef(false);
+  const quickAddDismissedPointer = useRef<number | null>(null);
   const previousSurfaceSize = useRef<{ width: number; height: number } | null>(null);
   const interaction = useCanvasInteraction(selectedIds, onSelected);
   const { beginEdit: beginInteractionEdit, mode: interactionMode, settle: settleInteraction } = interaction;
@@ -56,6 +57,17 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const [edgeEditor, setEdgeEditor] = useState<{ edgeId: string; editor: Exclude<EtherEdgeEditor, null> } | null>(null);
   const connectionIntent = clickConnectionIntent ?? dragConnectionIntent;
   const focusCanvas = useCallback(() => surfaceRef.current?.focus({ preventScroll: true }), []);
+  const closeQuickAdd = useCallback(() => {
+    setQuickAdd(null);
+    setMarqueeRect(null);
+    marqueeGesture.current = null;
+    marqueeWasActive.current = false;
+    setClickConnectionIntent(null);
+    setDragConnectionIntent(null);
+    settleInteraction();
+    focusCanvas();
+    globalThis.requestAnimationFrame(focusCanvas);
+  }, [focusCanvas, settleInteraction]);
   const commitInlineEdit = useCallback(async (nodeId: string, field: CanvasEditorField, value: string) => {
     const saved = await onEditCommit(nodeId, field, value);
     if (saved) globalThis.requestAnimationFrame(focusCanvas);
@@ -92,7 +104,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   }, [handleLayoutVersion, internalNodeIds, updateNodeInternals]);
   useEffect(() => {
     const handleWorkspaceShortcut = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isTextEditingTarget(event.target) || isNativeEnterTarget(event)) return;
+      if (!shouldRouteWorkspaceShortcut({ defaultPrevented: event.defaultPrevented, textEditing: isTextEditingTarget(event.target), nativeEnter: isNativeEnterTarget(event) })) return;
       const commandId = commandIdForKeyboard(event);
       const command = commandId === null ? undefined : commands.find((item) => item.id === commandId);
       if (command === undefined) return;
@@ -319,8 +331,8 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     if (bounds === undefined) return;
     setQuickAdd({
       anchor: {
-        x: Math.max(18, Math.min(bounds.width - 18, clientX - bounds.left)),
-        y: Math.max(18, Math.min(bounds.height - 18, clientY - bounds.top))
+        x: clientX - bounds.left,
+        y: clientY - bounds.top
       },
       position: insertionAt(clientX, clientY)
     });
@@ -419,8 +431,23 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       data-interaction-mode={interaction.mode}
       aria-label="Authoring canvas"
       tabIndex={0}
+      onClickCapture={(event) => {
+        if (quickAddDismissedPointer.current === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        quickAddDismissedPointer.current = null;
+      }}
       onPointerDownCapture={(event) => {
-        if (!isCanvasPaneTarget(event.target)) return;
+        const pointerAction = canvasPointerActionFor({ canvasPaneTarget: isCanvasPaneTarget(event.target), quickAddOpen: quickAdd !== null });
+        if (pointerAction === "ignore") return;
+        if (pointerAction === "dismiss-quick-add") {
+          event.preventDefault();
+          event.stopPropagation();
+          quickAddDismissedPointer.current = event.pointerId;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          closeQuickAdd();
+          return;
+        }
         focusCanvas();
         if (event.button !== 0) return;
         event.preventDefault();
@@ -440,6 +467,13 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         updateMarqueeGesture(gesture.start, { x: event.clientX, y: event.clientY }, event.currentTarget);
       }}
       onPointerUpCapture={(event) => {
+        if (quickAddDismissedPointer.current === event.pointerId) {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+          globalThis.requestAnimationFrame(() => {
+            if (quickAddDismissedPointer.current === event.pointerId) quickAddDismissedPointer.current = null;
+          });
+          return;
+        }
         const gesture = marqueeGesture.current;
         if (event.button !== 0 || gesture === null || gesture.pointerId !== event.pointerId) return;
         updateMarqueeGesture(gesture.start, { x: event.clientX, y: event.clientY }, event.currentTarget);
@@ -451,6 +485,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       }}
       onPointerCancelCapture={(event) => {
         altDragGesture.current = null;
+        quickAddDismissedPointer.current = null;
         if (marqueeGesture.current === null) return;
         marqueeGesture.current = null;
         marqueeWasActive.current = false;
@@ -462,7 +497,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         if (isCanvasPaneTarget(event.target)) openQuickAdd(event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
-        if (isTextEditingTarget(event.target)) return;
+        if (!shouldRouteWorkspaceShortcut({ defaultPrevented: event.defaultPrevented, textEditing: isTextEditingTarget(event.target), nativeEnter: isNativeEnterTarget(event.nativeEvent) })) return;
         if (event.target !== event.currentTarget && event.target instanceof Element && event.target.closest("button, input, select, textarea, summary, a[href], [role='button'], [role='option'], [role='menuitem'], [role='separator']")) return;
         const commandId = commandIdForKeyboard(event.nativeEvent);
         const command = commandId === null ? undefined : commands.find((item) => item.id === commandId);
@@ -481,7 +516,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           setMarqueeRect(null);
           setClickConnectionIntent(null);
           setDragConnectionIntent(null);
-          if (quickAdd !== null) setQuickAdd(null);
+          if (quickAdd !== null) closeQuickAdd();
           else interaction.cancel();
         } else if (
           event.target === event.currentTarget &&
@@ -563,6 +598,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           if (event !== null && event !== undefined) onViewport(nextViewport);
         }}
         onPaneClick={(event) => {
+          if (quickAdd !== null) {
+            closeQuickAdd();
+            return;
+          }
           if (marqueeWasActive.current) {
             marqueeWasActive.current = false;
             return;
@@ -602,12 +641,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         <QuickAddPalette
           anchor={quickAdd.anchor}
           catalog={catalog}
-          onClose={() => { setQuickAdd(null); focusCanvas(); }}
+          onClose={closeQuickAdd}
           onPick={(item) => {
             onAddNode(item.definitionId, quickAdd.position);
-            setQuickAdd(null);
-            focusCanvas();
-            globalThis.requestAnimationFrame(focusCanvas);
+            closeQuickAdd();
           }}
         />
       ) : null}
@@ -617,6 +654,15 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
 
 function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable || target.closest("[contenteditable='true']") !== null);
+}
+
+export function canvasPointerActionFor({ canvasPaneTarget, quickAddOpen }: { canvasPaneTarget: boolean; quickAddOpen: boolean }) {
+  if (!canvasPaneTarget) return "ignore" as const;
+  return quickAddOpen ? "dismiss-quick-add" as const : "begin-marquee" as const;
+}
+
+export function shouldRouteWorkspaceShortcut({ defaultPrevented, textEditing, nativeEnter = false }: { defaultPrevented: boolean; textEditing: boolean; nativeEnter?: boolean }) {
+  return !defaultPrevented && !textEditing && !nativeEnter;
 }
 
 function isCanvasPaneTarget(target: EventTarget | null) {

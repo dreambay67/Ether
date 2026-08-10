@@ -1,10 +1,21 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Clock3, GripVertical, Search, Star } from "lucide-react";
 import { NodeDefinitionIdSchema, type NodeDefinitionId, type NodeFamily, type NodeLibraryItem } from "@ether/schema";
 
 import { useDesktopSettings } from "../../project/useDesktopSettings";
 
 export const NODE_LIBRARY_DRAG_TYPE = "application/x-ether-node-definition";
+
+export type QuickAddPosition = { left: number; top: number };
+
+export function quickAddPosition(anchor: { x: number; y: number }, palette: { width: number; height: number }, surface: { width: number; height: number }, gutter = 12): QuickAddPosition {
+  const maxLeft = Math.max(gutter, surface.width - palette.width - gutter);
+  const maxTop = Math.max(gutter, surface.height - palette.height - gutter);
+  return {
+    left: clamp(anchor.x - 10, gutter, maxLeft),
+    top: clamp(anchor.y - 10, gutter, maxTop)
+  };
+}
 
 const familyOrder: readonly NodeFamily[] = [
   "prompt", "reference", "generation", "edit", "review", "flow", "output", "canvas"
@@ -197,6 +208,8 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const paletteRef = useRef<HTMLElement>(null);
+  const [position, setPosition] = useState<QuickAddPosition | null>(null);
   const items = filterNodeCatalog(catalog, query).slice(0, 8);
   const activeItem = items[activeIndex];
   useEffect(() => {
@@ -205,6 +218,23 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
   useEffect(() => {
     setActiveIndex((current) => Math.min(current, Math.max(0, items.length - 1)));
   }, [items.length]);
+  const placePalette = useCallback(() => {
+    const palette = paletteRef.current;
+    const surface = palette?.parentElement;
+    if (!palette || !surface) return;
+    const bounds = surface.getBoundingClientRect();
+    setPosition(quickAddPosition(anchor, { width: palette.offsetWidth, height: palette.offsetHeight }, { width: bounds.width, height: bounds.height }));
+  }, [anchor]);
+  useLayoutEffect(() => {
+    placePalette();
+    const palette = paletteRef.current;
+    const surface = palette?.parentElement;
+    if (!palette || !surface || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(placePalette);
+    observer.observe(surface);
+    observer.observe(palette);
+    return () => observer.disconnect();
+  }, [items.length, placePalette, query]);
   const choose = (index: number) => {
     const item = items[index];
     if (item !== undefined) onPick(item);
@@ -212,7 +242,6 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
   const keys = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) => Math.min(items.length - 1, current + 1));
@@ -226,12 +255,22 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
   };
   return (
     <section
+      ref={paletteRef}
       className="quick-add-palette nodrag nopan"
-      style={{ left: anchor.x, top: anchor.y }}
+      data-testid="quick-add-palette"
+      style={{ left: position?.left ?? anchor.x, top: position?.top ?? anchor.y, visibility: position === null ? "hidden" : "visible" }}
       role="dialog"
       aria-label="Quick add node"
       aria-modal="false"
       onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        }
+        event.stopPropagation();
+      }}
     >
       <header><span>Quick add</span><kbd>Esc</kbd></header>
       <label>
@@ -321,4 +360,8 @@ function normalizeIds(value: unknown): NodeDefinitionId[] {
 
 function capitalize(value: string) {
   return value.charAt(0).toLocaleUpperCase() + value.slice(1);
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
