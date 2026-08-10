@@ -589,7 +589,20 @@ function isTextEditingTarget(target: EventTarget | null) {
 }
 
 function isCanvasPaneTarget(target: EventTarget | null) {
-  return target instanceof Element && target.closest(".react-flow__pane") !== null;
+  if (!(target instanceof Element) || target.closest(".react-flow__pane") === null) return false;
+  return target.closest([
+    ".react-flow__node",
+    ".react-flow__edge",
+    ".react-flow__handle",
+    ".react-flow__controls",
+    ".react-flow__minimap",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "[role='button']",
+    "[role='menuitem']"
+  ].join(", ")) === null;
 }
 
 function isNativeEnterTarget(event: KeyboardEvent) {
