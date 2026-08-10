@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "version": "4.0.0",
+  "source": "packaged-blank-document-journeys",
+  "sourceProfile": "fresh-isolated",
+  "capturedAt": "2026-08-10T15:06:16.681Z",
+  "package": {
+    "gitCommit": "4b54a2bda0383a33f087653c271b3179eb287900",
+    "artifacts": [
+      {
+        "path": "release/windows/win-unpacked/Ether.exe",
+        "sha256": "461c878a999b4cf6540edbefd869a4be476985dc2246a0595c4d74fe579faa04"
+      },
+      {
+        "path": "release/windows/win-unpacked/resources/app.asar",
+        "sha256": "a956c135460a41cbe0bf434c31f1ae16a8d6d92ef917a6bb6b47d02c4fa5f5ef"
+      }
+    ]
+  },
+  "labels": [
+    "first-run",
+    "shortcuts",
+    "direct-editing",
+    "all-17-nodes",
+    "channels-roles",
+    "locked-module",
+    "reference-setup",
+    "batch-run",
+    "review-empty",
+    "export-setup",
+    "provider-guard",
+    "recipes",
+    "recovery-settings"
+  ],
+  "captures": [
+    {
+      "label": "first-run",
+      "title": "First-run blank canvas",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/01-first-run-blank.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/01-first-run-blank.png",
+      "actionSequence": 2,
+      "actionLabel": "Capture first-run guidance",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "cecce8a86365c3c9bbe54e61fb2be5fdb42c83031c5b44b696dd20e9feb1d1f6"
+    },
+    {
+      "label": "shortcuts",
+      "title": "Keyboard and pointer reference",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/02-shortcut-reference.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/02-shortcut-reference.png",
+      "actionSequence": 4,
+      "actionLabel": "Capture the shortcut reference",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "788d40003cfb77e6d67c76e88490e21f1ea86c08538219f60a76db48c79420ee"
+    },
+    {
+      "label": "direct-editing",
+      "title": "Direct editing on the canvas",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/03-direct-editing.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/03-direct-editing.png",
+      "actionSequence": 19,
+      "actionLabel": "Capture direct editing",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "780ad7913652498b394118e7a3bde1f1595f9b36c6cc331e61032d755b720232"
+    },
+    {
+      "label": "all-17-nodes",
+      "title": "All 17 canonical nodes authored from blank",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/result.json",
+      "screenshotPath": "screenshots/04-all-17-node-types.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-1/blank-gui-checkpoint/packaged/screenshots/04-all-17-node-types.png",
+      "actionSequence": 53,
+      "actionLabel": "Capture all canonical node types",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "a2c9db6edf43e914dc205360e4fdc9696587bb011f5129c12623bbcf78a251b0"
+    },
+    {
+      "label": "channels-roles",
+      "title": "Six channels with a visible semantic role",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/04-channels-and-roles.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/04-channels-and-roles.png",
+      "actionSequence": 35,
+      "actionLabel": "Capture channels and roles",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "a41d3669103d36aafeefba02c0905034505cbc87718895b14c50aaacc70cf0a9"
+    },
+    {
+      "label": "locked-module",
+      "title": "Locked Module created from selection",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/05-locked-module.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/05-locked-module.png",
+      "actionSequence": 39,
+      "actionLabel": "Capture the locked Module",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "d0835c8eaeb73015ec07e34b5593c8105477e3c22fda8cfa69750a22d4ec6a55"
+    },
+    {
+      "label": "reference-setup",
+      "title": "Reference Set and honest empty Reference Desk",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/06-reference-setup.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/06-reference-setup.png",
+      "actionSequence": 45,
+      "actionLabel": "Capture reference setup",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "5e89cf41e714dd7f3cb02b27a3a0712bd00ec866df9bc84db32afa871db8a32d"
+    },
+    {
+      "label": "batch-run",
+      "title": "Batch Matrix in the Run workspace",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/07-batch-run-workspace.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/07-batch-run-workspace.png",
+      "actionSequence": 47,
+      "actionLabel": "Capture batch planning",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "97b9e8cbec15d3b11268b60c72e0fb50f376f959e6a42348d5cf0baba04d35a1"
+    },
+    {
+      "label": "review-empty",
+      "title": "Artifact Observatory empty state",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/08-review-empty-state.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/08-review-empty-state.png",
+      "actionSequence": 49,
+      "actionLabel": "Capture Review",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "23b756ec0a5349426c79caf3113b9e05bb37cbae43a4061ae1bba308aeca49cb"
+    },
+    {
+      "label": "export-setup",
+      "title": "Export setup before a folder grant",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/09-export-setup.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/09-export-setup.png",
+      "actionSequence": 53,
+      "actionLabel": "Capture export setup",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "e1235142166900e28387f370c88f81c78cef63deba01897612b91272e4b5cd5a"
+    },
+    {
+      "label": "provider-guard",
+      "title": "Provider-safe run-preview error",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/10-provider-safe-error.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/10-provider-safe-error.png",
+      "actionSequence": 57,
+      "actionLabel": "Capture the provider guard",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "3db7a1f05e10ff1e73ed11622b68047cacd837f348fb14d8a5e9cc933520c2d9"
+    },
+    {
+      "label": "recipes",
+      "title": "Recipe Gallery before insertion",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/11-recipe-gallery.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/11-recipe-gallery.png",
+      "actionSequence": 59,
+      "actionLabel": "Capture Recipe Gallery",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "9f483f4069c9d77f3219416387f4296d1dba7dd34f6861dbe2bb95b9b5542606"
+    },
+    {
+      "label": "recovery-settings",
+      "title": "Recovery and provider setup in Settings",
+      "sourceResult": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/result.json",
+      "screenshotPath": "screenshots/12-recovery-and-provider-setup.png",
+      "path": "docs/evidence/ether-4.0-recovery/phase-5/manual-packaged/packaged/screenshots/12-recovery-and-provider-setup.png",
+      "actionSequence": 62,
+      "actionLabel": "Capture recovery and provider setup",
+      "width": 1600,
+      "height": 1000,
+      "sha256": "feabb8f5e918f03ba786930c259ff0d5a8db99a8f6aa86eb7466787da92c366b"
+    }
+  ]
+}
