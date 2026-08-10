@@ -51,9 +51,23 @@
 .review-empty h2 { margin:0 0 5px; color:#dce5ef; font-size:17px; }
 .load-more { margin:10px auto; }
 .loading-more { color:var(--review-accent); text-align:center; }
-.artifact-detail-panel { position:absolute; z-index:4; top:10px; right:20px; bottom:18px; width:min(330px,45%); overflow:auto; padding:14px; border:1px solid #3a4a5d; border-radius:8px; background:#0d151f; box-shadow:-14px 12px 34px rgba(0,0,0,.45); }
+.artifact-detail-panel { position:absolute; z-index:4; top:10px; right:20px; bottom:18px; width:min(520px,52%); overflow:auto; padding:14px; border:1px solid #3a4a5d; border-radius:8px; background:#0d151f; box-shadow:-14px 12px 34px rgba(0,0,0,.45); }
 .artifact-detail-panel>header,.artifact-detail-panel>header>div,.artifact-detail-panel h4 { display:flex; align-items:center; justify-content:space-between; gap:7px; }
-.artifact-detail-panel h3 { margin:18px 0 10px; }
+.artifact-detail-panel h3 { margin:18px 0 10px; overflow-wrap:anywhere; }
+.artifact-output-preview-section { margin-top:12px; padding:12px 0 15px; border-top:1px solid #263342; border-bottom:1px solid #263342; }
+.artifact-output-preview-heading { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.artifact-output-preview-heading h4 { margin:0; }
+.artifact-output-preview-heading>span { min-width:0; overflow:hidden; color:#8390a0; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.artifact-output-preview { display:grid; width:100%; min-height:240px; place-items:center; overflow:hidden; border:1px solid #263748; border-radius:7px; background:radial-gradient(circle at 50% 0%,rgba(50,93,111,.28),transparent 62%),#080e16; }
+.artifact-output-preview img,.artifact-output-preview video { display:block; width:100%; max-height:min(48vh,440px); object-fit:contain; }
+.artifact-output-preview video { min-height:220px; background:#05090e; }
+.artifact-output-preview-audio { align-content:center; gap:12px; padding:25px; color:#68e4e5; }
+.artifact-output-preview-audio audio { width:min(100%,420px); }
+.artifact-output-preview-code { display:block; max-height:340px; overflow:auto; margin:0; padding:14px; color:#d7edf1; font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.artifact-output-preview-empty { align-content:center; gap:8px; padding:24px; color:#9aa7b6; text-align:center; }
+.artifact-output-preview-empty strong { color:#dce5ef; }
+.artifact-output-preview-empty small { max-width:340px; line-height:1.45; }
+.artifact-output-preview-caption { margin:8px 0 0; color:#8390a0; font-size:10px; line-height:1.45; }
 .artifact-detail-panel dl { display:grid; gap:1px; }
 .artifact-detail-panel dl div,.evaluation-runtime div { display:grid; grid-template-columns:80px minmax(0,1fr); gap:8px; padding:6px 0; border-bottom:1px solid #202c39; }
 .artifact-detail-panel dt,.evaluation-runtime dt { color:#7f8b99; }
@@ -129,4 +143,4 @@
 .review-focus-brief p { grid-column:2; margin:0; }
 .adaptive-workspace[data-workspace="review"] .document-canvas { overflow:hidden; background:#080d14; }
 @media (max-width:1100px) { .review-form-grid { grid-template-columns:repeat(2,minmax(100px,1fr)); } .observatory-title { padding-inline:14px; } .observatory-search,.observatory-modes,.observatory-actionbar,.observatory-stage { padding-left:14px; padding-right:14px; } .observatory-card { width:25%!important; } }
-@media (max-width:760px) { .observatory-search { grid-template-columns:1fr auto auto; } .observatory-search>button:last-child { display:none; } .observatory-title>div:last-child { display:none; } .observatory-actionbar { align-items:flex-start; flex-direction:column; } .observatory-actionbar>div { width:100%; overflow:auto; } .artifact-detail-panel { inset:8px; width:auto; } .review-form-grid,.lineage-stage>div,.evaluation-runtime { grid-template-columns:1fr; } .observatory-card { width:50%!important; } }
+@media (max-width:760px) { .observatory-search { grid-template-columns:1fr auto auto; } .observatory-search>button:last-child { display:none; } .observatory-title>div:last-child { display:none; } .observatory-actionbar { align-items:flex-start; flex-direction:column; } .observatory-actionbar>div { width:100%; overflow:auto; } .artifact-detail-panel { inset:8px; width:auto; } .artifact-output-preview { min-height:200px; } .review-form-grid,.lineage-stage>div,.evaluation-runtime { grid-template-columns:1fr; } .observatory-card { width:50%!important; } }

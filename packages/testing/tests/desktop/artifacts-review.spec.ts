@@ -95,6 +95,25 @@ test("completes the practical Review journey across a 10k embedded library", asy
   await page.screenshot({ path: "../../test-results/phase3-artifact-observatory-1440x900.png", fullPage: true });
 });
 
+test("opens the selected artifact output for each supported preview family", async ({ page }) => {
+  await openReviewFixture(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+
+  for (const [title, kind] of [["Artifact 00000", "image"], ["Artifact 00001", "video"], ["Artifact 00002", "audio"], ["Artifact 00003", "text"], ["Artifact 00004", "data"]] as const) {
+    await page.getByText(title, { exact: true }).click();
+    const detail = page.getByRole("complementary", { name: "Artifact details" });
+    const preview = detail.getByTestId("artifact-output-preview");
+    await expect(preview).toHaveAttribute("data-preview-kind", kind);
+    if (kind === "image") await expect(preview.locator("img")).toHaveAttribute("src", /^ether-asset:\/\/.*\/original$/);
+    if (kind === "video") await expect(preview.locator("video")).toHaveAttribute("controls", "");
+    if (kind === "audio") await expect(preview.locator("audio")).toHaveAttribute("controls", "");
+    if (kind === "text") await expect(preview).toContainText("Text payload for Artifact 00003.");
+    if (kind === "data") await expect(preview).toContainText('"title": "Artifact 00004"');
+    await detail.getByRole("button", { name: "Close artifact details" }).click();
+  }
+});
+
 async function reviewState(page: Page, key: string) {
   return page.evaluate((stateKey) => (window as unknown as { __reviewState: Record<string, unknown> }).__reviewState[stateKey], key);
 }
@@ -104,6 +123,12 @@ async function openReviewFixture(page: Page) {
   await page.route("ether-asset://**", (route) => route.fulfill({ status: 200, contentType: "image/png", body: png }));
   await page.addInitScript(() => {
     const artifacts = Array.from({ length: 10_000 }, (_, index) => ({ id: `artifact-${String(index).padStart(5, "0")}`, contentKey: `sha256-${String(index).padStart(5, "0")}`, channel: index % 3 === 0 ? "image" : "text", mediaType: index < 12 ? "image/png" : "text/plain", byteLength: 2048 + index, source: { outputVersionId: `output-${String(index).padStart(5, "0")}`, payloadId: `payload-${String(index).padStart(5, "0")}` }, createdAt: "2026-07-22T12:00:00.000Z", metadata: { title: `Artifact ${String(index).padStart(5, "0")}`, quality: index % 5 } }));
+    const previewArtifactTypes: Array<[number, string, string]> = [[0, "image", "image/png"], [1, "video", "video/mp4"], [2, "audio", "audio/mpeg"], [3, "text", "text/plain"], [4, "data", "application/json"]];
+    for (const [index, channel, mediaType] of previewArtifactTypes) {
+      const artifact = artifacts[index] as { channel: string; mediaType: string };
+      artifact.channel = channel;
+      artifact.mediaType = mediaType;
+    }
     for (const artifact of artifacts.slice(0, 12)) {
       const metadata = artifact.metadata as Record<string, unknown>;
       metadata.thumbnailContentKey = "a".repeat(64);
@@ -125,6 +150,7 @@ async function openReviewFixture(page: Page) {
       application: { onEvent: () => () => undefined,
         query: async (query: { name: string; payload: Record<string, unknown> }) => {
           if (query.name === "artifact.search") { state.lastCollectionIds = query.payload.collectionIds; const text = String(query.payload.text ?? "").toLowerCase(); let matches = text ? artifacts.filter((artifact) => String(artifact.metadata.title).toLowerCase().includes(text)) : artifacts; if ((query.payload.collectionIds as string[]).length) matches = matches.filter((_, index) => index % 2 === 0); const offset = query.payload.cursor ? Number(query.payload.cursor) : 0; const result = matches.slice(offset, offset + 300); return { name: query.name, payload: { artifacts: result, total: matches.length, nextCursor: offset + result.length < matches.length ? String(offset + result.length) : null } }; }
+          if (query.name === "artifact.detail" && (String(artifacts.find((item) => item.id === query.payload.artifactId)?.channel) === "text" || String(artifacts.find((item) => item.id === query.payload.artifactId)?.channel) === "data")) { const artifact = artifacts.find((item) => item.id === query.payload.artifactId) ?? artifacts[0]; const content = artifact.channel === "text" ? { kind: "text", value: `Text payload for ${artifact.metadata.title}.` } : { kind: "object", value: { artifactId: artifact.id, title: artifact.metadata.title, quality: artifact.metadata.quality }, schemaId: "fixture.data.v1" }; return { name: query.name, payload: { artifact, outputVersion: { id: artifact.source.outputVersionId }, sourcePayload: { id: artifact.source.payloadId, content }, collections: [], lineage: [], tags, ratings: [], evaluation: { summary: "Recorded evaluation", providerId: "codex", modelId: "gpt-5", reasoningEffort: "high", schemaId: "review-v1", instruction: "Judge clarity", rubric: [] } } }; }
           if (query.name === "artifact.detail") { const artifact = artifacts.find((item) => item.id === query.payload.artifactId) ?? artifacts[0]; return { name: query.name, payload: { artifact, outputVersion: { id: artifact.source.outputVersionId }, sourcePayload: { id: artifact.source.payloadId }, collections: [], lineage: [], tags, ratings: [], evaluation: { summary: "Recorded evaluation", providerId: "codex", modelId: "gpt-5", reasoningEffort: "high", schemaId: "review-v1", instruction: "Judge clarity", rubric: [] } } }; }
           if (query.name === "artifact.lineage") return { name: query.name, payload: { lineage: [{ id: "edge-1", parentArtifactId: "artifact-00000", childArtifactId: "artifact-00001", relation: "edited-from", role: "general", createdAt: "2026-07-22T00:00:00.000Z" }] } };
           if (query.name === "collection.list") return { name: query.name, payload: { collections } };
