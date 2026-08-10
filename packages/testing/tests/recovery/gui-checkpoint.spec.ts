@@ -118,14 +118,14 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await canvas.focus();
     await input.pressKey("Home", "Refit before Worker editing", "The edited cards return to a clear direct-editing workspace.");
-    await input.leftClick(worker.locator(".ether-node-primary"), "Select Worker instruction for direct editing", "The ordinary Worker instruction becomes the primary editable selection.");
-    await input.pressKey("Enter", "Edit Worker instruction on canvas", "Enter opens the Worker's primary instruction directly on its card.");
-    const workerEditor = worker.locator(".ether-node-inline-editor textarea");
+    const editableWorker = page.locator(".ether-node[data-node-definition='prompt.worker']").last();
+    await input.leftDoubleClick(editableWorker.locator(".ether-node-primary"), "Edit Worker instruction on canvas", "Double-click opens the visible Worker's primary instruction directly on its card.");
+    const workerEditor = editableWorker.locator(".ether-node-inline-editor textarea");
     await expect(workerEditor).toBeVisible();
     await workerEditor.fill("Refine the campaign direction without narrating the change");
     await input.pressKey("Control+Enter", "Commit Worker instruction edit", "Ctrl+Enter saves the Worker's instruction as one graph transaction.");
     await expect(workerEditor).toBeHidden();
-    await expect(worker.locator(".ether-node-primary")).toContainText("Refine the campaign direction");
+    await expect(editableWorker.locator(".ether-node-primary")).toContainText("Refine the campaign direction");
     await input.leftClick(renamedTitle, "Restore Prompt command focus", "The directly edited Prompt remains the primary graph selection.");
     await expect.poll(() => selectedNodeDefinitions(page)).toEqual(["prompt.text"]);
     await input.pressKey("Control+A", "Select the preview graph scope", "The preview scope includes the blank-authored Workers without starting provider work.");

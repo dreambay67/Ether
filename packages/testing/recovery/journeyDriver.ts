@@ -33,6 +33,7 @@ export type JourneyOutcome = "passed" | "failed" | "inconclusive" | "baseline-de
 export type JourneyPoint = { x: number; y: number };
 export type JourneyInputKind =
   | "left-click"
+  | "left-double-click"
   | "left-drag"
   | "left-marquee"
   | "shift-marquee"
@@ -537,6 +538,14 @@ export class RealPageInput {
       const point = await this.point(target);
       await this.page.mouse.click(point.x, point.y, { button: "left" });
       return `Left click at ${formatPoint(point)}.`;
+    });
+  }
+
+  async leftDoubleClick(target: Locator | JourneyPoint, label: string, expected: string): Promise<void> {
+    await this.recordMouse("left-double-click", label, expected, async () => {
+      const point = await this.point(target);
+      await this.page.mouse.dblclick(point.x, point.y, { button: "left" });
+      return `Left double-click at ${formatPoint(point)}.`;
     });
   }
 
