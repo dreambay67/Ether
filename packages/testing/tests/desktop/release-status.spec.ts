@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("Provider Health and Settings expose truthful local runtime, privacy, layout, and About state", async ({ page }) => {
   test.setTimeout(60_000);
@@ -167,6 +167,7 @@ test("Provider Health and Settings expose truthful local runtime, privacy, layou
   await page.getByRole("button", { name: "Settings" }).click();
   const settings = page.getByRole("dialog", { name: "Settings" });
   await expect(settings).toBeVisible();
+  await expect.poll(() => modalOwnsCanvasOverlap(page, "Settings")).toBe(true);
   await expect(settings.getByTestId("about-ether")).toContainText("4.0.0");
   await expect(settings).toContainText("Off in Ether 4.0");
   await expect(settings).toContainText("Credentials, user paths, and personal identifiers");
@@ -222,3 +223,16 @@ test("Provider Health and Settings expose truthful local runtime, privacy, layou
     }).__releaseStatusProviderQueries.length
   )).toBe(providerQueriesBeforePolicyRefresh + 2);
 });
+
+async function modalOwnsCanvasOverlap(page: Page, label: string) {
+  return page.getByRole("dialog", { name: label }).evaluate((dialog) => {
+    const toolbar = document.querySelector<HTMLElement>(".canvas-toolbar");
+    if (toolbar === null) return true;
+    const left = Math.max(dialog.getBoundingClientRect().left, toolbar.getBoundingClientRect().left);
+    const top = Math.max(dialog.getBoundingClientRect().top, toolbar.getBoundingClientRect().top);
+    const right = Math.min(dialog.getBoundingClientRect().right, toolbar.getBoundingClientRect().right);
+    const bottom = Math.min(dialog.getBoundingClientRect().bottom, toolbar.getBoundingClientRect().bottom);
+    if (left >= right || top >= bottom) return false;
+    return document.elementFromPoint((left + right) / 2, (top + bottom) / 2)?.closest("[role='dialog']") === dialog;
+  });
+}

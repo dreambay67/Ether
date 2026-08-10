@@ -26,7 +26,7 @@ Ether is a local-first creative production canvas. An Ether project is one porta
 
 Choose **New document** to start an untitled usable canvas, or **Open document** to select one supported `.ether` file. Press `Ctrl+S` to name a new document. After a name exists, Save flushes pending work and creates a manual milestone; it does not create a project folder.
 
-A blank canvas gives you three starting steps: add a node from the 17-node Library, connect its named channel to a compatible input, then preview the plan before you run. Press `N` or double-click the canvas to open quick add at the pointer. The keyboard button in the Canvas toolbar opens the complete command and gesture reference.
+**Start in three moves:** add a node from the 17-node Library, connect its named channel to a compatible input, then preview the plan before you run. Press `N` or double-click the canvas to open quick add at the pointer. The **Keyboard and pointer reference** button in the Canvas toolbar opens the complete command and gesture reference.
 
 Ether opens maximized so the canvas and its supporting panes use the available desktop. The standard Windows title-bar controls remain available to minimize, restore, resize, or close the app.
 
@@ -254,6 +254,8 @@ The Ether Codex plugin is an external co-producer, not a second in-app chat. It 
 | **Inspect** | read document/graph/capabilities/health | mutate graph or execute providers |
 | **Edit Permit** | apply a previewed graph transaction within its temporary document scope | start a provider or grant itself Run permission |
 | **Run Permit** | start one exact immutable plan ID and content hash after desktop approval | a changed plan, broad execution, or self-approval |
+
+The **Run Permit** is always a separate, one-time desktop approval for the exact plan you inspected; editing permission alone can never launch provider work.
 
 Use the desktop menu to grant an Edit Permit or approve the exact latest Codex plan. A base-revision conflict returns rebaseable information. The plugin can create prompts, workers, references, generation, review, collections, and export preparation in one transaction, then inspect and repair the graph it created.
 

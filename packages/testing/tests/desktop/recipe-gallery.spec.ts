@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("loads typed recipe setup, previews blockers, inserts atomically, reloads, and focuses", async ({ page }) => {
   await page.addInitScript(() => {
@@ -122,6 +122,7 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
   await page.getByRole("button", { name: "Recipes" }).click();
   const dialog = page.getByRole("dialog", { name: "Recipe Gallery" });
   await expect(dialog).toBeVisible();
+  await expect.poll(() => modalOwnsCanvasOverlap(page, "Recipe Gallery")).toBe(true);
   await page.keyboard.press("Shift+Tab");
   expect(await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true);
   await page.keyboard.press("Escape");
@@ -181,3 +182,16 @@ test("loads typed recipe setup, previews blockers, inserts atomically, reloads, 
     payload: expect.objectContaining({ recipeId: "reference-guided", parameters: [{ parameterId: "referenceArtifact", value: ["artifact-source-1"] }] })
   }));
 });
+
+async function modalOwnsCanvasOverlap(page: Page, label: string) {
+  return page.getByRole("dialog", { name: label }).evaluate((dialog) => {
+    const toolbar = document.querySelector<HTMLElement>(".canvas-toolbar");
+    if (toolbar === null) return true;
+    const left = Math.max(dialog.getBoundingClientRect().left, toolbar.getBoundingClientRect().left);
+    const top = Math.max(dialog.getBoundingClientRect().top, toolbar.getBoundingClientRect().top);
+    const right = Math.min(dialog.getBoundingClientRect().right, toolbar.getBoundingClientRect().right);
+    const bottom = Math.min(dialog.getBoundingClientRect().bottom, toolbar.getBoundingClientRect().bottom);
+    if (left >= right || top >= bottom) return false;
+    return document.elementFromPoint((left + right) / 2, (top + bottom) / 2)?.closest("[role='dialog']") === dialog;
+  });
+}
