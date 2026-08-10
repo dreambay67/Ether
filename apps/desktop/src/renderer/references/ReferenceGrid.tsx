@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { connectionRoles, type ConnectionRole } from "@ether/schema";
 import type { ReferenceAction } from "../../shared/ipc/contracts";
+import { embeddedArtifactSource } from "../artifacts/embeddedArtifactSource";
 import type { ReferenceDeskItem } from "./useReferences";
 
 export type ReferenceSelection = {
@@ -12,6 +13,44 @@ export type ReferenceView = "grid" | "filmstrip" | "waveform" | "list";
 
 const roles: readonly ConnectionRole[] = connectionRoles;
 const viewportHeight = 360;
+const contentKeyPattern = /^[a-f0-9]{64}$/iu;
+const supportedReferenceMediaTypes = new Map<string, ReferenceMediaKind>([
+  ["image/avif", "image"],
+  ["image/bmp", "image"],
+  ["image/gif", "image"],
+  ["image/jpeg", "image"],
+  ["image/png", "image"],
+  ["image/tiff", "image"],
+  ["image/webp", "image"],
+  ["audio/mpeg", "audio"],
+  ["audio/ogg", "audio"],
+  ["audio/wav", "audio"],
+  ["audio/wave", "audio"],
+  ["video/mp4", "video"],
+  ["video/ogg", "video"],
+  ["video/webm", "video"]
+]);
+
+type ReferenceMediaKind = "image" | "video" | "audio";
+
+export type ReferencePreviewResolution =
+  | { kind: ReferenceMediaKind; source: string }
+  | { kind: "unavailable"; reason: "missing-content" | "unsupported-media" };
+
+export function resolveReferencePreview(documentId: string, reference: ReferenceDeskItem): ReferencePreviewResolution {
+  const kind = supportedReferenceMediaTypes.get(reference.mediaType.trim().toLowerCase());
+  if (kind === undefined) return { kind: "unavailable", reason: "unsupported-media" };
+
+  const candidates = reference.state === "embedded"
+    ? [reference.contentKey, reference.previewContentKey]
+    : [reference.previewContentKey];
+  const contentKey = candidates.find((candidate): candidate is string => candidate !== null && contentKeyPattern.test(candidate));
+  if (contentKey === undefined) return { kind: "unavailable", reason: "missing-content" };
+
+  // The renderer only receives a validated content key. It never turns the
+  // redacted originalPath into a local-file URL or otherwise reaches the local FS.
+  return { kind, source: embeddedArtifactSource(documentId, contentKey, "original") };
+}
 
 const viewLayout: Record<ReferenceView, { columns: number; rowHeight: number; overscan: number }> = {
   grid: { columns: 4, rowHeight: 132, overscan: 1 },
@@ -21,12 +60,14 @@ const viewLayout: Record<ReferenceView, { columns: number; rowHeight: number; ov
 };
 
 export function ReferenceGrid({
+  documentId,
   references,
   selection,
   view,
   onSelectionChange,
   onRecover
 }: {
+  documentId: string;
   references: ReferenceDeskItem[];
   selection: Map<string, ReferenceSelection>;
   view: ReferenceView;
@@ -83,15 +124,15 @@ export function ReferenceGrid({
                 width: `calc(100% / ${layout.columns})`
               }}
             >
-              <label className="reference-select">
+              <div className="reference-select">
                 <input
                   type="checkbox"
                   checked={selected !== undefined}
                   aria-label={`Select ${reference.displayName}`}
                   onChange={(event) => update(reference.id, event.target.checked ? { enabled: true } : null)}
                 />
-                <ReferencePreview reference={reference} view={view} />
-              </label>
+                <ReferencePreview documentId={documentId} reference={reference} view={view} />
+              </div>
               <div className="reference-identity">
                 <strong title={reference.displayName}>{reference.displayName}</strong>
                 <span>{reference.state} · {reference.mediaType}</span>
@@ -134,15 +175,35 @@ export function ReferenceGrid({
   );
 }
 
-function ReferencePreview({ reference, view }: { reference: ReferenceDeskItem; view: ReferenceView }) {
-  if (view === "waveform") {
-    if (reference.mediaType.startsWith("audio/")) {
-      return <span className="reference-preview reference-wave" aria-label="Audio waveform preview">{Array.from({ length: 12 }, (_, index) => <i key={index} style={{ height: `${25 + ((index * 29) % 65)}%` }} />)}</span>;
-    }
-    return <span className="reference-preview reference-wave-unavailable">No waveform</span>;
+export function ReferencePreview({ documentId, reference, view }: { documentId: string; reference: ReferenceDeskItem; view: ReferenceView }) {
+  const resolution = resolveReferencePreview(documentId, reference);
+  const source = resolution.kind === "unavailable" ? null : resolution.source;
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFailedSource(null);
+  }, [source]);
+
+  if (resolution.kind === "unavailable" || failedSource === source) {
+    return (
+      <span
+        className={`reference-preview reference-preview-unavailable${view === "waveform" ? " reference-wave-unavailable" : ""}`}
+        data-preview-state="unavailable"
+        aria-label="Media preview unavailable"
+        title={resolution.kind === "unavailable" && resolution.reason === "missing-content" ? "No embedded preview is available." : "Media preview unavailable."}
+      >
+        Preview unavailable
+      </span>
+    );
   }
-  if (reference.mediaType.startsWith("video/")) return <span className="reference-preview reference-poster">Poster unavailable</span>;
-  if (reference.mediaType.startsWith("audio/")) return <span className="reference-preview">AUDIO</span>;
-  if (reference.mediaType.startsWith("image/")) return <span className="reference-preview">IMAGE</span>;
-  return <span className="reference-preview">FILE</span>;
+
+  const onAssetError = () => setFailedSource(source);
+  const mediaClassName = `reference-preview reference-preview-${resolution.kind}${resolution.kind === "audio" && view === "waveform" ? " reference-wave" : ""}`;
+  if (resolution.kind === "image") {
+    return <img className={mediaClassName} data-preview-kind="image" src={resolution.source} alt={`${reference.displayName} preview`} loading="lazy" decoding="async" draggable={false} onError={onAssetError} />;
+  }
+  if (resolution.kind === "video") {
+    return <video className={mediaClassName} data-preview-kind="video" src={resolution.source} aria-label={`${reference.displayName} video preview`} muted playsInline preload="metadata" onError={onAssetError} />;
+  }
+  return <audio className={mediaClassName} data-preview-kind="audio" src={resolution.source} aria-label={`${reference.displayName} audio preview`} controls preload="metadata" onError={onAssetError} />;
 }

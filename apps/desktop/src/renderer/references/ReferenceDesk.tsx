@@ -196,7 +196,7 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
       </div>
       {!target ? <p className="reference-empty">Add a Reference Set node to organize source material.</p> : null}
       {compareOpen && selectedReferences.length >= 2 ? <ReferenceComparison references={selectedReferences.slice(0, 2)} /> : null}
-      {loading ? <p>Loading references…</p> : error ? <p role="alert">{error}</p> : references.length === 0 ? <p className="reference-empty">No references yet. Link a file to keep it external, embed a portable copy, or drop files here.</p> : <ReferenceGrid references={references} selection={selection} view={view} onSelectionChange={setSelection} onRecover={(referenceId, action) => void recover(referenceId, action)} />}
+      {loading ? <p>Loading references…</p> : error ? <p role="alert">{error}</p> : references.length === 0 ? <p className="reference-empty">No references yet. Link a file to keep it external, embed a portable copy, or drop files here.</p> : <ReferenceGrid documentId={documentId} references={references} selection={selection} view={view} onSelectionChange={setSelection} onRecover={(referenceId, action) => void recover(referenceId, action)} />}
       <footer>
         <span>{selection.size} selected · {savedMembers.length} saved in set · {references.length} total</span>
         <div className="reference-batch-send">

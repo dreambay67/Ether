@@ -24,6 +24,7 @@ export const testSuites = {
     "tests/recovery-journey-driver.test.ts",
     "tests/recovery-worker-simulation.test.ts",
     "tests/renderer-url.test.ts",
+    "tests/reference-preview.test.ts",
     "tests/schema-4.0.test.ts",
     "tests/windows-integration-contract.test.ts"
   ],

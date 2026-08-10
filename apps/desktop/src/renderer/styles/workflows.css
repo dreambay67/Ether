@@ -47,10 +47,13 @@
 .reference-row:hover { background: rgba(25, 53, 77, .34); }
 .reference-row.state-missing { border-left: 3px solid #ffb55b; }
 .reference-select { display: flex; align-items: center; gap: 8px; }
-.reference-preview { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid #30465d; border-radius: 5px; background: linear-gradient(145deg, #172738, #0b1119); color: #6ddfe4; font-size: 8px; font-weight: 800; text-align: center; }
-.reference-poster { padding: 3px; color: #a6b8ca; font-size: 7px; }
-.reference-wave { display: flex; align-items: center; justify-content: center; gap: 2px; width: min(280px, 42vw); }
-.reference-wave i { width: 3px; border-radius: 2px; background: linear-gradient(#37e6ea, #1470db); }
+.reference-preview { display: grid; width: 42px; height: 42px; place-items: center; overflow: hidden; border: 1px solid #30465d; border-radius: 5px; background: linear-gradient(145deg, #172738, #0b1119); color: #6ddfe4; font-size: 8px; font-weight: 800; text-align: center; }
+.reference-preview-image,
+.reference-preview-video { display: block; object-fit: cover; }
+.reference-preview-video { background: #050a10; }
+.reference-preview-audio { display: block; min-width: 0; background: #0a141e; }
+.reference-preview-unavailable { padding: 4px; color: #8296a9; line-height: 1.2; }
+.reference-wave { width: min(280px, 42vw); height: 38px; }
 .reference-wave-unavailable { width: min(280px, 42vw); color: #71879a; }
 .reference-identity { display: grid; min-width: 0; gap: 3px; }
 .reference-identity strong { overflow: hidden; color: #eef8ff; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
