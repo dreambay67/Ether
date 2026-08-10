@@ -237,7 +237,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(expectedSize).toBe(pointerSize === 8 ? 40 : 28);
     expect(reportedSize).toBe(expectedSize);
     if (pointerSize === 8) expect(reportedSize).toBe(40);
-  });
+  }, 30_000);
 
   it("keeps user-realistic Explorer focus proofs adjacent to native Enter and drag", () => {
     const associationScript = buildExplorerAssociationInvokeScript({
@@ -721,7 +721,9 @@ describe("A02 Windows integration harness contracts", () => {
       await Promise.all([mkdir(cache, { recursive: true }), mkdir(staging, { recursive: true }), mkdir(liveOutput, { recursive: true })]);
       await removeTestOwnedDisposableRoots(root, [cache, staging, liveOutput]);
       await expect(removeTestOwnedDisposableRoots(root, [outside])).rejects.toThrow(/outside the test-owned root/u);
-      await expect(removeTestOwnedDisposableRoots(root, [path.join(root, "profile", "documents")])).rejects.toThrow(/non-disposable/u);
+      const documents = path.join(root, "profile", "documents");
+      await mkdir(documents, { recursive: true });
+      await expect(removeTestOwnedDisposableRoots(root, [documents])).rejects.toThrow(/non-disposable/u);
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });

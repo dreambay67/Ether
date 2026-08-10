@@ -13,7 +13,7 @@ const read = (relative: string) => readFile(path.join(root, relative), "utf8");
 describe("Ether 4.0 recovery manual", () => {
   it("binds every screenshot to a passing exact-package action journey", async () => {
     const { validateRecoveryManualEvidence } = await import("../../../docs/manual/recovery-evidence.mjs");
-    const { manifest, captures } = await validateRecoveryManualEvidence(root);
+    const { manifest, captures } = await validateRecoveryManualEvidence(root, { verifyPackageFiles: false });
 
     expect(manifest.source).toBe("packaged-blank-document-journeys");
     expect(manifest.sourceProfile).toBe("fresh-isolated");

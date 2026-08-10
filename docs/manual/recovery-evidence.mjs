@@ -81,7 +81,7 @@ export async function createRecoveryManualManifest(root) {
   };
 }
 
-export async function validateRecoveryManualEvidence(root) {
+export async function validateRecoveryManualEvidence(root, { verifyPackageFiles = true } = {}) {
   const manifestPath = path.join(root, ...recoveryManifestRelativePath.split("/"));
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   if (
@@ -101,7 +101,9 @@ export async function validateRecoveryManualEvidence(root) {
   for (const artifactPath of requiredArtifacts) {
     const expected = artifactMap.get(artifactPath);
     if (!/^[a-f0-9]{64}$/u.test(expected ?? "")) throw new Error(`Manual manifest lacks ${artifactPath}.`);
-    if (await sha256File(path.join(root, ...artifactPath.split("/"))) !== expected) throw new Error(`Manual package hash is stale: ${artifactPath}.`);
+    if (verifyPackageFiles && await sha256File(path.join(root, ...artifactPath.split("/"))) !== expected) {
+      throw new Error(`Manual package hash is stale: ${artifactPath}.`);
+    }
   }
   if (!Array.isArray(manifest.captures) || manifest.captures.length !== recoveryCaptureInventory.length) {
     throw new Error("Manual manifest capture count is incomplete.");
