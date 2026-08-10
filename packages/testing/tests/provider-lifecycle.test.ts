@@ -435,7 +435,7 @@ describe("Codex runtime lifecycle", () => {
         providerId: "codex-vision-evaluation",
         profileId: "evaluation:gpt-5.4",
         modelId: "gpt-5.4",
-        operation: "llm",
+        operation: "evaluate",
         maxParallelism: 4
       })
     ]));
