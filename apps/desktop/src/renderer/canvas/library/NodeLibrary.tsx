@@ -1,6 +1,6 @@
-import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { Clock3, GripVertical, Search, Star } from "lucide-react";
-import type { NodeDefinitionId, NodeFamily, NodeLibraryItem } from "@ether/schema";
+import { NodeDefinitionIdSchema, type NodeDefinitionId, type NodeFamily, type NodeLibraryItem } from "@ether/schema";
 
 import { useDesktopSettings } from "../../project/useDesktopSettings";
 
@@ -57,7 +57,7 @@ export function NodeLibrary({ catalog, error, readOnly, onAdd }: {
     <aside className="node-library" aria-labelledby="node-library-title" data-testid="node-library">
       <header className="node-library-header">
         <div>
-          <span>Registry / 17</span>
+          <span>Registry / {catalog.length}</span>
           <strong id="node-library-title">Node Library</strong>
         </div>
         <small>{catalog.length === 0 ? "Loading" : `${filtered.length} visible`}</small>
@@ -198,6 +198,13 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const items = filterNodeCatalog(catalog, query).slice(0, 8);
+  const activeItem = items[activeIndex];
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    setActiveIndex((current) => Math.min(current, Math.max(0, items.length - 1)));
+  }, [items.length]);
   const choose = (index: number) => {
     const item = items[index];
     if (item !== undefined) onPick(item);
@@ -223,6 +230,7 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
       style={{ left: anchor.x, top: anchor.y }}
       role="dialog"
       aria-label="Quick add node"
+      aria-modal="false"
       onPointerDown={(event) => event.stopPropagation()}
     >
       <header><span>Quick add</span><kbd>Esc</kbd></header>
@@ -232,16 +240,19 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
           ref={inputRef}
           autoFocus
           aria-label="Find a node"
+          aria-controls="quick-add-matches"
+          aria-activedescendant={activeItem === undefined ? undefined : `quick-add-${activeItem.definitionId}`}
           placeholder="Type a node, purpose, or channel"
           value={query}
           onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
           onKeyDown={keys}
         />
       </label>
-      <div role="listbox" aria-label="Matching nodes">
+      <div id="quick-add-matches" role="listbox" aria-label="Matching nodes">
         {items.map((item, index) => (
           <button
             key={item.definitionId}
+            id={`quick-add-${item.definitionId}`}
             type="button"
             role="option"
             aria-selected={index === activeIndex}
@@ -302,14 +313,11 @@ function normalizePreferences(value: unknown): LibraryPreferences {
 
 function normalizeIds(value: unknown): NodeDefinitionId[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is NodeDefinitionId => typeof item === "string" && canonicalIds.has(item as NodeDefinitionId));
+  return value.flatMap((item) => {
+    const parsed = NodeDefinitionIdSchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  });
 }
-
-const canonicalIds = new Set<NodeDefinitionId>([
-  "prompt.text", "prompt.worker", "reference.set", "generation.image", "edit.image", "edit.mask",
-  "edit.transform", "review.compare", "review.evaluate", "review.filter", "flow.variables", "flow.batch",
-  "flow.join", "output.collection", "output.export", "canvas.note", "canvas.drawing"
-]);
 
 function capitalize(value: string) {
   return value.charAt(0).toLocaleUpperCase() + value.slice(1);

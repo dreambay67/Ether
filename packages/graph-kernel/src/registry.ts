@@ -230,7 +230,7 @@ function makeDefinition(id: NodeDefinitionId): KernelNodeDefinition {
     contract: { inputs: ports(metadata.inputs), outputs: ports(metadata.outputs), consequences },
     inspector: { sections: [{ id: "main", title: metadata.title, fields: inspectorFields[id] }] },
     executor: metadata.executor,
-    presentation: { width: 220, height: 140, previewMode: id === "prompt.text" ? "content" : "summary" },
+    presentation: { width: 220, height: 180, previewMode: id === "prompt.text" ? "content" : "summary" },
     library: {
       definitionId: id,
       inputChannels: [...metadata.inputs],

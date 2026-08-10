@@ -2,6 +2,19 @@ import { useCallback } from "react";
 import { EtherNodeSchema, type EtherGraph, type EtherNode, type GraphOperation, type NodeConfig, type NodeDefinitionId, type NodeLibraryItem, type NodePosition, type NodeSize } from "@ether/schema";
 import { createModuleOperations, moduleIsLocked } from "../modules/moduleModel";
 
+export function createNodeFromDefinition(definition: NodeLibraryItem, ordinal: number, position: NodePosition, id = crypto.randomUUID()): EtherNode | null {
+  const parsed = EtherNodeSchema.safeParse({
+    id,
+    definitionId: definition.definitionId,
+    title: `${definition.title} ${ordinal}`,
+    position,
+    size: { width: definition.presentation.width, height: definition.presentation.height },
+    config: structuredClone(definition.defaultConfig),
+    presentation: { collapsed: false, accent: "default", previewMode: definition.presentation.previewMode }
+  });
+  return parsed.success ? parsed.data : null;
+}
+
 export function useNodeCommands(graph: EtherGraph, catalog: readonly NodeLibraryItem[], apply: (operations: GraphOperation[], title: string) => Promise<boolean>, onStatus: (message: string) => void) {
   const createNode = useCallback(async (definitionId: NodeDefinitionId, position: NodePosition = { x: 120 + graph.nodes.length * 28, y: 120 + graph.nodes.length * 20 }) => {
     const definition = catalog.find((item) => item.definitionId === definitionId);
@@ -10,15 +23,11 @@ export function useNodeCommands(graph: EtherGraph, catalog: readonly NodeLibrary
       return false;
     }
     const ordinal = graph.nodes.filter((item) => item.definitionId === definitionId).length + 1;
-    const node = {
-      id: crypto.randomUUID(),
-      definitionId,
-      title: `${definition.title} ${ordinal}`,
-      position,
-      size: { width: definition.presentation.width, height: definition.presentation.height },
-      config: structuredClone(definition.defaultConfig),
-      presentation: { collapsed: false, accent: "default", previewMode: definition.presentation.previewMode }
-    } as EtherNode;
+    const node = createNodeFromDefinition(definition, ordinal, position);
+    if (node === null) {
+      onStatus(`The canonical ${definition.title} default configuration is invalid; no node was added.`);
+      return false;
+    }
     return apply([{ type: "addNode", graphId: graph.id, node } as GraphOperation], `Add ${definition.title}`);
   }, [apply, catalog, graph.id, graph.nodes, onStatus]);
   const removeNode = useCallback((nodeId: string) => {
@@ -29,7 +38,17 @@ export function useNodeCommands(graph: EtherGraph, catalog: readonly NodeLibrary
   }, [apply, graph.edges, graph.id]);
   const moveNodes = useCallback((positions: { nodeId: string; position: NodePosition }[]) => void apply([{ type: "moveNodes", graphId: graph.id, positions }], positions.length > 1 ? "Move selected nodes" : "Move node"), [apply, graph.id]);
   const resizeNode = useCallback((nodeId: string, size: NodeSize) => void apply([{ type: "resizeNodes", graphId: graph.id, sizes: [{ nodeId, size }] }], "Resize node"), [apply, graph.id]);
-  const rename = useCallback((nodeId: string, title: string) => { const node = graph.nodes.find((item) => item.id === nodeId); return node && title.trim() ? apply([{ type: "updateNode", graphId: graph.id, nodeId, node: { ...node, title: title.trim() } }], "Rename node") : Promise.resolve(false); }, [apply, graph.id, graph.nodes]);
+  const rename = useCallback((nodeId: string, title: string) => {
+    const node = graph.nodes.find((item) => item.id === nodeId);
+    if (!node) return Promise.resolve(false);
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      onStatus("A node title cannot be empty.");
+      return Promise.resolve(false);
+    }
+    if (nextTitle === node.title) return Promise.resolve(true);
+    return apply([{ type: "updateNode", graphId: graph.id, nodeId, node: { ...node, title: nextTitle } }], "Rename node");
+  }, [apply, graph.id, graph.nodes, onStatus]);
   const updateConfig = useCallback((nodeId: string, config: NodeConfig, title = "Edit node content") => {
     const node = graph.nodes.find((item) => item.id === nodeId);
     if (!node || config.kind !== node.definitionId) return Promise.resolve(false);

@@ -114,6 +114,21 @@ export function marqueeHitIds(
   )).map(({ id }) => id);
 }
 
+export function marqueeRectangle(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  surface: { left: number; top: number }
+) {
+  const left = Math.min(start.x, end.x) - surface.left;
+  const top = Math.min(start.y, end.y) - surface.top;
+  return {
+    left,
+    top,
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y)
+  };
+}
+
 function unique(ids: readonly string[]) {
   return [...new Set(ids)];
 }

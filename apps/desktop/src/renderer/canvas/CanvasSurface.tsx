@@ -3,9 +3,10 @@ import { Background, Controls, MiniMap, ReactFlow, SelectionMode, useReactFlow, 
 import { validateConnection } from "@ether/graph-kernel";
 import { NodeDefinitionIdSchema, type EtherGraph, type NodeDefinitionId, type NodeLibraryItem, type NodePosition, type PayloadChannel } from "@ether/schema";
 import { EtherEdge, type EtherEdgeEditor, type EtherFlowEdgeData } from "./edges/EtherEdge";
+import { edgeBundleKey, type EdgeBounds } from "./edges/edgeGeometry";
 import { EtherNode, type EtherCanvasNodeData, ModuleNode } from "./EtherNode";
 import type { NodeRuntimeStatus } from "./nodes/NodeStatusLayer";
-import { marqueeHitIds, useCanvasInteraction } from "./hooks/useCanvasInteraction";
+import { marqueeHitIds, marqueeRectangle, useCanvasInteraction } from "./hooks/useCanvasInteraction";
 import { PAYLOAD_CHANNELS, channelsFor } from "./ports/channelRegistry";
 import { projectCanvasChannelActivity } from "./projection";
 import { markPerformance, measurePerformance } from "../performance/marks";
@@ -22,6 +23,14 @@ function OverviewCluster({ data }: NodeProps & { data: { count: number; title: s
 const nodeTypes = { etherNode: EtherNode, overviewCluster: OverviewCluster, module: ModuleNode }; const edgeTypes = { etherEdge: EtherEdge };
 type ConnectionIntent = { nodeId: string; handleId: string; handleType: "source" | "target" };
 function projectAtVersion<T>(_version: string, project: () => T): T { return project(); }
+function endpointBounds(graph: EtherGraph, endpoint: EtherGraph["edges"][number]["from"]): EdgeBounds | undefined {
+  if (endpoint.kind === "node") {
+    const node = graph.nodes.find((candidate) => candidate.id === endpoint.nodeId);
+    return node === undefined ? undefined : { x: node.position.x, y: node.position.y, width: node.size.width, height: node.size.height };
+  }
+  const module = graph.modules.find((candidate) => candidate.id === endpoint.moduleId);
+  return module === undefined ? undefined : { x: module.position.x, y: module.position.y, width: module.size.width, height: module.collapsed ? 112 : module.size.height };
+}
 export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selectedIds, selectedEdgeId, selectedModuleId, activeEditor, commands, viewport, onAddNode, onMove, onMoveModule, onResize, onDelete, onEditRequest, onEditCommit, onEditCancel, onConnect, onDeleteEdge, onRole, onChannel, onModuleEnter, onModuleToggle, onSelected, onEdgeSelected, onModuleSelected, onViewport, onCommandUnavailable, onReferenceDrop }: {
   graph: EtherGraph; catalog: readonly NodeLibraryItem[]; nodeStatuses: Record<string, NodeRuntimeStatus>; readOnly: boolean; selectedIds: readonly string[]; selectedEdgeId: string | null; selectedModuleId: string | null; activeEditor: { nodeId: string; field: CanvasEditorField } | null; commands: readonly GraphCommand[]; viewport?: Viewport; onAddNode(definitionId: NodeDefinitionId, position: NodePosition): void; onMove(positions: { nodeId: string; position: XYPosition }[]): void; onMoveModule(id: string, position: XYPosition): void; onResize(id: string, size: { width: number; height: number }): void; onDelete(id: string): void; onEditRequest(id: string, field: CanvasEditorField): void; onEditCommit(id: string, field: CanvasEditorField, value: string): Promise<boolean>; onEditCancel(): void; onConnect(sourceId: string, sourceHandle: string, targetId: string, targetHandle: string): void; onDeleteEdge(id: string): void; onRole(id: string, role: import("@ether/schema").ConnectionRole): void; onChannel(id: string, endpoint: "source" | "target", channel: PayloadChannel): void; onModuleEnter(id: string): void; onModuleToggle(id: string): void; onSelected(ids: string[]): void; onEdgeSelected(id: string | null): void; onModuleSelected(id: string | null, additive?: boolean): void; onViewport(viewport: Viewport): void; onCommandUnavailable(message: string): void; onReferenceDrop?: CanvasReferenceDropHandler;
 }) {
@@ -29,7 +38,8 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const flow = useReactFlow();
   const updateNodeInternals = useUpdateNodeInternals();
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const marqueeGesture = useRef<{ start: { x: number; y: number } } | null>(null);
+  const marqueeGesture = useRef<{ start: { x: number; y: number }; pointerId: number; moved: boolean } | null>(null);
+  const marqueeWasActive = useRef(false);
   const previousSurfaceSize = useRef<{ width: number; height: number } | null>(null);
   const interaction = useCanvasInteraction(selectedIds, onSelected);
   const { beginEdit: beginInteractionEdit, mode: interactionMode, settle: settleInteraction } = interaction;
@@ -39,10 +49,21 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
   const [semanticOverview, setSemanticOverview] = useState(largeGraph && initialViewport.zoom < 0.4);
   const [placementPreview, setPlacementPreview] = useState<{ x: number; y: number; title: string } | null>(null);
   const [quickAdd, setQuickAdd] = useState<{ anchor: { x: number; y: number }; position: NodePosition } | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [dragConnectionIntent, setDragConnectionIntent] = useState<ConnectionIntent | null>(null);
   const [clickConnectionIntent, setClickConnectionIntent] = useState<ConnectionIntent | null>(null);
   const [edgeEditor, setEdgeEditor] = useState<{ edgeId: string; editor: Exclude<EtherEdgeEditor, null> } | null>(null);
   const connectionIntent = clickConnectionIntent ?? dragConnectionIntent;
+  const focusCanvas = useCallback(() => surfaceRef.current?.focus({ preventScroll: true }), []);
+  const commitInlineEdit = useCallback(async (nodeId: string, field: CanvasEditorField, value: string) => {
+    const saved = await onEditCommit(nodeId, field, value);
+    if (saved) globalThis.requestAnimationFrame(focusCanvas);
+    return saved;
+  }, [focusCanvas, onEditCommit]);
+  const cancelInlineEdit = useCallback(() => {
+    onEditCancel();
+    globalThis.requestAnimationFrame(focusCanvas);
+  }, [focusCanvas, onEditCancel]);
   const editEdge = useCallback((edgeId: string, editor: EtherEdgeEditor) => {
     onEdgeSelected(edgeId);
     setEdgeEditor(editor === null ? null : { edgeId, editor });
@@ -240,14 +261,49 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       const height = module.collapsed ? 112 : module.size.height;
       return { id: `module:${module.id}`, type: "module", position: module.position, width: module.size.width, height, draggable: !readOnly && !moduleIsLocked(module), selected: selectedModuleId === module.id, data: { title: module.title, description: module.description ?? "", accent: moduleAccent(module), locked: moduleIsLocked(module), collapsed: module.collapsed, inputs: module.interface.inputs.map((port) => ({ id: port.id, channel: port.channel })), outputs: module.interface.outputs.map((port) => ({ id: port.id, channel: port.channel })), readOnly, onSelect: selectModule, onEnter: () => onModuleEnter(module.id), onToggle: () => onModuleToggle(module.id), onHandleActivate: activateHandle }, style: { width: module.size.width, height, zIndex: 1 } };
     }),
-    ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => { const editing = activeEditor?.nodeId === node.id; const height = editing ? Math.max(220, node.size.height) : node.size.height; return { id: node.id, type: "etherNode", position: node.position, width: node.size.width, height, selected: selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], intentInput: intentChannelsFor(node.id, node.definitionId, "input"), intentOutput: intentChannelsFor(node.id, node.definitionId, "output"), status: nodeStatuses[node.id] ?? null, readOnly, activeEditor: editing ? activeEditor.field : null, onDelete, onResizeStart: interaction.beginResize, onResize, onResizeEnd: interaction.settle, onSelect: interaction.selectNode, onEditRequest, onEditCommit, onEditCancel, onHandleActivate: activateHandle } satisfies EtherCanvasNodeData, style: { width: node.size.width, height, zIndex: 1 } }; }))
-  ]), [activeEditor, activateHandle, activity, graph.modules, graph.nodes, intentChannelsFor, interaction.beginResize, interaction.selectNode, interaction.settle, moduleProjectionVersion, nodeStatuses, onDelete, onEditCancel, onEditCommit, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectModule, selectedIds, selectedModuleId, showSemanticOverview]);
+    ...(showSemanticOverview ? overviewClusters : graph.nodes.map((node) => { const editing = activeEditor?.nodeId === node.id; const height = editing ? Math.max(250, node.size.height) : node.size.height; return { id: node.id, type: "etherNode", position: node.position, width: node.size.width, height, selected: selectedIds.includes(node.id), data: { node, connectedInput: activity[node.id]?.input ?? [], connectedOutput: activity[node.id]?.output ?? [], intentInput: intentChannelsFor(node.id, node.definitionId, "input"), intentOutput: intentChannelsFor(node.id, node.definitionId, "output"), status: nodeStatuses[node.id] ?? null, readOnly, activeEditor: editing ? activeEditor.field : null, onDelete, onResizeStart: interaction.beginResize, onResize, onResizeEnd: interaction.settle, onSelect: interaction.selectNode, onEditRequest, onEditCommit: commitInlineEdit, onEditCancel: cancelInlineEdit, onHandleActivate: activateHandle } satisfies EtherCanvasNodeData, style: { width: node.size.width, height, zIndex: 1 } }; }))
+  ]), [activeEditor, activateHandle, activity, cancelInlineEdit, commitInlineEdit, graph.modules, graph.nodes, intentChannelsFor, interaction.beginResize, interaction.selectNode, interaction.settle, moduleProjectionVersion, nodeStatuses, onDelete, onEditRequest, onModuleEnter, onModuleToggle, onResize, overviewClusters, readOnly, selectModule, selectedIds, selectedModuleId, showSemanticOverview]);
   const edgeCount = graph.edges.length;
-  const edges = useMemo(() => projectAtVersion(edgeProjectionVersion, () => showSemanticOverview || edgeCount === 0 ? [] : graph.edges.map((edge) => ({ id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, selectable: false, data: { edge, editor: edgeEditor?.edgeId === edge.id ? edgeEditor.editor : null, readOnly, selected: selectedEdgeId === edge.id, compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel, onEdit: editEdge, onSelect: onEdgeSelected } satisfies EtherFlowEdgeData }))), [compatibleChannels, edgeCount, edgeEditor, edgeProjectionVersion, editEdge, graph.edges, onChannel, onDeleteEdge, onEdgeSelected, onRole, readOnly, selectedEdgeId, showSemanticOverview]);
+  const edgeLaneLayout = useMemo(() => {
+    const groups = new Map<string, EtherGraph["edges"]>();
+    for (const edge of graph.edges) {
+      const key = edgeBundleKey(edge);
+      const group = groups.get(key);
+      if (group === undefined) groups.set(key, [edge]);
+      else group.push(edge);
+    }
+    const layout = new Map<string, { index: number; count: number }>();
+    for (const group of groups.values()) {
+      const ordered = [...group].sort((left, right) => {
+        const channelOrder = PAYLOAD_CHANNELS.indexOf(left.from.channel) - PAYLOAD_CHANNELS.indexOf(right.from.channel);
+        return channelOrder || left.order - right.order || left.id.localeCompare(right.id);
+      });
+      ordered.forEach((edge, index) => layout.set(edge.id, { index, count: ordered.length }));
+    }
+    return layout;
+  }, [graph.edges]);
+  const edges = useMemo(() => projectAtVersion(edgeProjectionVersion, () => showSemanticOverview || edgeCount === 0 ? [] : graph.edges.map((edge) => {
+    const lane = edgeLaneLayout.get(edge.id) ?? { index: 0, count: 1 };
+    return { id: edge.id, type: "etherEdge", source: edge.from.kind === "node" ? edge.from.nodeId : `module:${edge.from.moduleId}`, target: edge.to.kind === "node" ? edge.to.nodeId : `module:${edge.to.moduleId}`, sourceHandle: edge.from.kind === "node" ? edge.from.channel : `out:${edge.from.portId}`, targetHandle: edge.to.kind === "node" ? edge.to.channel : `in:${edge.to.portId}`, selectable: false, data: { edge, editor: edgeEditor?.edgeId === edge.id ? edgeEditor.editor : null, readOnly, selected: selectedEdgeId === edge.id, laneIndex: lane.index, laneCount: lane.count, sourceBounds: endpointBounds(graph, edge.from), targetBounds: endpointBounds(graph, edge.to), compatibleSourceChannels: compatibleChannels(edge, "source"), compatibleTargetChannels: compatibleChannels(edge, "target"), onDelete: onDeleteEdge, onRole, onChannel, onEdit: editEdge, onSelect: onEdgeSelected } satisfies EtherFlowEdgeData };
+  })), [compatibleChannels, edgeCount, edgeEditor, edgeLaneLayout, edgeProjectionVersion, editEdge, graph, onChannel, onDeleteEdge, onEdgeSelected, onRole, readOnly, selectedEdgeId, showSemanticOverview]);
   markPerformance("canvas:projection:end");
   measurePerformance("canvas:projection", "canvas:projection:start", "canvas:projection:end");
   const onConnectFlow = useCallback((connection: Connection) => { setDragConnectionIntent(null); setClickConnectionIntent(null); if (readOnly || !connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) return; onConnect(connection.source, connection.sourceHandle, connection.target, connection.targetHandle); }, [onConnect, readOnly]);
   const insertionAt = useCallback((clientX: number, clientY: number) => flow.screenToFlowPosition({ x: clientX, y: clientY }), [flow]);
+  const renderedNodeRects = useCallback((surface: HTMLElement) => [...surface.querySelectorAll<HTMLElement>(".react-flow__node[data-id]")]
+    .flatMap((element) => {
+      const id = element.dataset.id;
+      return id !== undefined && graph.nodes.some((node) => node.id === id)
+        ? [{ id, rect: element.getBoundingClientRect() }]
+        : [];
+    }), [graph.nodes]);
+  const updateMarqueeGesture = useCallback((start: { x: number; y: number }, end: { x: number; y: number }, surface: HTMLElement) => {
+    const bounds = surface.getBoundingClientRect();
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    if (marqueeGesture.current !== null) marqueeGesture.current.moved = distance > 1;
+    setMarqueeRect(distance > 1 ? marqueeRectangle(start, end, bounds) : null);
+    interaction.updateMarquee(marqueeHitIds(renderedNodeRects(surface), start, end));
+  }, [interaction, renderedNodeRects]);
   const openQuickAdd = useCallback((clientX: number, clientY: number) => {
     if (readOnly || catalog.length === 0) return;
     const bounds = surfaceRef.current?.getBoundingClientRect();
@@ -345,34 +401,45 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
       aria-label="Authoring canvas"
       tabIndex={0}
       onPointerDownCapture={(event) => {
-        if (!(event.target instanceof HTMLElement) || !event.target.classList.contains("react-flow__pane")) return;
-        event.currentTarget.focus({ preventScroll: true });
-        if (event.button === 0) {
-          marqueeGesture.current = { start: { x: event.clientX, y: event.clientY } };
-          interaction.beginMarquee(event.shiftKey);
-        }
+        if (!isCanvasPaneTarget(event.target)) return;
+        focusCanvas();
+        if (event.button !== 0) return;
+        event.preventDefault();
+        marqueeGesture.current = { start: { x: event.clientX, y: event.clientY }, pointerId: event.pointerId, moved: false };
+        marqueeWasActive.current = false;
+        setMarqueeRect(null);
+        setClickConnectionIntent(null);
+        setDragConnectionIntent(null);
+        onEdgeSelected(null);
+        onModuleSelected(null);
+        interaction.beginMarquee(event.shiftKey);
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMoveCapture={(event) => {
+        const gesture = marqueeGesture.current;
+        if (gesture === null || gesture.pointerId !== event.pointerId) return;
+        updateMarqueeGesture(gesture.start, { x: event.clientX, y: event.clientY }, event.currentTarget);
       }}
       onPointerUpCapture={(event) => {
         const gesture = marqueeGesture.current;
-        if (event.button !== 0 || gesture === null) return;
+        if (event.button !== 0 || gesture === null || gesture.pointerId !== event.pointerId) return;
+        updateMarqueeGesture(gesture.start, { x: event.clientX, y: event.clientY }, event.currentTarget);
+        marqueeWasActive.current = gesture.moved;
         marqueeGesture.current = null;
-        const nodeRects = [...event.currentTarget.querySelectorAll<HTMLElement>(".react-flow__node[data-id]")]
-          .flatMap((element) => {
-            const id = element.dataset.id;
-            return id !== undefined && graph.nodes.some((node) => node.id === id)
-              ? [{ id, rect: element.getBoundingClientRect() }]
-              : [];
-          });
-        interaction.updateMarquee(marqueeHitIds(nodeRects, gesture.start, { x: event.clientX, y: event.clientY }));
+        setMarqueeRect(null);
         interaction.endMarquee();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       }}
-      onPointerCancelCapture={() => {
+      onPointerCancelCapture={(event) => {
         if (marqueeGesture.current === null) return;
         marqueeGesture.current = null;
+        marqueeWasActive.current = false;
+        setMarqueeRect(null);
         interaction.cancel();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       }}
       onDoubleClick={(event) => {
-        if (event.target instanceof HTMLElement && event.target.classList.contains("react-flow__pane")) openQuickAdd(event.clientX, event.clientY);
+        if (isCanvasPaneTarget(event.target)) openQuickAdd(event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
         if (isTextEditingTarget(event.target)) return;
@@ -389,6 +456,8 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         } else if (event.key === "Escape") {
           event.preventDefault();
           marqueeGesture.current = null;
+          marqueeWasActive.current = false;
+          setMarqueeRect(null);
           setClickConnectionIntent(null);
           setDragConnectionIntent(null);
           if (quickAdd !== null) setQuickAdd(null);
@@ -424,8 +493,8 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         onlyRenderVisibleElements={!showSemanticOverview}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
-        elementsSelectable
-        selectionOnDrag
+        elementsSelectable={false}
+        selectionOnDrag={false}
         selectionKeyCode={null}
         multiSelectionKeyCode="Shift"
         panOnDrag={[2]}
@@ -463,6 +532,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           if (event !== null && event !== undefined) onViewport(nextViewport);
         }}
         onPaneClick={(event) => {
+          if (marqueeWasActive.current) {
+            marqueeWasActive.current = false;
+            return;
+          }
           if ((event.target as HTMLElement).closest(".react-flow__node")) return;
           setClickConnectionIntent(null);
           setDragConnectionIntent(null);
@@ -476,6 +549,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         <Controls showInteractive={false} />
         {fitSmallGraph ? <MiniMap pannable zoomable nodeColor="#37e6ea" /> : null}
       </ReactFlow>
+      {marqueeRect !== null ? <div className="canvas-marquee-selection" style={marqueeRect} aria-hidden="true" /> : null}
       {graph.nodes.length === 0 && quickAdd === null ? (
         <div className="empty-canvas-actions">
           <span>Blank workflow</span>
@@ -497,10 +571,12 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
         <QuickAddPalette
           anchor={quickAdd.anchor}
           catalog={catalog}
-          onClose={() => { setQuickAdd(null); surfaceRef.current?.focus(); }}
+          onClose={() => { setQuickAdd(null); focusCanvas(); }}
           onPick={(item) => {
             onAddNode(item.definitionId, quickAdd.position);
             setQuickAdd(null);
+            focusCanvas();
+            globalThis.requestAnimationFrame(focusCanvas);
           }}
         />
       ) : null}
@@ -510,6 +586,10 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
 
 function isTextEditingTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable || target.closest("[contenteditable='true']") !== null);
+}
+
+function isCanvasPaneTarget(target: EventTarget | null) {
+  return target instanceof Element && target.closest(".react-flow__pane") !== null;
 }
 
 function isNativeEnterTarget(event: KeyboardEvent) {

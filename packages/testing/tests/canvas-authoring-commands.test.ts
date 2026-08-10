@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { nodeLibraryItems } from "@ether/graph-kernel";
 import type { EtherNode } from "@ether/schema";
 
 import { commandIdForKeyboard, commandPreservesCanvasFocus } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
-import { marqueeHitIds, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
+import { createNodeFromDefinition } from "../../../apps/desktop/src/renderer/canvas/commands/useNodeCommands";
+import { marqueeHitIds, marqueeRectangle, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
+import { filterNodeCatalog } from "../../../apps/desktop/src/renderer/canvas/library/NodeLibrary";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
 import { canvasCommandForAccelerator } from "../../../apps/desktop/src/main/canvasAccelerator";
 
@@ -67,6 +70,23 @@ describe("canvas authoring command map", () => {
     expect(marqueeHitIds(nodes, { x: 80, y: 80 }, { x: 160, y: 160 })).toEqual(["prompt"]);
     expect(marqueeHitIds(nodes, { x: 380, y: 80 }, { x: 620, y: 240 })).toEqual(["worker"]);
     expect(marqueeHitIds(nodes, { x: 80, y: 80 }, { x: 80.5, y: 80.5 })).toEqual([]);
+  });
+
+  it("keeps the marquee rectangle in surface coordinates when dragged in either direction", () => {
+    expect(marqueeRectangle({ x: 120, y: 90 }, { x: 40, y: 30 }, { left: 20, top: 10 }))
+      .toEqual({ left: 20, top: 20, width: 80, height: 60 });
+  });
+
+  it("uses canonical library defaults for searchable node insertion", () => {
+    const prompt = nodeLibraryItems.find((item) => item.definitionId === "prompt.text");
+    expect(prompt?.presentation).toMatchObject({ width: 220, height: 180 });
+    expect(new Set(nodeLibraryItems.map((item) => item.presentation.height))).toEqual(new Set([180]));
+    expect(filterNodeCatalog(nodeLibraryItems, "copy").map((item) => item.definitionId)).toEqual(["prompt.text"]);
+    expect(filterNodeCatalog(nodeLibraryItems, "nano banana").map((item) => item.definitionId)).toEqual(["generation.image"]);
+
+    const node = prompt === undefined ? null : createNodeFromDefinition(prompt, 1, { x: 12, y: 34 }, "prompt-node");
+    expect(node).not.toBeNull();
+    expect(node).toMatchObject({ id: "prompt-node", definitionId: "prompt.text", title: "Prompt 1", size: { width: 220, height: 180 }, config: { kind: "prompt.text", body: "" } });
   });
 
   it("centers blank insertions and finds the first non-overlapping registry slot", () => {

@@ -44,6 +44,13 @@
 .canvas-selection-run-prompt > .run-plan-details { grid-template-columns: minmax(0, 1fr); max-height: min(330px, 48vh); overflow: auto; }
 .canvas-selection-run-prompt > .run-plan-details > * { grid-column: 1; }
 .canvas-selection-run-prompt button { width: auto; min-width: 0; line-height: 1.25; white-space: normal; }
+.canvas-selection-run-prompt[data-placement="bottom-left"] { top: auto; right: auto; bottom: 14px; left: 14px; }
+.canvas-selection-run-prompt[data-placement="top-right"] { top: 96px; right: 230px; bottom: auto; left: auto; }
+.canvas-selection-run-prompt[data-placement="top-left"] { top: 96px; right: auto; bottom: auto; left: 14px; }
+@container (max-width: 650px) {
+  .canvas-selection-run-prompt[data-placement="bottom-left"] { right: auto; bottom: 190px; left: 14px; }
+  .canvas-selection-run-prompt[data-placement="top-right"] { top: 96px; right: 14px; bottom: auto; left: auto; }
+}
 
 /* Phase-one authoring commands and direct editing. */
 .canvas-toolbar .canvas-toolbar-context { flex: 0 0 auto; width: auto; height: auto; margin: 0; padding: 0 7px 0 4px; color: #7693a3; border-right: 1px solid rgba(135, 178, 203, .25); background: transparent; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
@@ -84,10 +91,15 @@
 .ether-node-primary.is-editable { margin: 4px -6px 0; padding: 0 20px 3px 6px; border-radius: 5px; cursor: text; }
 .ether-node-primary.is-editable:hover, .ether-node-primary.is-editable:focus-visible { background: color-mix(in srgb, var(--family-color), transparent 91%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--family-color), transparent 64%); }
 .ether-node-primary > svg { position: absolute; top: 10px; right: 5px; color: var(--family-color); opacity: .55; }
-.ether-node.is-editing { z-index: 12; min-height: 190px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--family-color), white 24%), 0 20px 42px rgba(0, 0, 0, .55); }
+.ether-node.is-editing { z-index: 12; display: flex; min-height: 250px; flex-direction: column; box-shadow: 0 0 0 2px color-mix(in srgb, var(--family-color), white 24%), 0 20px 42px rgba(0, 0, 0, .55); }
+.ether-node.is-editing .ether-node-header { flex: 0 0 auto; }
+.ether-node.is-editing .ether-node-main { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 8px; }
+.ether-node.is-editing .node-status-layer { position: static; align-self: flex-start; margin: 0 12px 6px; }
+.ether-node.is-editing .ether-node-footer { position: static; flex: 0 0 auto; margin: 0 12px 9px; padding-top: 7px; border-top: 1px solid color-mix(in srgb, var(--family-color), transparent 78%); }
 .ether-node-inline-editor { position: relative; z-index: 4; display: grid; gap: 5px; margin-top: 6px; }
 .ether-node-inline-editor.is-single-line { margin: 0 0 7px; }
 .ether-node-inline-input { width: 100%; min-width: 0; box-sizing: border-box; resize: vertical; padding: 7px 8px; color: #f4fbfc; border: 1px solid color-mix(in srgb, var(--family-color), transparent 38%); border-radius: 5px; outline: none; background: #0b151d; font: 12px/1.4 inherit; }
+.ether-node-inline-editor:not(.is-single-line) .ether-node-inline-input { min-height: 92px; max-height: 154px; }
 .ether-node-inline-editor.is-single-line .ether-node-inline-input { padding: 5px 7px; font-size: 14px; font-weight: 750; }
 .ether-node-inline-input:focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--family-color), transparent 76%); }
 .ether-node-inline-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
