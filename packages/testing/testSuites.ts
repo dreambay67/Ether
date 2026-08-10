@@ -120,6 +120,12 @@ export const testSuites = {
   recoveryT15ReferenceSet: ["tests/recovery/t15-reference-set-packaged.spec.ts"],
   recoveryT16T19Visible: ["tests/recovery/t16-t19-visible-packaged.spec.ts"],
   recoveryT20Recipes: ["tests/recovery/t20-recipes-packaged.spec.ts"],
+  recoveryT21PluginCoproduction: ["tests/recovery/t21-plugin-coproduction-packaged.spec.ts"],
+  recoveryT22ShellMatrix: ["tests/recovery/t22-packaged-shell-matrix.spec.ts"],
+  recoveryT23Keyboard: [
+    "tests/recovery/t23-keyboard-packaged.spec.ts",
+    "tests/recovery/t23-j06-keyboard-packaged.spec.ts"
+  ],
   recoveryManual: ["tests/recovery/manual-recovery.spec.ts"],
   recoveryDocumentLifecycle: ["tests/recovery/document-lifecycle-recovery.spec.ts"],
   recoveryVisiblePackaged: ["tests/recovery/visible-recovery-packaged.spec.ts"],
