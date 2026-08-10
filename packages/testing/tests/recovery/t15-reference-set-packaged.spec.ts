@@ -101,7 +101,9 @@ test("builds a linked and embedded Reference Set, then previews its offline Work
     await expect(sealedReferences.locator(":scope > article").nth(0)).toContainText("Included in this plan · Subject · Image · Embedded reference");
     await expect(sealedReferences.locator(":scope > article").nth(1)).toContainText("Included in this plan · Lighting · Image · Linked reference");
     await expect(sealedReferences).not.toContainText("01-linked-style.png");
-    await expect(sealedReferences.getByText("Payload ID", { exact: false })).not.toBeVisible();
+    const collapsedReferenceDetails = sealedReferences.locator(":scope > article details:not([open])");
+    await expect(collapsedReferenceDetails).toHaveCount(2);
+    await expect(collapsedReferenceDetails.filter({ hasText: "Payload ID" })).toHaveCount(2);
     await expect(workerInspector.getByRole("button", { name: "Start 1 call", exact: true })).toBeVisible();
     await input.screenshot("01-sealed-reference-preview.png", evidence, "Capture the sealed Reference Set preview", "The ordinary preview shows two enabled members in manual order with Subject and Lighting roles; the excluded Style member and expert IDs stay out of the concise view.");
     input.observe("T15 provider-safe Reference Set preview", "The blank-authored Worker preview contains the two enabled references only and remains unstarted.", "Link, Embed, explicit Add, explicit Replace, manual order, an excluded Style member, and two enabled members were authored through UI; the concise immutable preview showed their names, order, roles, channels, and source kinds on the offline deterministic Worker route.");

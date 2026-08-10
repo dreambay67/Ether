@@ -37,7 +37,7 @@ export function CollectionView({ documentId, selectedArtifactIds, onStatus }: { 
   return <section className="collection-view" aria-label="Collections">
     <header><div><FolderHeart size={16} /><span>Many-to-many routing</span><h3>Collections</h3></div><form onSubmit={(event) => { event.preventDefault(); if (title.trim()) void command("collection.create", { title: title.trim(), description: "Created in Artifact Observatory" }, "Collection created.").then(() => setTitle("")); }}><input aria-label="New collection title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="New collection" /><button type="submit" disabled={!title.trim()}><Plus size={14} />Create</button></form></header>
     <p>Membership is internal and non-destructive. One artifact may belong to any number of collections.</p>
-    <div className="collection-cards">{collections.map((collection) => {
+    <div className="collection-cards">{collections.length === 0 ? <div className="collection-empty" role="status"><strong>No collections yet</strong><span>Create a collection above, then add selected artifacts to it.</span></div> : collections.map((collection) => {
       const members = memberships[collection.id] ?? [];
       const selectedInside = selectedArtifactIds.filter((id) => members.some((member) => member.artifactId === id));
       return <article key={collection.id} className={collection.primary ? "is-primary" : ""}>

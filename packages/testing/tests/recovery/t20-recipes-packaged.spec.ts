@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,6 +76,7 @@ for (const recipe of recipes) {
       declaration: blankAuthoringJourney(journeyId, "fake")
     });
     let closed = false;
+    let nativeExportFolder: string | null = null;
     try {
       const { page, input, evidence } = session;
       const canvas = page.getByTestId("ether-canvas-surface");
@@ -115,10 +116,11 @@ for (const recipe of recipes) {
 
       if (recipe.requiresNativeFolderGrant === true) {
         if (sourceElectronDiagnostic) {
+          nativeExportFolder = path.join(session.profile.root, "source-recipe-exports");
           await input.leftClick(setup.getByRole("button", { name: /Choose export folder/u }), "Choose the source diagnostic export folder", "The source host returns a disposable isolated folder so the graph Export path can be debugged before packaging.");
           await expect(setup.getByRole("button", { name: "Choose export folder", exact: true })).toContainText("source-recipe-exports");
         } else {
-          await choosePackagedExportFolder(session, setup, input);
+          nativeExportFolder = await choosePackagedExportFolder(session, setup, input);
         }
       }
 
@@ -141,6 +143,16 @@ for (const recipe of recipes) {
         await waitForJobStatus(page, input, "completed", "Wait for the advertised fake Worker output", recipe.requiresArtifact === true ? 2 : 1);
       }
 
+      if (nativeExportFolder !== null) {
+        await expect.poll(async () => (await exportedFiles(nativeExportFolder!)).length, {
+          timeout: 30_000,
+          message: "The selected native export folder did not receive a verified file."
+        }).toBeGreaterThan(0);
+        const [firstFile] = await exportedFiles(nativeExportFolder);
+        expect(firstFile).toBeDefined();
+        expect((await readFile(path.join(nativeExportFolder, firstFile!))).byteLength).toBeGreaterThan(0);
+      }
+
       await input.leftClick(page.getByTestId("workspace-switcher").getByRole("button", { name: "Build", exact: true }), `Inspect ${recipe.title} output`, "The recipe returns to its visible canvas with the fake-provider output persisted.");
       const outputNode = nodeByTitle(page, recipe.outputTitle);
       await input.leftClick(outputNode.locator(".ether-node-title"), `Select ${recipe.title} output node`, "The advertised fake-provider output is inspected on the inserted recipe itself.");
@@ -161,7 +173,7 @@ async function choosePackagedExportFolder(
   session: RecoveryJourneySession,
   setup: Locator,
   input: RealPageInput
-): Promise<void> {
+): Promise<string> {
   const destination = path.join(session.profile.root, "recipe-exports");
   await mkdir(destination, { recursive: true });
   const ownerPid = await findExactPackagedProcessId(
@@ -175,4 +187,10 @@ async function choosePackagedExportFolder(
   );
   await completeNativeFolderDialogWithUia(ownerPid, destination);
   await expect(setup.getByRole("button", { name: "Choose export folder", exact: true })).toContainText("recipe-exports");
+  return destination;
+}
+
+async function exportedFiles(folder: string): Promise<string[]> {
+  const entries = await readdir(folder, { withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
 }

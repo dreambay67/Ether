@@ -148,6 +148,8 @@ function VariablesFields({ context }: { context: InspectorNodeContext }) {
 export function RegistryConfigFields({ context }: { context: InspectorNodeContext }) {
   const { node, graph, apply, report, document } = context;
   const draft = useInspectorDraft<NodeConfig>(`${node.id}:registry`, node.config);
+  const [pathGrantDisplayName, setPathGrantDisplayName] = useState<string | null>(null);
+  const [pathGrantBusy, setPathGrantBusy] = useState(false);
   if (node.config.kind === "flow.variables") return <VariablesFields context={context} />;
   if (purposeBuiltRegistryKinds.has(node.config.kind)) return null;
   const disabled = document.mode !== "writable";
@@ -155,6 +157,21 @@ export function RegistryConfigFields({ context }: { context: InspectorNodeContex
   const fields = definition.inspector.sections.flatMap((section) => section.fields).filter((field) => field !== "kind");
   const config = draft.draft as unknown as Record<string, unknown>;
   const updateField = (field: string, value: unknown) => draft.update((current) => ({ ...current, [field]: value } as NodeConfig));
+  const chooseExportFolder = async () => {
+    if (disabled || node.config.kind !== "output.export") return;
+    setPathGrantBusy(true);
+    try {
+      const grant = await window.ether.permissions.grantFolder(document.documentId, "export");
+      if (grant === null) return;
+      updateField("pathGrantId", grant.grantId);
+      setPathGrantDisplayName(grant.displayName);
+      report(`Export folder selected: ${grant.displayName}. Save the export settings to keep it on this node.`);
+    } catch (cause) {
+      report(cause instanceof Error ? cause.message : "The export folder could not be selected.");
+    } finally {
+      setPathGrantBusy(false);
+    }
+  };
   const save = async () => {
     if (draft.conflict) { report("Resolve the changed-base warning before saving this draft."); return; }
     const result = definition.configSchema.safeParse(draft.draft);
@@ -164,6 +181,10 @@ export function RegistryConfigFields({ context }: { context: InspectorNodeContex
   };
   return <InspectorSection title={`${definition.title} settings`} help={`These controls come from the canonical ${node.definitionId} Inspector definition.`}>{draft.conflict ? <DraftConflict onLatest={draft.useLatest} onRebase={draft.rebaseDraft} /> : null}{fields.map((field) => {
     const value = config[field];
+    if (node.config.kind === "output.export" && field === "pathGrantId") return <label className="inspector-path-grant" key={field}>Export folder
+      <button type="button" aria-label="Choose export folder" disabled={disabled || pathGrantBusy} onClick={() => void chooseExportFolder()}>{pathGrantBusy ? "Choosing folder…" : pathGrantDisplayName ?? (typeof value === "string" && value.length > 0 ? "Choose a different folder…" : "Choose export folder…")}</button>
+      <small>{typeof value === "string" && value.length > 0 ? `Opaque grant: ${pathGrantDisplayName ?? "selected folder"}.` : "Required before this node can write files."}</small>
+    </label>;
     const options = registrySelectOptions[`${node.config.kind}.${field}`];
     if (options) return <label key={field}>{labelFor(field)}<select aria-label={labelFor(field)} disabled={disabled} value={String(value ?? "")} onChange={(event) => updateField(field, event.target.value)}>{options.map((option) => <option key={option} value={option}>{labelFor(option)}</option>)}</select></label>;
     if (typeof value === "boolean") return <label key={field} className="inspector-checkbox"><input aria-label={labelFor(field)} disabled={disabled} type="checkbox" checked={value} onChange={(event) => updateField(field, event.target.checked)} />{labelFor(field)}</label>;
