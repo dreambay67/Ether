@@ -24,9 +24,18 @@
 
 .canvas-selection-run-prompt {
   display: grid;
+  right: 230px;
+  bottom: 14px;
   width: min(300px, calc(100% - 28px));
   align-items: stretch;
   gap: 7px;
+}
+
+@container (max-width: 650px) {
+  .canvas-selection-run-prompt {
+    right: 14px;
+    bottom: 190px;
+  }
 }
 .canvas-selection-run-prompt > strong,
 .canvas-selection-run-prompt > p { margin: 0; }

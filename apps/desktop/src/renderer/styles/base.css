@@ -179,6 +179,7 @@ main.ether-shell.task-nine-shell {
   position: relative;
   min-width: 0;
   min-height: 0;
+  container-type: inline-size;
   background: #080d14;
 }
 
@@ -1976,9 +1977,7 @@ button.ether-edge-channel-dot[aria-expanded="true"] {
 }
 
 .flow-shell .react-flow__minimap {
-  right: calc(
-    min(var(--ether-inspector-width, 0px), max(280px, calc(100% - 72px))) + 34px
-  ) !important;
+  right: 16px !important;
   bottom: 18px !important;
 }
 
