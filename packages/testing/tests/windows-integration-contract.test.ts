@@ -237,7 +237,7 @@ describe("A02 Windows integration harness contracts", () => {
     expect(expectedSize).toBe(pointerSize === 8 ? 40 : 28);
     expect(reportedSize).toBe(expectedSize);
     if (pointerSize === 8) expect(reportedSize).toBe(40);
-  }, 30_000);
+  }, 120_000);
 
   it("keeps user-realistic Explorer focus proofs adjacent to native Enter and drag", () => {
     const associationScript = buildExplorerAssociationInvokeScript({

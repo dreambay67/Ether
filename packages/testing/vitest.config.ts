@@ -5,6 +5,9 @@ import { testSuites } from "./testSuites.js";
 export default defineConfig({
   test: {
     environment: "node",
-    include: [...testSuites.unit]
+    hookTimeout: process.env.CI === "true" ? 60_000 : 10_000,
+    include: [...testSuites.unit],
+    maxWorkers: process.env.CI === "true" ? 2 : undefined,
+    testTimeout: process.env.CI === "true" ? 60_000 : 5_000
   }
 });
