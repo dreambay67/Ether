@@ -160,7 +160,13 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   if (recoveryShell !== null) mainWindow.setTitle(recoveryShell.taskbarName);
   const keepRecoveryWindowInBackground = recoveryShell !== null && process.env.ETHER_RECOVERY_BACKGROUND === "1";
   mainWindow.once("ready-to-show", () => {
-    if (keepRecoveryWindowInBackground) return;
+    if (keepRecoveryWindowInBackground) {
+      mainWindow.webContents.setBackgroundThrottling(false);
+      mainWindow.setSkipTaskbar(true);
+      mainWindow.setPosition(-32_000, -32_000, false);
+      mainWindow.showInactive();
+      return;
+    }
     if (credentialOnly) {
       mainWindow.center();
       mainWindow.show();
