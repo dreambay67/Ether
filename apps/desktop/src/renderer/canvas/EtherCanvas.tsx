@@ -572,7 +572,7 @@ const CanvasInner = forwardRef<EtherCanvasHandle, { graph: EtherGraph; catalog: 
     const frame = surface?.getBoundingClientRect();
     if (frame === undefined || frame.width <= 0 || frame.height <= 0) return;
     const minimap = surface?.querySelector<HTMLElement>(".react-flow__minimap")?.getBoundingClientRect();
-    const next = getViewportForBounds(content, frame.width, frame.height, 0.1, 1.25, {
+    const next = getViewportForBounds(content, frame.width, frame.height, 0.05, 1.25, {
       top: "86px",
       right: `${42 + (minimap?.width ?? 0)}px`,
       bottom: `${42 + (minimap?.height ?? 0)}px`,
