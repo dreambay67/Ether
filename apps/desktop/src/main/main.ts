@@ -158,7 +158,9 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
     });
   }
   if (recoveryShell !== null) mainWindow.setTitle(recoveryShell.taskbarName);
+  const keepRecoveryWindowInBackground = recoveryShell !== null && process.env.ETHER_RECOVERY_BACKGROUND === "1";
   mainWindow.once("ready-to-show", () => {
+    if (keepRecoveryWindowInBackground) return;
     if (credentialOnly) {
       mainWindow.center();
       mainWindow.show();
@@ -321,6 +323,7 @@ export async function startEtherDesktop(options: DesktopStartOptions = {}): Prom
   };
   const coordinator = new OpenDocumentCoordinator({
     focus: () => {
+      if (keepRecoveryWindowInBackground) return;
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();

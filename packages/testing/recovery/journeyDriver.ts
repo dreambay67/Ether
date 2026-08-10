@@ -723,7 +723,8 @@ export async function launchRecoveryJourney(config: RecoveryJourneyConfig): Prom
     const environment = Object.fromEntries(Object.entries({
       ...process.env,
       APPDATA: profile.appData,
-      LOCALAPPDATA: profile.localAppData
+      LOCALAPPDATA: profile.localAppData,
+      ETHER_RECOVERY_BACKGROUND: "1"
     }).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
     delete environment.ETHER_RENDERER_URL;
 
