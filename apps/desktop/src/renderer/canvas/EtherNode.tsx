@@ -1,6 +1,7 @@
 import { memo, useState, type FocusEvent } from "react";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { Check, LockKeyhole, Pencil, Trash2, Unlock, X } from "lucide-react";
+import { getNodeDefinition } from "@ether/graph-kernel";
 import type { EtherNode as SchemaNode, PayloadChannel } from "@ether/schema";
 import { ChannelRail } from "./ports/ChannelRail";
 import { NodePreview } from "./nodes/NodePreview";
@@ -28,11 +29,26 @@ export type EtherCanvasNodeData = {
 };
 const familyLabel: Record<string, string> = { prompt: "Prompt", reference: "Reference", generation: "Generation", edit: "Edit", review: "Review", flow: "Flow", output: "Output", canvas: "Canvas" };
 
+export type NodeReadiness = "Ready" | "Needs setup";
+
+export function nodeReadinessLabel(node: SchemaNode): NodeReadiness {
+  try {
+    const definition = getNodeDefinition(node.definitionId);
+    if (!definition.configSchema.safeParse(node.config).success) return "Needs setup";
+    if (node.config.kind === "output.export" && node.config.pathGrantId === "unconfigured") return "Needs setup";
+    const primaryEditor = primaryEditorFor(node);
+    return primaryEditor !== null && primaryEditor.value.trim() === "" ? "Needs setup" : "Ready";
+  } catch {
+    return "Needs setup";
+  }
+}
+
 export const EtherNode = memo(function EtherNode({ id, data, selected }: NodeProps & { data: EtherCanvasNodeData }) {
   const { node } = data;
   const family = node.definitionId.split(".")[0] ?? "canvas";
   const subtitle = node.definitionId.split(".")[1]?.replace(/(^|[-.])(\w)/g, (_, __, character) => String(character).toUpperCase()) ?? "";
   const primaryEditor = primaryEditorFor(node);
+  const readiness = nodeReadinessLabel(node);
   return <article className={`ether-node ether-node-family-${family}${selected ? " is-selected" : ""}${data.activeEditor ? " is-editing" : ""}`} data-testid="ether-node" data-node-id={id} data-node-family={family} data-node-definition={node.definitionId}>
     <NodeResizer color="var(--ether-cyan)" isVisible={selected && !data.readOnly && !data.activeEditor} minWidth={190} minHeight={132} onResizeStart={data.onResizeStart} onResizeEnd={(_, params) => { if (!data.readOnly) data.onResize(id, { width: Math.round(params.width), height: Math.round(params.height) }); data.onResizeEnd(); }} />
     <ChannelRail direction="input" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedInput} intentChannels={data.intentInput} disabled={data.readOnly} onActivate={(channel) => data.onHandleActivate(id, channel, "target")} />
@@ -42,7 +58,7 @@ export const EtherNode = memo(function EtherNode({ id, data, selected }: NodePro
       {data.activeEditor === "primary" && primaryEditor ? <InlineNodeEditor label={primaryEditor.label} value={primaryEditor.value} placeholder={primaryEditor.placeholder} onCommit={(value) => data.onEditCommit(id, "primary", value)} onCancel={data.onEditCancel} /> : <div className={`ether-node-primary${primaryEditor ? " is-editable" : ""}`} role={primaryEditor ? "button" : undefined} tabIndex={primaryEditor ? 0 : undefined} aria-label={primaryEditor ? `Edit ${primaryEditor.label}` : undefined} title={primaryEditor && !data.readOnly ? "Double-click or press Enter to edit" : undefined} onClick={(event) => { event.stopPropagation(); data.onSelect(id, event.ctrlKey || event.metaKey || event.shiftKey); }} onDoubleClick={() => { if (!data.readOnly && primaryEditor) data.onEditRequest(id, "primary"); }} onKeyDown={(event) => { if (event.key === "Enter" && !data.readOnly && primaryEditor) { event.preventDefault(); data.onSelect(id, false); data.onEditRequest(id, "primary"); } }}><NodePreview node={node} />{primaryEditor && !data.readOnly ? <Pencil size={11} aria-hidden="true" /> : null}</div>}
     </div>
     <NodeStatusLayer status={data.status ?? null} />
-    <footer className="ether-node-footer"><span>{data.activeEditor ? "Editing" : node.presentation.collapsed ? "Collapsed" : "Ready"}</span><button type="button" className="nodrag" aria-label={`Delete ${node.title}`} disabled={data.readOnly || data.activeEditor !== null} onClick={() => { if (!data.readOnly) data.onDelete(id); }}><Trash2 size={14} /></button></footer>
+    <footer className="ether-node-footer"><span>{data.activeEditor ? "Editing" : node.presentation.collapsed ? "Collapsed" : readiness}</span><button type="button" className="nodrag" aria-label={`Delete ${node.title}`} disabled={data.readOnly || data.activeEditor !== null} onClick={() => { if (!data.readOnly) data.onDelete(id); }}><Trash2 size={14} /></button></footer>
     <ChannelRail direction="output" nodeTitle={node.title} nodeDefinitionId={node.definitionId} connectedChannels={data.connectedOutput} intentChannels={data.intentOutput} disabled={data.readOnly} onActivate={(channel) => data.onHandleActivate(id, channel, "source")} />
   </article>;
 });

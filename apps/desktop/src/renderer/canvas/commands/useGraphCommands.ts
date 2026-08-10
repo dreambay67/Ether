@@ -1,12 +1,66 @@
 import { useCallback, useMemo } from "react";
-import type { EtherEdge, EtherGraph, EtherNode, GraphOperation } from "@ether/schema";
+import type { EtherEdge, EtherGraph, EtherNode, GraphOperation, NodePosition } from "@ether/schema";
 import type { CanvasEditorField } from "./directEditing";
 import { moduleIsLocked } from "../modules/moduleModel";
 
 export type GraphCommandId = "delete" | "duplicate" | "copy" | "cut" | "paste" | "selectAll" | "undo" | "redo" | "createModule" | "dissolveModule" | "rename" | "edit" | "runSelected" | "fit" | "palette";
-export type GraphCommand = { id: GraphCommandId; label: string; shortcut: string; enabled: boolean; disabledReason?: string; execute(): void | Promise<unknown> };
+export type GraphCommand = { id: GraphCommandId; label: string; shortcut: string; enabled: boolean; disabledReason?: string; execute(): void | Promise<unknown>; executeAltDrag?(nodeIds: readonly string[], delta: NodePosition): Promise<boolean> };
 type ClipboardSnapshot = { kind: "ether.graph-selection.v1"; nodes: EtherNode[]; edges: EtherEdge[]; pasteCount: number };
 let graphClipboard: ClipboardSnapshot | null = null;
+
+export type GraphDeleteImpact = { nodeCount: number; laneCount: number };
+
+export function graphDeleteImpact(graph: Pick<EtherGraph, "nodes" | "edges">, selectedNodeIds: readonly string[], selectedEdgeId: string | null): GraphDeleteImpact {
+  const nodeIds = new Set(selectedNodeIds);
+  const edgeIds = new Set<string>();
+  if (selectedEdgeId !== null && graph.edges.some((edge) => edge.id === selectedEdgeId)) edgeIds.add(selectedEdgeId);
+  graph.edges.forEach((edge) => {
+    if ((edge.from.kind === "node" && nodeIds.has(edge.from.nodeId)) || (edge.to.kind === "node" && nodeIds.has(edge.to.nodeId))) edgeIds.add(edge.id);
+  });
+  return {
+    nodeCount: graph.nodes.filter((node) => nodeIds.has(node.id)).length,
+    laneCount: edgeIds.size
+  };
+}
+
+export function graphDeleteConfirmationMessage(impact: GraphDeleteImpact) {
+  const count = (value: number, singular: string) => `${value} ${singular}${value === 1 ? "" : "s"}`;
+  return `Delete ${count(impact.nodeCount, "node")}?\n\nImpact: ${count(impact.nodeCount, "node")} and ${count(impact.laneCount, "lane")} will be removed. Connected lanes will be deleted with the nodes. This change is undoable.`;
+}
+
+export function confirmGraphDeletion(graph: Pick<EtherGraph, "nodes" | "edges">, selectedNodeIds: readonly string[], selectedEdgeId: string | null) {
+  const impact = graphDeleteImpact(graph, selectedNodeIds, selectedEdgeId);
+  return impact.nodeCount === 0 || impact.laneCount === 0 || window.confirm(graphDeleteConfirmationMessage(impact));
+}
+
+export function cloneGraphSelection(graph: Pick<EtherGraph, "nodes" | "edges">, selectedNodeIds: readonly string[], offset: NodePosition, titleSuffix = "") {
+  const selected = new Set(selectedNodeIds);
+  const idMap = new Map<string, string>();
+  const nodes = graph.nodes
+    .filter((node) => selected.has(node.id))
+    .map((node) => {
+      const id = crypto.randomUUID();
+      idMap.set(node.id, id);
+      return {
+        ...structuredClone(node),
+        id,
+        title: `${node.title}${titleSuffix}`,
+        position: { x: node.position.x + offset.x, y: node.position.y + offset.y }
+      };
+    });
+  const edges = graph.edges
+    .filter((edge) => edge.from.kind === "node" && edge.to.kind === "node" && selected.has(edge.from.nodeId) && selected.has(edge.to.nodeId))
+    .map((edge) => {
+      if (edge.from.kind !== "node" || edge.to.kind !== "node") throw new Error("Only node-to-node edges can be cloned with a node selection.");
+      return {
+        ...structuredClone(edge),
+        id: crypto.randomUUID(),
+        from: { ...edge.from, nodeId: idMap.get(edge.from.nodeId)! },
+        to: { ...edge.to, nodeId: idMap.get(edge.to.nodeId)! }
+      };
+    });
+  return { nodes, edges };
+}
 
 export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdgeId, selectedModuleId, apply, createModule, dissolveModule, undo, redo, onSelectNodes, onSelectEdge, onSelectModule, onEdit, onRenameModule, onEnterModule, onRunSelected, onFit, onPalette, onStatus }: {
   graph: EtherGraph;
@@ -46,6 +100,7 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
     return true;
   }, [graph.edges, onStatus, selection]);
   const deleteSelection = useCallback(async () => {
+    if (!confirmGraphDeletion(graph, selectedNodeIds, selectedEdgeId)) { onStatus("Delete cancelled; no change was made."); return; }
     const ids = new Set(selectedNodeIds);
     const edgeIds = new Set<string>();
     if (selectedEdgeId) edgeIds.add(selectedEdgeId);
@@ -67,7 +122,23 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
     if (await apply(operations, operations.length === 1 ? "Delete graph object" : "Delete graph selection")) {
       onSelectNodes([]); onSelectEdge(null);
     }
-  }, [apply, graph.edges, graph.groups, graph.id, onSelectEdge, onSelectNodes, selectedEdgeId, selectedNodeIds]);
+  }, [apply, graph, onSelectEdge, onSelectNodes, onStatus, selectedEdgeId, selectedNodeIds]);
+  const duplicateForAltDrag = useCallback(async (nodeIds: readonly string[], delta: NodePosition) => {
+    if (readOnly) return false;
+    const clone = cloneGraphSelection(graph, nodeIds, delta, " copy");
+    if (clone.nodes.length === 0) return false;
+    const operations: GraphOperation[] = [
+      ...clone.nodes.map((node) => ({ type: "addNode", graphId: graph.id, node } as GraphOperation)),
+      ...clone.edges.map((edge) => ({ type: "addEdge", graphId: graph.id, edge } as GraphOperation))
+    ];
+    const saved = await apply(operations, "Alt-drag duplicate selection");
+    if (saved) {
+      onSelectEdge(null);
+      onSelectModule(null);
+      onSelectNodes(clone.nodes.map((node) => node.id));
+    }
+    return saved;
+  }, [apply, graph, onSelectEdge, onSelectModule, onSelectNodes, readOnly]);
   const paste = useCallback(async (duplicate = false) => {
     let snapshot = duplicate ? (selection.length > 0 ? {
       kind: "ether.graph-selection.v1" as const,
@@ -104,9 +175,14 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
   const selectedModule = selectedModuleId === null ? undefined : graph.modules.find((module) => module.id === selectedModuleId);
   const noSelection = "Select a node first.";
   const locked = readOnly ? "This document is read-only." : undefined;
-  return useMemo<GraphCommand[]>(() => [
+  return useMemo<GraphCommand[]>(() => {
+    const duplicate = {
+      ...command("duplicate", "Duplicate", "Ctrl+D", !readOnly && selection.length > 0, locked ?? noSelection, () => paste(true)),
+      executeAltDrag: duplicateForAltDrag
+    } satisfies GraphCommand;
+    return [
     command("delete", "Delete", "Delete", !readOnly && (selectedNodeIds.length > 0 || selectedEdgeId !== null), locked ?? "Select a node or connection first.", deleteSelection),
-    command("duplicate", "Duplicate", "Ctrl+D", !readOnly && selection.length > 0, locked ?? noSelection, () => paste(true)),
+    duplicate,
     command("copy", "Copy", "Ctrl+C", selection.length > 0, noSelection, copySelection),
     command("cut", "Cut", "Ctrl+X", !readOnly && selection.length > 0, locked ?? noSelection, cut),
     command("paste", "Paste", "Ctrl+V", !readOnly, locked, () => paste(false)),
@@ -120,7 +196,8 @@ export function useGraphCommands({ graph, readOnly, selectedNodeIds, selectedEdg
     command("runSelected", "Preview selected run", "Ctrl+Enter", selectedNodeIds.length > 0, noSelection, onRunSelected),
     command("fit", "Fit current graph", "Home", graph.nodes.length + graph.modules.length > 0, "This canvas is blank.", onFit),
     command("palette", "Command palette", "Ctrl+K", true, undefined, onPalette)
-  ], [copySelection, createModule, cut, deleteSelection, dissolveModule, graph.modules.length, graph.nodes, locked, onEdit, onEnterModule, onFit, onPalette, onRenameModule, onRunSelected, onSelectEdge, onSelectModule, onSelectNodes, paste, primary, readOnly, redo, selectedEdgeId, selectedModule, selectedModuleId, selectedNodeIds, selection.length, undo]);
+    ];
+  }, [copySelection, createModule, cut, deleteSelection, dissolveModule, duplicateForAltDrag, graph.modules.length, graph.nodes, locked, noSelection, onEdit, onEnterModule, onFit, onPalette, onRenameModule, onRunSelected, onSelectEdge, onSelectModule, onSelectNodes, paste, primary, readOnly, redo, selectedEdgeId, selectedModule, selectedModuleId, selectedNodeIds, selection.length, undo]);
 }
 
 function command(id: GraphCommandId, label: string, shortcut: string, enabled: boolean, disabledReason: string | undefined, execute: GraphCommand["execute"]): GraphCommand {

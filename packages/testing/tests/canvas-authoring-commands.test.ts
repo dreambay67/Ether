@@ -1,17 +1,43 @@
 import { describe, expect, it } from "vitest";
 import { nodeLibraryItems } from "@ether/graph-kernel";
-import type { EtherNode } from "@ether/schema";
+import type { EtherEdge, EtherGraph, EtherNode } from "@ether/schema";
 
-import { commandIdForKeyboard, commandPreservesCanvasFocus } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
+import { cloneGraphSelection, commandIdForKeyboard, commandPreservesCanvasFocus, graphDeleteConfirmationMessage, graphDeleteImpact } from "../../../apps/desktop/src/renderer/canvas/commands/useGraphCommands";
 import { configFromPrimaryDraft, primaryEditorFor } from "../../../apps/desktop/src/renderer/canvas/commands/directEditing";
 import { createNodeFromDefinition } from "../../../apps/desktop/src/renderer/canvas/commands/useNodeCommands";
 import { marqueeHitIds, marqueeRectangle, marqueeSelectionStart, marqueeSelectionUpdate, toggleId } from "../../../apps/desktop/src/renderer/canvas/hooks/useCanvasInteraction";
 import { filterNodeCatalog } from "../../../apps/desktop/src/renderer/canvas/library/NodeLibrary";
 import { centeredCanvasPosition, openCanvasPosition } from "../../../apps/desktop/src/renderer/canvas/placement";
+import { isBlankCanvas } from "../../../apps/desktop/src/renderer/canvas/CanvasSurface";
+import { nodeReadinessLabel } from "../../../apps/desktop/src/renderer/canvas/EtherNode";
 import { canvasCommandForAccelerator } from "../../../apps/desktop/src/main/canvasAccelerator";
 
 const presentation = { collapsed: false, accent: "default", previewMode: "content" as const };
 const base = { id: "node-1", title: "Node", position: { x: 10, y: 20 }, size: { width: 240, height: 150 }, presentation };
+
+function promptNode(id: string, position: { x: number; y: number }) {
+  const definition = nodeLibraryItems.find((item) => item.definitionId === "prompt.text");
+  if (definition === undefined) throw new Error("The prompt definition is missing from the test catalog.");
+  const node = createNodeFromDefinition(definition, 1, position);
+  if (node === null) throw new Error("The prompt definition produced an invalid test node.");
+  return { ...node, id };
+}
+
+function nodeEdge(id: string, fromId: string, toId: string): EtherEdge {
+  return { id, from: { kind: "node", nodeId: fromId, channel: "text" }, to: { kind: "node", nodeId: toId, channel: "text" }, role: "general", order: 0, selector: { kind: "latest-approved" }, adapter: { kind: "auto" }, enabled: true };
+}
+
+function selectionGraph(): Pick<EtherGraph, "nodes" | "edges"> {
+  return {
+    nodes: [
+      promptNode("source", { x: 10, y: 20 }),
+      promptNode("target", { x: 310, y: 20 }),
+      promptNode("external", { x: 610, y: 20 }),
+      promptNode("isolated", { x: 10, y: 260 })
+    ] as unknown as EtherGraph["nodes"],
+    edges: [nodeEdge("internal", "source", "target"), nodeEdge("outbound", "target", "external")]
+  };
+}
 
 describe("canvas authoring command map", () => {
   it("maps the recovery shortcuts through one command vocabulary", () => {
@@ -84,7 +110,8 @@ describe("canvas authoring command map", () => {
     expect(filterNodeCatalog(nodeLibraryItems, "copy").map((item) => item.definitionId)).toEqual(["prompt.text"]);
     expect(filterNodeCatalog(nodeLibraryItems, "nano banana").map((item) => item.definitionId)).toEqual(["generation.image"]);
 
-    const node = prompt === undefined ? null : createNodeFromDefinition(prompt, 1, { x: 12, y: 34 }, "prompt-node");
+    const created = prompt === undefined ? null : createNodeFromDefinition(prompt, 1, { x: 12, y: 34 });
+    const node = created === null ? null : { ...created, id: "prompt-node" };
     expect(node).not.toBeNull();
     expect(node).toMatchObject({ id: "prompt-node", definitionId: "prompt.text", title: "Prompt 1", size: { width: 220, height: 180 }, config: { kind: "prompt.text", body: "" } });
   });
@@ -95,6 +122,53 @@ describe("canvas authoring command map", () => {
     expect(openCanvasPosition(centered, [])).toEqual(centered);
     expect(openCanvasPosition(centered, [{ position: centered, size: { width: 220, height: 140 } }]))
       .toEqual({ x: 230, y: 150 });
+  });
+
+  it("shows the blank workflow overlay only for a truly empty canvas", () => {
+    expect(isBlankCanvas({ nodes: [], modules: [] })).toBe(true);
+    expect(isBlankCanvas({ nodes: [], modules: [{} as EtherGraph["modules"][number]] })).toBe(false);
+  });
+
+  it("duplicates a selected subgraph with offset nodes and remapped internal lanes", () => {
+    const graph = selectionGraph();
+    const clone = cloneGraphSelection(graph, ["source", "target"], { x: 80, y: 40 }, " copy");
+    const cloneIds = new Set<string>(clone.nodes.map((node) => node.id));
+
+    expect(clone.nodes).toHaveLength(2);
+    expect(clone.nodes.map((node) => node.title)).toEqual(["Prompt 1 copy", "Prompt 1 copy"]);
+    expect(clone.nodes.map((node) => node.position)).toEqual([{ x: 90, y: 60 }, { x: 390, y: 60 }]);
+    expect(clone.edges).toHaveLength(1);
+    const clonedEdge = clone.edges[0];
+    expect(clonedEdge?.from.kind).toBe("node");
+    expect(clonedEdge?.to.kind).toBe("node");
+    if (clonedEdge?.from.kind === "node") expect(cloneIds.has(clonedEdge.from.nodeId)).toBe(true);
+    if (clonedEdge?.to.kind === "node") expect(cloneIds.has(clonedEdge.to.nodeId)).toBe(true);
+    expect(clone.edges[0]?.id).not.toBe("internal");
+  });
+
+  it("summarizes node deletion impact while keeping edge-only and isolated deletes immediate", () => {
+    const graph = selectionGraph();
+    expect(graphDeleteImpact(graph, ["source", "target"], null)).toEqual({ nodeCount: 2, laneCount: 2 });
+    expect(graphDeleteImpact(graph, [], "internal")).toEqual({ nodeCount: 0, laneCount: 1 });
+    expect(graphDeleteImpact(graph, ["isolated"], null)).toEqual({ nodeCount: 1, laneCount: 0 });
+    expect(graphDeleteConfirmationMessage({ nodeCount: 2, laneCount: 2 })).toContain("2 nodes and 2 lanes");
+  });
+});
+
+describe("node footer readiness", () => {
+  it("reports setup state from config completeness without probing providers", () => {
+    const blankPrompt = promptNode("blank-prompt", { x: 0, y: 0 });
+    const configuredPrompt = { ...blankPrompt, config: { ...blankPrompt.config, body: "Describe the result." } };
+    const imageDefinition = nodeLibraryItems.find((item) => item.definitionId === "generation.image");
+    const imageNode = imageDefinition === undefined ? null : createNodeFromDefinition(imageDefinition, 1, { x: 0, y: 0 });
+    const exportDefinition = nodeLibraryItems.find((item) => item.definitionId === "output.export");
+    const exportNode = exportDefinition === undefined ? null : createNodeFromDefinition(exportDefinition, 1, { x: 0, y: 0 });
+
+    expect(nodeReadinessLabel(blankPrompt)).toBe("Needs setup");
+    expect(nodeReadinessLabel(configuredPrompt)).toBe("Ready");
+    expect(imageNode === null ? null : nodeReadinessLabel(imageNode)).toBe("Ready");
+    expect(exportNode === null ? null : nodeReadinessLabel(exportNode)).toBe("Needs setup");
+    expect(nodeReadinessLabel({ ...blankPrompt, config: { ...blankPrompt.config, body: 42 } as never })).toBe("Needs setup");
   });
 });
 
