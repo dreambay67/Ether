@@ -131,7 +131,10 @@ async function chooseReference(input: RealPageInput, userData: string, button: L
 
 async function setReferenceSelection(input: RealPageInput, desk: Locator, displayName: string, enabled: boolean, role: string, label: string): Promise<void> {
   const row = desk.locator(".reference-row").filter({ hasText: displayName });
-  await input.leftClick(row.getByRole("checkbox", { name: `Select ${displayName}`, exact: true }), label, "The Reference Desk selection carries explicit inclusion and role metadata.");
+  const selector = row.getByRole("checkbox", { name: `Select ${displayName}`, exact: true });
+  if (!(await selector.isChecked())) {
+    await input.leftClick(selector, label, "The Reference Desk selection carries explicit inclusion and role metadata.");
+  }
   const include = row.getByRole("checkbox", { name: "Include", exact: true });
   if (enabled) await include.check();
   else await include.uncheck();

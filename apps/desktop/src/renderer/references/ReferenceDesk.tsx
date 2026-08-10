@@ -1,4 +1,4 @@
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { Columns3, Files, Grid2X2, Link2, List, PackagePlus, RefreshCcw, ScanSearch, Waves } from "lucide-react";
 import type { ConnectionRole, EtherGraph, FlowBatchConfig, GraphOperation, ReferenceSetMember } from "@ether/schema";
 import type { ReferenceAction } from "../../shared/ipc/contracts";
@@ -34,7 +34,17 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
   const [batchTargetKey, setBatchTargetKey] = useState(batchTargets[0]?.key ?? "");
   const target = referenceSets.find((node) => node.id === targetId) ?? referenceSets[0];
   const batchTarget = batchTargets.find((candidate) => candidate.key === batchTargetKey) ?? batchTargets[0];
+  const savedMembers = target?.config.kind === "reference.set" ? target.config.members : [];
+  const savedMembershipKey = savedMembers.map((member) => `${member.referenceId}:${member.enabled ? 1 : 0}:${member.roleOverride ?? "general"}`).join("\u001f");
   const selectedReferences = references.filter((reference) => selection.has(reference.id));
+
+  useEffect(() => {
+    setSelection(new Map(savedMembers.map((member) => [member.referenceId, {
+      enabled: member.enabled,
+      ...(member.roleOverride === undefined ? {} : { roleOverride: member.roleOverride })
+    }])));
+    setCompareOpen(false);
+  }, [target?.id, savedMembershipKey]);
 
   const choose = async (storage: "link" | "embed") => {
     if (!target) return;
@@ -85,7 +95,6 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
         name: "reference.assignToSet", payload: { nodeId: target.id, members, replace }
       });
       onStatus(`${members.length} reference${members.length === 1 ? "" : "s"} ${replace ? "replaced the" : "added to the"} set.`);
-      setSelection(new Map());
       setCompareOpen(false);
       await Promise.all([refresh(), onGraphUpdated()]);
     } catch (cause) {
@@ -189,7 +198,7 @@ export function ReferenceDesk({ documentId, graph, onGraphUpdated, onStatus }: {
       {compareOpen && selectedReferences.length >= 2 ? <ReferenceComparison references={selectedReferences.slice(0, 2)} /> : null}
       {loading ? <p>Loading references…</p> : error ? <p role="alert">{error}</p> : references.length === 0 ? <p className="reference-empty">No references yet. Link a file to keep it external, embed a portable copy, or drop files here.</p> : <ReferenceGrid references={references} selection={selection} view={view} onSelectionChange={setSelection} onRecover={(referenceId, action) => void recover(referenceId, action)} />}
       <footer>
-        <span>{selection.size} selected · {references.length} total</span>
+        <span>{selection.size} selected · {savedMembers.length} saved in set · {references.length} total</span>
         <div className="reference-batch-send">
           <select aria-label="Batch dimension" value={batchTarget?.key ?? ""} disabled={batchTargets.length === 0} onChange={(event) => setBatchTargetKey(event.target.value)}>{batchTargets.map((candidate) => <option key={candidate.key} value={candidate.key}>{candidate.label}</option>)}</select>
           <button type="button" disabled={!batchTarget || selection.size === 0} onClick={() => void sendToBatchDimension()}>Send to Batch</button>
