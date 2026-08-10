@@ -50,7 +50,7 @@ export function EtherShell({
   }[shell.workspace];
   const applicationAvailable = typeof window.ether.application?.onEvent === "function";
   const artifactObservatory = applicationAvailable
-    ? <Suspense fallback={<p>Loading Artifact Observatory…</p>}><ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /></Suspense>
+    ? <Suspense fallback={<p>Loading Artifact Observatory...</p>}><ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /></Suspense>
     : canvas;
   const upperPane = shell.workspace === "build"
     ? { label: "Reference Desk", content: referenceDesk }
@@ -58,7 +58,7 @@ export function EtherShell({
       ? { label: "Batch Matrix", content: batchMatrix }
       : shell.workspace === "review"
         ? { label: "Review focus", content: <div className="review-focus-brief"><Sparkles size={16} /><strong>Artifact decisions are centered below.</strong><p>Expand this desk only when you want more vertical review context.</p></div> }
-        : { label: "Live output", content: applicationAvailable ? <Suspense fallback={<p>Loading live output…</p>}><ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /></Suspense> : <p>Live output is unavailable in this compatibility session.</p> };
+        : { label: "Live output", content: applicationAvailable ? <Suspense fallback={<p>Loading live output...</p>}><ArtifactBrowser key={`${documentId}:${artifactRevision}`} documentId={documentId} /></Suspense> : <p>Live output is unavailable in this compatibility session.</p> };
   const upperPaneLimit = shell.workspace === "run" || shell.workspace === "build" ? "16vh" : "24vh";
   const runPaneLimit = shell.workspace === "run" ? "35vh" : "24vh";
 
