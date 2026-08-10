@@ -128,10 +128,11 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await page.getByRole("button", { name: "Compare selected" }).click();
   await expect(page.getByRole("region", { name: "Reference comparison" })).toContainText("Reference 001.png");
   await page.getByRole("button", { name: "Deduplicate selection" }).click();
-  await expect(page.getByText("1 selected · 100 total")).toBeVisible();
+  await expect(page.getByText("1 selected · 0 saved in set · 100 total")).toBeVisible();
   await page.getByRole("article").filter({ hasText: "Reference 001.png" }).getByRole("checkbox", { name: "Include" }).uncheck();
   await page.getByRole("combobox", { name: "Reference 001.png role override" }).selectOption("style");
   await page.getByRole("button", { name: "Add to set" }).press("Enter");
+  await page.getByRole("checkbox", { name: "Select Reference 001.png" }).uncheck();
   await page.getByRole("checkbox", { name: "Select Reference 003.png" }).check();
   await page.getByRole("button", { name: "Replace set" }).press("Enter");
   await page.getByRole("button", { name: "Link file" }).click();
@@ -142,6 +143,7 @@ test("manages 100 references, batch allocation and concurrency controls, and 500
   await expect(missing).toContainText("missing");
   await missing.getByRole("button", { name: "Locate" }).click();
   await grid.evaluate((element) => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll", { bubbles: true })); });
+  await page.getByRole("checkbox", { name: "Select Reference 003.png" }).uncheck();
   await page.getByRole("checkbox", { name: "Select Reference 001.png" }).check();
   await page.getByRole("combobox", { name: "Batch dimension" }).selectOption({ label: "Markets × treatments · Market" });
   await page.getByRole("button", { name: "Send to Batch" }).press("Enter");
