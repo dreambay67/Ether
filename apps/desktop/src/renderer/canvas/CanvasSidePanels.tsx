@@ -77,7 +77,7 @@ function SelectionRunPrompt({ selectedIds, runLabel, runPlan, runBusy, onRunSele
       setPlacement(best.placement);
     });
     return () => globalThis.cancelAnimationFrame(frame);
-  }, [placement, runPlan?.id, runPlan?.blockingWarnings.length, runBusy, runLabel, selectedIds.length]);
+  }, [placement, runPlan?.planId, runPlan?.blockingWarnings.length, runBusy, runLabel, selectedIds.length]);
   return <aside ref={promptRef} className="canvas-selection-run-prompt" data-placement={placement} aria-label="Selected run prompt"><strong>{selectedIds.length} nodes selected</strong>{runPlan ? <RunPlanDetails plan={runPlan} title="Selected plan" /> : <p>Prepare an exact selected-node plan before any provider work starts.</p>}<div><button type="button" disabled={runBusy || (runPlan?.blockingWarnings.length ?? 0) > 0} onClick={onRunSelected}>{runLabel}</button><button type="button" disabled={runBusy} onClick={onDismissRun}>Dismiss</button></div></aside>;
 }
 

@@ -50,7 +50,7 @@ test("records a blank-UI authored document through save, document actions, close
     await expect(page.locator(".react-flow__node")).toHaveCount(0);
 
     await input.leftClick(
-      page.getByRole("button", { name: "Prompt", exact: true }),
+      page.getByRole("button", { name: "Add Prompt", exact: true }),
       "Create the first graph node on the blank canvas",
       "A Prompt node is created only through the visible authoring UI."
     );
@@ -117,7 +117,7 @@ test("records a blank-UI authored document through save, document actions, close
 
     const saveStateObservation = observeSavingThenSaved(page);
     await input.leftClick(
-      page.getByRole("button", { name: "Image", exact: true }),
+      page.getByRole("button", { name: "Add Image Generator", exact: true }),
       "Edit the saved document through the visible UI before a recovery restart",
       "A second node is committed and autosaved before the deliberate process kill."
     );
