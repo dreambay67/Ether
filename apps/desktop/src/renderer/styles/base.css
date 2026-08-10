@@ -2808,7 +2808,7 @@ button.ether-edge-channel-dot[aria-expanded="true"] {
   border-radius: 8px;
   background: transparent;
   color: var(--ether-text-primary);
-  pointer-events: auto;
+  pointer-events: none;
   transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
