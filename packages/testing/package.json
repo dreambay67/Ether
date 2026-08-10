@@ -26,6 +26,8 @@
     "test:recovery-driver": "vitest run --config vitest.config.ts tests/recovery-journey-driver.test.ts",
     "test:recovery-baseline:source": "cross-env ETHER_RECOVERY_BASELINE_MODE=source-electron playwright test --config playwright.recovery-baseline.config.ts",
     "test:recovery-baseline:packaged": "cross-env ETHER_RECOVERY_BASELINE_MODE=packaged playwright test --config playwright.recovery-baseline.config.ts",
+    "test:j02-node-catalog:source": "cross-env ETHER_J02_NODE_CATALOG_MODE=source-electron playwright test --config playwright.j02-node-catalog.config.ts",
+    "test:j02-node-catalog:packaged": "cross-env ETHER_J02_NODE_CATALOG_MODE=packaged playwright test --config playwright.j02-node-catalog.config.ts",
     "test:gui-checkpoint:packaged": "playwright test --config playwright.gui-checkpoint.config.ts",
     "test:module-authoring-recovery:packaged": "playwright test --config playwright.module-authoring-recovery.config.ts",
     "test:connection-inspector-recovery:packaged": "playwright test --config playwright.connection-inspector-recovery.config.ts",

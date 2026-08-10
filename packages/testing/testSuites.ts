@@ -111,6 +111,7 @@ export const testSuites = {
     "tests/desktop/drawing-edit.spec.ts"
   ],
   recoveryBaseline: ["tests/recovery/authoring-baseline.spec.ts"],
+  recoveryJ02NodeCatalog: ["tests/recovery/j02-node-catalog.spec.ts"],
   recoveryGuiCheckpoint: ["tests/recovery/gui-checkpoint.spec.ts"],
   recoveryModuleAuthoring: ["tests/recovery/module-authoring-recovery.spec.ts"],
   recoveryConnectionInspector: ["tests/recovery/connection-inspector-recovery.spec.ts"],
