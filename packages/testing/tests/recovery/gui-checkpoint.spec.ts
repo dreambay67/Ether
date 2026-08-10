@@ -52,12 +52,15 @@ test("authors the practical phase-one journey from a blank packaged document", a
     const canvasBox = await requiredBox(canvas, "authoring canvas");
     const workerBefore = await requiredBox(worker, "Worker before movement");
     const workerCenter = center(workerBefore);
+    const lowerLimit = canvasBox.y + canvasBox.height - workerBefore.height / 2 - 40;
+    const upperLimit = canvasBox.y + workerBefore.height / 2 + 40;
+    const moveDown = lowerLimit - workerCenter.y >= 300;
     const safeWorkerTarget = {
       x: workerCenter.x,
-      y: Math.min(canvasBox.y + canvasBox.height - workerBefore.height / 2 - 40, workerCenter.y + 400)
+      y: moveDown ? Math.min(lowerLimit, workerCenter.y + 400) : Math.max(upperLimit, workerCenter.y - 400)
     };
     await input.leftDrag(workerCenter, safeWorkerTarget, "Move Worker with ordinary left drag", "The Worker moves once and preserves its graph identity.");
-    await expect.poll(async () => (await requiredBox(worker, "Worker after movement")).y).toBeGreaterThan(workerBefore.y + 250);
+    await expect.poll(async () => Math.abs((await requiredBox(worker, "Worker after movement")).y - workerBefore.y)).toBeGreaterThan(250);
 
     const promptBox = await requiredBox(prompt, "Prompt for marquee");
     await input.leftMarquee(...marqueeAround(promptBox, canvasBox), "Marquee-select Prompt", "A left-drag marquee selects the intersected Prompt.");
