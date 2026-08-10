@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 test("projects the typed graph into a nonblank canvas and sends role edits through graph transactions", async ({ page }) => {
   const pageErrors: string[] = [];
@@ -23,7 +23,8 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
     Object.defineProperty(window, "ether", { value: { document: { onEvent: () => () => undefined, bootstrap: async () => descriptor(), new: async () => descriptor(), open: async () => descriptor(), openDropped: async () => descriptor(), save: async () => descriptor(), saveAs: async () => descriptor(), saveCopy: async () => descriptor(), compact: async () => ({ beforeBytes: 1, afterBytes: 1 }), makePortable: async () => ({ cancelled: false, embeddedCount: 0, embeddedBytes: 0, expectedBytes: 0, expectedCount: 0, missingReferences: [] }), close: async () => null }, graph: { snapshot: async () => ({ graph, revision: 1 }), applyTransaction: async () => ({ graph, revision: 1 }) }, application: { onEvent: () => () => undefined, command: async (command: { name: string; payload?: { transaction?: { baseGraphRevisions: Record<string, string>; operations: Array<Record<string, unknown>> }; scope?: { kind: string; nodeIds?: string[] } } }) => { const transaction = command.payload?.transaction; if (transaction) { for (const [graphId, base] of Object.entries(transaction.baseGraphRevisions)) if (graphRevisions[graphId] !== base) throw new Error("stale graph revision"); update(transaction.operations); revision += 1; for (const graphId of Object.keys(transaction.baseGraphRevisions)) graphRevisions[graphId] = `${graphId}-revision-${revision}`; } (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.push(command); if (command.name === "run.preview") { const nodeIds = command.payload?.scope?.nodeIds ?? []; return { payload: { plan: { id: "selected-plan", contentHash: `sha256:v1:${"a".repeat(64)}`, graphId: "graph-root", scope: { kind: "selected", nodeIds }, estimatedCalls: 1, requestedParallelism: 4, effectiveParallelism: 2, workItems: [{ id: "work-selected" }], warnings: [], steps: [{ id: "step-selected", nodeId: nodeIds[0] ?? "prompt", subject: { kind: "node", nodeId: nodeIds[0] ?? "prompt" }, executor: "codex-llm", inputPayloadIds: ["payload-direction"], resolvedInputBindings: [{ name: "Subject", payloadId: "payload-direction", selector: "latest-approved" }], compiledPrompt: "Subject: selected canvas direction", provider: { providerId: "ether-fake-local", modelId: "fake-worker" } }] } } }; } if (command.name === "permission.grantRun") return { payload: { permitId: "selected-permit" } }; if (command.name === "run.start") return { payload: { job: { id: "selected-job" } } }; return { payload: { kind: "revision", documentRevisionId: `revision-${revision}`, graphRevisions: Object.entries(graphRevisions).map(([graphId, revisionId]) => ({ graphId, revisionId })) } }; }, query: async (query: { name: string; payload: { graphId?: string } }) => query.name === "node.catalog" ? { name: "node.catalog", payload: { nodes: catalog } } : ({ name: query.name, payload: { graph: query.payload.graphId === "graph-child" ? childGraph : graph, documentRevisionId: `revision-${revision}`, graphRevisionId: graphRevisions[query.payload.graphId ?? "graph-root"] } }) }, artifacts: { search: async () => [], generateFake: async () => [] }, references: { list: async () => [], act: async () => [] }, runtime: { versions: async () => ({ electron: "43", node: "24" }) } } });
   });
   await page.goto("/");
-  await expect(page.getByTestId("ether-canvas-surface")).toBeVisible();
+  const canvasSurface = page.getByTestId("ether-canvas-surface");
+  await expect(canvasSurface).toBeVisible();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
   await page.keyboard.press("Control+K");
@@ -91,10 +92,12 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   };
   await addWithRealMouse("prompt.text");
-  await expect(page.locator(".ether-node")).toHaveCount(3);
+  await expect(canvasSurface).toHaveAttribute("data-graph-node-count", "3");
   await addWithRealMouse("generation.image");
-  await expect(page.locator(".ether-node")).toHaveCount(4);
-  await expect(page.getByTestId("channel-zone-output-data").first()).toHaveAttribute("data-connected", "true");
+  await expect(canvasSurface).toHaveAttribute("data-graph-node-count", "4");
+  await canvasSurface.focus();
+  await page.keyboard.press("Home");
+  await expect(promptNode.getByTestId("channel-zone-output-data")).toHaveAttribute("data-connected", "true");
   await page.locator(".ether-edge-hit-target").dispatchEvent("click", { bubbles: true });
   const edgeInspector = page.getByTestId("edge-inspector");
   await expect(edgeInspector).toContainText("Adapter · local.data-to-text");
@@ -116,7 +119,9 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await expect(page.getByTestId("edge-role-chip")).toContainText("Subject");
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(5);
   await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
-  await expect(page.locator(".ether-node")).toHaveCount(5);
+  await expect(canvasSurface).toHaveAttribute("data-graph-node-count", "5");
+  await canvasSurface.focus();
+  await page.keyboard.press("Home");
   await promptNode.locator(".ether-node-title").click();
   await page.getByRole("button", { name: "Target channel Data" }).click({ button: "right" });
   await expect(page.getByTestId("edge-role-chip")).toHaveCount(0);
@@ -153,7 +158,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("canvas-status")).toContainText("Entered Polish pipeline");
   await expect(page.getByLabel("Canvas legend").getByText("Polish pipeline")).toBeVisible();
-  await expect(page.locator(".ether-node")).toHaveCount(1);
+  await expect(canvasSurface).toHaveAttribute("data-graph-node-count", "1");
   const childPrompt = page.locator('[data-testid="rf__node-child-prompt"]');
   await childPrompt.locator(".ether-node-main p").click();
   await page.getByRole("button", { name: "Expose selected parameter" }).click();
@@ -204,9 +209,9 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   });
   expect(selectedScope).toMatchObject({ kind: "selected" });
   await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
-  await expect(page.getByLabel("Selected run prompt").getByRole("button", { name: "Preview selected run" })).toBeVisible();
+  await expect(page.getByLabel("Selected run prompt")).toHaveCount(0);
   await expect(page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" })).toHaveCount(0);
-  await page.getByLabel("Selected run prompt").getByRole("button", { name: "Preview selected run" }).click();
+  await page.getByRole("button", { name: "Preview selected run", exact: true }).click();
   await expect(page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" })).toBeVisible();
   await page.getByLabel("Selected run prompt").getByRole("button", { name: "Start 1 call" }).click();
   await expect(page.getByTestId("canvas-status")).toContainText("Selected run started: selected-job");
@@ -215,8 +220,84 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   const duplicateSelection = page.getByRole("button", { name: "Duplicate", exact: true });
   await expect(duplicateSelection).toBeEnabled();
   await duplicateSelection.click();
-  await expect(page.locator(".ether-node")).toHaveCount(8);
+  await expect(canvasSurface).toHaveAttribute("data-graph-node-count", "7");
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __canvasTransactions: unknown[] }).__canvasTransactions.length)).toBe(24);
+});
+
+test("reveals and selects a node added after a large locked module", async ({ page }) => {
+  await page.addInitScript(() => {
+    let graph = {
+      id: "graph-root", title: "Canvas fixture", kind: "root", createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z",
+      nodes: [] as Array<Record<string, unknown>>, edges: [], groups: [], modules: [{
+        id: "module-large", title: "Large locked module", description: "Occupies the working canvas", accent: "#37e6ea", locked: true, graphId: "graph-child",
+        position: { x: 0, y: 0 }, size: { width: 2400, height: 1600 },
+        interface: { inputs: [], outputs: [], parameters: [] }, collapsed: false
+      }],
+      viewState: { viewport: { x: 0, y: 0, zoom: 1 }, selectedNodeIds: [], selectedEdgeIds: [], inspectorTarget: null }
+    };
+    const catalog = [{
+      definitionId: "prompt.text", family: "prompt", title: "Prompt", description: "Write reusable text instructions.",
+      example: "Describe a quiet studio portrait.", synonyms: ["instruction", "text"], inputChannels: [], outputChannels: ["text"],
+      defaultConfig: { kind: "prompt.text", body: "", assembly: "append" },
+      inspector: { sections: [{ id: "main", title: "Prompt", fields: ["body", "assembly"] }] }, executor: "deterministic-assembly",
+      presentation: { width: 250, height: 150, previewMode: "content" }, setupRequirement: "none"
+    }];
+    let revision = 1;
+    const descriptor = () => ({
+      documentId: "canvas-large-module", displayName: "Canvas", named: true, mode: "writable", readOnlyReason: null,
+      commands: { save: true, saveAs: true, saveCopy: true, compact: true, makePortable: true }, saveState: "saved",
+      documentRevisionId: "document-revision-1", graphId: "graph-root", graphRevisionId: "graph-revision-1", simulationEnabled: false, revision
+    });
+    Object.defineProperty(window, "ether", { value: {
+      document: { onEvent: () => () => undefined, bootstrap: async () => descriptor(), new: async () => descriptor(), open: async () => descriptor(), openDropped: async () => descriptor(), save: async () => descriptor(), saveAs: async () => descriptor(), saveCopy: async () => descriptor(), compact: async () => ({ beforeBytes: 1, afterBytes: 1 }), makePortable: async () => ({ cancelled: false, embeddedCount: 0, embeddedBytes: 0, expectedBytes: 0, expectedCount: 0, missingReferences: [] }), close: async () => null },
+      graph: { snapshot: async () => ({ graph, revision }), applyTransaction: async () => ({ graph, revision }) },
+      application: {
+        onEvent: () => () => undefined,
+        query: async (query: { name: string }) => query.name === "node.catalog"
+          ? { name: query.name, payload: { nodes: catalog } }
+          : query.name === "job.list"
+            ? { name: query.name, payload: { jobs: [] } }
+            : { name: query.name, payload: { graph, documentRevisionId: `document-revision-${revision}`, graphRevisionId: `graph-revision-${revision}` } },
+        command: async (command: { payload?: { transaction?: { operations?: Array<{ type: string; node?: Record<string, unknown> }> } } }) => {
+          for (const operation of command.payload?.transaction?.operations ?? []) {
+            if (operation.type === "addNode" && operation.node !== undefined) graph = { ...graph, nodes: [...graph.nodes, operation.node] };
+          }
+          revision += 1;
+          return { payload: { documentRevisionId: `document-revision-${revision}`, graphRevisions: [{ graphId: "graph-root", revisionId: `graph-revision-${revision}` }] } };
+        }
+      },
+      artifacts: { search: async () => [], generateFake: async () => [] }, references: { list: async () => [], act: async () => [] }, runtime: { versions: async () => ({ electron: "43", node: "24" }) }
+    } });
+  });
+
+  await page.goto("/");
+  const surface = page.getByTestId("ether-canvas-surface");
+  await expect(surface).toBeVisible();
+  await expect(page.getByTestId("ether-module-node")).toHaveAttribute("data-module-locked", "true");
+
+  const assertRevealed = async (node: Locator) => {
+    await expect(node).toHaveClass(/is-selected/u);
+    await expect(node).toBeVisible();
+    const [surfaceBox, nodeBox] = await Promise.all([surface.boundingBox(), node.boundingBox()]);
+    expect(surfaceBox).not.toBeNull();
+    expect(nodeBox).not.toBeNull();
+    expect(Math.abs((nodeBox!.x + nodeBox!.width / 2) - (surfaceBox!.x + surfaceBox!.width / 2))).toBeLessThan(surfaceBox!.width * 0.1);
+    expect(Math.abs((nodeBox!.y + nodeBox!.height / 2) - (surfaceBox!.y + surfaceBox!.height / 2))).toBeLessThan(surfaceBox!.height * 0.1);
+  };
+
+  await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
+  const firstNode = page.locator(".ether-node[data-node-definition='prompt.text']").first();
+  await expect(surface).toHaveAttribute("data-graph-node-count", "1");
+  await assertRevealed(firstNode);
+
+  await surface.focus();
+  await page.keyboard.press("n");
+  const quickAdd = page.getByRole("dialog", { name: "Quick add node" });
+  await expect(quickAdd).toBeVisible();
+  await quickAdd.getByRole("option").first().click();
+  const secondNode = page.locator(".ether-node[data-node-definition='prompt.text']").last();
+  await expect(surface).toHaveAttribute("data-graph-node-count", "2");
+  await assertRevealed(secondNode);
 });
 
 test("keeps node creation disabled while a new document with the same graph id hydrates", async ({ page }) => {

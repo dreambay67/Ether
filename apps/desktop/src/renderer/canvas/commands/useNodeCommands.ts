@@ -20,15 +20,16 @@ export function useNodeCommands(graph: EtherGraph, catalog: readonly NodeLibrary
     const definition = catalog.find((item) => item.definitionId === definitionId);
     if (definition === undefined) {
       onStatus(`The canonical ${definitionId} definition is unavailable.`);
-      return false;
+      return null;
     }
     const ordinal = graph.nodes.filter((item) => item.definitionId === definitionId).length + 1;
     const node = createNodeFromDefinition(definition, ordinal, position);
     if (node === null) {
       onStatus(`The canonical ${definition.title} default configuration is invalid; no node was added.`);
-      return false;
+      return null;
     }
-    return apply([{ type: "addNode", graphId: graph.id, node } as GraphOperation], `Add ${definition.title}`);
+    const saved = await apply([{ type: "addNode", graphId: graph.id, node } as GraphOperation], `Add ${definition.title}`);
+    return saved ? node.id : null;
   }, [apply, catalog, graph.id, graph.nodes, onStatus]);
   const removeNode = useCallback((nodeId: string) => {
     const edgeOperations = graph.edges
