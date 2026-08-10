@@ -11,6 +11,10 @@ function labelFor(field: string) {
   return field.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
 }
 
+export function persistedExportFolderDisplayName(value: unknown, fallback: string | null = null): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+
 function ListEditor({ kind, field, value, disabled, onChange }: { kind: NodeConfig["kind"]; field: string; value: unknown[]; disabled: boolean; onChange(value: unknown[]): void }) {
   const sample = createRegistryListItem(kind, field, value.length);
   if (field === "artifactIds") return <div className="inspector-structured-summary"><strong>Saved members</strong><span>Managed with the Reference Set actions above</span></div>;
@@ -148,7 +152,6 @@ function VariablesFields({ context }: { context: InspectorNodeContext }) {
 export function RegistryConfigFields({ context }: { context: InspectorNodeContext }) {
   const { node, graph, apply, report, document } = context;
   const draft = useInspectorDraft<NodeConfig>(`${node.id}:registry`, node.config);
-  const [pathGrantDisplayName, setPathGrantDisplayName] = useState<string | null>(null);
   const [pathGrantBusy, setPathGrantBusy] = useState(false);
   if (node.config.kind === "flow.variables") return <VariablesFields context={context} />;
   if (purposeBuiltRegistryKinds.has(node.config.kind)) return null;
@@ -156,6 +159,7 @@ export function RegistryConfigFields({ context }: { context: InspectorNodeContex
   const definition = getNodeDefinition(node.definitionId);
   const fields = definition.inspector.sections.flatMap((section) => section.fields).filter((field) => field !== "kind");
   const config = draft.draft as unknown as Record<string, unknown>;
+  const pathGrantDisplayName = persistedExportFolderDisplayName(config.pathGrantDisplayName);
   const updateField = (field: string, value: unknown) => draft.update((current) => ({ ...current, [field]: value } as NodeConfig));
   const chooseExportFolder = async () => {
     if (disabled || node.config.kind !== "output.export") return;
@@ -163,8 +167,7 @@ export function RegistryConfigFields({ context }: { context: InspectorNodeContex
     try {
       const grant = await window.ether.permissions.grantFolder(document.documentId, "export");
       if (grant === null) return;
-      updateField("pathGrantId", grant.grantId);
-      setPathGrantDisplayName(grant.displayName);
+      draft.update((current) => ({ ...current, pathGrantId: grant.grantId, pathGrantDisplayName: grant.displayName } as NodeConfig));
       report(`Export folder selected: ${grant.displayName}. Save the export settings to keep it on this node.`);
     } catch (cause) {
       report(cause instanceof Error ? cause.message : "The export folder could not be selected.");

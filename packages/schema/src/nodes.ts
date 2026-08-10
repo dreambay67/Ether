@@ -428,6 +428,7 @@ export const OutputExportConfigSchema = z
   .object({
     kind: z.literal("output.export"),
     pathGrantId: z.string().min(1),
+    pathGrantDisplayName: z.string().min(1).max(255).regex(/^[^\\/:*?"<>|]+$/u).optional(),
     namingTemplate: z.string().min(1),
     format: z.enum(["original", "png", "jpeg", "webp"]),
     collisionPolicy: z.enum(["rename", "skip", "error"]),
