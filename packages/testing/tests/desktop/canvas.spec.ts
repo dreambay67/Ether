@@ -70,7 +70,11 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   const edgeInspector = page.getByTestId("edge-inspector");
   await expect(edgeInspector).toContainText("Adapter · local.data-to-text");
   await expect(edgeInspector).toContainText("Receiver field");
-  await expect(edgeInspector.locator("details", { hasText: "Connection diagnostics" })).not.toHaveAttribute("open", "");
+  const connectionDiagnostics = edgeInspector.getByRole("button", { name: "Connection diagnostics", exact: true });
+  await expect(connectionDiagnostics).toHaveAttribute("aria-expanded", "false");
+  await connectionDiagnostics.click();
+  await expect(connectionDiagnostics).toHaveAttribute("aria-expanded", "true");
+  await expect(edgeInspector.getByLabel("Connection adapter", { exact: true })).toBeEnabled();
   await edgeInspector.getByLabel("Output selection", { exact: true }).selectOption("latest");
   await page.getByRole("button", { name: "Target channel Text" }).click();
   const targetPicker = page.getByTestId("edge-channel-picker-target");
@@ -148,7 +152,7 @@ test("projects the typed graph into a nonblank canvas and sends role edits throu
   await rootImage.locator(".ether-node-main p").click();
   await moduleCard.locator(".ether-module-title").dispatchEvent("click", { bubbles: true, shiftKey: true });
   await expect(rootImage.locator(".ether-node")).toHaveClass(/is-selected/);
-  await expect(page.getByTestId("module-inspector").getByRole("button", { name: "Add selected to module" })).toBeEnabled();
+  await expect(page.getByTestId("module-inspector").getByRole("button", { name: "Add selected to module" })).toBeDisabled();
   await moduleCard.locator(".ether-module-title").dispatchEvent("click", { bubbles: true });
   await expect(rootImage.locator(".ether-node")).not.toHaveClass(/is-selected/);
   await page.locator(".react-flow__node-etherNode").nth(2).locator(".ether-node-main p").click();

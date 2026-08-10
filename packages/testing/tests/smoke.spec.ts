@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { nodeLibraryItems } from "@ether/graph-kernel";
 
 test("shows an immediate untitled canvas and subscribes before the initial snapshot", async ({ page }) => {
   await openEther(page);
@@ -51,7 +52,8 @@ test("keeps header, graph, tools, and status bounded across presentation widths"
 test("presents graph edits and ordinary document commands without a production fake generator", async ({ page }) => {
   await openEther(page);
 
-  await page.getByRole("button", { name: "Prompt", exact: true }).click();
+  await expect(page.getByTestId("node-library").locator(".node-library-item")).toHaveCount(17);
+  await page.getByRole("button", { name: "Add Prompt", exact: true }).click();
   await expect(page.locator(".react-flow__node")).toHaveCount(1);
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
@@ -78,9 +80,11 @@ test("explains honest read-only mode and disables canvas mutation before invocat
   for (const name of ["Save", "Save as", "Compact document", "Make document portable"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
   }
-  for (const name of ["Prompt", "Image", "Simulation output"]) {
+  await expect(page.getByRole("button", { name: "Add Image Generator", exact: true })).toBeVisible();
+  for (const name of ["Add Prompt", "Add Image Generator", "Simulation output"]) {
     await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
   }
+  await expect(page.getByTestId("node-library").locator(".node-library-item")).toHaveCount(17);
   await expect(page.locator(".react-flow__node.draggable")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save a copy", exact: true })).toBeEnabled();
   expect(await calls(page)).not.toContain("graph.apply");
@@ -143,6 +147,15 @@ test("presents simulation, compact, portable, and exact save-state feedback", as
   await expect(page.getByText("The disk is full.", { exact: true })).toHaveCount(0);
 });
 
+type SmokeFixture = {
+  mode?: "writable" | "read-only";
+  readOnlyReason?: "requested" | "writer-active" | "location-unsupported" | "sqlite-busy" | "heartbeat-failed" | null;
+  initialNode?: boolean;
+  missingReference?: "limited" | "full";
+  simulationMode?: boolean;
+  catalog: readonly unknown[];
+};
+
 async function openEther(
   page: Page,
   options: {
@@ -153,7 +166,8 @@ async function openEther(
     simulationMode?: boolean;
   } = {}
 ) {
-  await page.addInitScript((fixture) => {
+  const initFixture: SmokeFixture = { ...options, catalog: nodeLibraryItems as readonly unknown[] };
+  await page.addInitScript((fixture: SmokeFixture) => {
     const calls: string[] = [];
     const listeners: Array<(event: unknown) => void> = [];
     let revision = 1;
@@ -225,6 +239,16 @@ async function openEther(
       emit();
       return snapshot();
     };
+    const applyGraphTransaction = (operations: Array<Record<string, unknown>>) => {
+      calls.push("graph.apply");
+      for (const operation of operations) {
+        if (operation.type === "addNode") nodes = [...nodes, operation.node as Record<string, unknown>];
+      }
+      revision += 1;
+      graphRevision = `graph-revision-${revision}`;
+      emit();
+      return { graph: graph(), revision };
+    };
 
     Object.defineProperty(window, "__etherSmokeCalls", { value: calls });
     Object.defineProperty(window, "__etherEmitState", { value: (
@@ -267,15 +291,28 @@ async function openEther(
       },
       graph: {
         snapshot: async () => ({ graph: graph(), revision }),
-        applyTransaction: async (_documentId: string, transaction: { operations: Array<Record<string, unknown>> }) => {
-          calls.push("graph.apply");
-          for (const operation of transaction.operations) {
-            if (operation.type === "addNode") nodes = [...nodes, operation.node as Record<string, unknown>];
+        applyTransaction: async (_documentId: string, transaction: { operations: Array<Record<string, unknown>> }) => applyGraphTransaction(transaction.operations)
+      },
+      application: {
+        onEvent: () => () => undefined,
+        query: async (query: { name: string }) => {
+          if (query.name === "node.catalog") return { name: query.name, payload: { nodes: fixture.catalog } };
+          if (query.name === "graph.snapshot") {
+            const active = snapshot();
+            return { name: query.name, payload: { graph: graph(), documentRevisionId: active.documentRevisionId, graphRevisionId: graphRevision } };
           }
-          revision += 1;
-          graphRevision = `graph-revision-${revision}`;
-          emit();
-          return { graph: graph(), revision };
+          if (query.name === "reference.list") return { name: query.name, payload: { references: [] } };
+          if (query.name === "job.list") return { name: query.name, payload: { jobs: [] } };
+          if (query.name === "provider.capabilities") return { name: query.name, payload: { capabilities: [] } };
+          return { name: query.name, payload: {} };
+        },
+        command: async (request: { name: string; payload?: { transaction?: { operations?: Array<Record<string, unknown>> } } }) => {
+          if (request.name === "graph.applyTransaction") {
+            applyGraphTransaction(request.payload?.transaction?.operations ?? []);
+            const active = snapshot();
+            return { name: request.name, payload: { documentRevisionId: active.documentRevisionId, graphRevisions: [{ graphId: "graph-root", revisionId: graphRevision }] } };
+          }
+          return { name: request.name, payload: {} };
         }
       },
       artifacts: {
@@ -315,7 +352,7 @@ async function openEther(
       },
       runtime: { versions: async () => ({ electron: "43.1.1", node: "24.17.0" }) }
     }});
-  }, options);
+  }, initFixture);
   await page.goto("/");
   await expect(page.getByTestId("document-canvas")).toBeVisible();
 }
