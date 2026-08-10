@@ -62,6 +62,8 @@ test("authors the practical phase-one journey from a blank packaged document", a
     await input.leftDrag(workerCenter, safeWorkerTarget, "Move Worker with ordinary left drag", "The Worker moves once and preserves its graph identity.");
     const expectedTravel = Math.abs(safeWorkerTarget.y - workerCenter.y);
     await expect.poll(async () => Math.abs((await requiredBox(worker, "Worker after movement")).y - workerBefore.y)).toBeGreaterThan(Math.max(40, expectedTravel * 0.6));
+    await canvas.focus();
+    await input.pressKey("Home", "Fit the moved nodes", "The two authored nodes return to a clear marquee workspace without changing their saved positions.");
 
     const promptBox = await requiredBox(prompt, "Prompt for marquee");
     await input.leftMarquee(...marqueeAround(promptBox, canvasBox), "Marquee-select Prompt", "A left-drag marquee selects the intersected Prompt.");
