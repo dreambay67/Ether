@@ -98,7 +98,11 @@ export async function publishRecipeMask(page: Page, input: RealPageInput): Promi
     const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     if (target === title || (target !== null && title.contains(target))) return "mask-title";
     if (!(target instanceof HTMLElement)) return String(target);
-    return `${target.tagName.toLocaleLowerCase()}${target.className ? `.${String(target.className).replaceAll(" ", ".")}` : ""}${target.getAttribute("aria-label") ? `[aria-label=${target.getAttribute("aria-label")}]` : ""}`;
+    const ancestry: string[] = [];
+    for (let current: HTMLElement | null = target; current !== null && ancestry.length < 5; current = current.parentElement) {
+      ancestry.push(`${current.tagName.toLocaleLowerCase()}${current.className ? `.${String(current.className).replaceAll(" ", ".")}` : ""}${current.getAttribute("aria-label") ? `[aria-label=${current.getAttribute("aria-label")}]` : ""}`);
+    }
+    return ancestry.join(" > ");
   }), { timeout: 5_000, message: "The visible Mask title was covered by another canvas hit target." }).toBe("mask-title");
   await input.leftClick(maskTitle, "Select recipe Mask", "The inserted Mask node exposes its visible image-backed Mask workspace.");
   await expect(maskNode).toHaveClass(/is-selected/u, { timeout: 5_000 });
