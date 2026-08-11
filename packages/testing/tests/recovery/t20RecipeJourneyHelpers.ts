@@ -92,7 +92,13 @@ export async function publishRecipeMask(page: Page, input: RealPageInput): Promi
   await canvas.focus();
   await input.pressKey("Home", "Refit recipe for Mask authoring", "The inserted Mask node is visible and unobstructed before selection.");
   await expect(maskNode).toBeVisible({ timeout: 5_000 });
-  await input.leftClick(maskNode.locator(".ether-node-title"), "Select recipe Mask", "The inserted Mask node exposes its visible image-backed Mask workspace.");
+  const maskTitle = maskNode.locator(".ether-node-title");
+  await expect.poll(async () => maskTitle.evaluate((title) => {
+    const bounds = title.getBoundingClientRect();
+    const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    return target === title || (target !== null && title.contains(target));
+  }), { timeout: 5_000, message: "The visible Mask title was covered by another canvas hit target." }).toBe(true);
+  await input.leftClick(maskTitle, "Select recipe Mask", "The inserted Mask node exposes its visible image-backed Mask workspace.");
   await expect(maskNode).toHaveClass(/is-selected/u, { timeout: 5_000 });
   await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Mask workspace", "Project lens reopens on the selected Mask node rather than the previously selected lane.");
 
