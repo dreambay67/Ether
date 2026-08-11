@@ -297,7 +297,6 @@ async function selectLatestOnNewestLane(page: Page, input: RealPageInput, label:
   await outputSelection.selectOption("latest");
   await expect(outputSelection).toHaveValue("latest");
   await page.waitForTimeout(150);
-  await input.leftClick(lanes.nth(expectedLaneCount - 1).locator("button.ether-edge-role-chip"), `Close ${label} role menu`, "The connection remains selected while its role menu no longer covers later canvas handles.");
   await expect(page.getByTestId("edge-role-grid")).toHaveCount(0);
 }
 
