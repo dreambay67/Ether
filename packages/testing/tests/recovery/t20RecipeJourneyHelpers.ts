@@ -43,9 +43,15 @@ export async function createSourceArtifact(page: Page, input: RealPageInput): Pr
   await expect(promptEditor).toBeHidden();
 
   await configureFakeImage(page, input, image, "source Image Generator");
+  for (const panel of ["Reference Desk", "Build tools", "Project lens"]) {
+    await input.leftClick(page.getByRole("button", { name: `Hide ${panel}`, exact: true }), `Hide ${panel} for source connection`, "The two-node source graph gets a clear canvas for precise channel authoring.");
+  }
+  await canvas.focus();
+  await input.pressKey("Home", "Fit source artifact graph", "The source Prompt and Image Generator fit in the unobstructed canvas.");
   await connect(input, prompt, "Text output", image, "Text input", "source Prompt to Image Generator");
 
   await input.leftClick(image.locator(".ether-node-title"), "Select source Image Generator", "The explicit local recovery image route is prepared from the blank graph.");
+  await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show source Image Generator setup", "The selected node's inspect-first run controls return after connection authoring.");
   const inspector = page.getByTestId("node-inspector");
   await input.leftClick(inspector.getByRole("button", { name: "Preview plan", exact: true }), "Preview source artifact plan", "The one-call fake image plan is inspected before a permit is issued.");
   const plan = page.getByLabel("Prepared plan");
@@ -61,6 +67,7 @@ export async function createSourceArtifact(page: Page, input: RealPageInput): Pr
   await input.leftClick(page.getByTestId("workspace-switcher").getByRole("button", { name: "Build", exact: true }), "Return to Build after source artifact", "The completed current-document artifact is available to recipe setup without changing the graph.");
   await input.leftClick(image.locator(".ether-node-title"), "Inspect source artifact output", "The generated source is confirmed on its ordinary Image Generator node.");
   await expect(page.getByTestId("output-versions")).toContainText("deterministic-png-v1");
+  await input.leftClick(page.getByRole("button", { name: "Show Build tools", exact: true }), "Show Build tools for recipes", "Recipe Gallery access returns after the source artifact is verified.");
 }
 
 /** Focus the recipe graph using the canvas's documented fit command. */
@@ -216,9 +223,9 @@ async function configureFakeImage(page: Page, input: RealPageInput, image: Locat
 async function connect(input: RealPageInput, source: Locator, output: string, target: Locator, receiver: string, label: string): Promise<void> {
   const sourceHandle = source.getByLabel(output);
   const targetHandle = target.getByLabel(receiver);
-  await sourceHandle.hover();
+  await source.locator(".ether-channel-rail-output").hover();
   await input.leftClick(sourceHandle, `Begin ${label}`, `The compatible ${receiver} handle becomes the intended receiver.`);
-  await targetHandle.hover();
+  await target.locator(".ether-channel-rail-input").hover();
   await input.leftClick(targetHandle, `Complete ${label}`, "The exact visible lane persists through ordinary channel interaction.");
 }
 
