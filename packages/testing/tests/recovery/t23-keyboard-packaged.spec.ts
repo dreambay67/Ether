@@ -70,6 +70,7 @@ test("authors and edits a blank packaged document with keyboard-only J03 control
 
     await tabTo(page, input, canvas, "Return to the canvas after title editing");
     await input.pressKey("Control+A", "Select both authored nodes", "The canvas-owned command selects the two blank-authored nodes.");
+    console.log(await page.getByTestId("ether-node").evaluateAll((nodes) => nodes.filter((node) => node.classList.contains("is-selected")).map((node) => ({ id: node.getAttribute("data-node-id"), definition: node.getAttribute("data-node-definition"), title: node.querySelector(".ether-node-title")?.textContent }))));
     await expect.poll(() => selectedNodeCount(page)).toBe(2);
     input.observe("Keyboard multi-selection", "Ctrl+A is the documented keyboard route for selecting all authored canvas nodes.", "The blank-authored Prompt and Note are selected together before duplicate, copy, paste, delete, undo, and redo.");
     await input.pressKey("Control+D", "Duplicate the keyboard selection", "Duplicate creates two offset graph nodes without opening an editor.");
