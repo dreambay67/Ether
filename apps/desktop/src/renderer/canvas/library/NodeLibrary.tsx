@@ -213,11 +213,11 @@ export function QuickAddPalette({ anchor, catalog, onClose, onPick }: {
   const items = filterNodeCatalog(catalog, query).slice(0, 8);
   const activeItem = items[activeIndex];
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-  useEffect(() => {
     setActiveIndex((current) => Math.min(current, Math.max(0, items.length - 1)));
   }, [items.length]);
+  useLayoutEffect(() => {
+    if (position !== null) inputRef.current?.focus({ preventScroll: true });
+  }, [position]);
   const placePalette = useCallback(() => {
     const palette = paletteRef.current;
     const surface = palette?.parentElement;
