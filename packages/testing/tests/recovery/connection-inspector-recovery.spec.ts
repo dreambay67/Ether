@@ -84,6 +84,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
     const firstRole = page.getByTestId("edge-role-chip").first();
+    await page.locator(".ether-edge-hit-target").first().hover();
+    await expect(firstRole).toBeVisible();
     await input.leftClick(firstRole.getByRole("button", { name: "General" }), "Open the in-place role grid", "All 15 semantic roles are available directly on the lane.");
     await expect(page.getByTestId("edge-role-grid").getByRole("button")).toHaveCount(15);
     await input.leftClick(page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }), "Name the Text lane Subject", "The non-General role becomes a visible lane badge.");
@@ -105,7 +107,10 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await input.leftClick(worker.getByLabel("Text input"), "Complete adapter lane", "The adapter-backed lane persists before any run or provider call.");
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
-    await input.leftClick(page.getByTestId("edge-role-chip").last().getByRole("button", { name: "General" }), "Select the adapter lane", "A visible lane control selects the exact connection for the Project lens.");
+    await page.locator(".ether-edge-hit-target").last().hover();
+    const adapterRole = page.getByTestId("edge-role-chip").last();
+    await expect(adapterRole).toBeVisible();
+    await input.leftClick(adapterRole.getByRole("button", { name: "General" }), "Select the adapter lane", "A visible lane control selects the exact connection for the Project lens.");
     await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Project lens", "Ordinary connection controls appear without covering the completed authoring interaction.");
     const edgeInspector = page.getByTestId("edge-inspector");
     await expect(edgeInspector).toContainText("Adapter · local.data-to-text");
