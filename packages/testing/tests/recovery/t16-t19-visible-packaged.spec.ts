@@ -107,6 +107,7 @@ test("authors a fake-provider image-to-review-and-delivery journey from a blank 
     await previewBatchMatrix(page, input);
     await input.leftClick(page.getByRole("button", { name: "Build", exact: true }), "Return to Build for the image run", "The authored runtime route remains on the ordinary canvas after the isolated Batch grid/setup preview.");
     await input.leftClick(image.locator(".ether-node-title"), "Select Image Generator", "The provider-backed image node is the first explicit fake-provider run target.");
+    await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Image Generator setup", "The selected node's inspect-first run controls return after unobstructed lane authoring.");
     const imageInspector = page.getByTestId("node-inspector");
     await input.leftClick(imageInspector.getByRole("button", { name: "Preview plan", exact: true }), "Preview fake Image Generator plan", "The single offline image call is shown before its one-use permit is issued.");
     const imagePlan = page.getByLabel("Prepared plan");
@@ -293,12 +294,17 @@ async function selectLatestOnNewestLane(page: Page, input: RealPageInput, label:
   await page.waitForTimeout(250);
   const lane = lanes.nth(expectedLaneCount - 1);
   await input.leftClick(lane.getByRole("button", { name: "General", exact: true }), `Inspect ${label} lane`, "This local or review continuation intentionally consumes the latest durable output, including an unreviewed intermediate.");
+  const showProjectLens = page.getByRole("button", { name: "Show Project lens", exact: true });
+  if (await showProjectLens.isVisible()) {
+    await input.leftClick(showProjectLens, `Show ${label} connection settings`, "The selected lane's output policy is edited in the Project lens.");
+  }
   const outputSelection = page.getByTestId("edge-inspector").getByLabel("Output selection", { exact: true });
   await outputSelection.selectOption("latest");
   await expect(outputSelection).toHaveValue("latest");
   await page.waitForTimeout(150);
   await input.pressKey("Escape", `Close ${label} role menu`, "Escape dismisses the open in-place role grid without changing the selected connection.");
   await expect(page.getByTestId("edge-role-grid")).toHaveCount(0);
+  await input.leftClick(page.getByRole("button", { name: "Hide Project lens", exact: true }), `Hide ${label} connection settings`, "The next source and receiver handles get the full canvas width.");
 }
 
 async function selectNodeBehindProjectLens(page: Page, input: RealPageInput, node: Locator, title: string, expected: string) {
