@@ -25,7 +25,7 @@ export type EtherFlowEdgeData = {
 export function EtherEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }: EdgeProps & { data: EtherFlowEdgeData }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const hoverLeaveTimer = useRef<number | null>(null);
+  const hoverLeaveTimer = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const edge = data.edge;
   const bundled = bundledBezierPath({ x: sourceX, y: sourceY, targetX, targetY, lane: { index: data.laneIndex, count: data.laneCount } });
   const [defaultPath, defaultLabelX, defaultLabelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
