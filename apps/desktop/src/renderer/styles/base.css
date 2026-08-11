@@ -1678,6 +1678,11 @@ button {
   pointer-events: none;
 }
 
+/* Node cards must remain the primary hit target when a lane label crosses them. */
+.flow-shell .react-flow__nodes {
+  z-index: 3000 !important;
+}
+
 .react-flow__attribution {
   display: none;
 }
