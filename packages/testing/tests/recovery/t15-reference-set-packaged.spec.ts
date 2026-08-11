@@ -77,6 +77,11 @@ test("builds a linked and embedded Reference Set, then previews its offline Work
     await expect(referenceSet.getByTestId("reference-set-preview")).toHaveAttribute("aria-label", "3 references");
     await expect(referenceSet.getByText("Excluded", { exact: true })).toBeVisible();
 
+    for (const panel of ["Reference Desk", "Build tools", "Project lens"]) {
+      await input.leftClick(page.getByRole("button", { name: `Hide ${panel}`, exact: true }), `Hide ${panel}`, "The two-node graph gets a clear canvas for precise channel authoring.");
+    }
+    await canvas.focus();
+    await input.pressKey("Home", "Fit the Reference Set graph", "Both cards and their Image handles fit in the unobstructed canvas.");
     await connect(input, referenceSet, "Image output", worker, "Image input", "Reference Set image input to Worker");
     const roleChip = page.getByTestId("edge-role-chip");
     await input.leftClick(roleChip.getByRole("button", { name: "General", exact: true }), "Open the Reference Set lane roles", "The downstream Worker receives a deliberate semantic role, separate from member-level overrides.");
@@ -84,6 +89,7 @@ test("builds a linked and embedded Reference Set, then previews its offline Work
     await expect(roleChip.getByText("Style", { exact: true })).toBeVisible();
 
     await input.leftClick(worker.locator(".ether-node-title"), "Select Worker for provider-safe preview", "The Worker receives the enabled Reference Set image members without running a provider.");
+    await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Project lens for Worker", "The selected Worker's concise setup and preview controls return after connection authoring.");
     const workerInspector = page.getByTestId("node-inspector");
     await workerInspector.getByRole("button", { name: "Advanced worker settings", exact: true }).click();
     await workerInspector.getByLabel("Worker provider and model", { exact: true }).selectOption("ether-fake-local\u0000worker:deterministic-transform-v1");
