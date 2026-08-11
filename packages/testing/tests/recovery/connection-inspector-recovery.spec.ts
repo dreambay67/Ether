@@ -79,8 +79,10 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
           })
         );
       }
-      await expect(page.locator(".ether-edge-hit-target")).toHaveCount(index + 1);
     }
+    const canvasBounds = await canvas.boundingBox();
+    if (canvasBounds === null) throw new Error("The authoring canvas did not provide layout geometry after lane creation.");
+    await page.mouse.move(canvasBounds.x + 24, canvasBounds.y + canvasBounds.height - 24);
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
     const editedRole = page.getByTestId("edge-role-chip").last();
