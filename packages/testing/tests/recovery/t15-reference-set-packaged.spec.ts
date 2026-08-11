@@ -67,6 +67,7 @@ test("builds a linked and embedded Reference Set, then previews its offline Work
 
     await setReferenceSelection(input, desk, "01-linked-style.png", false, "style", "Select first reference for Replace");
     await setReferenceSelection(input, desk, "02-embedded-subject.png", true, "subject", "Select embedded Subject reference for Replace");
+    await input.leftClick(desk.locator(".reference-row").filter({ hasText: "03-linked-lighting.png" }).getByRole("checkbox", { name: "Select 03-linked-lighting.png", exact: true }), "Deselect third reference for Replace", "Replace receives only the two explicitly selected references; Include remains an independent channel-use control.");
     await input.leftClick(desk.getByRole("button", { name: "Replace set", exact: true }), "Replace with the explicit two-reference set", "Replace removes the unselected third reference only after the explicit action.");
     await expect(inspector).toContainText("2 saved members; ordered manual.");
 
