@@ -88,8 +88,8 @@ test("captures the manual from visible blank-document actions without provider w
       await expect(page.getByTestId("canvas-status")).toContainText("Connect nodes saved");
       await expect(page.locator(".ether-edge-hit-target")).toHaveCount(index + 1);
     }
-    const firstRole = page.getByTestId("edge-role-chip").first();
-    await input.leftClick(firstRole.getByRole("button", { name: "General" }), "Open semantic roles", "The lane exposes the shared semantic role grid.");
+    const activeRole = page.locator(".ether-edge-label.is-selected");
+    await input.leftClick(activeRole.getByRole("button", { name: "General" }), "Open semantic roles", "The active lane exposes the shared semantic role grid.");
     await input.leftClick(page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }), "Set the Subject role", "The Text lane carries a visible Subject badge.");
     await input.screenshot("04-channels-and-roles.png", evidence, "Capture channels and roles", "All six channel lanes coexist and one lane shows its semantic Subject role.");
 
