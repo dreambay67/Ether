@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FocusEvent } from "react";
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react";
 import type { ConnectionRole, EtherEdge as SchemaEdge, PayloadChannel } from "@ether/schema";
 import { CONNECTION_ROLES, PAYLOAD_CHANNELS, channelLabel, roleLabel } from "../ports/channelRegistry";
-import { bundledBezierPath, edgeLabelPlacement, type EdgeBounds } from "./edgeGeometry";
+import { bundledBezierPath, type EdgeBounds } from "./edgeGeometry";
 
 export type EtherEdgeEditor = "role" | "source" | "target" | null;
 export type EtherFlowEdgeData = {
@@ -32,7 +32,7 @@ export function EtherEdge({ id, sourceX, sourceY, targetX, targetY, sourcePositi
   const path = bundled?.path ?? defaultPath;
   const source = edge.from.channel;
   const target = edge.to.channel;
-  const labelPosition = edgeLabelPlacement({ x: sourceX, y: sourceY, targetX, targetY, lane: { index: data.laneIndex, count: data.laneCount }, sourceBounds: data.sourceBounds, targetBounds: data.targetBounds });
+  const labelPosition = bundled?.center ?? { x: defaultLabelX, y: defaultLabelY };
   const rolesOpen = data.editor === "role";
   const picker = data.editor === "source" || data.editor === "target" ? data.editor : null;
   const labelVisible = hovered || focused || data.selected || edge.role !== "general";
