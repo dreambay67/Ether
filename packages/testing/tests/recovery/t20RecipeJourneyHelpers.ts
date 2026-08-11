@@ -83,6 +83,7 @@ export async function fitRecipe(page: Page, input: RealPageInput): Promise<void>
 export async function publishRecipeMask(page: Page, input: RealPageInput): Promise<void> {
   const maskNode = nodeByTitle(page, "Paint mask");
   await expect(maskNode).toHaveCount(1);
+  await expect(maskNode).toBeVisible({ timeout: 5_000 });
   const hideProjectLens = page.getByRole("button", { name: "Hide Project lens", exact: true });
   if (await hideProjectLens.isVisible()) {
     await input.leftClick(hideProjectLens, "Hide connection Inspector before Mask authoring", "The recipe graph gets full width before the Mask node becomes the Inspector target.");
@@ -90,7 +91,9 @@ export async function publishRecipeMask(page: Page, input: RealPageInput): Promi
   const canvas = page.getByTestId("ether-canvas-surface");
   await canvas.focus();
   await input.pressKey("Home", "Refit recipe for Mask authoring", "The inserted Mask node is visible and unobstructed before selection.");
+  await expect(maskNode).toBeVisible({ timeout: 5_000 });
   await input.leftClick(maskNode.locator(".ether-node-title"), "Select recipe Mask", "The inserted Mask node exposes its visible image-backed Mask workspace.");
+  await expect(maskNode).toHaveClass(/is-selected/u, { timeout: 5_000 });
   await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Mask workspace", "Project lens reopens on the selected Mask node rather than the previously selected lane.");
 
   const workspace = page.getByTestId("mask-workspace");
