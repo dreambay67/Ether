@@ -54,7 +54,7 @@ test("authors and edits a blank packaged document with keyboard-only J03 control
     await addFromLibraryWithKeyboard(page, input, "Prompt", "Prompt", 1);
     await addFromCanvasQuickAdd(page, input, "Note", "Note", 2);
 
-    const promptTitle = page.getByRole("button", { name: "Prompt", exact: true });
+    const promptTitle = canvas.getByRole("button", { name: "Prompt", exact: true });
     await keyboardActivate(page, input, promptTitle, "Select Prompt from its focused title", "Space selects the keyboard-reached node without using a pointer.", "Space");
     await expect.poll(() => selectedNodeCount(page)).toBe(1);
     await input.pressKey("F2", "Open the focused Prompt title editor", "F2 opens one bounded title editor for the selected Prompt.");
@@ -65,12 +65,11 @@ test("authors and edits a blank packaged document with keyboard-only J03 control
     await expect.poll(() => selectedNodeCount(page)).toBe(1);
     await input.pressKey("Enter", "Commit the focused title editor", "Enter commits the title edit and closes the inline editor.");
     await expect(titleEditor).toBeHidden();
-    const renamedTitle = page.getByRole("button", { name: "Keyboard brief", exact: true });
+    const renamedTitle = canvas.getByRole("button", { name: "Keyboard brief", exact: true });
     await expect(renamedTitle).toBeVisible();
 
     await tabTo(page, input, canvas, "Return to the canvas after title editing");
     await input.pressKey("Control+A", "Select both authored nodes", "The canvas-owned command selects the two blank-authored nodes.");
-    console.log(await page.getByTestId("ether-node").evaluateAll((nodes) => nodes.filter((node) => node.classList.contains("is-selected")).map((node) => ({ id: node.getAttribute("data-node-id"), definition: node.getAttribute("data-node-definition"), title: node.querySelector(".ether-node-title")?.textContent }))));
     await expect.poll(() => selectedNodeCount(page)).toBe(2);
     input.observe("Keyboard multi-selection", "Ctrl+A is the documented keyboard route for selecting all authored canvas nodes.", "The blank-authored Prompt and Note are selected together before duplicate, copy, paste, delete, undo, and redo.");
     await input.pressKey("Control+D", "Duplicate the keyboard selection", "Duplicate creates two offset graph nodes without opening an editor.");
