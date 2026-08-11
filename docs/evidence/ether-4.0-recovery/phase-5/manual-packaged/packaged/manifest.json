@@ -3,17 +3,17 @@
   "version": "4.0.0",
   "source": "packaged-blank-document-journeys",
   "sourceProfile": "fresh-isolated",
-  "capturedAt": "2026-08-10T17:08:59.394Z",
+  "capturedAt": "2026-08-11T11:08:04.446Z",
   "package": {
-    "gitCommit": "40ac5238c425e38cb1cf7d2a39e740dcad4ee82c",
+    "gitCommit": "4377c567e52721f8a4a7c52b84f6815031babe44",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "69ce2ed5290ea53e69cf0ca4d56a260b2bc8d3cbed073b8e9e5adc12b09f25be"
+        "sha256": "a53092cd276ed4c9840885db2619ad56c2595fb053721856b95bdd0b8eca54bf"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "27e40c00d8356cebb277203076d1abbd23c268d66586e6b70bd679b82c7ad712"
+        "sha256": "c16491a5ef5bd38ffdeae98921a0d4e191ccfef032b5c6cf2d29f8eec97ccde8"
       }
     ]
   },
@@ -67,7 +67,7 @@
       "actionLabel": "Capture direct editing",
       "width": 1600,
       "height": 1000,
-      "sha256": "2ba14cd5c0b773790d2710b788774f6bf89b16cb67a4aec2c8b008a420c72eeb"
+      "sha256": "cad6a4cf613e7cc2e1fa193a7ca40c596073b83b07a924b86900a3331fb50c75"
     },
     {
       "label": "all-17-nodes",
@@ -91,7 +91,7 @@
       "actionLabel": "Capture channels and roles",
       "width": 1600,
       "height": 1000,
-      "sha256": "dc3d076892f7db543c49999292f498abc0143e3cfaedaa3c77e025d4073ad991"
+      "sha256": "18a854ff338a7e917c753b37756729b7e99428eea1ea5f0d8e0f89e76d0458d7"
     },
     {
       "label": "locked-module",
@@ -103,7 +103,7 @@
       "actionLabel": "Capture the locked Module",
       "width": 1600,
       "height": 1000,
-      "sha256": "9b3abbe1b3d10939d35845be291d3b1c69e03718877b9128ab02f3b775611459"
+      "sha256": "a098ae0d9b456e01b097365a15147c94cba1ff09a4113a0e66b46fc2ec2c59ff"
     },
     {
       "label": "reference-setup",
@@ -115,7 +115,7 @@
       "actionLabel": "Capture reference setup",
       "width": 1600,
       "height": 1000,
-      "sha256": "e121faa6c5ad7e2a2051488a390b016fdf84846c99ffe38f061bf2c5073aa40a"
+      "sha256": "8f602b954cd0fbe734d9e31b1f6ce8d3d7788ce04061070e25ea3026284d4878"
     },
     {
       "label": "batch-run",
@@ -127,7 +127,7 @@
       "actionLabel": "Capture batch planning",
       "width": 1600,
       "height": 1000,
-      "sha256": "9c497c96448b6a9c8081def38d605efe1137a730500f4d23a2a5fb7c6d682c56"
+      "sha256": "3386a85774674d54339c0b332094a63e802557ad3db29f81d2766da4efdf20b0"
     },
     {
       "label": "review-empty",
@@ -151,7 +151,7 @@
       "actionLabel": "Capture export setup",
       "width": 1600,
       "height": 1000,
-      "sha256": "5f77478aea8b3dfc155f0e7f528f1928e7118a7d4f1a0da8f76bc40295f88ab7"
+      "sha256": "c4d5795645cb92cafe70c67624f0b16d7a6d11c7d78b0ff0323a6955d549d167"
     },
     {
       "label": "provider-guard",
@@ -163,7 +163,7 @@
       "actionLabel": "Capture the provider guard",
       "width": 1600,
       "height": 1000,
-      "sha256": "a2d80ebb66bc161fdc3427ec2825229a4ee1ded755ecb5efd58004a50641a8e0"
+      "sha256": "5dd5c6b5e8348ef8f10d17c4e85baa667b39557578f71343d8bb243ef4fce7b5"
     },
     {
       "label": "recipes",
@@ -175,7 +175,7 @@
       "actionLabel": "Capture Recipe Gallery",
       "width": 1600,
       "height": 1000,
-      "sha256": "c0c80dccbd1df339a753f3213b7cfc5df4fb4dc5d788ace05f97195ef053abca"
+      "sha256": "9f483f4069c9d77f3219416387f4296d1dba7dd34f6861dbe2bb95b9b5542606"
     },
     {
       "label": "recovery-settings",
@@ -187,7 +187,7 @@
       "actionLabel": "Capture recovery and provider setup",
       "width": 1600,
       "height": 1000,
-      "sha256": "c323382493e31d8dee14ecbc9eff37834e7455e206f17729bd24d8dc200df302"
+      "sha256": "feabb8f5e918f03ba786930c259ff0d5a8db99a8f6aa86eb7466787da92c366b"
     }
   ]
 }

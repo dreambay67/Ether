@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t20-recipe-image-edit-with-mask",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:03:17.423Z",
-  "finishedAt": "2026-08-09T15:03:26.734Z",
+  "startedAt": "2026-08-11T09:50:17.720Z",
+  "finishedAt": "2026-08-11T09:50:28.241Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "e5de95dc6fe5c8978815c1435d6451f941656352",
+    "gitCommit": "9872deaee3dd4457f09192da6d535ee3c76701f7",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+        "sha256": "4824a5a0b5189bfa805f5cabdb70e8ab74ed897a6438bc13c1a1db303b70cc3d"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+        "sha256": "a599062e8a65b0446ab31e7eaabcf48d431b164fa7ea4ac950267ac78703f60a"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the canonical registry.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 56
+      "durationMs": 67
     },
     {
       "sequence": 2,
@@ -45,15 +45,15 @@
       "label": "Add generation.image from Node Library",
       "expected": "The blank document creates generation.image through the canonical registry.",
       "actual": "Left click at (108, 799).",
-      "durationMs": 56
+      "durationMs": 64
     },
     {
       "sequence": 3,
       "kind": "left-click",
-      "label": "Select source Prompt",
-      "expected": "The blank document's source prompt becomes the direct canvas editing target.",
-      "actual": "Left click at (802, 599).",
-      "durationMs": 47
+      "label": "Focus source Prompt content",
+      "expected": "The blank document's source prompt exposes its direct canvas content target.",
+      "actual": "Left click at (1062, 838).",
+      "durationMs": 55
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Edit source Prompt",
       "expected": "The ordinary Prompt editor opens on the canvas.",
       "actual": "Pressed Enter.",
-      "durationMs": 29
+      "durationMs": 21
     },
     {
       "sequence": 5,
@@ -69,14 +69,14 @@
       "label": "Commit source Prompt",
       "expected": "The reusable source-artifact brief is saved as authored graph content.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 32
+      "durationMs": 36
     },
     {
       "sequence": 6,
       "kind": "left-click",
       "label": "Select source Image Generator",
       "expected": "The ordinary Inspector exposes the recovery-only fake image profile.",
-      "actual": "Left click at (542, 419).",
+      "actual": "Left click at (802, 579).",
       "durationMs": 43
     },
     {
@@ -85,235 +85,307 @@
       "label": "Save source Image Generator fake profile",
       "expected": "The durable binding is the explicit local simulation profile, not a real-provider fallback.",
       "actual": "Left click at (1439, 632).",
-      "durationMs": 70
+      "durationMs": 84
     },
     {
       "sequence": 8,
       "kind": "left-click",
-      "label": "Begin source Prompt to Image Generator",
-      "expected": "The compatible Text input handle becomes the intended receiver.",
-      "actual": "Left click at (913, 591).",
-      "durationMs": 215
+      "label": "Hide Reference Desk for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 72
     },
     {
       "sequence": 9,
       "kind": "left-click",
-      "label": "Complete source Prompt to Image Generator",
-      "expected": "The exact visible lane persists through ordinary channel interaction.",
-      "actual": "Left click at (431, 411).",
-      "durationMs": 231
+      "label": "Hide Build tools for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 42
     },
     {
       "sequence": 10,
       "kind": "left-click",
-      "label": "Select source Image Generator",
-      "expected": "The explicit local recovery image route is prepared from the blank graph.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 54
+      "label": "Hide Project lens for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 39
     },
     {
       "sequence": 11,
-      "kind": "left-click",
-      "label": "Preview source artifact plan",
-      "expected": "The one-call fake image plan is inspected before a permit is issued.",
-      "actual": "Left click at (1407, 793).",
-      "durationMs": 62
-    },
-    {
-      "sequence": 12,
-      "kind": "left-click",
-      "label": "Start source artifact plan",
-      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
-      "actual": "Left click at (1401, 700).",
-      "durationMs": 45
-    },
-    {
-      "sequence": 13,
-      "kind": "left-click",
-      "label": "Wait for the source artifact to become durable",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 97
-    },
-    {
-      "sequence": 14,
-      "kind": "left-click",
-      "label": "Return to Build after source artifact",
-      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
-      "actual": "Left click at (47, 89).",
-      "durationMs": 32
-    },
-    {
-      "sequence": 15,
-      "kind": "left-click",
-      "label": "Inspect source artifact output",
-      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 43
-    },
-    {
-      "sequence": 16,
-      "kind": "left-click",
-      "label": "Open Image Edit with Mask in Recipe Gallery",
-      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
-      "actual": "Left click at (226, 898).",
-      "durationMs": 69
-    },
-    {
-      "sequence": 17,
-      "kind": "left-click",
-      "label": "Choose Image Edit with Mask",
-      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
-      "actual": "Left click at (447, 553).",
-      "durationMs": 84
-    },
-    {
-      "sequence": 18,
-      "kind": "left-click",
-      "label": "Preview Image Edit with Mask",
-      "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
-      "actual": "Left click at (829, 672).",
-      "durationMs": 84
-    },
-    {
-      "sequence": 19,
-      "kind": "left-click",
-      "label": "Insert Image Edit with Mask",
-      "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
-      "actual": "Left click at (1159, 672).",
-      "durationMs": 104
-    },
-    {
-      "sequence": 20,
       "kind": "keyboard-command",
-      "label": "Fit inserted recipe",
-      "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
+      "label": "Fit source artifact graph",
+      "expected": "The source Prompt and Image Generator fit in the unobstructed canvas.",
       "actual": "Pressed Home.",
       "durationMs": 5
     },
     {
+      "sequence": 12,
+      "kind": "left-click",
+      "label": "Begin source Prompt to Image Generator",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (1094, 584).",
+      "durationMs": 237
+    },
+    {
+      "sequence": 13,
+      "kind": "left-click",
+      "label": "Complete source Prompt to Image Generator",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (506, 316).",
+      "durationMs": 246
+    },
+    {
+      "sequence": 14,
+      "kind": "left-click",
+      "label": "Select source Image Generator",
+      "expected": "The explicit local recovery image route is prepared from the blank graph.",
+      "actual": "Left click at (641, 319).",
+      "durationMs": 59
+    },
+    {
+      "sequence": 15,
+      "kind": "left-click",
+      "label": "Show source Image Generator setup",
+      "expected": "The selected node's inspect-first run controls return after connection authoring.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 42
+    },
+    {
+      "sequence": 16,
+      "kind": "left-click",
+      "label": "Preview source artifact plan",
+      "expected": "The one-call fake image plan is inspected before a permit is issued.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 84
+    },
+    {
+      "sequence": 17,
+      "kind": "left-click",
+      "label": "Start source artifact plan",
+      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 44
+    },
+    {
+      "sequence": 18,
+      "kind": "left-click",
+      "label": "Wait for the source artifact to become durable",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 89
+    },
+    {
+      "sequence": 19,
+      "kind": "left-click",
+      "label": "Return to Build after source artifact",
+      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 42
+    },
+    {
+      "sequence": 20,
+      "kind": "left-click",
+      "label": "Inspect source artifact output",
+      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
+      "actual": "Left click at (529, 319).",
+      "durationMs": 38
+    },
+    {
       "sequence": 21,
       "kind": "left-click",
-      "label": "Select recipe Mask",
-      "expected": "The inserted Mask node exposes its visible image-backed Mask workspace.",
-      "actual": "Left click at (884, 545).",
-      "durationMs": 41
+      "label": "Show Build tools for recipes",
+      "expected": "Recipe Gallery access returns after the source artifact is verified.",
+      "actual": "Left click at (19, 183).",
+      "durationMs": 49
     },
     {
       "sequence": 22,
-      "kind": "left-drag",
-      "label": "Paint recipe mask",
-      "expected": "A visible brush stroke creates the local white-selected Mask geometry before it is committed.",
-      "actual": "Left drag (1433, 546) to (1619, 694).",
-      "durationMs": 133
+      "kind": "left-click",
+      "label": "Open Image Edit with Mask in Recipe Gallery",
+      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
+      "actual": "Left click at (226, 898).",
+      "durationMs": 61
     },
     {
       "sequence": 23,
       "kind": "left-click",
-      "label": "Commit recipe mask",
-      "expected": "The painted local mask is published as an immutable document artifact without a provider call.",
-      "actual": "Left click at (1528, 849).",
-      "durationMs": 49
+      "label": "Choose Image Edit with Mask",
+      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
+      "actual": "Left click at (447, 553).",
+      "durationMs": 78
     },
     {
       "sequence": 24,
-      "kind": "keyboard-command",
-      "label": "Select Image Edit with Mask run root",
-      "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
-      "actual": "Pressed Space.",
-      "durationMs": 14
+      "kind": "left-click",
+      "label": "Preview Image Edit with Mask",
+      "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
+      "actual": "Left click at (829, 672).",
+      "durationMs": 91
     },
     {
       "sequence": 25,
       "kind": "left-click",
-      "label": "Preview Image Edit with Mask Branch",
-      "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
-      "actual": "Left click at (1407, 741).",
-      "durationMs": 69
+      "label": "Insert Image Edit with Mask",
+      "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
+      "actual": "Left click at (1159, 672).",
+      "durationMs": 45
     },
     {
       "sequence": 26,
-      "kind": "left-click",
-      "label": "Start Image Edit with Mask reviewed plan",
-      "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
-      "actual": "Left click at (1401, 700).",
-      "durationMs": 45
+      "kind": "keyboard-command",
+      "label": "Fit inserted recipe",
+      "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
+      "actual": "Pressed Home.",
+      "durationMs": 3
     },
     {
       "sequence": 27,
       "kind": "left-click",
-      "label": "Wait for Image Edit with Mask human checkpoint",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 85
+      "label": "Hide connection Inspector before Mask authoring",
+      "expected": "The recipe graph gets full width before the Mask node becomes the Inspector target.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 55
     },
     {
       "sequence": 28,
-      "kind": "left-click",
-      "label": "Open Review for recipe checkpoint",
-      "expected": "Artifact Observatory exposes the durable human Compare checkpoint without an implicit model decision.",
-      "actual": "Left click at (232, 89).",
-      "durationMs": 34
+      "kind": "keyboard-command",
+      "label": "Refit recipe for Mask authoring",
+      "expected": "The inserted Mask node is visible and unobstructed before selection.",
+      "actual": "Pressed Home.",
+      "durationMs": 8
     },
     {
       "sequence": 29,
       "kind": "left-click",
-      "label": "Open recipe Compare stage",
-      "expected": "The recipe's sealed output candidates are reviewed by a person, not a model.",
-      "actual": "Left click at (429, 296).",
+      "label": "Select recipe Mask",
+      "expected": "The inserted Mask node exposes its visible image-backed Mask workspace.",
+      "actual": "Left click at (896, 458).",
       "durationMs": 29
     },
     {
       "sequence": 30,
       "kind": "left-click",
-      "label": "Select recipe review candidate 1",
-      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
-      "actual": "Left click at (254, 592).",
-      "durationMs": 28
+      "label": "Show Mask workspace",
+      "expected": "Project lens reopens on the selected Mask node rather than the previously selected lane.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 57
     },
     {
       "sequence": 31,
-      "kind": "left-click",
-      "label": "Complete recipe human checkpoint",
-      "expected": "The selected output versions and review note are durably saved before downstream work resumes.",
-      "actual": "Left click at (1079, 830).",
-      "durationMs": 58
+      "kind": "left-drag",
+      "label": "Paint recipe mask",
+      "expected": "A visible brush stroke creates the local white-selected Mask geometry before it is committed.",
+      "actual": "Left drag (1433, 482) to (1619, 630).",
+      "durationMs": 132
     },
     {
       "sequence": 32,
       "kind": "left-click",
-      "label": "Wait for the recipe to finish after human review",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 44
+      "label": "Commit recipe mask",
+      "expected": "The painted local mask is published as an immutable document artifact without a provider call.",
+      "actual": "Left click at (1528, 785).",
+      "durationMs": 61
     },
     {
       "sequence": 33,
-      "kind": "left-click",
-      "label": "Inspect Image Edit with Mask output",
-      "expected": "The recipe returns to its visible canvas with the fake-provider output persisted.",
-      "actual": "Left click at (47, 89).",
-      "durationMs": 42
+      "kind": "keyboard-command",
+      "label": "Select Image Edit with Mask run root",
+      "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
+      "actual": "Pressed Space.",
+      "durationMs": 15
     },
     {
       "sequence": 34,
       "kind": "left-click",
-      "label": "Select Image Edit with Mask output node",
-      "expected": "The advertised fake-provider output is inspected on the inserted recipe itself.",
-      "actual": "Left click at (1102, 589).",
-      "durationMs": 60
+      "label": "Preview Image Edit with Mask Branch",
+      "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 63
     },
     {
       "sequence": 35,
+      "kind": "left-click",
+      "label": "Start Image Edit with Mask reviewed plan",
+      "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 42
+    },
+    {
+      "sequence": 36,
+      "kind": "left-click",
+      "label": "Wait for Image Edit with Mask human checkpoint",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 92
+    },
+    {
+      "sequence": 37,
+      "kind": "left-click",
+      "label": "Open Review for recipe checkpoint",
+      "expected": "Artifact Observatory exposes the durable human Compare checkpoint without an implicit model decision.",
+      "actual": "Left click at (232, 89).",
+      "durationMs": 27
+    },
+    {
+      "sequence": 38,
+      "kind": "left-click",
+      "label": "Open recipe Compare stage",
+      "expected": "The recipe's sealed output candidates are reviewed by a person, not a model.",
+      "actual": "Left click at (429, 296).",
+      "durationMs": 38
+    },
+    {
+      "sequence": 39,
+      "kind": "left-click",
+      "label": "Select recipe review candidate 1",
+      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
+      "actual": "Left click at (254, 592).",
+      "durationMs": 27
+    },
+    {
+      "sequence": 40,
+      "kind": "left-click",
+      "label": "Complete recipe human checkpoint",
+      "expected": "The selected output versions and review note are durably saved before downstream work resumes.",
+      "actual": "Left click at (1079, 830).",
+      "durationMs": 55
+    },
+    {
+      "sequence": 41,
+      "kind": "left-click",
+      "label": "Wait for the recipe to finish after human review",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 49
+    },
+    {
+      "sequence": 42,
+      "kind": "left-click",
+      "label": "Inspect Image Edit with Mask output",
+      "expected": "The recipe returns to its visible canvas with the fake-provider output persisted.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 50
+    },
+    {
+      "sequence": 43,
+      "kind": "left-click",
+      "label": "Select Image Edit with Mask output node",
+      "expected": "The advertised fake-provider output is inspected on the inserted recipe itself.",
+      "actual": "Left click at (1102, 499).",
+      "durationMs": 55
+    },
+    {
+      "sequence": 44,
       "kind": "screenshot",
       "label": "Capture Image Edit with Mask fake-provider output",
       "expected": "This fresh-document recipe was configured, inserted, explicitly previewed, permitted, and completed through ordinary controls using only the recovery simulation.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 239,
+      "durationMs": 267,
       "screenshotPath": "screenshots/image-edit-with-mask-fake-output.png"
     },
     {
-      "sequence": 36,
+      "sequence": 45,
       "kind": "observation",
       "label": "Image Edit with Mask packaged recipe",
       "expected": "The built-in workflow reaches its advertised fake-provider output from a fresh document through visible setup and run controls.",

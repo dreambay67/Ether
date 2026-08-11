@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t20-recipe-infographic-builder",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:03:08.806Z",
-  "finishedAt": "2026-08-09T15:03:17.003Z",
+  "startedAt": "2026-08-11T08:33:46.932Z",
+  "finishedAt": "2026-08-11T08:33:54.431Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "e5de95dc6fe5c8978815c1435d6451f941656352",
+    "gitCommit": "4e0674d9497d4221fa5bc0c7dc57b68a6c459d70",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+        "sha256": "0ec4253d0d29d12333d459052dbfa9814396e5afcc8b1570d81f4c30c1a2fc47"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+        "sha256": "bb1fe953a7c38e22e55d6ce0994d37da5ac56665f90677fa135caf91673af823"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Open Infographic Builder in Recipe Gallery",
       "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
       "actual": "Left click at (226, 898).",
-      "durationMs": 70
+      "durationMs": 84
     },
     {
       "sequence": 2,
@@ -45,7 +45,7 @@
       "label": "Choose Infographic Builder",
       "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
       "actual": "Left click at (447, 825).",
-      "durationMs": 79
+      "durationMs": 29
     },
     {
       "sequence": 3,
@@ -53,7 +53,7 @@
       "label": "Preview Infographic Builder",
       "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
       "actual": "Left click at (829, 671).",
-      "durationMs": 99
+      "durationMs": 89
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Insert Infographic Builder",
       "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
       "actual": "Left click at (1159, 671).",
-      "durationMs": 85
+      "durationMs": 63
     },
     {
       "sequence": 5,
@@ -69,7 +69,7 @@
       "label": "Fit inserted recipe",
       "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
       "actual": "Pressed Home.",
-      "durationMs": 4
+      "durationMs": 6
     },
     {
       "sequence": 6,
@@ -77,7 +77,7 @@
       "label": "Select Infographic Builder run root",
       "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
       "actual": "Pressed Space.",
-      "durationMs": 18
+      "durationMs": 24
     },
     {
       "sequence": 7,
@@ -85,7 +85,7 @@
       "label": "Preview Infographic Builder Branch",
       "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
       "actual": "Left click at (1407, 741).",
-      "durationMs": 75
+      "durationMs": 91
     },
     {
       "sequence": 8,
@@ -93,7 +93,7 @@
       "label": "Start Infographic Builder reviewed plan",
       "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
       "actual": "Left click at (1403, 700).",
-      "durationMs": 48
+      "durationMs": 39
     },
     {
       "sequence": 9,
@@ -101,7 +101,7 @@
       "label": "Wait for Infographic Builder human checkpoint",
       "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
       "actual": "Left click at (169, 89).",
-      "durationMs": 308
+      "durationMs": 254
     },
     {
       "sequence": 10,
@@ -109,7 +109,7 @@
       "label": "Open Review for recipe checkpoint",
       "expected": "Artifact Observatory exposes the durable human Compare checkpoint without an implicit model decision.",
       "actual": "Left click at (232, 89).",
-      "durationMs": 30
+      "durationMs": 28
     },
     {
       "sequence": 11,
@@ -117,7 +117,7 @@
       "label": "Open recipe Compare stage",
       "expected": "The recipe's sealed output candidates are reviewed by a person, not a model.",
       "actual": "Left click at (429, 296).",
-      "durationMs": 40
+      "durationMs": 48
     },
     {
       "sequence": 12,
@@ -125,7 +125,7 @@
       "label": "Select recipe review candidate 1",
       "expected": "The visible candidate is included in the explicit human checkpoint decision.",
       "actual": "Left click at (254, 592).",
-      "durationMs": 37
+      "durationMs": 31
     },
     {
       "sequence": 13,
@@ -133,7 +133,7 @@
       "label": "Complete recipe human checkpoint",
       "expected": "The selected output versions and review note are durably saved before downstream work resumes.",
       "actual": "Left click at (1079, 830).",
-      "durationMs": 59
+      "durationMs": 77
     },
     {
       "sequence": 14,
@@ -141,7 +141,7 @@
       "label": "Wait for the recipe to finish after human review",
       "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
       "actual": "Left click at (169, 89).",
-      "durationMs": 45
+      "durationMs": 41
     },
     {
       "sequence": 15,
@@ -149,7 +149,7 @@
       "label": "Inspect Infographic Builder output",
       "expected": "The recipe returns to its visible canvas with the fake-provider output persisted.",
       "actual": "Left click at (47, 89).",
-      "durationMs": 42
+      "durationMs": 35
     },
     {
       "sequence": 16,
@@ -157,7 +157,7 @@
       "label": "Select Infographic Builder output node",
       "expected": "The advertised fake-provider output is inspected on the inserted recipe itself.",
       "actual": "Left click at (957, 597).",
-      "durationMs": 63
+      "durationMs": 61
     },
     {
       "sequence": 17,
@@ -165,7 +165,7 @@
       "label": "Capture Infographic Builder fake-provider output",
       "expected": "This fresh-document recipe was configured, inserted, explicitly previewed, permitted, and completed through ordinary controls using only the recovery simulation.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 251,
+      "durationMs": 245,
       "screenshotPath": "screenshots/infographic-builder-fake-output.png"
     },
     {

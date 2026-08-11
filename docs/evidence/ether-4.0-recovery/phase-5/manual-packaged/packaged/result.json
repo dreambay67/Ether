@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "manual-recovery",
   "mode": "packaged",
-  "startedAt": "2026-08-10T17:08:44.998Z",
-  "finishedAt": "2026-08-10T17:08:59.394Z",
+  "startedAt": "2026-08-11T11:00:32.304Z",
+  "finishedAt": "2026-08-11T11:00:47.572Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "40ac5238c425e38cb1cf7d2a39e740dcad4ee82c",
+    "gitCommit": "4377c567e52721f8a4a7c52b84f6815031babe44",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "69ce2ed5290ea53e69cf0ca4d56a260b2bc8d3cbed073b8e9e5adc12b09f25be"
+        "sha256": "a53092cd276ed4c9840885db2619ad56c2595fb053721856b95bdd0b8eca54bf"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "27e40c00d8356cebb277203076d1abbd23c268d66586e6b70bd679b82c7ad712"
+        "sha256": "c16491a5ef5bd38ffdeae98921a0d4e191ccfef032b5c6cf2d29f8eec97ccde8"
       }
     ]
   },
@@ -45,7 +45,7 @@
       "label": "Capture first-run guidance",
       "expected": "The packaged blank document shows the registry Library and three practical starting steps.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 158,
+      "durationMs": 156,
       "screenshotPath": "screenshots/01-first-run-blank.png"
     },
     {
@@ -54,7 +54,7 @@
       "label": "Open the shortcut reference",
       "expected": "The Canvas toolbar exposes commands and gestures without requiring pointer hover.",
       "actual": "Left click at (913, 328).",
-      "durationMs": 66
+      "durationMs": 75
     },
     {
       "sequence": 4,
@@ -62,7 +62,7 @@
       "label": "Capture the shortcut reference",
       "expected": "Keyboard commands and pointer gestures are readable in one focused dialog.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 183,
+      "durationMs": 202,
       "screenshotPath": "screenshots/02-shortcut-reference.png"
     },
     {
@@ -71,7 +71,7 @@
       "label": "Close the shortcut reference",
       "expected": "Escape closes the modal and returns focus to its toolbar button.",
       "actual": "Pressed Escape.",
-      "durationMs": 8
+      "durationMs": 6
     },
     {
       "sequence": 6,
@@ -79,7 +79,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The registry creates prompt.text with canonical defaults.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 80
+      "durationMs": 61
     },
     {
       "sequence": 7,
@@ -87,7 +87,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The registry creates prompt.worker with canonical defaults.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 163
+      "durationMs": 64
     },
     {
       "sequence": 8,
@@ -95,7 +95,7 @@
       "label": "Add review.evaluate from Node Library",
       "expected": "The registry creates review.evaluate with canonical defaults.",
       "actual": "Left click at (108, 669).",
-      "durationMs": 57
+      "durationMs": 116
     },
     {
       "sequence": 9,
@@ -103,7 +103,7 @@
       "label": "Add flow.batch from Node Library",
       "expected": "The registry creates flow.batch with canonical defaults.",
       "actual": "Left click at (108, 669).",
-      "durationMs": 56
+      "durationMs": 74
     },
     {
       "sequence": 10,
@@ -111,7 +111,7 @@
       "label": "Hide Reference Desk",
       "expected": "The canvas gains room for the authoring action.",
       "actual": "Left click at (1581, 151).",
-      "durationMs": 43
+      "durationMs": 44
     },
     {
       "sequence": 11,
@@ -119,7 +119,7 @@
       "label": "Hide Build tools",
       "expected": "The canvas gains room for the authoring action.",
       "actual": "Left click at (244, 183).",
-      "durationMs": 52
+      "durationMs": 47
     },
     {
       "sequence": 12,
@@ -127,7 +127,7 @@
       "label": "Hide Project lens",
       "expected": "The canvas gains room for the authoring action.",
       "actual": "Left click at (1580, 183).",
-      "durationMs": 35
+      "durationMs": 40
     },
     {
       "sequence": 13,
@@ -142,8 +142,8 @@
       "kind": "left-click",
       "label": "Select Prompt for direct editing",
       "expected": "The Prompt becomes the primary canvas selection.",
-      "actual": "Left click at (1139, 667).",
-      "durationMs": 49
+      "actual": "Left click at (1027, 667).",
+      "durationMs": 33
     },
     {
       "sequence": 15,
@@ -151,7 +151,7 @@
       "label": "Rename the Prompt",
       "expected": "F2 opens the bounded title editor.",
       "actual": "Pressed F2.",
-      "durationMs": 16
+      "durationMs": 15
     },
     {
       "sequence": 16,
@@ -166,7 +166,7 @@
       "kind": "left-click",
       "label": "Focus Prompt content",
       "expected": "The renamed Prompt's primary content control owns keyboard focus.",
-      "actual": "Left click at (1139, 690).",
+      "actual": "Left click at (1027, 690).",
       "durationMs": 54
     },
     {
@@ -183,7 +183,7 @@
       "label": "Capture direct editing",
       "expected": "The packaged canvas shows one controlled in-place content editor.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 183,
+      "durationMs": 179,
       "screenshotPath": "screenshots/03-direct-editing.png"
     },
     {
@@ -192,119 +192,119 @@
       "label": "Commit Prompt content",
       "expected": "Ctrl+Enter saves the edit without starting a run.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 32
+      "durationMs": 37
     },
     {
       "sequence": 21,
       "kind": "left-click",
       "label": "Begin Text lane",
       "expected": "Compatible Text inputs become visible before the lane is saved.",
-      "actual": "Left click at (901, 410).",
-      "durationMs": 238
+      "actual": "Left click at (789, 410).",
+      "durationMs": 218
     },
     {
       "sequence": 22,
       "kind": "left-click",
       "label": "Complete Text lane",
       "expected": "The Text lane persists through the visible canvas interaction.",
-      "actual": "Left click at (621, 282).",
-      "durationMs": 269
+      "actual": "Left click at (509, 282).",
+      "durationMs": 253
     },
     {
       "sequence": 23,
       "kind": "left-click",
       "label": "Begin Image lane",
       "expected": "Compatible Image inputs become visible before the lane is saved.",
-      "actual": "Left click at (901, 420).",
-      "durationMs": 223
+      "actual": "Left click at (789, 420).",
+      "durationMs": 242
     },
     {
       "sequence": 24,
       "kind": "left-click",
       "label": "Complete Image lane",
       "expected": "The Image lane persists through the visible canvas interaction.",
-      "actual": "Left click at (621, 292).",
-      "durationMs": 272
+      "actual": "Left click at (509, 292).",
+      "durationMs": 261
     },
     {
       "sequence": 25,
       "kind": "left-click",
       "label": "Begin Mask lane",
       "expected": "Compatible Mask inputs become visible before the lane is saved.",
-      "actual": "Left click at (901, 429).",
-      "durationMs": 236
+      "actual": "Left click at (789, 429).",
+      "durationMs": 226
     },
     {
       "sequence": 26,
       "kind": "left-click",
       "label": "Complete Mask lane",
       "expected": "The Mask lane persists through the visible canvas interaction.",
-      "actual": "Left click at (621, 301).",
-      "durationMs": 306
+      "actual": "Left click at (509, 301).",
+      "durationMs": 260
     },
     {
       "sequence": 27,
       "kind": "left-click",
       "label": "Begin Data lane",
       "expected": "Compatible Data inputs become visible before the lane is saved.",
-      "actual": "Left click at (901, 439).",
-      "durationMs": 262
+      "actual": "Left click at (789, 439).",
+      "durationMs": 241
     },
     {
       "sequence": 28,
       "kind": "left-click",
       "label": "Complete Data lane",
       "expected": "The Data lane persists through the visible canvas interaction.",
-      "actual": "Left click at (621, 311).",
-      "durationMs": 261
+      "actual": "Left click at (509, 311).",
+      "durationMs": 278
     },
     {
       "sequence": 29,
       "kind": "left-click",
       "label": "Begin Video lane",
       "expected": "Compatible Video inputs become visible before the lane is saved.",
-      "actual": "Left click at (901, 448).",
-      "durationMs": 225
+      "actual": "Left click at (789, 448).",
+      "durationMs": 237
     },
     {
       "sequence": 30,
       "kind": "left-click",
       "label": "Complete Video lane",
       "expected": "The Video lane persists through the visible canvas interaction.",
-      "actual": "Left click at (621, 320).",
-      "durationMs": 275
+      "actual": "Left click at (509, 320).",
+      "durationMs": 260
     },
     {
       "sequence": 31,
       "kind": "left-click",
       "label": "Begin Audio lane",
       "expected": "Compatible Audio inputs become visible before the lane is saved.",
-      "actual": "Left click at (901, 457).",
-      "durationMs": 278
+      "actual": "Left click at (789, 457).",
+      "durationMs": 225
     },
     {
       "sequence": 32,
       "kind": "left-click",
       "label": "Complete Audio lane",
       "expected": "The Audio lane persists through the visible canvas interaction.",
-      "actual": "Left click at (621, 330).",
-      "durationMs": 284
+      "actual": "Left click at (509, 330).",
+      "durationMs": 247
     },
     {
       "sequence": 33,
       "kind": "left-click",
       "label": "Open semantic roles",
-      "expected": "The lane exposes the shared semantic role grid.",
-      "actual": "Left click at (761, 501).",
-      "durationMs": 52
+      "expected": "The active lane exposes the shared semantic role grid.",
+      "actual": "Left click at (656, 378).",
+      "durationMs": 42
     },
     {
       "sequence": 34,
       "kind": "left-click",
       "label": "Set the Subject role",
       "expected": "The Text lane carries a visible Subject badge.",
-      "actual": "Left click at (808, 522).",
-      "durationMs": 59
+      "actual": "Left click at (703, 398).",
+      "durationMs": 77
     },
     {
       "sequence": 35,
@@ -312,7 +312,7 @@
       "label": "Capture channels and roles",
       "expected": "All six channel lanes coexist and one lane shows its semantic Subject role.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 218,
+      "durationMs": 238,
       "screenshotPath": "screenshots/04-channels-and-roles.png"
     },
     {
@@ -320,16 +320,16 @@
       "kind": "left-click",
       "label": "Select Prompt for a Module",
       "expected": "Prompt begins the Module selection.",
-      "actual": "Left click at (1139, 697).",
-      "durationMs": 39
+      "actual": "Left click at (1027, 697).",
+      "durationMs": 36
     },
     {
       "sequence": 37,
       "kind": "left-click",
       "label": "Add Worker to the Module selection",
       "expected": "Shift keeps Prompt selected and adds Worker.",
-      "actual": "Left click at (988, 569).",
-      "durationMs": 43
+      "actual": "Left click at (876, 569).",
+      "durationMs": 46
     },
     {
       "sequence": 38,
@@ -337,7 +337,7 @@
       "label": "Create a Module",
       "expected": "Ctrl+G moves the two selected nodes into one locked durable Module.",
       "actual": "Pressed Control+G.",
-      "durationMs": 65
+      "durationMs": 54
     },
     {
       "sequence": 39,
@@ -354,7 +354,7 @@
       "label": "Restore Build tools",
       "expected": "The Library returns for the next documented setup.",
       "actual": "Left click at (19, 183).",
-      "durationMs": 35
+      "durationMs": 34
     },
     {
       "sequence": 41,
@@ -362,7 +362,7 @@
       "label": "Restore Project lens",
       "expected": "The Inspector returns for setup details.",
       "actual": "Left click at (1584, 183).",
-      "durationMs": 35
+      "durationMs": 45
     },
     {
       "sequence": 42,
@@ -370,7 +370,7 @@
       "label": "Restore Reference Desk",
       "expected": "The source desk returns above the canvas.",
       "actual": "Left click at (20, 151).",
-      "durationMs": 37
+      "durationMs": 39
     },
     {
       "sequence": 43,
@@ -378,7 +378,7 @@
       "label": "Add reference.set from Node Library",
       "expected": "The registry creates reference.set with canonical defaults.",
       "actual": "Left click at (108, 749).",
-      "durationMs": 55
+      "durationMs": 91
     },
     {
       "sequence": 44,
@@ -386,7 +386,7 @@
       "label": "Select Reference Set",
       "expected": "Reference controls and the empty source desk share the visible Build workspace.",
       "actual": "Left click at (802, 579).",
-      "durationMs": 42
+      "durationMs": 57
     },
     {
       "sequence": 45,
@@ -394,7 +394,7 @@
       "label": "Capture reference setup",
       "expected": "Reference Set setup and the honest empty Reference Desk are visible without importing or injecting a source.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 280,
+      "durationMs": 243,
       "screenshotPath": "screenshots/06-reference-setup.png"
     },
     {
@@ -403,7 +403,7 @@
       "label": "Open Run workspace",
       "expected": "Run reveals Batch Matrix and Job Center around the same durable graph.",
       "actual": "Left click at (169, 89).",
-      "durationMs": 48
+      "durationMs": 45
     },
     {
       "sequence": 47,
@@ -411,7 +411,7 @@
       "label": "Capture batch planning",
       "expected": "The Batch Matrix shows the work set, allocation boundary, and concurrency controls without starting work.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 205,
+      "durationMs": 191,
       "screenshotPath": "screenshots/07-batch-run-workspace.png"
     },
     {
@@ -420,7 +420,7 @@
       "label": "Open Review workspace",
       "expected": "Review exposes the Artifact Observatory for the current blank-authored document.",
       "actual": "Left click at (232, 89).",
-      "durationMs": 35
+      "durationMs": 39
     },
     {
       "sequence": 49,
@@ -428,7 +428,7 @@
       "label": "Capture Review",
       "expected": "The packaged Review workspace reports its empty artifact state instead of fabricating output.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 175,
+      "durationMs": 154,
       "screenshotPath": "screenshots/08-review-empty-state.png"
     },
     {
@@ -437,7 +437,7 @@
       "label": "Return to Build",
       "expected": "The same authored graph returns for export setup.",
       "actual": "Left click at (47, 89).",
-      "durationMs": 50
+      "durationMs": 54
     },
     {
       "sequence": 51,
@@ -445,7 +445,7 @@
       "label": "Add output.export from Node Library",
       "expected": "The registry creates output.export with canonical defaults.",
       "actual": "Left click at (108, 674).",
-      "durationMs": 55
+      "durationMs": 75
     },
     {
       "sequence": 52,
@@ -453,7 +453,7 @@
       "label": "Select Export",
       "expected": "The Inspector exposes export setup before any folder grant or write.",
       "actual": "Left click at (802, 579).",
-      "durationMs": 38
+      "durationMs": 42
     },
     {
       "sequence": 53,
@@ -461,7 +461,7 @@
       "label": "Capture export setup",
       "expected": "Export names the required scoped folder grant, template, format, collision policy, and metadata choice before writing.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 241,
+      "durationMs": 255,
       "screenshotPath": "screenshots/09-export-setup.png"
     },
     {
@@ -470,7 +470,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The registry creates prompt.worker with canonical defaults.",
       "actual": "Left click at (108, 643).",
-      "durationMs": 62
+      "durationMs": 61
     },
     {
       "sequence": 55,
@@ -478,7 +478,7 @@
       "label": "Select an unconfigured Worker",
       "expected": "The run preview targets one visible runnable node.",
       "actual": "Left click at (802, 579).",
-      "durationMs": 58
+      "durationMs": 47
     },
     {
       "sequence": 56,
@@ -486,7 +486,7 @@
       "label": "Preview without a provider",
       "expected": "Preview stops at capability validation and starts no provider work.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 26
+      "durationMs": 22
     },
     {
       "sequence": 57,
@@ -503,7 +503,7 @@
       "label": "Open Recipe Gallery",
       "expected": "The versioned recipe catalog opens without applying a recipe.",
       "actual": "Left click at (194, 913).",
-      "durationMs": 80
+      "durationMs": 61
     },
     {
       "sequence": 59,
@@ -511,7 +511,7 @@
       "label": "Capture Recipe Gallery",
       "expected": "All 12 recipe cards are visible before setup, mutation, or provider work.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 222,
+      "durationMs": 253,
       "screenshotPath": "screenshots/11-recipe-gallery.png"
     },
     {
@@ -520,7 +520,7 @@
       "label": "Close Recipe Gallery",
       "expected": "Escape closes the recipe dialog without changing the graph.",
       "actual": "Pressed Escape.",
-      "durationMs": 10
+      "durationMs": 8
     },
     {
       "sequence": 61,
@@ -528,7 +528,7 @@
       "label": "Open Settings",
       "expected": "Settings exposes local interface, safety, recovery, and version state.",
       "actual": "Left click at (1564, 34).",
-      "durationMs": 53
+      "durationMs": 70
     },
     {
       "sequence": 62,
@@ -536,7 +536,7 @@
       "label": "Capture recovery and provider setup",
       "expected": "Settings shows a healthy local recovery state and an unconfigured Gemini route without testing or connecting it.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 326,
+      "durationMs": 345,
       "screenshotPath": "screenshots/12-recovery-and-provider-setup.png"
     },
     {

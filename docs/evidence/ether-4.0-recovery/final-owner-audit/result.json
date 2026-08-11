@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "ether-4.0-final-owner-audit@1",
+  "date": "2026-08-11",
+  "result": "PASS",
+  "ownerDecision": "ACCEPTED",
+  "productCommit": "4377c567e52721f8a4a7c52b84f6815031babe44",
+  "packageArtifact": "release/windows/win-unpacked/resources/app.asar",
+  "packageHash": "C16491A5EF5BD38FFDEAE98921A0D4E191CCFEF032B5C6CF2D29F8EEC97CCDE8",
+  "installerHash": "16AD60BFA83E7CC6A221B53BF7C4126036419719B2C01768141668A54C9D4A6C",
+  "manualHash": "5ACDE9CEDC4B96B25E608D92F7029FBB73EFA8E36DF5C2B2717538D3FC990092",
+  "imageGenerationsUsed": 1,
+  "imageGenerationLimit": 12,
+  "journeys": {
+    "J01": "PASS",
+    "J02": "PASS",
+    "J03": "PASS",
+    "J04": "PASS",
+    "J05": "PASS",
+    "J06": "PASS",
+    "J07": "PASS",
+    "J08": "PASS",
+    "J09": "PASS",
+    "J10": "PASS"
+  },
+  "disclosures": [
+    "Unsigned Windows installer may show SmartScreen.",
+    "Windows protected credentials are user and profile bound.",
+    "Codex CLI 0.144.2 is the reviewed conformance target; unreviewed versions fail closed.",
+    "Antigravity is an explicit fallback outside the default Google API launch gate."
+  ]
+}

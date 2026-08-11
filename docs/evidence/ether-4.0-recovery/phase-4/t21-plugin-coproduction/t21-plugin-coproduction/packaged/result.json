@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t21-plugin-coproduction",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:08:38.475Z",
-  "finishedAt": "2026-08-09T15:09:26.064Z",
+  "startedAt": "2026-08-11T09:50:39.947Z",
+  "finishedAt": "2026-08-11T09:51:37.450Z",
   "outcome": "failed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,19 +17,24 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "e5de95dc6fe5c8978815c1435d6451f941656352",
+    "gitCommit": "9872deaee3dd4457f09192da6d535ee3c76701f7",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+        "sha256": "4824a5a0b5189bfa805f5cabdb70e8ab74ed897a6438bc13c1a1db303b70cc3d"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+        "sha256": "a599062e8a65b0446ab31e7eaabcf48d431b164fa7ea4ac950267ac78703f60a"
       }
     ]
   },
   "actions": [],
-  "errors": []
+  "errors": [
+    {
+      "source": "main-process",
+      "message": "[73520:0811/115136.381:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1089] GPU process exited unexpectedly: exit_code=-1"
+    }
+  ]
 }

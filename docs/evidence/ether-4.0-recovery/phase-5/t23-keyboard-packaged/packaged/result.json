@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "journeyId": "t23-keyboard-packaged",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:25:49.587Z",
-  "finishedAt": "2026-08-09T15:26:02.908Z",
-  "outcome": "failed",
+  "startedAt": "2026-08-11T10:38:53.869Z",
+  "finishedAt": "2026-08-11T10:39:00.951Z",
+  "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
     "appData": "isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "2dd2fd54e60e421386f9bba92b8d331fbd46b748",
+    "gitCommit": "cee52084d5e423960c60311779767586d4c167c5",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "2d90842c3b03c131567522e8cd9b63b31064cb97fa52d4c1b31bb1d7e19337ec"
+        "sha256": "e2f8c25e63420e646c6d588ff83cc16bac2f4affd1dec7d3416370d653e747e8"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875"
+        "sha256": "e959f707a6d36e9004cc70e66030ceb7e39d1be612462481876db37388f889d3"
       }
     ]
   },
@@ -53,7 +53,7 @@
       "label": "Select the Library query",
       "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
       "actual": "Pressed Control+A.",
-      "durationMs": 3
+      "durationMs": 4
     },
     {
       "sequence": 4,
@@ -77,14 +77,14 @@
       "label": "Add Prompt from the Library",
       "expected": "Enter creates the canonical node through the ordinary Library command.",
       "actual": "Pressed Enter.",
-      "durationMs": 39
+      "durationMs": 52
     },
     {
       "sequence": 7,
       "kind": "observation",
       "label": "Reach the authoring canvas",
       "expected": "The target is reached from the actual current focus using keyboard traversal only.",
-      "actual": "Reached Authoring canvas with 15 Tab key events.",
+      "actual": "Reached Authoring canvas with 19 Tab key events.",
       "durationMs": 0
     },
     {
@@ -93,7 +93,7 @@
       "label": "Open canvas quick add",
       "expected": "N opens the searchable node palette while the canvas owns focus.",
       "actual": "Pressed N.",
-      "durationMs": 16
+      "durationMs": 17
     },
     {
       "sequence": 9,
@@ -109,7 +109,200 @@
       "label": "Insert Note from quick add",
       "expected": "Enter inserts the active matching canonical node and returns focus to the canvas.",
       "actual": "Pressed Enter.",
+      "durationMs": 29
+    },
+    {
+      "sequence": 11,
+      "kind": "observation",
+      "label": "Select Prompt from its focused title",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Prompt 1 with 4 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 12,
+      "kind": "keyboard-command",
+      "label": "Select Prompt from its focused title",
+      "expected": "Space selects the keyboard-reached node without using a pointer.",
+      "actual": "Pressed Space.",
+      "durationMs": 9
+    },
+    {
+      "sequence": 13,
+      "kind": "keyboard-command",
+      "label": "Open the focused Prompt title editor",
+      "expected": "F2 opens one bounded title editor for the selected Prompt.",
+      "actual": "Pressed F2.",
+      "durationMs": 13
+    },
+    {
+      "sequence": 14,
+      "kind": "keyboard-command",
+      "label": "Select title editor text",
+      "expected": "The inline editor keeps Ctrl+A local instead of selecting graph nodes.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 15,
+      "kind": "observation",
+      "label": "Type the Prompt title",
+      "expected": "The bounded F2 editor receives typed text while graph selection remains unchanged.",
+      "actual": "Typed 14 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 16,
+      "kind": "keyboard-command",
+      "label": "Commit the focused title editor",
+      "expected": "Enter commits the title edit and closes the inline editor.",
+      "actual": "Pressed Enter.",
+      "durationMs": 24
+    },
+    {
+      "sequence": 17,
+      "kind": "observation",
+      "label": "Return to the canvas after title editing",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Authoring canvas with 0 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 18,
+      "kind": "keyboard-command",
+      "label": "Select both authored nodes",
+      "expected": "The canvas-owned command selects the two blank-authored nodes.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 16
+    },
+    {
+      "sequence": 19,
+      "kind": "observation",
+      "label": "Keyboard multi-selection",
+      "expected": "Ctrl+A is the documented keyboard route for selecting all authored canvas nodes.",
+      "actual": "The blank-authored Prompt and Note are selected together before duplicate, copy, paste, delete, undo, and redo.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 20,
+      "kind": "keyboard-command",
+      "label": "Duplicate the keyboard selection",
+      "expected": "Duplicate creates two offset graph nodes without opening an editor.",
+      "actual": "Pressed Control+D.",
+      "durationMs": 34
+    },
+    {
+      "sequence": 21,
+      "kind": "keyboard-command",
+      "label": "Copy the duplicated selection",
+      "expected": "Copy retains the selected graph subgraph for the ordinary clipboard command.",
+      "actual": "Pressed Control+C.",
+      "durationMs": 10
+    },
+    {
+      "sequence": 22,
+      "kind": "keyboard-command",
+      "label": "Paste the graph selection",
+      "expected": "Paste creates fresh graph identities through the canvas command.",
+      "actual": "Pressed Control+V.",
+      "durationMs": 33
+    },
+    {
+      "sequence": 23,
+      "kind": "keyboard-command",
+      "label": "Delete the pasted selection",
+      "expected": "Delete removes only the current selection and reports the mutation through the polite canvas status.",
+      "actual": "Pressed Delete.",
+      "durationMs": 25
+    },
+    {
+      "sequence": 24,
+      "kind": "keyboard-command",
+      "label": "Undo the keyboard delete",
+      "expected": "Undo restores the pasted selection.",
+      "actual": "Pressed Control+Z.",
       "durationMs": 30
+    },
+    {
+      "sequence": 25,
+      "kind": "keyboard-command",
+      "label": "Redo the keyboard delete",
+      "expected": "Redo reapplies the deletion without losing canvas focus.",
+      "actual": "Pressed Control+Y.",
+      "durationMs": 34
+    },
+    {
+      "sequence": 26,
+      "kind": "observation",
+      "label": "Restore the edited Prompt selection",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Keyboard brief with 4 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 27,
+      "kind": "keyboard-command",
+      "label": "Restore the edited Prompt selection",
+      "expected": "The renamed Prompt is selected for its keyboard-accessible Inspector help.",
+      "actual": "Pressed Space.",
+      "durationMs": 8
+    },
+    {
+      "sequence": 28,
+      "kind": "observation",
+      "label": "Reach Setup help",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Setup help with 29 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 29,
+      "kind": "keyboard-command",
+      "label": "Dismiss the focused Setup tooltip",
+      "expected": "Escape closes the focus tooltip without changing graph selection.",
+      "actual": "Pressed Escape.",
+      "durationMs": 2
+    },
+    {
+      "sequence": 30,
+      "kind": "observation",
+      "label": "Open keyboard reference from its focused toolbar control",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Keyboard and pointer reference with 62 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 31,
+      "kind": "keyboard-command",
+      "label": "Open keyboard reference from its focused toolbar control",
+      "expected": "Enter opens the keyboard-help modal and transfers focus inside it.",
+      "actual": "Pressed Enter.",
+      "durationMs": 12
+    },
+    {
+      "sequence": 32,
+      "kind": "keyboard-command",
+      "label": "Close keyboard reference",
+      "expected": "Escape closes the modal and returns focus to its toolbar trigger.",
+      "actual": "Pressed Escape.",
+      "durationMs": 3
+    },
+    {
+      "sequence": 33,
+      "kind": "observation",
+      "label": "Keyboard-only J03 subset",
+      "expected": "The fresh packaged document was authored, edited, multi-selected, duplicated, copied, pasted, deleted, undone, and redone using keyboard focus and real key events.",
+      "actual": "Library Tab/Enter, canvas N/Enter, F2/Enter, Ctrl+A multi-selection, graph shortcuts, a focus tooltip, reduced-motion CSS targets, and modal Escape focus return all remained available. Pointer-only marquee and move are outside this keyboard subset.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 34,
+      "kind": "screenshot",
+      "label": "Capture keyboard-only authoring state",
+      "expected": "The packaged blank-authored canvas visibly retains the renamed node after keyboard-only commands.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 158,
+      "screenshotPath": "screenshots/01-keyboard-authoring.png"
     }
   ],
   "errors": []

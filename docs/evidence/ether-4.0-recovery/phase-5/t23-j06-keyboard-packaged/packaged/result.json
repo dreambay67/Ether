@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "journeyId": "t23-j06-keyboard-packaged",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:25:36.032Z",
-  "finishedAt": "2026-08-09T15:25:48.642Z",
-  "outcome": "failed",
+  "startedAt": "2026-08-11T10:38:32.549Z",
+  "finishedAt": "2026-08-11T10:38:53.445Z",
+  "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
     "appData": "isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "2dd2fd54e60e421386f9bba92b8d331fbd46b748",
+    "gitCommit": "cee52084d5e423960c60311779767586d4c167c5",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "2d90842c3b03c131567522e8cd9b63b31064cb97fa52d4c1b31bb1d7e19337ec"
+        "sha256": "e2f8c25e63420e646c6d588ff83cc16bac2f4affd1dec7d3416370d653e747e8"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "f1823e2bde697e2cc8fa55add7b1d71be99fb19369e3234ca7599ee6963ae875"
+        "sha256": "e959f707a6d36e9004cc70e66030ceb7e39d1be612462481876db37388f889d3"
       }
     ]
   },
@@ -53,7 +53,7 @@
       "label": "Select the Library query",
       "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
       "actual": "Pressed Control+A.",
-      "durationMs": 3
+      "durationMs": 4
     },
     {
       "sequence": 4,
@@ -77,14 +77,14 @@
       "label": "Add Prompt from the Library",
       "expected": "Enter creates the canonical node through the ordinary Library command.",
       "actual": "Pressed Enter.",
-      "durationMs": 51
+      "durationMs": 52
     },
     {
       "sequence": 7,
       "kind": "observation",
       "label": "Reach the Library search",
       "expected": "The target is reached from the actual current focus using keyboard traversal only.",
-      "actual": "Reached  with 57 Tab key events.",
+      "actual": "Reached  with 75 Tab key events.",
       "durationMs": 0
     },
     {
@@ -117,14 +117,14 @@
       "label": "Add Worker from the Library",
       "expected": "Enter creates the canonical node through the ordinary Library command.",
       "actual": "Pressed Enter.",
-      "durationMs": 34
+      "durationMs": 27
     },
     {
       "sequence": 12,
       "kind": "observation",
       "label": "Reach the Library search",
       "expected": "The target is reached from the actual current focus using keyboard traversal only.",
-      "actual": "Reached  with 63 Tab key events.",
+      "actual": "Reached  with 93 Tab key events.",
       "durationMs": 0
     },
     {
@@ -157,14 +157,14 @@
       "label": "Add Worker from the Library",
       "expected": "Enter creates the canonical node through the ordinary Library command.",
       "actual": "Pressed Enter.",
-      "durationMs": 26
+      "durationMs": 49
     },
     {
       "sequence": 17,
       "kind": "observation",
       "label": "Reach the Library search",
       "expected": "The target is reached from the actual current focus using keyboard traversal only.",
-      "actual": "Reached  with 75 Tab key events.",
+      "actual": "Reached  with 105 Tab key events.",
       "durationMs": 0
     },
     {
@@ -173,7 +173,7 @@
       "label": "Select the Library query",
       "expected": "The focused Library search owns the select-all shortcut, not the canvas graph.",
       "actual": "Pressed Control+A.",
-      "durationMs": 4
+      "durationMs": 3
     },
     {
       "sequence": 19,
@@ -197,14 +197,14 @@
       "label": "Add Image Generator from the Library",
       "expected": "Enter creates the canonical node through the ordinary Library command.",
       "actual": "Pressed Enter.",
-      "durationMs": 27
+      "durationMs": 39
     },
     {
       "sequence": 22,
       "kind": "observation",
       "label": "Begin Prompt to Worker A",
       "expected": "The target is reached from the actual current focus using keyboard traversal only.",
-      "actual": "Reached Text output with 17 Tab key events.",
+      "actual": "Reached Text output with 21 Tab key events.",
       "durationMs": 0
     },
     {
@@ -213,7 +213,504 @@
       "label": "Begin Prompt to Worker A",
       "expected": "Enter begins a keyboard-owned connection intent from the source channel.",
       "actual": "Pressed Enter.",
+      "durationMs": 5
+    },
+    {
+      "sequence": 24,
+      "kind": "observation",
+      "label": "Complete Prompt to Worker A",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Text input with 2 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 25,
+      "kind": "keyboard-command",
+      "label": "Complete Prompt to Worker A",
+      "expected": "Space completes the compatible connection through the ordinary canvas interaction.",
+      "actual": "Pressed Space.",
+      "durationMs": 45
+    },
+    {
+      "sequence": 26,
+      "kind": "observation",
+      "label": "Begin Worker A to Worker B",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Text output with 9 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 27,
+      "kind": "keyboard-command",
+      "label": "Begin Worker A to Worker B",
+      "expected": "Enter begins a keyboard-owned connection intent from the source channel.",
+      "actual": "Pressed Enter.",
+      "durationMs": 5
+    },
+    {
+      "sequence": 28,
+      "kind": "observation",
+      "label": "Complete Worker A to Worker B",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Text input with 2 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 29,
+      "kind": "keyboard-command",
+      "label": "Complete Worker A to Worker B",
+      "expected": "Space completes the compatible connection through the ordinary canvas interaction.",
+      "actual": "Pressed Space.",
+      "durationMs": 46
+    },
+    {
+      "sequence": 30,
+      "kind": "observation",
+      "label": "Begin Worker B to Image Generator",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Text output with 9 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 31,
+      "kind": "keyboard-command",
+      "label": "Begin Worker B to Image Generator",
+      "expected": "Enter begins a keyboard-owned connection intent from the source channel.",
+      "actual": "Pressed Enter.",
+      "durationMs": 5
+    },
+    {
+      "sequence": 32,
+      "kind": "observation",
+      "label": "Complete Worker B to Image Generator",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Text input with 2 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 33,
+      "kind": "keyboard-command",
+      "label": "Complete Worker B to Image Generator",
+      "expected": "Space completes the compatible connection through the ordinary canvas interaction.",
+      "actual": "Pressed Space.",
+      "durationMs": 43
+    },
+    {
+      "sequence": 34,
+      "kind": "observation",
+      "label": "Open the active lane role grid",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached General• with 72 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 35,
+      "kind": "keyboard-command",
+      "label": "Open the active lane role grid",
+      "expected": "Space opens the keyboard-reachable role grid for the newly created connection.",
+      "actual": "Pressed Space.",
+      "durationMs": 5
+    },
+    {
+      "sequence": 36,
+      "kind": "observation",
+      "label": "Reach Project Lens Connection role",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Connection role with 70 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 37,
+      "kind": "observation",
+      "label": "Choose the Subject role",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Subject with 58 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 38,
+      "kind": "keyboard-command",
+      "label": "Choose the Subject role",
+      "expected": "Enter assigns the visible semantic Subject role without pointer input.",
+      "actual": "Pressed Enter.",
+      "durationMs": 51
+    },
+    {
+      "sequence": 39,
+      "kind": "observation",
+      "label": "Keyboard role grid and Project Lens",
+      "expected": "The lane role grid and selected Edge Inspector are reached through Tab and Enter after keyboard-created connection intent.",
+      "actual": "The active Text lane now exposes Subject; Project Lens exposes source channel, target channel, connection role, and output-selection controls for the selected edge.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 40,
+      "kind": "observation",
+      "label": "Select Worker A",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker 1 with 19 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 41,
+      "kind": "keyboard-command",
+      "label": "Select Worker A",
+      "expected": "Space selects Worker A through a tab-reached node title.",
+      "actual": "Pressed Space.",
+      "durationMs": 12
+    },
+    {
+      "sequence": 42,
+      "kind": "observation",
+      "label": "Reach Worker A instruction",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker instruction with 35 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 43,
+      "kind": "keyboard-command",
+      "label": "Select Worker A instruction",
+      "expected": "Ctrl+A remains inside the focused Worker instruction field.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 3
+    },
+    {
+      "sequence": 44,
+      "kind": "observation",
+      "label": "Type Worker A instruction",
+      "expected": "The Worker instruction is authored through the keyboard-reached Inspector textarea.",
+      "actual": "Typed 56 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 45,
+      "kind": "observation",
+      "label": "Set Worker A result handling",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker result handling with 5 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 46,
+      "kind": "keyboard-command",
+      "label": "Set Worker A result handling: first option",
+      "expected": "Home places the native select at its first available option.",
+      "actual": "Pressed Home.",
+      "durationMs": 1
+    },
+    {
+      "sequence": 47,
+      "kind": "keyboard-command",
+      "label": "Set Worker A result handling: option 1",
+      "expected": "ArrowDown advances the native select through its visible option order.",
+      "actual": "Pressed ArrowDown.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 48,
+      "kind": "observation",
+      "label": "Save Worker A",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Save worker with 1 Tab key event.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 49,
+      "kind": "keyboard-command",
+      "label": "Save Worker A",
+      "expected": "Enter saves the Worker instruction and auto-apply policy through the ordinary Inspector control.",
+      "actual": "Pressed Enter.",
+      "durationMs": 42
+    },
+    {
+      "sequence": 50,
+      "kind": "observation",
+      "label": "Select Worker B",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker 2 with 98 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 51,
+      "kind": "keyboard-command",
+      "label": "Select Worker B",
+      "expected": "Space selects Worker B through a tab-reached node title.",
+      "actual": "Pressed Space.",
+      "durationMs": 9
+    },
+    {
+      "sequence": 52,
+      "kind": "observation",
+      "label": "Reach Worker B instruction",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker instruction with 23 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 53,
+      "kind": "keyboard-command",
+      "label": "Select Worker B instruction",
+      "expected": "Ctrl+A remains inside the focused Worker instruction field.",
+      "actual": "Pressed Control+A.",
+      "durationMs": 3
+    },
+    {
+      "sequence": 54,
+      "kind": "observation",
+      "label": "Type Worker B instruction",
+      "expected": "The Worker instruction is authored through the keyboard-reached Inspector textarea.",
+      "actual": "Typed 62 characters through the active keyboard target.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 55,
+      "kind": "observation",
+      "label": "Set Worker B result handling",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker result handling with 5 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 56,
+      "kind": "keyboard-command",
+      "label": "Set Worker B result handling: first option",
+      "expected": "Home places the native select at its first available option.",
+      "actual": "Pressed Home.",
+      "durationMs": 2
+    },
+    {
+      "sequence": 57,
+      "kind": "keyboard-command",
+      "label": "Set Worker B result handling: option 1",
+      "expected": "ArrowDown advances the native select through its visible option order.",
+      "actual": "Pressed ArrowDown.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 58,
+      "kind": "observation",
+      "label": "Save Worker B",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Save worker with 1 Tab key event.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 59,
+      "kind": "keyboard-command",
+      "label": "Save Worker B",
+      "expected": "Enter saves the Worker instruction and auto-apply policy through the ordinary Inspector control.",
+      "actual": "Pressed Enter.",
+      "durationMs": 30
+    },
+    {
+      "sequence": 60,
+      "kind": "observation",
+      "label": "Select Image Generator",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Image Generator 1 with 107 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 61,
+      "kind": "keyboard-command",
+      "label": "Select Image Generator",
+      "expected": "Space selects the Image Generator through its keyboard-reached title.",
+      "actual": "Pressed Space.",
+      "durationMs": 10
+    },
+    {
+      "sequence": 62,
+      "kind": "observation",
+      "label": "Choose recovery-only fake-local image profile",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Provider profile with 15 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 63,
+      "kind": "keyboard-command",
+      "label": "Choose recovery-only fake-local image profile: first option",
+      "expected": "Home places the native select at its first available option.",
+      "actual": "Pressed Home.",
+      "durationMs": 7
+    },
+    {
+      "sequence": 64,
+      "kind": "keyboard-command",
+      "label": "Choose recovery-only fake-local image profile: option 1",
+      "expected": "ArrowDown advances the native select through its visible option order.",
+      "actual": "Pressed ArrowDown.",
+      "durationMs": 2
+    },
+    {
+      "sequence": 65,
+      "kind": "observation",
+      "label": "Save fake-local Image profile",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Save provider settings with 9 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 66,
+      "kind": "keyboard-command",
+      "label": "Save fake-local Image profile",
+      "expected": "Enter saves the deterministic local image binding; no real provider fallback is used.",
+      "actual": "Pressed Enter.",
+      "durationMs": 33
+    },
+    {
+      "sequence": 67,
+      "kind": "observation",
+      "label": "Select Worker A for reviewed preview",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Worker 1 with 76 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 68,
+      "kind": "keyboard-command",
+      "label": "Select Worker A for reviewed preview",
+      "expected": "Space selects Worker A through its keyboard-reached title.",
+      "actual": "Pressed Space.",
       "durationMs": 11
+    },
+    {
+      "sequence": 69,
+      "kind": "observation",
+      "label": "Select Worker A branch scope",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Run scope with 52 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 70,
+      "kind": "keyboard-command",
+      "label": "Select Worker A branch scope: first option",
+      "expected": "Home places the native select at its first available option.",
+      "actual": "Pressed Home.",
+      "durationMs": 1
+    },
+    {
+      "sequence": 71,
+      "kind": "keyboard-command",
+      "label": "Select Worker A branch scope: option 1",
+      "expected": "ArrowDown advances the native select through its visible option order.",
+      "actual": "Pressed ArrowDown.",
+      "durationMs": 4
+    },
+    {
+      "sequence": 72,
+      "kind": "observation",
+      "label": "Preview the fake-local Worker branch",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Preview plan with 2 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 73,
+      "kind": "keyboard-command",
+      "label": "Preview the fake-local Worker branch",
+      "expected": "Enter prepares the immutable Worker-to-Image plan before it can start.",
+      "actual": "Pressed Enter.",
+      "durationMs": 85
+    },
+    {
+      "sequence": 74,
+      "kind": "observation",
+      "label": "Explicitly start the reviewed fake-local plan",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Start 3 calls with 127 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 75,
+      "kind": "keyboard-command",
+      "label": "Explicitly start the reviewed fake-local plan",
+      "expected": "Enter grants the one-use permit for the exact displayed plan; no real provider is available to this route.",
+      "actual": "Pressed Enter.",
+      "durationMs": 49
+    },
+    {
+      "sequence": 76,
+      "kind": "observation",
+      "label": "Open Job Center with the keyboard",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Run with 29 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 77,
+      "kind": "keyboard-command",
+      "label": "Open Job Center with the keyboard",
+      "expected": "Enter opens Run workspace where the durable fake-local job can be observed.",
+      "actual": "Pressed Enter.",
+      "durationMs": 7
+    },
+    {
+      "sequence": 78,
+      "kind": "observation",
+      "label": "Return to Build for output lineage",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Build with 125 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 79,
+      "kind": "keyboard-command",
+      "label": "Return to Build for output lineage",
+      "expected": "Enter returns to the authored chain without using a pointer.",
+      "actual": "Pressed Enter.",
+      "durationMs": 15
+    },
+    {
+      "sequence": 80,
+      "kind": "observation",
+      "label": "Select Image Generator output",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Image Generator 1 with 107 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 81,
+      "kind": "keyboard-command",
+      "label": "Select Image Generator output",
+      "expected": "Space selects the completed Image Generator for output inspection.",
+      "actual": "Pressed Space.",
+      "durationMs": 12
+    },
+    {
+      "sequence": 82,
+      "kind": "observation",
+      "label": "Open Image Generator provenance",
+      "expected": "The target is reached from the actual current focus using keyboard traversal only.",
+      "actual": "Reached Version provenance with 30 Tab key events.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 83,
+      "kind": "keyboard-command",
+      "label": "Open Image Generator provenance",
+      "expected": "Space expands the output's durable selected-input lineage.",
+      "actual": "Pressed Space.",
+      "durationMs": 2
+    },
+    {
+      "sequence": 84,
+      "kind": "observation",
+      "label": "Keyboard-only J06 chain",
+      "expected": "A blank Prompt to Worker to Worker to Image chain was created, configured, previewed, explicitly started, and inspected using Tab, Enter, Space, Home, Arrow keys, and typed text only.",
+      "actual": "The recovery-token-gated fake-local route completed in Job Center and the Image output exposed its selected-input lineage without a real provider request.",
+      "durationMs": 0
+    },
+    {
+      "sequence": 85,
+      "kind": "screenshot",
+      "label": "Capture keyboard-only J06 output lineage",
+      "expected": "The packaged Image Generator output visibly retains deterministic fake-local provenance after a keyboard-only journey.",
+      "actual": "Captured after the documented preceding action.",
+      "durationMs": 161,
+      "screenshotPath": "screenshots/01-keyboard-j06-lineage.png"
     }
   ],
   "errors": []

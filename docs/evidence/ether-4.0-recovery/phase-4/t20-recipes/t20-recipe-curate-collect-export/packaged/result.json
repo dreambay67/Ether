@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t20-recipe-curate-collect-export",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:10:47.408Z",
-  "finishedAt": "2026-08-09T15:11:10.165Z",
+  "startedAt": "2026-08-11T09:25:24.135Z",
+  "finishedAt": "2026-08-11T09:25:48.066Z",
   "outcome": "failed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "5d02190bffadb545b3f0339b2dcc4ef50c29ca49",
+    "gitCommit": "73b9b4b2c44ab1aab55572eddb4136fb696b8d52",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+        "sha256": "1c7e775f391afbfa5810207ab8602bc2b5f6266fab946986b4cb91a67d38c7a5"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+        "sha256": "afecb748ffbc85bc09c6963525cdd75982f4651fe5d28e037363ad569f7d54d2"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the canonical registry.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 62
+      "durationMs": 73
     },
     {
       "sequence": 2,
@@ -50,10 +50,10 @@
     {
       "sequence": 3,
       "kind": "left-click",
-      "label": "Select source Prompt",
-      "expected": "The blank document's source prompt becomes the direct canvas editing target.",
-      "actual": "Left click at (802, 599).",
-      "durationMs": 49
+      "label": "Focus source Prompt content",
+      "expected": "The blank document's source prompt exposes its direct canvas content target.",
+      "actual": "Left click at (1062, 838).",
+      "durationMs": 44
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Edit source Prompt",
       "expected": "The ordinary Prompt editor opens on the canvas.",
       "actual": "Pressed Enter.",
-      "durationMs": 28
+      "durationMs": 21
     },
     {
       "sequence": 5,
@@ -69,15 +69,15 @@
       "label": "Commit source Prompt",
       "expected": "The reusable source-artifact brief is saved as authored graph content.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 29
+      "durationMs": 42
     },
     {
       "sequence": 6,
       "kind": "left-click",
       "label": "Select source Image Generator",
       "expected": "The ordinary Inspector exposes the recovery-only fake image profile.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 42
+      "actual": "Left click at (802, 579).",
+      "durationMs": 64
     },
     {
       "sequence": 7,
@@ -85,96 +85,149 @@
       "label": "Save source Image Generator fake profile",
       "expected": "The durable binding is the explicit local simulation profile, not a real-provider fallback.",
       "actual": "Left click at (1439, 632).",
-      "durationMs": 72
+      "durationMs": 77
     },
     {
       "sequence": 8,
       "kind": "left-click",
-      "label": "Begin source Prompt to Image Generator",
-      "expected": "The compatible Text input handle becomes the intended receiver.",
-      "actual": "Left click at (913, 591).",
-      "durationMs": 218
+      "label": "Hide Reference Desk for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 62
     },
     {
       "sequence": 9,
       "kind": "left-click",
-      "label": "Complete source Prompt to Image Generator",
-      "expected": "The exact visible lane persists through ordinary channel interaction.",
-      "actual": "Left click at (431, 411).",
-      "durationMs": 249
+      "label": "Hide Build tools for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 45
     },
     {
       "sequence": 10,
       "kind": "left-click",
-      "label": "Select source Image Generator",
-      "expected": "The explicit local recovery image route is prepared from the blank graph.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 58
+      "label": "Hide Project lens for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 38
     },
     {
       "sequence": 11,
-      "kind": "left-click",
-      "label": "Preview source artifact plan",
-      "expected": "The one-call fake image plan is inspected before a permit is issued.",
-      "actual": "Left click at (1407, 793).",
-      "durationMs": 63
+      "kind": "keyboard-command",
+      "label": "Fit source artifact graph",
+      "expected": "The source Prompt and Image Generator fit in the unobstructed canvas.",
+      "actual": "Pressed Home.",
+      "durationMs": 4
     },
     {
       "sequence": 12,
       "kind": "left-click",
-      "label": "Start source artifact plan",
-      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
-      "actual": "Left click at (1401, 700).",
-      "durationMs": 42
+      "label": "Begin source Prompt to Image Generator",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (1094, 584).",
+      "durationMs": 228
     },
     {
       "sequence": 13,
       "kind": "left-click",
-      "label": "Wait for the source artifact to become durable",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 63
+      "label": "Complete source Prompt to Image Generator",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (506, 316).",
+      "durationMs": 261
     },
     {
       "sequence": 14,
       "kind": "left-click",
-      "label": "Return to Build after source artifact",
-      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
-      "actual": "Left click at (47, 89).",
-      "durationMs": 37
+      "label": "Select source Image Generator",
+      "expected": "The explicit local recovery image route is prepared from the blank graph.",
+      "actual": "Left click at (641, 319).",
+      "durationMs": 58
     },
     {
       "sequence": 15,
       "kind": "left-click",
-      "label": "Inspect source artifact output",
-      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 42
+      "label": "Show source Image Generator setup",
+      "expected": "The selected node's inspect-first run controls return after connection authoring.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 43
     },
     {
       "sequence": 16,
       "kind": "left-click",
-      "label": "Open Curate, Collect, and Export in Recipe Gallery",
-      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
-      "actual": "Left click at (226, 898).",
-      "durationMs": 62
+      "label": "Preview source artifact plan",
+      "expected": "The one-call fake image plan is inspected before a permit is issued.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 80
     },
     {
       "sequence": 17,
       "kind": "left-click",
-      "label": "Choose Curate, Collect, and Export",
-      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
-      "actual": "Left click at (447, 811).",
-      "durationMs": 78
+      "label": "Start source artifact plan",
+      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 57
     },
     {
       "sequence": 18,
       "kind": "left-click",
+      "label": "Wait for the source artifact to become durable",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 82
+    },
+    {
+      "sequence": 19,
+      "kind": "left-click",
+      "label": "Return to Build after source artifact",
+      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 35
+    },
+    {
+      "sequence": 20,
+      "kind": "left-click",
+      "label": "Inspect source artifact output",
+      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
+      "actual": "Left click at (529, 319).",
+      "durationMs": 43
+    },
+    {
+      "sequence": 21,
+      "kind": "left-click",
+      "label": "Show Build tools for recipes",
+      "expected": "Recipe Gallery access returns after the source artifact is verified.",
+      "actual": "Left click at (19, 183).",
+      "durationMs": 50
+    },
+    {
+      "sequence": 22,
+      "kind": "left-click",
+      "label": "Open Curate, Collect, and Export in Recipe Gallery",
+      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
+      "actual": "Left click at (226, 898).",
+      "durationMs": 70
+    },
+    {
+      "sequence": 23,
+      "kind": "left-click",
+      "label": "Choose Curate, Collect, and Export",
+      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
+      "actual": "Left click at (447, 811).",
+      "durationMs": 79
+    },
+    {
+      "sequence": 24,
+      "kind": "left-click",
       "label": "Choose the Curate recipe export folder",
       "expected": "The packaged app opens its exact owner-scoped native directory dialog only after the visible setup action.",
       "actual": "Left click at (729, 436).",
-      "durationMs": 32
+      "durationMs": 23
     }
   ],
-  "errors": []
+  "errors": [
+    {
+      "source": "main-process",
+      "message": "[77592:0811/112546.951:ERROR:content\\browser\\network_service_instance_impl.cc:721] Network service crashed or was terminated, restarting service."
+    }
+  ]
 }

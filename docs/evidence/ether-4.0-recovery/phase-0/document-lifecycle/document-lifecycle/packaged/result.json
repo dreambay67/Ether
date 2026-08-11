@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "document-lifecycle",
   "mode": "packaged",
-  "startedAt": "2026-08-03T01:14:03.429Z",
-  "finishedAt": "2026-08-03T01:14:22.430Z",
+  "startedAt": "2026-08-11T10:39:30.340Z",
+  "finishedAt": "2026-08-11T10:39:52.329Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "5417ce1999f04206918ef9aaf8fae1eac2ef33c8",
+    "gitCommit": "cee52084d5e423960c60311779767586d4c167c5",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+        "sha256": "e2f8c25e63420e646c6d588ff83cc16bac2f4affd1dec7d3416370d653e747e8"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+        "sha256": "e959f707a6d36e9004cc70e66030ceb7e39d1be612462481876db37388f889d3"
       }
     ]
   },
@@ -36,8 +36,8 @@
       "kind": "left-click",
       "label": "Create the first graph node on the blank canvas",
       "expected": "A Prompt node is created only through the visible authoring UI.",
-      "actual": "Left click at (91, 313).",
-      "durationMs": 56
+      "actual": "Left click at (108, 453).",
+      "durationMs": 91
     },
     {
       "sequence": 2,
@@ -45,7 +45,7 @@
       "label": "Capture the UI-authored graph",
       "expected": "The first node is visibly authored from a blank document.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 96,
+      "durationMs": 142,
       "screenshotPath": "screenshots/01-blank-ui-node.png"
     },
     {
@@ -78,7 +78,7 @@
       "label": "Inspect the manual save milestone",
       "expected": "Document History shows the Ctrl+S manual milestone as a reviewable record.",
       "actual": "Left click at (1079, 34).",
-      "durationMs": 15
+      "durationMs": 48
     },
     {
       "sequence": 7,
@@ -86,7 +86,7 @@
       "label": "Capture the visible manual milestone",
       "expected": "The document history names the manual Ctrl+S milestone.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 102,
+      "durationMs": 170,
       "screenshotPath": "screenshots/manual-save-history.png"
     },
     {
@@ -95,7 +95,7 @@
       "label": "Close Document History",
       "expected": "The history review returns to the document canvas.",
       "actual": "Left click at (964, 138).",
-      "durationMs": 18
+      "durationMs": 45
     },
     {
       "sequence": 9,
@@ -103,7 +103,7 @@
       "label": "Save As to a second path",
       "expected": "The active document switches only after the new destination is complete.",
       "actual": "Left click at (884, 34).",
-      "durationMs": 11
+      "durationMs": 37
     },
     {
       "sequence": 10,
@@ -111,7 +111,7 @@
       "label": "Save a copy without switching",
       "expected": "A complete copy is created while the active title remains the Save As destination.",
       "actual": "Left click at (923, 34).",
-      "durationMs": 12
+      "durationMs": 33
     },
     {
       "sequence": 11,
@@ -119,7 +119,7 @@
       "label": "Compact the UI-authored document",
       "expected": "Compaction reports actual before and after sizes without invalidating the document.",
       "actual": "Left click at (962, 34).",
-      "durationMs": 14
+      "durationMs": 28
     },
     {
       "sequence": 12,
@@ -127,7 +127,7 @@
       "label": "Make the UI-authored document portable",
       "expected": "The native confirmation completes a zero-reference portability check honestly.",
       "actual": "Left click at (1001, 34).",
-      "durationMs": 15
+      "durationMs": 40
     },
     {
       "sequence": 13,
@@ -135,7 +135,7 @@
       "label": "Capture completed document actions",
       "expected": "Save As, Copy, Compact, and Portable actions have completed on the UI-authored document.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 92,
+      "durationMs": 86,
       "screenshotPath": "screenshots/02-saved-compact-portable.png"
     },
     {
@@ -143,7 +143,7 @@
       "kind": "observation",
       "label": "Writer lease before contender",
       "expected": "The Save As destination retains one AppData writer lease before the competing process opens it.",
-      "actual": "Observed one lease for PID 5360 and path hash 859047644462acbeab7a1b26a4d0af2aebba4c92707bd0dfcdc58b61edf474f3.",
+      "actual": "Observed one lease for PID 77480 and path hash 729be1410566a9a9e8de3db29c6ce6bdab03ccc4a0c1752776395fecad6927e3.",
       "durationMs": 0
     },
     {
@@ -151,8 +151,8 @@
       "kind": "left-click",
       "label": "Edit the saved document through the visible UI before a recovery restart",
       "expected": "A second node is committed and autosaved before the deliberate process kill.",
-      "actual": "Left click at (91, 354).",
-      "durationMs": 16
+      "actual": "Left click at (108, 507).",
+      "durationMs": 66
     },
     {
       "sequence": 16,

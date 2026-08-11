@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t20-recipe-evaluate-and-route",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:03:47.253Z",
-  "finishedAt": "2026-08-09T15:03:56.166Z",
+  "startedAt": "2026-08-11T09:25:13.857Z",
+  "finishedAt": "2026-08-11T09:25:23.715Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "e5de95dc6fe5c8978815c1435d6451f941656352",
+    "gitCommit": "73b9b4b2c44ab1aab55572eddb4136fb696b8d52",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+        "sha256": "1c7e775f391afbfa5810207ab8602bc2b5f6266fab946986b4cb91a67d38c7a5"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+        "sha256": "afecb748ffbc85bc09c6963525cdd75982f4651fe5d28e037363ad569f7d54d2"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the canonical registry.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 55
+      "durationMs": 69
     },
     {
       "sequence": 2,
@@ -45,15 +45,15 @@
       "label": "Add generation.image from Node Library",
       "expected": "The blank document creates generation.image through the canonical registry.",
       "actual": "Left click at (108, 799).",
-      "durationMs": 53
+      "durationMs": 58
     },
     {
       "sequence": 3,
       "kind": "left-click",
-      "label": "Select source Prompt",
-      "expected": "The blank document's source prompt becomes the direct canvas editing target.",
-      "actual": "Left click at (802, 599).",
-      "durationMs": 45
+      "label": "Focus source Prompt content",
+      "expected": "The blank document's source prompt exposes its direct canvas content target.",
+      "actual": "Left click at (1062, 838).",
+      "durationMs": 46
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Edit source Prompt",
       "expected": "The ordinary Prompt editor opens on the canvas.",
       "actual": "Pressed Enter.",
-      "durationMs": 28
+      "durationMs": 22
     },
     {
       "sequence": 5,
@@ -69,15 +69,15 @@
       "label": "Commit source Prompt",
       "expected": "The reusable source-artifact brief is saved as authored graph content.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 29
+      "durationMs": 51
     },
     {
       "sequence": 6,
       "kind": "left-click",
       "label": "Select source Image Generator",
       "expected": "The ordinary Inspector exposes the recovery-only fake image profile.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 42
+      "actual": "Left click at (802, 579).",
+      "durationMs": 61
     },
     {
       "sequence": 7,
@@ -85,146 +85,194 @@
       "label": "Save source Image Generator fake profile",
       "expected": "The durable binding is the explicit local simulation profile, not a real-provider fallback.",
       "actual": "Left click at (1439, 632).",
-      "durationMs": 63
+      "durationMs": 72
     },
     {
       "sequence": 8,
       "kind": "left-click",
-      "label": "Begin source Prompt to Image Generator",
-      "expected": "The compatible Text input handle becomes the intended receiver.",
-      "actual": "Left click at (913, 591).",
-      "durationMs": 219
+      "label": "Hide Reference Desk for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 62
     },
     {
       "sequence": 9,
       "kind": "left-click",
-      "label": "Complete source Prompt to Image Generator",
-      "expected": "The exact visible lane persists through ordinary channel interaction.",
-      "actual": "Left click at (431, 411).",
-      "durationMs": 233
+      "label": "Hide Build tools for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 44
     },
     {
       "sequence": 10,
       "kind": "left-click",
-      "label": "Select source Image Generator",
-      "expected": "The explicit local recovery image route is prepared from the blank graph.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 54
+      "label": "Hide Project lens for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 39
     },
     {
       "sequence": 11,
-      "kind": "left-click",
-      "label": "Preview source artifact plan",
-      "expected": "The one-call fake image plan is inspected before a permit is issued.",
-      "actual": "Left click at (1407, 793).",
-      "durationMs": 63
+      "kind": "keyboard-command",
+      "label": "Fit source artifact graph",
+      "expected": "The source Prompt and Image Generator fit in the unobstructed canvas.",
+      "actual": "Pressed Home.",
+      "durationMs": 5
     },
     {
       "sequence": 12,
       "kind": "left-click",
-      "label": "Start source artifact plan",
-      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
-      "actual": "Left click at (1401, 700).",
-      "durationMs": 37
+      "label": "Begin source Prompt to Image Generator",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (1207, 584).",
+      "durationMs": 230
     },
     {
       "sequence": 13,
       "kind": "left-click",
-      "label": "Wait for the source artifact to become durable",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 125
+      "label": "Complete source Prompt to Image Generator",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (618, 316).",
+      "durationMs": 252
     },
     {
       "sequence": 14,
       "kind": "left-click",
-      "label": "Return to Build after source artifact",
-      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
-      "actual": "Left click at (47, 89).",
-      "durationMs": 44
+      "label": "Select source Image Generator",
+      "expected": "The explicit local recovery image route is prepared from the blank graph.",
+      "actual": "Left click at (754, 319).",
+      "durationMs": 66
     },
     {
       "sequence": 15,
       "kind": "left-click",
-      "label": "Inspect source artifact output",
-      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 44
+      "label": "Show source Image Generator setup",
+      "expected": "The selected node's inspect-first run controls return after connection authoring.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 42
     },
     {
       "sequence": 16,
       "kind": "left-click",
-      "label": "Open Evaluate and Route in Recipe Gallery",
-      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
-      "actual": "Left click at (226, 898).",
-      "durationMs": 79
+      "label": "Preview source artifact plan",
+      "expected": "The one-call fake image plan is inspected before a permit is issued.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 80
     },
     {
       "sequence": 17,
       "kind": "left-click",
-      "label": "Choose Evaluate and Route",
-      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
-      "actual": "Left click at (447, 708).",
-      "durationMs": 74
+      "label": "Start source artifact plan",
+      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 36
     },
     {
       "sequence": 18,
       "kind": "left-click",
-      "label": "Preview Evaluate and Route",
-      "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
-      "actual": "Left click at (829, 539).",
-      "durationMs": 105
+      "label": "Wait for the source artifact to become durable",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 146
     },
     {
       "sequence": 19,
       "kind": "left-click",
-      "label": "Insert Evaluate and Route",
-      "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
-      "actual": "Left click at (1159, 539).",
-      "durationMs": 104
+      "label": "Return to Build after source artifact",
+      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 33
     },
     {
       "sequence": 20,
-      "kind": "keyboard-command",
-      "label": "Fit inserted recipe",
-      "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
-      "actual": "Pressed Home.",
-      "durationMs": 6
+      "kind": "left-click",
+      "label": "Inspect source artifact output",
+      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
+      "actual": "Left click at (641, 319).",
+      "durationMs": 42
     },
     {
       "sequence": 21,
-      "kind": "keyboard-command",
-      "label": "Select Evaluate and Route run root",
-      "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
-      "actual": "Pressed Space.",
-      "durationMs": 17
+      "kind": "left-click",
+      "label": "Show Build tools for recipes",
+      "expected": "Recipe Gallery access returns after the source artifact is verified.",
+      "actual": "Left click at (19, 183).",
+      "durationMs": 76
     },
     {
       "sequence": 22,
       "kind": "left-click",
-      "label": "Preview Evaluate and Route Branch",
-      "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
-      "actual": "Left click at (1407, 804).",
-      "durationMs": 67
+      "label": "Open Evaluate and Route in Recipe Gallery",
+      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
+      "actual": "Left click at (226, 898).",
+      "durationMs": 73
     },
     {
       "sequence": 23,
       "kind": "left-click",
-      "label": "Start Evaluate and Route reviewed plan",
-      "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
-      "actual": "Left click at (1401, 700).",
-      "durationMs": 47
+      "label": "Choose Evaluate and Route",
+      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
+      "actual": "Left click at (447, 708).",
+      "durationMs": 68
     },
     {
       "sequence": 24,
       "kind": "left-click",
-      "label": "Wait for Evaluate and Route human checkpoint",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 105
+      "label": "Preview Evaluate and Route",
+      "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
+      "actual": "Left click at (829, 539).",
+      "durationMs": 73
     },
     {
       "sequence": 25,
+      "kind": "left-click",
+      "label": "Insert Evaluate and Route",
+      "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
+      "actual": "Left click at (1159, 539).",
+      "durationMs": 75
+    },
+    {
+      "sequence": 26,
+      "kind": "keyboard-command",
+      "label": "Fit inserted recipe",
+      "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
+      "actual": "Pressed Home.",
+      "durationMs": 12
+    },
+    {
+      "sequence": 27,
+      "kind": "keyboard-command",
+      "label": "Select Evaluate and Route run root",
+      "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
+      "actual": "Pressed Space.",
+      "durationMs": 19
+    },
+    {
+      "sequence": 28,
+      "kind": "left-click",
+      "label": "Preview Evaluate and Route Branch",
+      "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
+      "actual": "Left click at (1407, 802).",
+      "durationMs": 80
+    },
+    {
+      "sequence": 29,
+      "kind": "left-click",
+      "label": "Start Evaluate and Route reviewed plan",
+      "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 48
+    },
+    {
+      "sequence": 30,
+      "kind": "left-click",
+      "label": "Wait for Evaluate and Route human checkpoint",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 110
+    },
+    {
+      "sequence": 31,
       "kind": "left-click",
       "label": "Open Review for recipe checkpoint",
       "expected": "Artifact Observatory exposes the durable human Compare checkpoint without an implicit model decision.",
@@ -232,64 +280,64 @@
       "durationMs": 37
     },
     {
-      "sequence": 26,
+      "sequence": 32,
       "kind": "left-click",
       "label": "Open recipe Compare stage",
       "expected": "The recipe's sealed output candidates are reviewed by a person, not a model.",
       "actual": "Left click at (429, 296).",
-      "durationMs": 33
+      "durationMs": 36
     },
     {
-      "sequence": 27,
+      "sequence": 33,
       "kind": "left-click",
       "label": "Select recipe review candidate 1",
       "expected": "The visible candidate is included in the explicit human checkpoint decision.",
       "actual": "Left click at (254, 592).",
-      "durationMs": 29
+      "durationMs": 28
     },
     {
-      "sequence": 28,
+      "sequence": 34,
       "kind": "left-click",
       "label": "Complete recipe human checkpoint",
       "expected": "The selected output versions and review note are durably saved before downstream work resumes.",
       "actual": "Left click at (1079, 830).",
-      "durationMs": 90
+      "durationMs": 77
     },
     {
-      "sequence": 29,
+      "sequence": 35,
       "kind": "left-click",
       "label": "Wait for the recipe to finish after human review",
       "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
       "actual": "Left click at (169, 89).",
-      "durationMs": 222
+      "durationMs": 257
     },
     {
-      "sequence": 30,
+      "sequence": 36,
       "kind": "left-click",
       "label": "Inspect Evaluate and Route output",
       "expected": "The recipe returns to its visible canvas with the fake-provider output persisted.",
       "actual": "Left click at (47, 89).",
-      "durationMs": 48
+      "durationMs": 39
     },
     {
-      "sequence": 31,
+      "sequence": 37,
       "kind": "left-click",
       "label": "Select Evaluate and Route output node",
       "expected": "The advertised fake-provider output is inspected on the inserted recipe itself.",
-      "actual": "Left click at (970, 577).",
-      "durationMs": 61
+      "actual": "Left click at (970, 488).",
+      "durationMs": 67
     },
     {
-      "sequence": 32,
+      "sequence": 38,
       "kind": "screenshot",
       "label": "Capture Evaluate and Route fake-provider output",
       "expected": "This fresh-document recipe was configured, inserted, explicitly previewed, permitted, and completed through ordinary controls using only the recovery simulation.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 249,
+      "durationMs": 265,
       "screenshotPath": "screenshots/evaluate-and-route-fake-output.png"
     },
     {
-      "sequence": 33,
+      "sequence": 39,
       "kind": "observation",
       "label": "Evaluate and Route packaged recipe",
       "expected": "The built-in workflow reaches its advertised fake-provider output from a fresh document through visible setup and run controls.",
@@ -297,5 +345,10 @@
       "durationMs": 0
     }
   ],
-  "errors": []
+  "errors": [
+    {
+      "source": "main-process",
+      "message": "[76148:0811/112522.584:ERROR:content\\browser\\gpu\\gpu_process_host.cc:1089] GPU process exited unexpectedly: exit_code=-1"
+    }
+  ]
 }

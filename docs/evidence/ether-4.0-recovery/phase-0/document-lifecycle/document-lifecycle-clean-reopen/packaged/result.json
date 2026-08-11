@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "document-lifecycle-clean-reopen",
   "mode": "packaged",
-  "startedAt": "2026-08-03T01:14:25.606Z",
-  "finishedAt": "2026-08-03T01:14:29.042Z",
+  "startedAt": "2026-08-11T10:39:56.250Z",
+  "finishedAt": "2026-08-11T10:40:00.573Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "5417ce1999f04206918ef9aaf8fae1eac2ef33c8",
+    "gitCommit": "cee52084d5e423960c60311779767586d4c167c5",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "03db599dbaec1e6d564275cfb63d568dec0189217237efa3ea5e2e99b482580f"
+        "sha256": "e2f8c25e63420e646c6d588ff83cc16bac2f4affd1dec7d3416370d653e747e8"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "8cc07d197b636b5104da29ffc295313ed64f82082cf2907566f5cbfedafb0a4e"
+        "sha256": "e959f707a6d36e9004cc70e66030ceb7e39d1be612462481876db37388f889d3"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Capture the clean-close reopen",
       "expected": "The same user-saved document remains writable after an exact Windows UI Automation close.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 116,
+      "durationMs": 107,
       "screenshotPath": "screenshots/04-clean-close-reopen.png"
     }
   ],

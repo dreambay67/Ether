@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "module-authoring-recovery",
   "mode": "packaged",
-  "startedAt": "2026-08-09T22:29:18.605Z",
-  "finishedAt": "2026-08-09T22:29:25.965Z",
+  "startedAt": "2026-08-11T07:42:10.674Z",
+  "finishedAt": "2026-08-11T07:42:18.827Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+    "gitCommit": "4746030158cf692d00e424df3443b2ce2e1b83a5",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "041d80aff7402348bd5aeae718f4784d4aa545efc597ae2b21b56e7918997023"
+        "sha256": "cf4639e8dfd14088ab93d1f3d25531d4418bf7324b53e04ef73bb9c758edfedd"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb"
+        "sha256": "b1e6ed7a40deb5fcec6424d7b3d44dd87948b61e45e9034927c07939a14c51b6"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the registry-backed factory.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 72
+      "durationMs": 68
     },
     {
       "sequence": 2,
@@ -45,7 +45,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The blank document creates prompt.worker through the registry-backed factory.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 52
+      "durationMs": 51
     },
     {
       "sequence": 3,
@@ -53,7 +53,7 @@
       "label": "Select the workflow for a Module",
       "expected": "The canvas-owned select-all command selects both blank-authored nodes before organization.",
       "actual": "Pressed Control+A.",
-      "durationMs": 19
+      "durationMs": 22
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Create Module from selection",
       "expected": "The visible command moves the selection into one locked, durable Module through the shared graph command.",
       "actual": "Left click at (578, 328).",
-      "durationMs": 69
+      "durationMs": 61
     },
     {
       "sequence": 5,
@@ -77,7 +77,7 @@
       "label": "Capture locked Module creation",
       "expected": "A blank-authored selection is visibly represented as Ether's single locked organizational container.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 172,
+      "durationMs": 231,
       "screenshotPath": "screenshots/01-locked-module-created.png"
     },
     {
@@ -85,16 +85,16 @@
       "kind": "left-drag",
       "label": "Try to move the locked Module",
       "expected": "A locked Module remains fixed on the parent canvas.",
-      "actual": "Left drag (672, 524) to (852, 614).",
-      "durationMs": 212
+      "actual": "Left drag (932, 724) to (1112, 814).",
+      "durationMs": 434
     },
     {
       "sequence": 8,
       "kind": "left-click",
       "label": "Select the Module",
       "expected": "The Project lens switches to the Module inspector.",
-      "actual": "Left click at (475, 371).",
-      "durationMs": 39
+      "actual": "Left click at (735, 531).",
+      "durationMs": 37
     },
     {
       "sequence": 9,
@@ -102,7 +102,7 @@
       "label": "Focus Module rename",
       "expected": "F2 targets the selected Module title field.",
       "actual": "Pressed F2.",
-      "durationMs": 4
+      "durationMs": 3
     },
     {
       "sequence": 10,
@@ -110,7 +110,7 @@
       "label": "Choose the Module highlight",
       "expected": "The Module uses a deliberate Violet accent.",
       "actual": "Left click at (1525, 680).",
-      "durationMs": 52
+      "durationMs": 32
     },
     {
       "sequence": 11,
@@ -118,7 +118,7 @@
       "label": "Save Module details",
       "expected": "Title, description, and accent commit together.",
       "actual": "Left click at (1409, 765).",
-      "durationMs": 38
+      "durationMs": 52
     },
     {
       "sequence": 12,
@@ -126,23 +126,23 @@
       "label": "Explicitly unlock the Module",
       "expected": "Parent-canvas movement and membership controls become available only after this action.",
       "actual": "Left click at (1419, 806).",
-      "durationMs": 52
+      "durationMs": 48
     },
     {
       "sequence": 13,
       "kind": "left-drag",
       "label": "Move the unlocked Module",
       "expected": "The explicitly unlocked Module can be repositioned on the parent canvas.",
-      "actual": "Left drag (672, 524) to (842, 594).",
-      "durationMs": 106
+      "actual": "Left drag (932, 724) to (1102, 794).",
+      "durationMs": 121
     },
     {
       "sequence": 14,
       "kind": "left-click",
       "label": "Restore Module selection",
       "expected": "The moved Module remains the current organization target.",
-      "actual": "Left click at (659, 433).",
-      "durationMs": 43
+      "actual": "Left click at (919, 593).",
+      "durationMs": 24
     },
     {
       "sequence": 15,
@@ -150,7 +150,7 @@
       "label": "Collapse the Module",
       "expected": "Collapse compacts presentation without deleting its internal graph.",
       "actual": "Left click at (1504, 908).",
-      "durationMs": 55
+      "durationMs": 54
     },
     {
       "sequence": 16,
@@ -158,7 +158,7 @@
       "label": "Capture edited collapsed Module",
       "expected": "The Module visibly carries its title, description, Violet highlight, unlocked state, and compact presentation.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 187,
+      "durationMs": 196,
       "screenshotPath": "screenshots/02-module-details-and-collapse.png"
     },
     {
@@ -166,16 +166,16 @@
       "kind": "left-click",
       "label": "Expand the Module",
       "expected": "The full Module presentation returns with its durable metadata.",
-      "actual": "Left click at (1045, 496).",
-      "durationMs": 77
+      "actual": "Left click at (1305, 656).",
+      "durationMs": 51
     },
     {
       "sequence": 18,
       "kind": "left-click",
       "label": "Select Module for keyboard entry",
       "expected": "Canvas focus can enter the selected Module through the primary edit shortcut.",
-      "actual": "Left click at (659, 433).",
-      "durationMs": 57
+      "actual": "Left click at (919, 593).",
+      "durationMs": 46
     },
     {
       "sequence": 19,
@@ -191,7 +191,7 @@
       "label": "Capture Module interior",
       "expected": "Both original blank-authored members are visible inside the Module workspace.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 192,
+      "durationMs": 168,
       "screenshotPath": "screenshots/03-module-interior.png"
     },
     {
@@ -199,8 +199,8 @@
       "kind": "left-click",
       "label": "Select one Module member",
       "expected": "One internal member becomes the membership change target.",
-      "actual": "Left click at (965, 746).",
-      "durationMs": 61
+      "actual": "Left click at (965, 771).",
+      "durationMs": 52
     },
     {
       "sequence": 22,
@@ -208,7 +208,7 @@
       "label": "Move a member to the parent",
       "expected": "Unlocked membership editing moves the selected node out without recreating it.",
       "actual": "Left click at (1244, 426).",
-      "durationMs": 79
+      "durationMs": 66
     },
     {
       "sequence": 23,
@@ -216,31 +216,31 @@
       "label": "Leave the Module",
       "expected": "The parent viewport and Module selection are restored.",
       "actual": "Left click at (1247, 380).",
-      "durationMs": 71
+      "durationMs": 51
     },
     {
       "sequence": 24,
       "kind": "left-click",
       "label": "Select the parent node",
       "expected": "The moved member is selected for reassignment.",
-      "actual": "Left click at (965, 746).",
-      "durationMs": 46
+      "actual": "Left click at (965, 771).",
+      "durationMs": 43
     },
     {
       "sequence": 25,
       "kind": "left-click",
       "label": "Add the Module to the selection context",
       "expected": "Shift-click preserves the selected parent node while opening Module membership controls.",
-      "actual": "Left click at (600, 422).",
-      "durationMs": 55
+      "actual": "Left click at (600, 372).",
+      "durationMs": 54
     },
     {
       "sequence": 26,
       "kind": "left-click",
       "label": "Add the selected node to the Module",
       "expected": "The existing node returns to the Module through the explicit membership command.",
-      "actual": "Left click at (1444, 815).",
-      "durationMs": 54
+      "actual": "Left click at (1444, 704).",
+      "durationMs": 45
     },
     {
       "sequence": 27,
@@ -255,8 +255,8 @@
       "kind": "left-click",
       "label": "Relock the Module",
       "expected": "The completed organization is protected again explicitly.",
-      "actual": "Left click at (1418, 657).",
-      "durationMs": 49
+      "actual": "Left click at (1418, 546).",
+      "durationMs": 50
     },
     {
       "sequence": 29,
@@ -264,7 +264,7 @@
       "label": "Capture relocked membership",
       "expected": "The two-member Module is visibly relocked after a complete membership round trip.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 224,
+      "durationMs": 243,
       "screenshotPath": "screenshots/04-module-membership-relocked.png"
     },
     {
@@ -272,16 +272,16 @@
       "kind": "left-click",
       "label": "Unlock before dissolution",
       "expected": "Dissolution remains a deliberate action unavailable while locked.",
-      "actual": "Left click at (1419, 657).",
-      "durationMs": 62
+      "actual": "Left click at (1419, 546).",
+      "durationMs": 47
     },
     {
       "sequence": 31,
       "kind": "left-click",
       "label": "Confirm Module dissolution",
       "expected": "Dissolve restores both members to the parent in one undoable transaction.",
-      "actual": "Left click at (1427, 873).",
-      "durationMs": 48
+      "actual": "Left click at (1427, 917).",
+      "durationMs": 30
     },
     {
       "sequence": 32,
@@ -289,7 +289,7 @@
       "label": "Capture dissolved Module",
       "expected": "Both original members are restored to the parent canvas with no Module shell left behind.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 140,
+      "durationMs": 128,
       "screenshotPath": "screenshots/05-dissolved-members.png"
     },
     {
@@ -298,15 +298,15 @@
       "label": "Undo Module dissolution",
       "expected": "Undo restores the Module and removes the restored parent copies atomically.",
       "actual": "Pressed Control+Z.",
-      "durationMs": 22
+      "durationMs": 29
     },
     {
       "sequence": 34,
       "kind": "left-click",
       "label": "Inspect the restored Module",
       "expected": "Undo preserves the Module metadata and explicit lock state from immediately before dissolution.",
-      "actual": "Left click at (600, 422).",
-      "durationMs": 39
+      "actual": "Left click at (600, 372).",
+      "durationMs": 27
     },
     {
       "sequence": 35,
@@ -314,7 +314,7 @@
       "label": "Relock the restored Module",
       "expected": "The practical journey ends with the recovered organization protected.",
       "actual": "Left click at (1418, 806).",
-      "durationMs": 46
+      "durationMs": 34
     },
     {
       "sequence": 36,
@@ -322,9 +322,14 @@
       "label": "Capture dissolution undo",
       "expected": "Undo visibly restores the named two-member Module, ready in its protected state.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 202,
+      "durationMs": 206,
       "screenshotPath": "screenshots/06-dissolve-undone.png"
     }
   ],
-  "errors": []
+  "errors": [
+    {
+      "source": "main-process",
+      "message": "[60552:0811/094217.684:ERROR:content\\browser\\network_service_instance_impl.cc:721] Network service crashed or was terminated, restarting service."
+    }
+  ]
 }

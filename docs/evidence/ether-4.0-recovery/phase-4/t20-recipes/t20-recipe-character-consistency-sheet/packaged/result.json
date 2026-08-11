@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t20-recipe-character-consistency-sheet",
   "mode": "packaged",
-  "startedAt": "2026-08-09T15:02:32.360Z",
-  "finishedAt": "2026-08-09T15:02:45.320Z",
+  "startedAt": "2026-08-11T08:33:15.643Z",
+  "finishedAt": "2026-08-11T08:33:31.319Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "e5de95dc6fe5c8978815c1435d6451f941656352",
+    "gitCommit": "4e0674d9497d4221fa5bc0c7dc57b68a6c459d70",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "ffadec0c1e1955fd1e020da81234ab3c33cae5fbd7cd2fc79573ccb0ea0913e6"
+        "sha256": "0ec4253d0d29d12333d459052dbfa9814396e5afcc8b1570d81f4c30c1a2fc47"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "d72ef456c7a7670900cc3441c99419257c156c45fa65e4fb710e06df1d4c76ee"
+        "sha256": "bb1fe953a7c38e22e55d6ce0994d37da5ac56665f90677fa135caf91673af823"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the canonical registry.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 62
+      "durationMs": 64
     },
     {
       "sequence": 2,
@@ -45,15 +45,15 @@
       "label": "Add generation.image from Node Library",
       "expected": "The blank document creates generation.image through the canonical registry.",
       "actual": "Left click at (108, 799).",
-      "durationMs": 53
+      "durationMs": 48
     },
     {
       "sequence": 3,
       "kind": "left-click",
-      "label": "Select source Prompt",
-      "expected": "The blank document's source prompt becomes the direct canvas editing target.",
-      "actual": "Left click at (802, 599).",
-      "durationMs": 41
+      "label": "Focus source Prompt content",
+      "expected": "The blank document's source prompt exposes its direct canvas content target.",
+      "actual": "Left click at (1062, 838).",
+      "durationMs": 49
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Edit source Prompt",
       "expected": "The ordinary Prompt editor opens on the canvas.",
       "actual": "Pressed Enter.",
-      "durationMs": 34
+      "durationMs": 26
     },
     {
       "sequence": 5,
@@ -69,15 +69,15 @@
       "label": "Commit source Prompt",
       "expected": "The reusable source-artifact brief is saved as authored graph content.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 43
+      "durationMs": 49
     },
     {
       "sequence": 6,
       "kind": "left-click",
       "label": "Select source Image Generator",
       "expected": "The ordinary Inspector exposes the recovery-only fake image profile.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 52
+      "actual": "Left click at (802, 579).",
+      "durationMs": 46
     },
     {
       "sequence": 7,
@@ -85,235 +85,283 @@
       "label": "Save source Image Generator fake profile",
       "expected": "The durable binding is the explicit local simulation profile, not a real-provider fallback.",
       "actual": "Left click at (1439, 632).",
-      "durationMs": 66
+      "durationMs": 71
     },
     {
       "sequence": 8,
       "kind": "left-click",
-      "label": "Begin source Prompt to Image Generator",
-      "expected": "The compatible Text input handle becomes the intended receiver.",
-      "actual": "Left click at (913, 591).",
-      "durationMs": 228
+      "label": "Hide Reference Desk for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1581, 151).",
+      "durationMs": 54
     },
     {
       "sequence": 9,
       "kind": "left-click",
-      "label": "Complete source Prompt to Image Generator",
-      "expected": "The exact visible lane persists through ordinary channel interaction.",
-      "actual": "Left click at (431, 411).",
-      "durationMs": 230
+      "label": "Hide Build tools for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (244, 183).",
+      "durationMs": 43
     },
     {
       "sequence": 10,
       "kind": "left-click",
-      "label": "Select source Image Generator",
-      "expected": "The explicit local recovery image route is prepared from the blank graph.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 57
+      "label": "Hide Project lens for source connection",
+      "expected": "The two-node source graph gets a clear canvas for precise channel authoring.",
+      "actual": "Left click at (1580, 183).",
+      "durationMs": 31
     },
     {
       "sequence": 11,
-      "kind": "left-click",
-      "label": "Preview source artifact plan",
-      "expected": "The one-call fake image plan is inspected before a permit is issued.",
-      "actual": "Left click at (1407, 793).",
-      "durationMs": 70
+      "kind": "keyboard-command",
+      "label": "Fit source artifact graph",
+      "expected": "The source Prompt and Image Generator fit in the unobstructed canvas.",
+      "actual": "Pressed Home.",
+      "durationMs": 3
     },
     {
       "sequence": 12,
       "kind": "left-click",
-      "label": "Start source artifact plan",
-      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
-      "actual": "Left click at (1401, 700).",
-      "durationMs": 35
+      "label": "Begin source Prompt to Image Generator",
+      "expected": "The compatible Text input handle becomes the intended receiver.",
+      "actual": "Left click at (1094, 584).",
+      "durationMs": 220
     },
     {
       "sequence": 13,
       "kind": "left-click",
-      "label": "Wait for the source artifact to become durable",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 148
+      "label": "Complete source Prompt to Image Generator",
+      "expected": "The exact visible lane persists through ordinary channel interaction.",
+      "actual": "Left click at (506, 316).",
+      "durationMs": 247
     },
     {
       "sequence": 14,
       "kind": "left-click",
-      "label": "Return to Build after source artifact",
-      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
-      "actual": "Left click at (47, 89).",
-      "durationMs": 38
+      "label": "Select source Image Generator",
+      "expected": "The explicit local recovery image route is prepared from the blank graph.",
+      "actual": "Left click at (641, 319).",
+      "durationMs": 56
     },
     {
       "sequence": 15,
       "kind": "left-click",
-      "label": "Inspect source artifact output",
-      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
-      "actual": "Left click at (542, 419).",
-      "durationMs": 50
+      "label": "Show source Image Generator setup",
+      "expected": "The selected node's inspect-first run controls return after connection authoring.",
+      "actual": "Left click at (1584, 183).",
+      "durationMs": 41
     },
     {
       "sequence": 16,
       "kind": "left-click",
-      "label": "Open Character Consistency Sheet in Recipe Gallery",
-      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
-      "actual": "Left click at (226, 898).",
-      "durationMs": 145
+      "label": "Preview source artifact plan",
+      "expected": "The one-call fake image plan is inspected before a permit is issued.",
+      "actual": "Left click at (1407, 741).",
+      "durationMs": 79
     },
     {
       "sequence": 17,
       "kind": "left-click",
-      "label": "Choose Character Consistency Sheet",
-      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
-      "actual": "Left click at (447, 706).",
-      "durationMs": 190
+      "label": "Start source artifact plan",
+      "expected": "Only the reviewed offline fake image plan starts; no real provider is contacted.",
+      "actual": "Left click at (1401, 700).",
+      "durationMs": 39
     },
     {
       "sequence": 18,
       "kind": "left-click",
-      "label": "Preview Character Consistency Sheet",
-      "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
-      "actual": "Left click at (829, 672).",
-      "durationMs": 64
+      "label": "Wait for the source artifact to become durable",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 79
     },
     {
       "sequence": 19,
       "kind": "left-click",
-      "label": "Insert Character Consistency Sheet",
-      "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
-      "actual": "Left click at (1159, 672).",
-      "durationMs": 209
+      "label": "Return to Build after source artifact",
+      "expected": "The completed current-document artifact is available to recipe setup without changing the graph.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 44
     },
     {
       "sequence": 20,
-      "kind": "keyboard-command",
-      "label": "Fit inserted recipe",
-      "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
-      "actual": "Pressed Home.",
-      "durationMs": 8
+      "kind": "left-click",
+      "label": "Inspect source artifact output",
+      "expected": "The generated source is confirmed on its ordinary Image Generator node.",
+      "actual": "Left click at (529, 319).",
+      "durationMs": 43
     },
     {
       "sequence": 21,
-      "kind": "keyboard-command",
-      "label": "Select Character Consistency Sheet run root",
-      "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
-      "actual": "Pressed Space.",
-      "durationMs": 15
+      "kind": "left-click",
+      "label": "Show Build tools for recipes",
+      "expected": "Recipe Gallery access returns after the source artifact is verified.",
+      "actual": "Left click at (19, 183).",
+      "durationMs": 47
     },
     {
       "sequence": 22,
       "kind": "left-click",
-      "label": "Preview Character Consistency Sheet Batch",
-      "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
-      "actual": "Left click at (1513, 760).",
-      "durationMs": 89
+      "label": "Open Character Consistency Sheet in Recipe Gallery",
+      "expected": "The blank document reaches its built-in recipes through the ordinary Gallery command.",
+      "actual": "Left click at (226, 898).",
+      "durationMs": 65
     },
     {
       "sequence": 23,
       "kind": "left-click",
-      "label": "Start Character Consistency Sheet reviewed plan",
-      "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
-      "actual": "Left click at (1403, 700).",
-      "durationMs": 45
+      "label": "Choose Character Consistency Sheet",
+      "expected": "The versioned built-in recipe loads its real setup sheet and token-scoped fake-provider readiness through the application boundary.",
+      "actual": "Left click at (447, 706).",
+      "durationMs": 46
     },
     {
       "sequence": 24,
       "kind": "left-click",
-      "label": "Wait for Character Consistency Sheet human checkpoint",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 330
+      "label": "Preview Character Consistency Sheet",
+      "expected": "The Gallery validates the current document artifact, exact call range, and token-scoped fake-provider substitutions before insertion.",
+      "actual": "Left click at (829, 672).",
+      "durationMs": 80
     },
     {
       "sequence": 25,
       "kind": "left-click",
-      "label": "Open Review for recipe checkpoint",
-      "expected": "Artifact Observatory exposes the durable human Compare checkpoint without an implicit model decision.",
-      "actual": "Left click at (232, 89).",
-      "durationMs": 635
+      "label": "Insert Character Consistency Sheet",
+      "expected": "The Gallery inserts the prepared built-in graph as one undoable ordinary UI transaction without starting provider work.",
+      "actual": "Left click at (1159, 672).",
+      "durationMs": 46
     },
     {
       "sequence": 26,
-      "kind": "left-click",
-      "label": "Open recipe Compare stage",
-      "expected": "The recipe's sealed output candidates are reviewed by a person, not a model.",
-      "actual": "Left click at (429, 296).",
-      "durationMs": 47
+      "kind": "keyboard-command",
+      "label": "Fit inserted recipe",
+      "expected": "The inserted recipe's cards and visible lanes fit the ordinary canvas viewport.",
+      "actual": "Pressed Home.",
+      "durationMs": 4
     },
     {
       "sequence": 27,
-      "kind": "left-click",
-      "label": "Select recipe review candidate 1",
-      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
-      "actual": "Left click at (254, 592).",
-      "durationMs": 41
+      "kind": "keyboard-command",
+      "label": "Select Character Consistency Sheet run root",
+      "expected": "The recipe's advertised run node is selected through its visible keyboard-focusable title even when a connection lane crosses the card.",
+      "actual": "Pressed Space.",
+      "durationMs": 24
     },
     {
       "sequence": 28,
       "kind": "left-click",
-      "label": "Select recipe review candidate 2",
-      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
-      "actual": "Left click at (461, 592).",
-      "durationMs": 31
+      "label": "Preview Character Consistency Sheet Batch",
+      "expected": "The exact recipe boundary, fake-provider bindings, and call count are visible before permission is granted.",
+      "actual": "Left click at (1513, 700).",
+      "durationMs": 78
     },
     {
       "sequence": 29,
       "kind": "left-click",
-      "label": "Select recipe review candidate 3",
-      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
-      "actual": "Left click at (667, 592).",
-      "durationMs": 33
+      "label": "Start Character Consistency Sheet reviewed plan",
+      "expected": "Only this immutable fake-provider recipe plan receives a one-use permit and starts.",
+      "actual": "Left click at (1403, 700).",
+      "durationMs": 48
     },
     {
       "sequence": 30,
       "kind": "left-click",
-      "label": "Select recipe review candidate 4",
-      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
-      "actual": "Left click at (874, 592).",
-      "durationMs": 26
+      "label": "Wait for Character Consistency Sheet human checkpoint",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 126
     },
     {
       "sequence": 31,
       "kind": "left-click",
-      "label": "Complete recipe human checkpoint",
-      "expected": "The selected output versions and review note are durably saved before downstream work resumes.",
-      "actual": "Left click at (1079, 830).",
-      "durationMs": 70
+      "label": "Open Review for recipe checkpoint",
+      "expected": "Artifact Observatory exposes the durable human Compare checkpoint without an implicit model decision.",
+      "actual": "Left click at (232, 89).",
+      "durationMs": 655
     },
     {
       "sequence": 32,
       "kind": "left-click",
-      "label": "Wait for the recipe to finish after human review",
-      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
-      "actual": "Left click at (169, 89).",
-      "durationMs": 124
+      "label": "Open recipe Compare stage",
+      "expected": "The recipe's sealed output candidates are reviewed by a person, not a model.",
+      "actual": "Left click at (429, 296).",
+      "durationMs": 39
     },
     {
       "sequence": 33,
       "kind": "left-click",
-      "label": "Inspect Character Consistency Sheet output",
-      "expected": "The recipe returns to its visible canvas with the fake-provider output persisted.",
-      "actual": "Left click at (47, 89).",
-      "durationMs": 664
+      "label": "Select recipe review candidate 1",
+      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
+      "actual": "Left click at (254, 592).",
+      "durationMs": 34
     },
     {
       "sequence": 34,
       "kind": "left-click",
-      "label": "Select Character Consistency Sheet output node",
-      "expected": "The advertised fake-provider output is inspected on the inserted recipe itself.",
-      "actual": "Left click at (874, 554).",
-      "durationMs": 55
+      "label": "Select recipe review candidate 2",
+      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
+      "actual": "Left click at (461, 592).",
+      "durationMs": 29
     },
     {
       "sequence": 35,
+      "kind": "left-click",
+      "label": "Select recipe review candidate 3",
+      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
+      "actual": "Left click at (667, 592).",
+      "durationMs": 30
+    },
+    {
+      "sequence": 36,
+      "kind": "left-click",
+      "label": "Select recipe review candidate 4",
+      "expected": "The visible candidate is included in the explicit human checkpoint decision.",
+      "actual": "Left click at (874, 592).",
+      "durationMs": 34
+    },
+    {
+      "sequence": 37,
+      "kind": "left-click",
+      "label": "Complete recipe human checkpoint",
+      "expected": "The selected output versions and review note are durably saved before downstream work resumes.",
+      "actual": "Left click at (1079, 830).",
+      "durationMs": 81
+    },
+    {
+      "sequence": 38,
+      "kind": "left-click",
+      "label": "Wait for the recipe to finish after human review",
+      "expected": "Job Center exposes the durable transition created through the reviewed recipe plan.",
+      "actual": "Left click at (169, 89).",
+      "durationMs": 136
+    },
+    {
+      "sequence": 39,
+      "kind": "left-click",
+      "label": "Inspect Character Consistency Sheet output",
+      "expected": "The recipe returns to its visible canvas with the fake-provider output persisted.",
+      "actual": "Left click at (47, 89).",
+      "durationMs": 641
+    },
+    {
+      "sequence": 40,
+      "kind": "left-click",
+      "label": "Select Character Consistency Sheet output node",
+      "expected": "The advertised fake-provider output is inspected on the inserted recipe itself.",
+      "actual": "Left click at (874, 471).",
+      "durationMs": 64
+    },
+    {
+      "sequence": 41,
       "kind": "screenshot",
       "label": "Capture Character Consistency Sheet fake-provider output",
       "expected": "This fresh-document recipe was configured, inserted, explicitly previewed, permitted, and completed through ordinary controls using only the recovery simulation.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 226,
+      "durationMs": 254,
       "screenshotPath": "screenshots/character-consistency-sheet-fake-output.png"
     },
     {
-      "sequence": 36,
+      "sequence": 42,
       "kind": "observation",
       "label": "Character Consistency Sheet packaged recipe",
       "expected": "The built-in workflow reaches its advertised fake-provider output from a fresh document through visible setup and run controls.",

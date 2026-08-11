@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "blank-gui-checkpoint",
   "mode": "packaged",
-  "startedAt": "2026-08-10T17:08:32.618Z",
-  "finishedAt": "2026-08-10T17:08:42.501Z",
+  "startedAt": "2026-08-11T11:07:53.111Z",
+  "finishedAt": "2026-08-11T11:08:04.446Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "40ac5238c425e38cb1cf7d2a39e740dcad4ee82c",
+    "gitCommit": "4377c567e52721f8a4a7c52b84f6815031babe44",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "69ce2ed5290ea53e69cf0ca4d56a260b2bc8d3cbed073b8e9e5adc12b09f25be"
+        "sha256": "a53092cd276ed4c9840885db2619ad56c2595fb053721856b95bdd0b8eca54bf"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "27e40c00d8356cebb277203076d1abbd23c268d66586e6b70bd679b82c7ad712"
+        "sha256": "c16491a5ef5bd38ffdeae98921a0d4e191ccfef032b5c6cf2d29f8eec97ccde8"
       }
     ]
   },
@@ -45,7 +45,7 @@
       "label": "Capture the blank registry-backed library",
       "expected": "A fresh blank document visibly exposes the searchable Node Library.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 148,
+      "durationMs": 153,
       "screenshotPath": "screenshots/01-blank-library.png"
     },
     {
@@ -54,7 +54,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The registry factory creates prompt.text with canonical defaults.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 65
+      "durationMs": 82
     },
     {
       "sequence": 4,
@@ -62,7 +62,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The registry factory creates prompt.worker with canonical defaults.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 49
+      "durationMs": 57
     },
     {
       "sequence": 5,
@@ -70,7 +70,7 @@
       "label": "Move Worker with ordinary left drag",
       "expected": "The Worker moves once and preserves its graph identity.",
       "actual": "Left drag (802, 614) to (802, 424).",
-      "durationMs": 128
+      "durationMs": 150
     },
     {
       "sequence": 6,
@@ -78,7 +78,7 @@
       "label": "Fit the moved nodes",
       "expected": "The two authored nodes return to a clear marquee workspace without changing their saved positions.",
       "actual": "Pressed Home.",
-      "durationMs": 6
+      "durationMs": 8
     },
     {
       "sequence": 7,
@@ -86,7 +86,7 @@
       "label": "Marquee-select Prompt",
       "expected": "A left-drag marquee selects the intersected Prompt.",
       "actual": "Left drag (797, 608) to (973, 758).",
-      "durationMs": 102
+      "durationMs": 120
     },
     {
       "sequence": 8,
@@ -94,7 +94,7 @@
       "label": "Add Worker with Shift marquee",
       "expected": "Shift marquee preserves Prompt and adds Worker.",
       "actual": "Shift+left drag (631, 362) to (807, 512).",
-      "durationMs": 108
+      "durationMs": 396
     },
     {
       "sequence": 9,
@@ -102,7 +102,7 @@
       "label": "Pan with ordinary right drag",
       "expected": "The canvas viewport moves while the two-node selection remains unchanged.",
       "actual": "Right drag (996, 819) to (886, 774).",
-      "durationMs": 92
+      "durationMs": 95
     },
     {
       "sequence": 10,
@@ -110,7 +110,7 @@
       "label": "Capture movement and additive marquee",
       "expected": "The separated nodes show one reliable movement and two-node additive selection state.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 164,
+      "durationMs": 166,
       "screenshotPath": "screenshots/02-marquee-and-movement.png"
     },
     {
@@ -119,7 +119,7 @@
       "label": "Duplicate selected nodes",
       "expected": "Ctrl+D duplicates the two selected nodes with a visible offset.",
       "actual": "Pressed Control+D.",
-      "durationMs": 33
+      "durationMs": 39
     },
     {
       "sequence": 12,
@@ -127,7 +127,7 @@
       "label": "Copy graph selection",
       "expected": "Ctrl+C records the selected graph subgraph.",
       "actual": "Pressed Control+C.",
-      "durationMs": 7
+      "durationMs": 13
     },
     {
       "sequence": 13,
@@ -135,7 +135,7 @@
       "label": "Paste graph selection",
       "expected": "Ctrl+V pastes the selected subgraph with fresh graph identities.",
       "actual": "Pressed Control+V.",
-      "durationMs": 31
+      "durationMs": 41
     },
     {
       "sequence": 14,
@@ -143,7 +143,7 @@
       "label": "Delete pasted graph selection",
       "expected": "Delete removes the current graph selection.",
       "actual": "Pressed Delete.",
-      "durationMs": 30
+      "durationMs": 27
     },
     {
       "sequence": 15,
@@ -159,7 +159,7 @@
       "label": "Redo graph delete",
       "expected": "Ctrl+Y reapplies the graph deletion.",
       "actual": "Pressed Control+Y.",
-      "durationMs": 33
+      "durationMs": 30
     },
     {
       "sequence": 17,
@@ -167,7 +167,7 @@
       "label": "Select every current node",
       "expected": "Ctrl+A selects every node when the canvas owns focus.",
       "actual": "Pressed Control+A.",
-      "durationMs": 8
+      "durationMs": 12
     },
     {
       "sequence": 18,
@@ -183,7 +183,7 @@
       "label": "Rename the primary selected node",
       "expected": "F2 opens one controlled title editor.",
       "actual": "Pressed F2.",
-      "durationMs": 22
+      "durationMs": 20
     },
     {
       "sequence": 20,
@@ -191,7 +191,7 @@
       "label": "Commit the direct title edit",
       "expected": "Enter commits the renamed title as one graph transaction.",
       "actual": "Pressed Enter.",
-      "durationMs": 41
+      "durationMs": 37
     },
     {
       "sequence": 21,
@@ -199,7 +199,7 @@
       "label": "Restore canvas-owned node focus",
       "expected": "The renamed Prompt is the primary selected graph object.",
       "actual": "Left click at (775, 615).",
-      "durationMs": 35
+      "durationMs": 39
     },
     {
       "sequence": 22,
@@ -207,7 +207,7 @@
       "label": "Open primary content editing",
       "expected": "Enter edits the selected Prompt primary content rather than moving the node.",
       "actual": "Pressed Enter.",
-      "durationMs": 14
+      "durationMs": 16
     },
     {
       "sequence": 23,
@@ -215,7 +215,7 @@
       "label": "Capture controlled direct editing",
       "expected": "The selected Prompt visibly owns the only bounded on-canvas editor.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 202,
+      "durationMs": 217,
       "screenshotPath": "screenshots/03-direct-editing.png"
     },
     {
@@ -224,7 +224,7 @@
       "label": "Commit primary content edit",
       "expected": "Ctrl+Enter commits text while the editor owns focus.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 33
+      "durationMs": 49
     },
     {
       "sequence": 25,
@@ -232,7 +232,7 @@
       "label": "Refit before Worker editing",
       "expected": "The edited cards return to a clear direct-editing workspace.",
       "actual": "Pressed Home.",
-      "durationMs": 3
+      "durationMs": 4
     },
     {
       "sequence": 26,
@@ -240,7 +240,7 @@
       "label": "Edit Worker instruction on canvas",
       "expected": "Double-click opens the visible Worker's primary instruction directly on its card.",
       "actual": "Left double-click at (737, 460).",
-      "durationMs": 70
+      "durationMs": 68
     },
     {
       "sequence": 27,
@@ -248,7 +248,7 @@
       "label": "Commit Worker instruction edit",
       "expected": "Ctrl+Enter saves the Worker's instruction as one graph transaction.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 34
+      "durationMs": 47
     },
     {
       "sequence": 28,
@@ -256,7 +256,7 @@
       "label": "Restore Prompt command focus",
       "expected": "The directly edited Prompt remains the primary graph selection.",
       "actual": "Left click at (867, 642).",
-      "durationMs": 49
+      "durationMs": 58
     },
     {
       "sequence": 29,
@@ -264,7 +264,7 @@
       "label": "Select the preview graph scope",
       "expected": "The preview scope includes the blank-authored Workers without starting provider work.",
       "actual": "Pressed Control+A.",
-      "durationMs": 16
+      "durationMs": 18
     },
     {
       "sequence": 30,
@@ -288,7 +288,7 @@
       "label": "Add reference.set from Node Library",
       "expected": "The registry factory creates reference.set with canonical defaults.",
       "actual": "Left click at (108, 749).",
-      "durationMs": 70
+      "durationMs": 75
     },
     {
       "sequence": 33,
@@ -296,7 +296,7 @@
       "label": "Add generation.image from Node Library",
       "expected": "The registry factory creates generation.image with canonical defaults.",
       "actual": "Left click at (108, 814).",
-      "durationMs": 54
+      "durationMs": 74
     },
     {
       "sequence": 34,
@@ -304,7 +304,7 @@
       "label": "Add edit.image from Node Library",
       "expected": "The registry factory creates edit.image with canonical defaults.",
       "actual": "Left click at (108, 674).",
-      "durationMs": 56
+      "durationMs": 76
     },
     {
       "sequence": 35,
@@ -312,7 +312,7 @@
       "label": "Add edit.mask from Node Library",
       "expected": "The registry factory creates edit.mask with canonical defaults.",
       "actual": "Left click at (108, 750).",
-      "durationMs": 56
+      "durationMs": 79
     },
     {
       "sequence": 36,
@@ -328,7 +328,7 @@
       "label": "Add review.compare from Node Library",
       "expected": "The registry factory creates review.compare with canonical defaults.",
       "actual": "Left click at (108, 674).",
-      "durationMs": 59
+      "durationMs": 83
     },
     {
       "sequence": 38,
@@ -336,7 +336,7 @@
       "label": "Add review.evaluate from Node Library",
       "expected": "The registry factory creates review.evaluate with canonical defaults.",
       "actual": "Left click at (108, 750).",
-      "durationMs": 52
+      "durationMs": 80
     },
     {
       "sequence": 39,
@@ -344,7 +344,7 @@
       "label": "Add review.filter from Node Library",
       "expected": "The registry factory creates review.filter with canonical defaults.",
       "actual": "Left click at (108, 814).",
-      "durationMs": 56
+      "durationMs": 67
     },
     {
       "sequence": 40,
@@ -352,7 +352,7 @@
       "label": "Add flow.variables from Node Library",
       "expected": "The registry factory creates flow.variables with canonical defaults.",
       "actual": "Left click at (108, 674).",
-      "durationMs": 54
+      "durationMs": 75
     },
     {
       "sequence": 41,
@@ -360,7 +360,7 @@
       "label": "Add flow.batch from Node Library",
       "expected": "The registry factory creates flow.batch with canonical defaults.",
       "actual": "Left click at (108, 750).",
-      "durationMs": 55
+      "durationMs": 80
     },
     {
       "sequence": 42,
@@ -368,7 +368,7 @@
       "label": "Add flow.join from Node Library",
       "expected": "The registry factory creates flow.join with canonical defaults.",
       "actual": "Left click at (108, 814).",
-      "durationMs": 59
+      "durationMs": 79
     },
     {
       "sequence": 43,
@@ -376,7 +376,7 @@
       "label": "Add output.collection from Node Library",
       "expected": "The registry factory creates output.collection with canonical defaults.",
       "actual": "Left click at (108, 674).",
-      "durationMs": 57
+      "durationMs": 81
     },
     {
       "sequence": 44,
@@ -384,7 +384,7 @@
       "label": "Add output.export from Node Library",
       "expected": "The registry factory creates output.export with canonical defaults.",
       "actual": "Left click at (108, 750).",
-      "durationMs": 59
+      "durationMs": 78
     },
     {
       "sequence": 45,
@@ -392,7 +392,7 @@
       "label": "Add canvas.note from Node Library",
       "expected": "The registry factory creates canvas.note with canonical defaults.",
       "actual": "Left click at (108, 814).",
-      "durationMs": 54
+      "durationMs": 82
     },
     {
       "sequence": 46,
@@ -400,7 +400,7 @@
       "label": "Add canvas.drawing from Node Library",
       "expected": "The registry factory creates canvas.drawing with canonical defaults.",
       "actual": "Left click at (108, 774).",
-      "durationMs": 73
+      "durationMs": 88
     },
     {
       "sequence": 47,
@@ -408,7 +408,7 @@
       "label": "Hide Reference Desk",
       "expected": "The ordinary panel control clears more room for the authored graph.",
       "actual": "Left click at (1581, 151).",
-      "durationMs": 94
+      "durationMs": 84
     },
     {
       "sequence": 48,
@@ -416,7 +416,7 @@
       "label": "Hide Build tools",
       "expected": "The ordinary panel control clears more room for the authored graph.",
       "actual": "Left click at (244, 183).",
-      "durationMs": 48
+      "durationMs": 58
     },
     {
       "sequence": 49,
@@ -424,7 +424,7 @@
       "label": "Hide Project lens",
       "expected": "The ordinary panel control clears more room for the authored graph.",
       "actual": "Left click at (1580, 183).",
-      "durationMs": 48
+      "durationMs": 51
     },
     {
       "sequence": 50,
@@ -432,7 +432,7 @@
       "label": "Return focus to the canvas",
       "expected": "Canvas focus owns the final fit command.",
       "actual": "Left click at (800, 906).",
-      "durationMs": 27
+      "durationMs": 21
     },
     {
       "sequence": 51,
@@ -440,7 +440,7 @@
       "label": "Fit the authored graph",
       "expected": "Home fits all authored node types into the viewport.",
       "actual": "Pressed Home.",
-      "durationMs": 15
+      "durationMs": 4
     },
     {
       "sequence": 52,
@@ -456,7 +456,7 @@
       "label": "Capture all canonical node types",
       "expected": "The fitted blank-authored graph visibly contains all 17 canonical node types.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 160,
+      "durationMs": 145,
       "screenshotPath": "screenshots/04-all-17-node-types.png"
     },
     {
@@ -465,7 +465,7 @@
       "label": "Open the canvas command palette",
       "expected": "Ctrl+K exposes the same graph command registry used by shortcuts and toolbar.",
       "actual": "Pressed Control+K.",
-      "durationMs": 28
+      "durationMs": 22
     },
     {
       "sequence": 55,
@@ -473,7 +473,7 @@
       "label": "Capture the unified command surface",
       "expected": "The palette visibly lists graph commands, shortcuts, availability, and disabled reasons.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 175,
+      "durationMs": 201,
       "screenshotPath": "screenshots/05-command-palette.png"
     }
   ],

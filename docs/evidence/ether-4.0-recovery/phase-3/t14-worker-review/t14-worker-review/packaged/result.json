@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "journeyId": "t14-worker-review",
   "mode": "packaged",
-  "startedAt": "2026-08-09T22:29:54.705Z",
-  "finishedAt": "2026-08-09T22:30:05.779Z",
+  "startedAt": "2026-08-11T07:46:51.510Z",
+  "finishedAt": "2026-08-11T07:47:02.092Z",
   "outcome": "passed",
   "profile": {
     "kind": "fresh-isolated",
@@ -17,16 +17,16 @@
     "deviceScaleFactor": 1
   },
   "identity": {
-    "gitCommit": "9acd1bb81b7f21f6fd36af71158041a2e8ca00f2",
+    "gitCommit": "87153f61773b00f573007820ec151f4f525f61ec",
     "mode": "packaged",
     "artifacts": [
       {
         "path": "release/windows/win-unpacked/Ether.exe",
-        "sha256": "041d80aff7402348bd5aeae718f4784d4aa545efc597ae2b21b56e7918997023"
+        "sha256": "cf4639e8dfd14088ab93d1f3d25531d4418bf7324b53e04ef73bb9c758edfedd"
       },
       {
         "path": "release/windows/win-unpacked/resources/app.asar",
-        "sha256": "c604e44d467f7e4114bb02299bb218b48c4827fd9f394a70dead872e2d9d36bb"
+        "sha256": "b1e6ed7a40deb5fcec6424d7b3d44dd87948b61e45e9034927c07939a14c51b6"
       }
     ]
   },
@@ -37,7 +37,7 @@
       "label": "Add prompt.text from Node Library",
       "expected": "The blank document creates prompt.text through the canonical registry.",
       "actual": "Left click at (108, 498).",
-      "durationMs": 58
+      "durationMs": 62
     },
     {
       "sequence": 2,
@@ -45,7 +45,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The blank document creates prompt.worker through the canonical registry.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 64
+      "durationMs": 66
     },
     {
       "sequence": 3,
@@ -53,7 +53,7 @@
       "label": "Add prompt.worker from Node Library",
       "expected": "The blank document creates prompt.worker through the canonical registry.",
       "actual": "Left click at (108, 633).",
-      "durationMs": 79
+      "durationMs": 55
     },
     {
       "sequence": 4,
@@ -61,7 +61,7 @@
       "label": "Add generation.image from Node Library",
       "expected": "The blank document creates generation.image through the canonical registry.",
       "actual": "Left click at (108, 799).",
-      "durationMs": 63
+      "durationMs": 53
     },
     {
       "sequence": 5,
@@ -69,7 +69,7 @@
       "label": "Hide Reference Desk",
       "expected": "The blank-authored recovery chain remains fully visible.",
       "actual": "Left click at (1581, 151).",
-      "durationMs": 76
+      "durationMs": 64
     },
     {
       "sequence": 6,
@@ -77,7 +77,7 @@
       "label": "Hide Build tools",
       "expected": "The blank-authored recovery chain remains fully visible.",
       "actual": "Left click at (244, 183).",
-      "durationMs": 64
+      "durationMs": 47
     },
     {
       "sequence": 7,
@@ -85,15 +85,15 @@
       "label": "Fit the Worker recovery chain",
       "expected": "Prompt, both Workers, and Image Generator fit in one ordinary canvas view.",
       "actual": "Pressed Home.",
-      "durationMs": 6
+      "durationMs": 5
     },
     {
       "sequence": 8,
       "kind": "left-click",
       "label": "Focus Prompt content",
       "expected": "The Prompt's primary content control owns keyboard focus.",
-      "actual": "Left click at (688, 693).",
-      "durationMs": 44
+      "actual": "Left click at (1029, 690).",
+      "durationMs": 41
     },
     {
       "sequence": 9,
@@ -101,7 +101,7 @@
       "label": "Edit the authored Prompt",
       "expected": "Enter opens the primary inline text editor through the focused card control.",
       "actual": "Pressed Enter.",
-      "durationMs": 31
+      "durationMs": 54
     },
     {
       "sequence": 10,
@@ -109,87 +109,87 @@
       "label": "Commit the authored Prompt",
       "expected": "The durable Prompt becomes the sole starting material for the Worker chain.",
       "actual": "Pressed Control+Enter.",
-      "durationMs": 46
+      "durationMs": 32
     },
     {
       "sequence": 11,
       "kind": "left-click",
       "label": "Begin Prompt to Worker A",
       "expected": "The compatible Text input receiver becomes the intended lane target.",
-      "actual": "Left click at (826, 633).",
-      "durationMs": 35
+      "actual": "Left click at (1093, 666).",
+      "durationMs": 43
     },
     {
       "sequence": 12,
       "kind": "left-click",
       "label": "Complete Prompt to Worker A",
       "expected": "The exact connection persists through the ordinary channel interaction.",
-      "actual": "Left click at (224, 408).",
-      "durationMs": 253
+      "actual": "Left click at (813, 538).",
+      "durationMs": 276
     },
     {
       "sequence": 13,
       "kind": "left-click",
       "label": "Begin Worker A to Worker B",
       "expected": "The compatible Text input receiver becomes the intended lane target.",
-      "actual": "Left click at (501, 408).",
-      "durationMs": 148
+      "actual": "Left click at (942, 538).",
+      "durationMs": 45
     },
     {
       "sequence": 14,
       "kind": "left-click",
       "label": "Complete Worker A to Worker B",
       "expected": "The exact connection persists through the ordinary channel interaction.",
-      "actual": "Left click at (549, 408).",
-      "durationMs": 303
+      "actual": "Left click at (662, 410).",
+      "durationMs": 280
     },
     {
       "sequence": 15,
       "kind": "left-click",
       "label": "Begin Worker B to Image Generator",
       "expected": "The compatible Text input receiver becomes the intended lane target.",
-      "actual": "Left click at (826, 408).",
-      "durationMs": 58
+      "actual": "Left click at (791, 410).",
+      "durationMs": 50
     },
     {
       "sequence": 16,
       "kind": "left-click",
       "label": "Complete Worker B to Image Generator",
       "expected": "The exact connection persists through the ordinary channel interaction.",
-      "actual": "Left click at (874, 408).",
-      "durationMs": 242
+      "actual": "Left click at (511, 282).",
+      "durationMs": 275
     },
     {
       "sequence": 17,
       "kind": "left-click",
       "label": "Inspect latest-approved lane 1",
       "expected": "Each freshly authored lane is explicitly verified as latest-approved.",
-      "actual": "Left click at (525, 521).",
-      "durationMs": 51
+      "actual": "Left click at (953, 756).",
+      "durationMs": 50
     },
     {
       "sequence": 18,
       "kind": "left-click",
       "label": "Inspect latest-approved lane 2",
       "expected": "Each freshly authored lane is explicitly verified as latest-approved.",
-      "actual": "Left click at (525, 408).",
-      "durationMs": 56
+      "actual": "Left click at (802, 628).",
+      "durationMs": 44
     },
     {
       "sequence": 19,
       "kind": "left-click",
       "label": "Inspect latest-approved lane 3",
       "expected": "Each freshly authored lane is explicitly verified as latest-approved.",
-      "actual": "Left click at (850, 408).",
-      "durationMs": 69
+      "actual": "Left click at (651, 501).",
+      "durationMs": 42
     },
     {
       "sequence": 20,
       "kind": "left-click",
       "label": "Select Worker A",
       "expected": "The ordinary Inspector exposes the Worker profile and result-handling controls.",
-      "actual": "Left click at (363, 419).",
-      "durationMs": 50
+      "actual": "Left click at (878, 540).",
+      "durationMs": 46
     },
     {
       "sequence": 21,
@@ -197,15 +197,15 @@
       "label": "Save Worker A review policy",
       "expected": "The authored instruction, deterministic profile, and review policy save together through one normal Inspector action.",
       "actual": "Left click at (1410, 567).",
-      "durationMs": 72
+      "durationMs": 79
     },
     {
       "sequence": 22,
       "kind": "left-click",
       "label": "Select Worker B",
       "expected": "The ordinary Inspector exposes the Worker profile and result-handling controls.",
-      "actual": "Left click at (688, 419).",
-      "durationMs": 61
+      "actual": "Left click at (726, 412).",
+      "durationMs": 59
     },
     {
       "sequence": 23,
@@ -213,15 +213,15 @@
       "label": "Save Worker B review policy",
       "expected": "The authored instruction, deterministic profile, and review policy save together through one normal Inspector action.",
       "actual": "Left click at (1410, 567).",
-      "durationMs": 66
+      "durationMs": 74
     },
     {
       "sequence": 24,
       "kind": "left-click",
       "label": "Select Image Generator",
       "expected": "The ordinary Inspector exposes only verified image profiles.",
-      "actual": "Left click at (1013, 419).",
-      "durationMs": 79
+      "actual": "Left click at (575, 284).",
+      "durationMs": 72
     },
     {
       "sequence": 25,
@@ -229,7 +229,7 @@
       "label": "Save deterministic Image Generator profile",
       "expected": "The recovery-only fake-local image profile becomes the durable binding for this branch.",
       "actual": "Left click at (1439, 661).",
-      "durationMs": 71
+      "durationMs": 67
     },
     {
       "sequence": 26,
@@ -237,7 +237,7 @@
       "label": "Capture the blank-authored Worker chain",
       "expected": "Prompt, two Workers, Image Generator, and three latest-approved lanes were created through ordinary UI input only.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 243,
+      "durationMs": 231,
       "screenshotPath": "screenshots/01-authored-review-chain.png"
     },
     {
@@ -245,8 +245,8 @@
       "kind": "left-click",
       "label": "Select Worker A for inspect-first execution",
       "expected": "Worker A is configured to leave its durable result unreviewed.",
-      "actual": "Left click at (363, 419).",
-      "durationMs": 53
+      "actual": "Left click at (878, 540).",
+      "durationMs": 38
     },
     {
       "sequence": 28,
@@ -254,7 +254,7 @@
       "label": "Preview Worker A plan",
       "expected": "The deterministic Worker plan is reviewed before any permit is created.",
       "actual": "Left click at (1407, 883).",
-      "durationMs": 93
+      "durationMs": 90
     },
     {
       "sequence": 29,
@@ -262,7 +262,7 @@
       "label": "Permit and start Worker A",
       "expected": "Only the reviewed deterministic Worker plan receives its one-use permit.",
       "actual": "Left click at (1401, 700).",
-      "durationMs": 70
+      "durationMs": 56
     },
     {
       "sequence": 30,
@@ -270,7 +270,7 @@
       "label": "Wait for Worker A durable job",
       "expected": "Job Center displays the durable plan execution created through preview and permit.",
       "actual": "Left click at (169, 89).",
-      "durationMs": 154
+      "durationMs": 139
     },
     {
       "sequence": 31,
@@ -278,15 +278,15 @@
       "label": "Return to the Build workspace",
       "expected": "The Inspector refreshes Worker A's completed durable version.",
       "actual": "Left click at (47, 89).",
-      "durationMs": 45
+      "durationMs": 47
     },
     {
       "sequence": 32,
       "kind": "left-click",
       "label": "Inspect Worker A output",
       "expected": "Worker A's exact output and provenance are visible before approval.",
-      "actual": "Left click at (363, 419).",
-      "durationMs": 54
+      "actual": "Left click at (878, 540).",
+      "durationMs": 58
     },
     {
       "sequence": 33,
@@ -294,7 +294,7 @@
       "label": "Open Worker A provenance",
       "expected": "Provider, job, and generated output lineage are inspectable before approval.",
       "actual": "Left click at (1461, 893).",
-      "durationMs": 56
+      "durationMs": 48
     },
     {
       "sequence": 34,
@@ -302,7 +302,7 @@
       "label": "Capture Worker A unreviewed output",
       "expected": "The inspect-first result is durable, unreviewed, and visibly tied to the deterministic local simulation.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 229,
+      "durationMs": 215,
       "screenshotPath": "screenshots/02-worker-a-unreviewed-provenance.png"
     },
     {
@@ -311,15 +311,15 @@
       "label": "Approve Worker A output",
       "expected": "The durable output becomes eligible for the next latest-approved lane.",
       "actual": "Left click at (1410, 723).",
-      "durationMs": 43
+      "durationMs": 47
     },
     {
       "sequence": 36,
       "kind": "left-click",
       "label": "Select Worker B and the Image branch",
       "expected": "Worker B retains its separately authored instruction and auto-apply policy.",
-      "actual": "Left click at (688, 419).",
-      "durationMs": 73
+      "actual": "Left click at (726, 412).",
+      "durationMs": 55
     },
     {
       "sequence": 37,
@@ -327,7 +327,7 @@
       "label": "Preview approved Worker B image branch",
       "expected": "The branch resolves only Worker A's approved result and the fake-local Image Generator before permit.",
       "actual": "Left click at (1407, 741).",
-      "durationMs": 90
+      "durationMs": 86
     },
     {
       "sequence": 38,
@@ -335,7 +335,7 @@
       "label": "Permit and start Worker B with Image Generator",
       "expected": "The previewed Worker B branch is explicitly permitted and started without a real provider or image call.",
       "actual": "Left click at (1403, 700).",
-      "durationMs": 246
+      "durationMs": 52
     },
     {
       "sequence": 39,
@@ -343,7 +343,7 @@
       "label": "Wait for Worker B and Image Generator durable job",
       "expected": "Job Center displays the durable plan execution created through preview and permit.",
       "actual": "Left click at (169, 89).",
-      "durationMs": 767
+      "durationMs": 570
     },
     {
       "sequence": 40,
@@ -351,15 +351,15 @@
       "label": "Return to Build for transformed lineage",
       "expected": "The completed branch output is inspected in the ordinary canvas workspace.",
       "actual": "Left click at (47, 89).",
-      "durationMs": 61
+      "durationMs": 237
     },
     {
       "sequence": 41,
       "kind": "left-click",
       "label": "Inspect Worker B transformed output",
       "expected": "Worker B's auto-applied durable output preserves its selected approved input lineage.",
-      "actual": "Left click at (688, 419).",
-      "durationMs": 57
+      "actual": "Left click at (726, 412).",
+      "durationMs": 50
     },
     {
       "sequence": 42,
@@ -367,15 +367,15 @@
       "label": "Open Worker B transformed provenance",
       "expected": "The output identifies its selected input version instead of changing Worker B's authored instruction.",
       "actual": "Left click at (1461, 893).",
-      "durationMs": 61
+      "durationMs": 48
     },
     {
       "sequence": 43,
       "kind": "left-click",
       "label": "Inspect Image Generator output lineage",
       "expected": "The generated image has the Worker B approved version as its selected input.",
-      "actual": "Left click at (1013, 419).",
-      "durationMs": 94
+      "actual": "Left click at (575, 284).",
+      "durationMs": 47
     },
     {
       "sequence": 44,
@@ -383,7 +383,7 @@
       "label": "Open Image Generator provenance",
       "expected": "The image output preserves the transformed Worker lineage through the latest-approved lane.",
       "actual": "Left click at (1461, 832).",
-      "durationMs": 86
+      "durationMs": 52
     },
     {
       "sequence": 45,
@@ -391,7 +391,7 @@
       "label": "Capture approved transformed lineage",
       "expected": "Worker B auto-applies its valid output, Image Generator consumes that approved version, and Worker B's authored instruction remains unchanged.",
       "actual": "Captured after the documented preceding action.",
-      "durationMs": 218,
+      "durationMs": 226,
       "screenshotPath": "screenshots/03-approved-worker-and-image-lineage.png"
     },
     {
@@ -403,5 +403,10 @@
       "durationMs": 0
     }
   ],
-  "errors": []
+  "errors": [
+    {
+      "source": "main-process",
+      "message": "[70280:0811/094701.012:ERROR:content\\browser\\network_service_instance_impl.cc:721] Network service crashed or was terminated, restarting service."
+    }
+  ]
 }
