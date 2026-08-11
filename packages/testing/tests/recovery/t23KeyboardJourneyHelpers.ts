@@ -116,7 +116,10 @@ export async function activeElementDescription(page: Page): Promise<string> {
 }
 
 export async function selectedNodeCount(page: Page): Promise<number> {
-  return page.getByTestId("ether-node").evaluateAll((nodes) => nodes.filter((node) => node.classList.contains("is-selected")).length);
+  return page.getByTestId("ether-node").evaluateAll((nodes) => new Set(nodes
+    .filter((node) => node.classList.contains("is-selected"))
+    .map((node) => node.getAttribute("data-node-id"))
+    .filter((id): id is string => id !== null)).size);
 }
 
 async function isFocused(target: Locator): Promise<boolean> {
