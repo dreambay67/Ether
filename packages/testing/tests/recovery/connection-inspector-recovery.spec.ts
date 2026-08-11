@@ -84,7 +84,7 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
     const firstRole = page.getByTestId("edge-role-chip").first();
-    await page.locator(".ether-edge-hit-target").first().hover();
+    await revealLaneAtLabel(page, firstRole);
     await expect(firstRole).toBeVisible();
     await input.leftClick(firstRole.getByRole("button", { name: "General" }), "Open the in-place role grid", "All 15 semantic roles are available directly on the lane.");
     await expect(page.getByTestId("edge-role-grid").getByRole("button")).toHaveCount(15);
@@ -107,8 +107,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await input.leftClick(worker.getByLabel("Text input"), "Complete adapter lane", "The adapter-backed lane persists before any run or provider call.");
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
-    await page.locator(".ether-edge-hit-target").last().hover();
     const adapterRole = page.getByTestId("edge-role-chip").last();
+    await revealLaneAtLabel(page, adapterRole);
     await expect(adapterRole).toBeVisible();
     await input.leftClick(adapterRole.getByRole("button", { name: "General" }), "Select the adapter lane", "A visible lane control selects the exact connection for the Project lens.");
     await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Project lens", "Ordinary connection controls appear without covering the completed authoring interaction.");
@@ -164,4 +164,10 @@ async function addDefinition(page: Page, input: RealPageInput, definition: strin
 
 function channelLabel(channel: typeof channels[number]) {
   return channel[0]!.toLocaleUpperCase() + channel.slice(1);
+}
+
+async function revealLaneAtLabel(page: import("@playwright/test").Page, label: import("@playwright/test").Locator) {
+  const bounds = await label.boundingBox();
+  if (bounds === null) throw new Error("The lane label did not provide a visible canvas position.");
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
 }
