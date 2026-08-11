@@ -84,8 +84,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
     const firstRole = page.getByTestId("edge-role-chip").first();
-    await revealLaneAtLabel(page, firstRole);
-    await expect(firstRole).toBeVisible();
+    await revealLaneAtPath(page, page.locator(".ether-edge-hit-target").first());
+    await expect(firstRole).toHaveCSS("pointer-events", "all");
     await input.leftClick(firstRole.getByRole("button", { name: "General" }), "Open the in-place role grid", "All 15 semantic roles are available directly on the lane.");
     await expect(page.getByTestId("edge-role-grid").getByRole("button")).toHaveCount(15);
     await input.leftClick(page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }), "Name the Text lane Subject", "The non-General role becomes a visible lane badge.");
@@ -108,8 +108,8 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
     const adapterRole = page.getByTestId("edge-role-chip").last();
-    await revealLaneAtLabel(page, adapterRole);
-    await expect(adapterRole).toBeVisible();
+    await revealLaneAtPath(page, page.locator(".ether-edge-hit-target").last());
+    await expect(adapterRole).toHaveCSS("pointer-events", "all");
     await input.leftClick(adapterRole.getByRole("button", { name: "General" }), "Select the adapter lane", "A visible lane control selects the exact connection for the Project lens.");
     await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Project lens", "Ordinary connection controls appear without covering the completed authoring interaction.");
     const edgeInspector = page.getByTestId("edge-inspector");
@@ -166,8 +166,13 @@ function channelLabel(channel: typeof channels[number]) {
   return channel[0]!.toLocaleUpperCase() + channel.slice(1);
 }
 
-async function revealLaneAtLabel(page: import("@playwright/test").Page, label: import("@playwright/test").Locator) {
-  const bounds = await label.boundingBox();
-  if (bounds === null) throw new Error("The lane label did not provide a visible canvas position.");
-  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+async function revealLaneAtPath(page: import("@playwright/test").Page, edge: import("@playwright/test").Locator) {
+  const point = await edge.evaluate((path) => {
+    if (!(path instanceof SVGPathElement)) throw new Error("The lane hit target is not an SVG path.");
+    const matrix = path.getScreenCTM();
+    if (matrix === null) throw new Error("The lane hit target has no screen transform.");
+    const local = path.getPointAtLength(path.getTotalLength() / 2);
+    return { x: matrix.a * local.x + matrix.c * local.y + matrix.e, y: matrix.b * local.x + matrix.d * local.y + matrix.f };
+  });
+  await page.mouse.move(point.x, point.y);
 }
