@@ -81,6 +81,7 @@ test("previews exact scopes and completes one fake-local job from a blank docume
     await selectFakeProfile(page, input, editor, "Image Editor");
     await input.leftClick(batch.locator(".ether-node-title"), "Select Batch", "The progressive Inspector exposes the authored batch and its run scope.");
     const inspector = page.getByTestId("node-inspector");
+    await input.leftClick(inspector.getByRole("button", { name: "Add dimension", exact: true }), "Add Batch dimension", "A new Batch starts empty and exposes an ordinary control for its first dimension.");
     const values = inspector.getByTestId("inspector-list-dimensions").locator("textarea").first();
     await values.fill("coastal\nstudio");
     await input.leftClick(inspector.getByRole("button", { name: "Save batch", exact: true }), "Save two Batch values", "The exact two-item expansion is stored before preview.");
