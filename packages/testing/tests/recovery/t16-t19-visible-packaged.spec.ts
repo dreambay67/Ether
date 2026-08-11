@@ -282,9 +282,9 @@ async function inspectDeliverySetup(page: Page, input: RealPageInput, collection
 async function connect(input: RealPageInput, source: Locator, output: string, target: Locator, receiver: string, label: string) {
   const sourceHandle = source.getByLabel(output);
   const targetHandle = target.getByLabel(receiver);
-  await sourceHandle.hover();
+  await source.locator(".ether-channel-rail-output").hover();
   await input.leftClick(sourceHandle, `Begin ${label}`, `The compatible ${receiver} handle becomes the intended receiver.`);
-  await targetHandle.hover();
+  await target.locator(".ether-channel-rail-input").hover();
   await input.leftClick(targetHandle, `Complete ${label}`, "The exact visible lane persists through ordinary channel interaction.");
 }
 
