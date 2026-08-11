@@ -1683,6 +1683,10 @@ button {
   z-index: 3000 !important;
 }
 
+.flow-shell .react-flow__node {
+  z-index: 3000 !important;
+}
+
 .react-flow__attribution {
   display: none;
 }
