@@ -297,6 +297,7 @@ async function selectLatestOnNewestLane(page: Page, input: RealPageInput, label:
   await outputSelection.selectOption("latest");
   await expect(outputSelection).toHaveValue("latest");
   await page.waitForTimeout(150);
+  await input.pressKey("Escape", `Close ${label} role menu`, "Escape dismisses the open in-place role grid without changing the selected connection.");
   await expect(page.getByTestId("edge-role-grid")).toHaveCount(0);
 }
 
