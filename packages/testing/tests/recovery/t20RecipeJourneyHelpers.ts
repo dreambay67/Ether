@@ -96,8 +96,10 @@ export async function publishRecipeMask(page: Page, input: RealPageInput): Promi
   await expect.poll(async () => maskTitle.evaluate((title) => {
     const bounds = title.getBoundingClientRect();
     const target = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-    return target === title || (target !== null && title.contains(target));
-  }), { timeout: 5_000, message: "The visible Mask title was covered by another canvas hit target." }).toBe(true);
+    if (target === title || (target !== null && title.contains(target))) return "mask-title";
+    if (!(target instanceof HTMLElement)) return String(target);
+    return `${target.tagName.toLocaleLowerCase()}${target.className ? `.${String(target.className).replaceAll(" ", ".")}` : ""}${target.getAttribute("aria-label") ? `[aria-label=${target.getAttribute("aria-label")}]` : ""}`;
+  }), { timeout: 5_000, message: "The visible Mask title was covered by another canvas hit target." }).toBe("mask-title");
   await input.leftClick(maskTitle, "Select recipe Mask", "The inserted Mask node exposes its visible image-backed Mask workspace.");
   await expect(maskNode).toHaveClass(/is-selected/u, { timeout: 5_000 });
   await input.leftClick(page.getByRole("button", { name: "Show Project lens", exact: true }), "Show Mask workspace", "Project lens reopens on the selected Mask node rather than the previously selected lane.");
