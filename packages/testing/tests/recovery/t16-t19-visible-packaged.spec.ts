@@ -197,6 +197,7 @@ async function authorPrompt(page: Page, input: RealPageInput, prompt: Locator) {
 async function configureBatch(page: Page, input: RealPageInput, batch: Locator) {
   await input.leftClick(batch.locator(".ether-node-title"), "Select Batch", "The Inspector exposes the exact dimension values and sequential default before any run is prepared.");
   const inspector = page.getByTestId("node-inspector");
+  await input.leftClick(inspector.getByRole("button", { name: "Add dimension", exact: true }), "Add the lighting dimension", "A new Batch begins empty and the first controlled dimension is added explicitly.");
   const dimensions = inspector.getByTestId("inspector-list-dimensions");
   await dimensions.getByLabel("Name").fill("Lighting");
   await dimensions.getByLabel("Values").fill("morning\nevening");
