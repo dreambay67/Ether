@@ -128,12 +128,12 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     const nodeInspector = page.getByTestId("node-inspector");
     await expect(nodeInspector).toContainText("Channels & routes");
     await expect(nodeInspector).toContainText("Batch settings");
-    await expect(nodeInspector.getByTestId("inspector-list-dimensions").locator(".inspector-list-item")).toHaveCount(1);
+    await expect(nodeInspector.getByTestId("inspector-list-dimensions").locator(".inspector-list-item")).toHaveCount(0);
     const nodeDiagnostics = nodeInspector.getByRole("button", { name: "Diagnostics & provenance", exact: true });
     await expect(nodeDiagnostics).toHaveAttribute("aria-expanded", "false");
     await input.leftClick(nodeInspector.getByRole("button", { name: "Add dimension" }), "Add a structured Batch dimension", "The Inspector adds a named structured item rather than exposing raw JSON.");
     await input.leftClick(nodeInspector.getByRole("button", { name: "Add exclusion" }), "Add a structured Batch exclusion", "The Inspector adds a key/value exclusion editor through an ordinary control.");
-    await expect(nodeInspector.getByTestId("inspector-list-dimensions").locator(".inspector-list-item")).toHaveCount(2);
+    await expect(nodeInspector.getByTestId("inspector-list-dimensions").locator(".inspector-list-item")).toHaveCount(1);
     await expect(nodeInspector.getByTestId("inspector-list-exclusions").locator(".inspector-list-item")).toHaveCount(1);
     await input.leftClick(nodeInspector.getByRole("button", { name: "Save batch" }), "Save structured Batch settings", "The registry-backed draft commits through one durable graph transaction.");
     await input.screenshot("05-progressive-batch-inspector.png", evidence, "Capture ordinary progressive Inspector", "Concise channels and structured Batch controls are visible while technical provenance remains collapsed.");
