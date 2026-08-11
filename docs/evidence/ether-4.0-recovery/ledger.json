@@ -11,8 +11,8 @@
     "commit": "4377c567e52721f8a4a7c52b84f6815031babe44",
     "packageHash": "c16491a5ef5bd38ffdeae98921a0d4e191ccfef032b5c6cf2d29f8eec97ccde8",
     "packageArtifact": "release/windows/win-unpacked/resources/app.asar",
-    "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c",
-    "validatedAt": "2026-08-11T11:14:50.694Z"
+    "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706",
+    "validatedAt": "2026-08-11T11:38:26.533Z"
   },
   "statusModel": [
     "OPEN",
@@ -3139,7 +3139,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -3187,7 +3187,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -3235,7 +3235,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -3283,7 +3283,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5458,7 +5458,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5507,7 +5507,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5556,7 +5556,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5605,7 +5605,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5654,7 +5654,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5703,7 +5703,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5752,7 +5752,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5801,7 +5801,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5850,7 +5850,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5899,7 +5899,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5948,7 +5948,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -5997,7 +5997,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -6046,7 +6046,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -6095,7 +6095,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -6144,7 +6144,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -8687,7 +8687,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -8704,7 +8704,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -8754,7 +8754,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -8771,7 +8771,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -8821,7 +8821,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -8838,7 +8838,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -8888,7 +8888,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -8905,7 +8905,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -8955,7 +8955,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -8972,7 +8972,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9022,7 +9022,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -9039,7 +9039,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9089,7 +9089,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -9106,7 +9106,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9156,7 +9156,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -9173,7 +9173,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9261,7 +9261,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9558,7 +9558,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9608,7 +9608,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -9943,7 +9943,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -10032,7 +10032,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -10250,7 +10250,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -10267,7 +10267,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
@@ -10480,7 +10480,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         },
         {
           "classes": [
@@ -10496,7 +10496,7 @@
           "routeVersion": "ether-4.0-owner-route@1",
           "result": "PASS",
           "ownerDecision": "ACCEPTED",
-          "installerHash": "16ad60bfa83e7cc6a221b53bf7c4126036419719b2c01768141668a54c9d4a6c"
+          "installerHash": "3466278a77ed14b65b69b0599761489beff616f826bfad27d129d250eae86706"
         }
       ],
       "priorEvidence": null,
