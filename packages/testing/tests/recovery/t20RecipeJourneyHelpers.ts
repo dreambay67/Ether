@@ -34,7 +34,7 @@ export async function createSourceArtifact(page: Page, input: RealPageInput): Pr
   await expect(prompt).toHaveCount(1);
   await expect(image).toHaveCount(1);
 
-  await input.leftClick(prompt.locator(".ether-node-title"), "Select source Prompt", "The blank document's source prompt becomes the direct canvas editing target.");
+  await input.leftClick(prompt.getByRole("button", { name: "Edit Prompt body", exact: true }), "Focus source Prompt content", "The blank document's source prompt exposes its direct canvas content target.");
   await input.pressKey("Enter", "Edit source Prompt", "The ordinary Prompt editor opens on the canvas.");
   const promptEditor = prompt.locator(".ether-node-inline-editor textarea");
   await expect(promptEditor).toBeVisible();
