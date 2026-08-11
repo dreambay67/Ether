@@ -45,7 +45,7 @@ export async function connectWithKeyboard(page: Page, input: RealPageInput, sour
   const output = source.getByLabel(outputName);
   const receiver = target.getByLabel(inputName);
   await keyboardActivate(page, input, output, `Begin ${label}`, "Enter begins a keyboard-owned connection intent from the source channel.");
-  await expect(receiver).toHaveAttribute("data-compatible", "true");
+  await expect(receiver.locator("..")).toHaveAttribute("data-compatible", "true");
   await keyboardActivate(page, input, receiver, `Complete ${label}`, "Space completes the compatible connection through the ordinary canvas interaction.", "Space");
 }
 
