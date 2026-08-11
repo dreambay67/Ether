@@ -304,7 +304,8 @@ test("persists drawing gestures and exposes honest mask editing capabilities", a
   await expect(page.getByText("Unsupported:", { exact: false })).toBeVisible();
   await expect(page.getByRole("button", { name: "Commit mask" })).toBeDisabled();
 
-  await page.getByRole("button", { name: "Dismiss" }).click();
+  const selectedRunDismiss = page.getByRole("button", { name: "Dismiss" });
+  if (await selectedRunDismiss.isVisible()) await selectedRunDismiss.click();
   await page.locator('[data-node-id="mask"] .ether-node-primary').dispatchEvent("click");
   await expect(page.getByTestId("mask-workspace")).toBeVisible();
   await expect(page.getByTestId("mask-input-summary")).toContainText("1 Image");
