@@ -1,4 +1,4 @@
-import { useState, type FocusEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react";
 import type { ConnectionRole, EtherEdge as SchemaEdge, PayloadChannel } from "@ether/schema";
 import { CONNECTION_ROLES, PAYLOAD_CHANNELS, channelLabel, roleLabel } from "../ports/channelRegistry";
@@ -25,6 +25,7 @@ export type EtherFlowEdgeData = {
 export function EtherEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }: EdgeProps & { data: EtherFlowEdgeData }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const hoverLeaveTimer = useRef<number | null>(null);
   const edge = data.edge;
   const bundled = bundledBezierPath({ x: sourceX, y: sourceY, targetX, targetY, lane: { index: data.laneIndex, count: data.laneCount } });
   const [defaultPath, defaultLabelX, defaultLabelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
@@ -38,13 +39,28 @@ export function EtherEdge({ id, sourceX, sourceY, targetX, targetY, sourcePositi
   const compatible = (endpoint: "source" | "target", channel: PayloadChannel) => (endpoint === "source" ? data.compatibleSourceChannels : data.compatibleTargetChannels).includes(channel);
   const chooseChannel = (endpoint: "source" | "target", channel: PayloadChannel) => { if (!data.readOnly && compatible(endpoint, channel)) data.onChannel(id, endpoint, channel); data.onEdit(id, null); };
   const openPicker = (endpoint: "source" | "target") => { if (!data.readOnly) data.onEdit(id, endpoint); };
+  const revealLabel = () => {
+    if (hoverLeaveTimer.current !== null) globalThis.clearTimeout(hoverLeaveTimer.current);
+    hoverLeaveTimer.current = null;
+    setHovered(true);
+  };
+  const concealLabelSoon = () => {
+    if (hoverLeaveTimer.current !== null) globalThis.clearTimeout(hoverLeaveTimer.current);
+    hoverLeaveTimer.current = globalThis.setTimeout(() => {
+      hoverLeaveTimer.current = null;
+      setHovered(false);
+    }, 140);
+  };
+  useEffect(() => () => {
+    if (hoverLeaveTimer.current !== null) globalThis.clearTimeout(hoverLeaveTimer.current);
+  }, []);
   const leaveDisclosure = (event: FocusEvent<HTMLDivElement>) => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
     setFocused(false);
   };
   const hitStrokeWidth = data.laneCount > 1 ? Math.max(12, Math.min(18, 96 / data.laneCount - 3)) : 18;
-  return <><path d={path} fill="none" stroke="transparent" strokeWidth={hitStrokeWidth} className="ether-edge-hit-target" data-lane-index={data.laneIndex} data-lane-count={data.laneCount} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onClick={(event) => { event.stopPropagation(); data.onSelect(id); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!data.readOnly) data.onDelete(id); }} /><BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ stroke: `var(--ether-channel-${source})`, strokeWidth: data.selected ? 3 : 2 }} />
-    <EdgeLabelRenderer><div className={`ether-edge-label nodrag nopan${data.selected ? " is-selected" : ""}${edge.role !== "general" ? " is-named-role" : ""}${focused ? " is-focused" : ""}`} style={{ transform: `translate(-50%, -50%) translate(${labelPosition.x ?? defaultLabelX}px, ${labelPosition.y ?? defaultLabelY}px)`, opacity: labelVisible ? 1 : 0, pointerEvents: labelVisible ? "all" : "none" }} data-testid="edge-role-chip" data-lane-index={data.laneIndex} data-lane-count={data.laneCount} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={leaveDisclosure} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!data.readOnly) data.onDelete(id); }}>
+  return <><path d={path} fill="none" stroke="transparent" strokeWidth={hitStrokeWidth} className="ether-edge-hit-target" data-lane-index={data.laneIndex} data-lane-count={data.laneCount} onMouseEnter={revealLabel} onMouseLeave={concealLabelSoon} onClick={(event) => { event.stopPropagation(); data.onSelect(id); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!data.readOnly) data.onDelete(id); }} /><BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ stroke: `var(--ether-channel-${source})`, strokeWidth: data.selected ? 3 : 2 }} />
+    <EdgeLabelRenderer><div className={`ether-edge-label nodrag nopan${data.selected ? " is-selected" : ""}${edge.role !== "general" ? " is-named-role" : ""}${focused ? " is-focused" : ""}`} style={{ transform: `translate(-50%, -50%) translate(${labelPosition.x ?? defaultLabelX}px, ${labelPosition.y ?? defaultLabelY}px)`, opacity: labelVisible ? 1 : 0, pointerEvents: labelVisible ? "all" : "none" }} data-testid="edge-role-chip" data-lane-index={data.laneIndex} data-lane-count={data.laneCount} onMouseEnter={revealLabel} onMouseLeave={concealLabelSoon} onFocus={() => setFocused(true)} onBlur={leaveDisclosure} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!data.readOnly) data.onDelete(id); }}>
       <button type="button" tabIndex={labelVisible ? 0 : -1} disabled={data.readOnly} className={`ether-edge-channel-dot ether-edge-channel-${source}`} aria-label={`Source channel ${channelLabel(source)}`} aria-haspopup="menu" aria-expanded={picker === "source"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openPicker("source"); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!data.readOnly) data.onDelete(id); }} />
       <button type="button" tabIndex={labelVisible ? 0 : -1} disabled={data.readOnly} className={`ether-edge-role-chip${edge.role === "general" ? " is-general-role" : ""}`} aria-haspopup="menu" aria-expanded={rolesOpen} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); if (!data.readOnly) data.onEdit(id, rolesOpen ? null : "role"); }}>{edge.role === "general" ? <><span className="sr-only">General</span><span aria-hidden="true">•</span></> : roleLabel(edge.role)}</button>
       <button type="button" tabIndex={labelVisible ? 0 : -1} disabled={data.readOnly} className={`ether-edge-channel-dot ether-edge-channel-${target}`} aria-label={`Target channel ${channelLabel(target)}`} aria-haspopup="menu" aria-expanded={picker === "target"} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); openPicker("target"); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!data.readOnly) data.onDelete(id); }} />
