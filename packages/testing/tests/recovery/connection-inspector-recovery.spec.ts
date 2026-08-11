@@ -83,10 +83,10 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     }
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(6);
 
-    const firstRole = page.getByTestId("edge-role-chip").first();
-    await revealLaneAtPath(page, page.locator(".ether-edge-hit-target").first());
-    await expect(firstRole).toHaveCSS("pointer-events", "all");
-    await input.leftClick(firstRole.getByRole("button", { name: "General" }), "Open the in-place role grid", "All 15 semantic roles are available directly on the lane.");
+    const editedRole = page.getByTestId("edge-role-chip").last();
+    await revealLaneAtPath(page, page.locator(".ether-edge-hit-target").last());
+    await expect(editedRole).toHaveCSS("pointer-events", "all");
+    await input.leftClick(editedRole.getByRole("button", { name: "General" }), "Open the in-place role grid", "All 15 semantic roles are available directly on the lane.");
     await expect(page.getByTestId("edge-role-grid").getByRole("button")).toHaveCount(15);
     await input.leftClick(page.getByTestId("edge-role-grid").getByRole("button", { name: "Subject" }), "Name the Text lane Subject", "The non-General role becomes a visible lane badge.");
     await expect(page.getByTestId("canvas-status")).toContainText("Change connection role saved");
@@ -94,7 +94,7 @@ test("authors six-channel lanes, an adapter, and progressive Inspector controls 
     await input.screenshot("02-six-channel-lanes-and-role.png", evidence, "Capture six persisted lanes", "Six channel-specific paths coexist between the same node pair and one carries a visible Subject role.");
 
     await input.leftClick(evaluate.locator(".ether-node-title"), "Select Evaluate before edge deletion", "The source node remains the graph selection while an edge-only context action runs.");
-    await input.rightClick(firstRole.getByRole("button", { name: "Source channel Text" }), "Delete only the Text lane", "Right-click removes the targeted edge without deleting or deselecting either node.");
+    await input.rightClick(editedRole.getByRole("button", { name: /^Source channel /u }), "Delete only the role-edited lane", "Right-click removes the targeted edge without deleting or deselecting either node.");
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(5);
     await expect(evaluate).toHaveClass(/is-selected/u);
 
