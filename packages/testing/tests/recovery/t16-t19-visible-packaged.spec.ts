@@ -271,7 +271,8 @@ async function inspectDeliverySetup(page: Page, input: RealPageInput, collection
 
   await selectNodeBehindProjectLens(page, input, exportNode, "Export", "The graph Export node makes its own grant, naming, format, collision, and sidecar controls visible before any folder is requested.");
   const exportInspector = page.getByTestId("node-inspector");
-  await expect(exportInspector.getByLabel("Path grant id")).toHaveValue("unconfigured");
+  await expect(exportInspector.getByRole("button", { name: "Choose export folder", exact: true })).toContainText("Choose export folder");
+  await expect(exportInspector).toContainText("Required before this node can write files.");
   await exportInspector.getByLabel("Naming template").fill("{collection}/{title}-{artifactId}");
   await exportInspector.getByLabel("Format").selectOption("png");
   await input.leftClick(exportInspector.getByRole("button", { name: "Save export", exact: true }), "Save graph Export delivery template", "The graph node's durable Export setup remains gated on an explicit folder grant and does not write during authoring.");
