@@ -98,6 +98,17 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
     else if (interactionMode === "editing") settleInteraction();
   }, [activeEditor, beginInteractionEdit, interactionMode, settleInteraction]);
   useEffect(() => {
+    if (edgeEditor === null) return;
+    const closeEdgeEditor = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEdgeEditor(null);
+      focusCanvas();
+    };
+    globalThis.addEventListener("keydown", closeEdgeEditor);
+    return () => globalThis.removeEventListener("keydown", closeEdgeEditor);
+  }, [edgeEditor, focusCanvas]);
+  useEffect(() => {
     setSemanticOverview(largeGraph && initialViewport.zoom < 0.4);
   }, [graph.id, initialViewport.zoom, largeGraph]);
   useEffect(() => {
@@ -625,6 +636,7 @@ export function CanvasSurface({ graph, catalog, nodeStatuses, readOnly, selected
           if ((event.target as HTMLElement).closest(".react-flow__node")) return;
           setClickConnectionIntent(null);
           setDragConnectionIntent(null);
+          setEdgeEditor(null);
           interaction.clearSelection();
           onEdgeSelected(null);
           onModuleSelected(null);
