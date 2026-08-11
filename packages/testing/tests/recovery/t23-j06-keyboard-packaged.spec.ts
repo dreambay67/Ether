@@ -63,8 +63,8 @@ test("runs a blank Prompt to Worker to Worker to Image fake-local chain using ke
     await connectWithKeyboard(page, input, workerA, "Text output", workerB, "Text input", "Worker A to Worker B");
     await connectWithKeyboard(page, input, workerB, "Text output", image, "Text input", "Worker B to Image Generator");
     await expect(page.locator(".ether-edge-hit-target")).toHaveCount(3);
-    const firstRole = page.getByTestId("edge-role-chip").first().getByRole("button", { name: "General", exact: true });
-    await keyboardActivate(page, input, firstRole, "Open the first lane role grid", "Space opens the keyboard-reachable role grid for the first connection.", "Space");
+    const activeRole = page.locator(".ether-edge-label.is-selected").getByRole("button", { name: "General", exact: true });
+    await keyboardActivate(page, input, activeRole, "Open the active lane role grid", "Space opens the keyboard-reachable role grid for the newly created connection.", "Space");
     const roleGrid = page.getByTestId("edge-role-grid");
     await expect(roleGrid).toBeVisible();
     const edgeInspector = page.getByTestId("edge-inspector");
@@ -79,9 +79,9 @@ test("runs a blank Prompt to Worker to Worker to Image fake-local chain using ke
     await expect(outputSelection).toHaveValue("latest-approved");
     await tabTo(page, input, connectionRole, "Reach Project Lens Connection role");
     await keyboardActivate(page, input, roleGrid.getByRole("button", { name: "Subject", exact: true }), "Choose the Subject role", "Enter assigns the visible semantic Subject role without pointer input.");
-    await expect(page.getByTestId("edge-role-chip").first()).toContainText("Subject");
+    await expect(page.locator(".ether-edge-label.is-selected")).toContainText("Subject");
     await expect(connectionRole).toHaveValue("subject");
-    input.observe("Keyboard role grid and Project Lens", "The lane role grid and selected Edge Inspector are reached through Tab and Enter after keyboard-created connection intent.", "The first Text lane now exposes Subject; Project Lens exposes source channel, target channel, connection role, and output-selection controls for the selected edge.");
+    input.observe("Keyboard role grid and Project Lens", "The lane role grid and selected Edge Inspector are reached through Tab and Enter after keyboard-created connection intent.", "The active Text lane now exposes Subject; Project Lens exposes source channel, target channel, connection role, and output-selection controls for the selected edge.");
 
     await configureWorker(page, input, workerA, "Clarify the subject while preserving its concise intent.", "Worker A");
     await configureWorker(page, input, workerB, "Turn the approved Worker A result into one image-ready prompt.", "Worker B");

@@ -54,7 +54,7 @@ test("authors and edits a blank packaged document with keyboard-only J03 control
     await addFromLibraryWithKeyboard(page, input, "Prompt", "Prompt", 1);
     await addFromCanvasQuickAdd(page, input, "Note", "Note", 2);
 
-    const promptTitle = canvas.getByRole("button", { name: "Prompt", exact: true });
+    const promptTitle = canvas.locator(".ether-node[data-node-definition='prompt.text'] .ether-node-title");
     await keyboardActivate(page, input, promptTitle, "Select Prompt from its focused title", "Space selects the keyboard-reached node without using a pointer.", "Space");
     await expect.poll(() => selectedNodeCount(page)).toBe(1);
     await input.pressKey("F2", "Open the focused Prompt title editor", "F2 opens one bounded title editor for the selected Prompt.");
